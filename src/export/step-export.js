@@ -69,8 +69,8 @@ export function estimateL5BumpCount(spec, active) {
 
 // 메인 진입점. combo/geom은 solveCombo()/buildGeometry() 결과(main.js run()과 동일 소스).
 // onProgress(done, total, label) — 선택적 진행률 콜백.
-export function buildStepForSpec(oc, spec, combo, geom, onProgress) {
-  const active = new Set(geom.tags?.map((t) => Number(t.slice(1))) ?? []);
+export function buildStepForSpec(oc, spec, combo, geom, onProgress, activeIn) {
+  const active = new Set(activeIn ?? []);
   if (active.size === 0) for (const l of [1, 2, 3, 4, 5]) if (spec.levels[l]?.on) active.add(l);
   const depth = combo.depth;
   const X = spec.target.xLen, Y = spec.target.yLen;

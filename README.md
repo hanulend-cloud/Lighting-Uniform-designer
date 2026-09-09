@@ -29,6 +29,7 @@ python -m http.server 5173 # http://localhost:5173
 | 최적화 | coarse grid 탐색 → 제약 필터 → Pareto front → Top 2 (최저비용 / 균일도 여유), 민감도 |
 | 비용 | LED·형상 난이도·금형 상각(÷생산수량)·조립 휴리스틱 (`src/model/defaults.js` 계수 조정) |
 | I/O | 실시간 반영, 입력값 JSON 저장/불러오기, localStorage 자동 저장 |
+| 내보내기 | STEP(AP214) 3D CAD 파일 내보내기 — 바디·LED·PCB 솔리드, Web Worker(OpenCASCADE.js)로 UI 안 멈추게 처리 |
 
 ## 구조
 
@@ -43,6 +44,7 @@ src/
   engine/optimizer.js   1차 최적화 + Pareto + Top 2
   ui/heatmap.js         히트맵·프로파일 렌더
   main.js               UI 배선 + 실시간 재계산
+  export/                내보내기(STEP) — OpenCASCADE.js 기반, 별도 문서: docs/superpowers/plans/2026-09-09-step-export.md
 ```
 
 ## 로드맵

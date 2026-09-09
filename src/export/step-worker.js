@@ -20,10 +20,10 @@ function loadOc() {
 
 self.onmessage = async (ev) => {
   try {
-    const { spec, combo, geom } = ev.data;
+    const { spec, combo, geom, active } = ev.data;
     const oc = await loadOc();
     const onProgress = (done, total, label) => self.postMessage({ type: 'progress', done, total, label });
-    const r = buildStepForSpec(oc, spec, combo, geom, onProgress);
+    const r = buildStepForSpec(oc, spec, combo, geom, onProgress, active);
     self.postMessage({ type: 'done', stepText: r.stepText, solidCount: r.solidCount });
   } catch (e) {
     self.postMessage({ type: 'error', message: e.message ?? String(e) });

@@ -29,6 +29,12 @@ export function exportStep(spec, combo, geom, active) {
     if (!ok) return;
   }
 
+  const p5 = spec.levels?.[5];
+  if (active.includes(5) && p5?.on && p5.dir === '오목') {
+    const ok = confirm('L5 "오목"(오목 돌기)는 아직 STEP 내보내기에서 지원하지 않습니다 — 대신 "돌출" 형상으로 내보내집니다. 화면 미리보기와 다를 수 있습니다. 계속하시겠습니까?');
+    if (!ok) return;
+  }
+
   const btn = document.getElementById('btn-step');
   if (btn) btn.disabled = true;   // 진행 중 재클릭(특히 키보드 Enter/Space) 방지 — 동시 워커 방지
 
@@ -70,6 +76,7 @@ export function exportStep(spec, combo, geom, active) {
   worker.postMessage({
     spec: JSON.parse(JSON.stringify(spec)),
     combo: { depth: combo.depth, pitchX: combo.pitchX, pitchY: combo.pitchY, padX: combo.padX, padY: combo.padY },
-    geom: { leds: geom.leds, ledSize: geom.ledSize, l4HalfP: geom.l4HalfP, tags: geom.levelText.split(' + ').filter((t) => /^L\d$/.test(t)) },
+    geom: { leds: geom.leds, ledSize: geom.ledSize, l4HalfP: geom.l4HalfP },
+    active,
   });
 }
