@@ -863,8 +863,13 @@ function check(name, cond, detail = '') {
   else { console.log('FAIL', name, detail); fail++; }
 }
 
+// DEFAULT_SPEC 은 타겟이 300x120mm 라 LED 수백 개(~5분/케이스, Task 4 실측)가 나온다 — 스모크
+// 테스트는 형상 파이프라인 정상 동작 확인이 목적이라 20x20mm 소형 타겟으로 낮춰 전체 스위트가
+// 몇 분 안에 끝나게 한다(정확한 LED 배치 최적화 결과 자체는 이미 test/smoke.mjs 가 검증함).
 function specWith(levels) {
   const spec = JSON.parse(JSON.stringify(DEFAULT_SPEC));
+  spec.target.xLen = 20; spec.target.yLen = 20;
+  spec.goal.U0 = 0.3; // 낮은 목표치 → 최소 LED 수(보통 1~4개)로 수렴, STEP 생성이 빨라짐
   for (const k of [1, 2, 3, 4, 5]) spec.levels[k].on = false;
   for (const l of levels) spec.levels[l].on = true;
   return spec;
@@ -889,15 +894,20 @@ const oc = await initOpenCascade();
   check('L1 바디 부피 > 0', r.bodyVolume > 0, 'vol=' + r.bodyVolume);
 }
 
-// L3 — 바디 부피가 L1(평판, baseThk=3mm 전체)보다 작아야 함(가장자리 얇아짐).
+// L3 — 같은 wallThk(6mm)의 "테이퍼 없는 평판"보다 부피가 작아야 함(가장자리가 얇아짐).
+// (주의: L1 기본 baseThk=3mm 기준판과 비교하면 안 된다 — L3 중앙부 자체가 6mm 로 이미
+// 3mm보다 두꺼워서, 가장자리가 아무리 얇아져도 3mm 기준판보다 부피가 커질 수 있다. 이건
+// Task 3 Step 3 에서 이미 한 번 겪은 것과 같은 종류의 착오라 여기서도 wallThk 자신을
+// 기준판으로 삼는다.)
 {
-  const specFlat = specWith([1]);
-  const rFlat = run(oc, specFlat, [1]);
+  const specFlat6 = specWith([1]);
+  specFlat6.levels[1].thk = 6; // L3의 wallThk(6mm)와 동일한 두께의 평판 기준
+  const rFlat6 = run(oc, specFlat6, [1]);
   const spec3 = specWith([1, 3]);
   spec3.levels[3].wallThk = 6; spec3.levels[3].edgeAngle = 45; spec3.levels[3].edgeR = 5;
   const r3 = run(oc, spec3, [1, 3]);
   check('L3 STEP 생성 성공', r3.stepText.length > 100);
-  check('L3 바디 부피 < L1 평판 부피', r3.bodyVolume < rFlat.bodyVolume, `L3=${r3.bodyVolume} L1=${rFlat.bodyVolume}`);
+  check('L3 바디 부피 < 동일 두께 평판 부피', r3.bodyVolume < rFlat6.bodyVolume, `L3=${r3.bodyVolume} flat6mm=${rFlat6.bodyVolume}`);
 }
 
 // L4 — 정상 생성만 확인(형상은 L3와 다른 함수 경로).
