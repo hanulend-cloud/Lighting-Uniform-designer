@@ -201,6 +201,7 @@ export function fuseAll(oc, shapes, onProgress) {
     const fuse = new oc.BRepAlgoAPI_Fuse_3(acc, shapes[i], new oc.Message_ProgressRange_1());
     const next = fuse.Shape();
     fuse.delete();
+    if (i > 1) acc.delete();   // shapes[0]은 호출측 소유라 첫 반복에서는 지우지 않음
     acc = next;
     if (onProgress) onProgress(i, shapes.length - 1);
   }
@@ -220,9 +221,19 @@ export function volumeOf(oc, shape) {
 export function coneBump(oc, sizeX, sizeY, height, sides) {
   const hx = sizeX / 2, hy = sizeY / 2;
   const base = [];
-  for (let i = 0; i < sides; i++) {
-    const a = (i / sides) * Math.PI * 2;
-    base.push(pnt(oc, Math.cos(a) * hx, Math.sin(a) * hy, 0));
+  if (sides === 4) {
+    // 정확한 사각형 네 모서리(축 정렬) — L5 돌기는 sizeX*sizeY footprint끼리 맞닿아야
+    // 하므로(패킹) 밑면이 정확히 sizeX*sizeY 넓이의 축 정렬 사각형이어야 한다. 타원(ellipse)
+    // 파라미터화(cos/sin)로는 위상을 아무리 돌려도 꼭짓점이 (±hx,±hy) 모서리에 닿지 않고
+    // 항상 타원 위(모서리보다 안쪽)에 남으므로 — 실측(밑면 넓이가 절반인 마름모가 됨)으로
+    // 확인되어 4각형만 별도 처리.
+    base.push(pnt(oc, hx, hy, 0), pnt(oc, -hx, hy, 0), pnt(oc, -hx, -hy, 0), pnt(oc, hx, -hy, 0));
+  } else {
+    // dome 등 — 타원(반경 hx,hy)에 내접하는 N각형으로 둥근 느낌만 근사(축 정렬 여부는 무관).
+    for (let i = 0; i < sides; i++) {
+      const a = (i / sides) * Math.PI * 2;
+      base.push(pnt(oc, Math.cos(a) * hx, Math.sin(a) * hy, 0));
+    }
   }
   const apex = pnt(oc, 0, 0, height);
   const faces = [];
@@ -373,7 +384,9 @@ import('opencascade.js/dist/node.js').then(async (m) => {
 
 Expected: `volume 6000 expected 6000` (허용 오차 격자 근사로 <1%)
 
-- [ ] **Step 3: L3 실제 형상으로 검증 — 중앙이 가장자리보다 두꺼운지(부피가 순수 평판보다 작은지) 확인**
+- [ ] **Step 3: L3 실제 형상으로 검증 — 같은 wallThk(6mm)의 "테이퍼 없는 평판"보다 부피가 작은지 확인**
+
+(주의: L1 기준판 3mm가 아니라, L3 자신의 중앙 두께 wallThk=6mm 평판과 비교해야 한다 — L3 중앙부는 원래 6mm 로 3mm 평판보다 두껍고, 가장자리 테이퍼 폭(tw)이 타겟 전체 면적 대비 작은 좁은 띠라서 3mm 기준과 비교하면 테이퍼가 있어도 전체 부피가 더 크게 나온다. "가장자리가 얇아진다"는 wallThk 자체를 기준판으로 삼아야 검증된다.)
 
 ```bash
 node -e "
@@ -385,13 +398,14 @@ import('opencascade.js/dist/node.js').then(async (m) => {
   const spec = { target:{xLen:100,yLen:20}, body:{baseThk:3,n:1.59}, led:{sizeX:1,sizeY:1,sizeZ:0.5,beamX:120},
     levels:{1:{on:true,thk:1},3:{on:true,wallThk:6,edgeAngle:45,edgeR:5}} };
   const s = buildBodySolid(oc, { X:100, Y:20, topZ:12, botZAt:(x,y)=>l3BotZAt(spec,12,x,y), nx:40, ny:16 });
-  console.log('L3 volume', volumeOf(oc, s), '(평판 6000mm3보다 작아야 함 — 가장자리가 얇아짐)');
+  const flatRef = buildBodySolid(oc, { X:100, Y:20, topZ:12, botZAt: () => 12 - 6, nx:10, ny:8 }); // wallThk=6mm 평판(테이퍼 없음)
+  console.log('L3 volume', volumeOf(oc, s), '/ flat(6mm) ref volume', volumeOf(oc, flatRef), '(L3 < ref 여야 함 — 가장자리가 얇아짐)');
   process.exit(0);
 });
 "
 ```
 
-Expected: L3 volume < 6000
+Expected: L3 volume < flat(6mm) ref volume(=12000)
 
 - [ ] **Step 4: Commit**
 
