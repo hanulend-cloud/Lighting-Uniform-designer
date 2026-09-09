@@ -27,7 +27,7 @@ export function buildLevels(el, spec, onToggle, onParam) {
         <span class="lv-code">L${l}</span><span class="lv-nm">${s.label}</span>
         <span class="lv-badge" data-badge="${l}">—</span>
       </div>
-      <div class="lv-pitch" data-pitch="${l}"></div>
+      <div class="lv-stats" data-pitch="${l}"></div>
       <div class="lv-role">${s.hint}</div>
       <div class="lv-f">${core}</div>
       ${advList.length ? `<span class="lv-adv-toggle" data-adv-toggle="${l}">고급 ▾</span>
@@ -76,16 +76,20 @@ export function updateLevels(el, solo, activeSet, target, onApply) {
     if (!row) continue;
     row.classList.toggle('on', activeSet.has(r.level));
     const ok = r.U0 >= target;
-    const pitchTxt = r.pitchY == null
-      ? `${r.pitchX.toFixed(0)}mm`
-      : `X${r.pitchX.toFixed(0)}×Y${r.pitchY.toFixed(0)}mm`;
 
     const badge = row.querySelector('.lv-badge');
     badge.textContent = `${r.leds}개`;
     badge.className = `lv-badge ${ok ? 'ok' : 'ng'}`;
 
-    const pitchEl = row.querySelector('.lv-pitch');
-    pitchEl.textContent = `${pitchTxt} · 균일도 ${(r.U0 * 100).toFixed(0)}%${ok ? '' : ' (미달)'}`;
+    // 단독 조건 결과 — LED개수(배지) 옆에 Pitch X·Y·균일도를 라벨 붙은 칩으로 나란히 표시
+    // ("공학적 OUT"처럼 값을 바로 읽을 수 있게: 라벨은 작게, 수치는 굵게).
+    const pitchChips = r.pitchY == null
+      ? `<span class="lv-stat"><i>Pitch</i><b>${r.pitchX.toFixed(0)}</b>mm</span>`
+      : `<span class="lv-stat"><i>Pitch X</i><b>${r.pitchX.toFixed(0)}</b>mm</span>
+         <span class="lv-stat"><i>Pitch Y</i><b>${r.pitchY.toFixed(0)}</b>mm</span>`;
+    const statsEl = row.querySelector('.lv-stats');
+    statsEl.innerHTML = `${pitchChips}
+      <span class="lv-stat ${ok ? 'ok' : 'ng'}"><i>균일도</i><b>${(r.U0 * 100).toFixed(0)}</b>%${ok ? '' : ' 미달'}</span>`;
 
     const autoWrap = row.querySelector('.lv-auto-wrap');
     if (!r.auto) { autoWrap.innerHTML = ''; continue; }
@@ -103,23 +107,27 @@ export function renderVerdict(el, combo, tags, goalSpec) {
   const met = combo.feasible;
   el.className = met ? 'ok' : 'ng';
   const name = tags.length ? tags.join(' + ') : '기본 평판';
-  const pitchTxt = combo.pitchY == null
-    ? `${combo.pitchX.toFixed(0)}mm (선형)`
-    : `X ${combo.pitchX.toFixed(0)} × Y ${combo.pitchY.toFixed(0)} mm`;
+  const pitchVal = combo.pitchY == null
+    ? `${combo.pitchX.toFixed(0)}<i>mm(선형)</i>`
+    : `${combo.pitchX.toFixed(0)}<i>×</i>${combo.pitchY.toFixed(0)}<i>mm</i>`;
   const cvW = combo.cv > goalSpec.cvMax ? ' ⚠' : '';
   const gW = combo.grad > goalSpec.gradMax ? ' ⚠' : '';
   const T = (combo.transmit * 100).toFixed(0);
-  const line1 = met
-    ? `필요 LED <b>${combo.leds}개</b> <span class="mut">(${combo.nx}×${combo.ny})</span>`
-    : `최소 피치로도 부족 · LED <b>${combo.leds}개</b>`;
+  const ledSub = met ? `<span class="mut">(${combo.nx}×${combo.ny})</span>` : '<span class="mut">(최소 피치로도 부족)</span>';
   const overhangLine = combo.overhang > 0.001
     ? `<div class="v-sub">기구 크기 <b>${combo.fixtureX.toFixed(0)}×${combo.fixtureY.toFixed(0)}mm</b> (타겟 대비 +${(combo.overhang * 100).toFixed(0)}%, 가장자리 보강용 오버행)</div>`
     : '';
+  // 최종(조합) 결과 — LED 개수 · Pitch X·Y · 균일도를 같은 비중의 카드 3개로 나란히 표시
+  // ("공학적 OUT": 라벨+수치가 명확히 구분되는 스펙시트 형태).
   el.innerHTML = `
-    <div class="v-hd">적용 조합: <b>${name}</b> · 목표 균일도(min/max) ${(combo.target * 100).toFixed(0)}%</div>
-    <div class="v-big">균일도 ${(combo.U0 * 100).toFixed(1)}% <span>${met ? '목표 달성' : '목표 미달'}</span></div>
-    <div class="v-sub">${line1}</div>
-    <div class="v-sub">pitch <b>${pitchTxt}</b> · 투과율 ${T}%</div>
+    <div class="v-hd">적용 조합: <b>${name}</b> · 목표 균일도(min/max) ${(combo.target * 100).toFixed(0)}%
+      <span class="v-status ${met ? 'ok' : 'ng'}">${met ? '목표 달성' : '목표 미달'}</span></div>
+    <div class="v-stats">
+      <div class="v-stat-box"><span class="lbl">LED 개수</span><span class="val">${combo.leds}<i>개</i></span>${ledSub}</div>
+      <div class="v-stat-box"><span class="lbl">Pitch X·Y</span><span class="val">${pitchVal}</span></div>
+      <div class="v-stat-box ${met ? 'ok' : 'ng'}"><span class="lbl">균일도</span><span class="val">${(combo.U0 * 100).toFixed(1)}<i>%</i></span></div>
+    </div>
+    <div class="v-sub">투과율 ${T}%</div>
     ${overhangLine}
     ${met ? '' : '<div class="v-sub hint">→ 깊이↑ 또는 확산 적용(L2 Milky·L3~5)</div>'}
     <div class="v-sub">참고 — min/avg ${(combo.minAvg * 100).toFixed(0)}% · CV ${(combo.cv * 100).toFixed(1)}%${cvW} · 인접변화율 ${(combo.grad * 100).toFixed(1)}%${gW}</div>`;

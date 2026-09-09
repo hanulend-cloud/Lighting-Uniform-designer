@@ -188,37 +188,70 @@ function autoTuneLevel(spec, level) {
   const b = bounds(spec);
   const depth = spec.space.depth;
   const maxEx = extremeDiffusionParams(level, depth, 'max');
+  const minEx = extremeDiffusionParams(level, depth, 'min');
   let maxParams = maxEx.params, maxEffect = maxEx.effect;
 
-  // 1단계: 이 레벨이 낼 수 있는 최대 확산으로 '최소 LED 개수' 해(피치)를 확정 — solveXY 1회.
+  // 1단계: "확산을 최대로 밀수록 LED가 가장 적게 든다"는 가정이 실측(L2 milky, L3 도파관 모두)
+  // 으로 깨지는 경우가 확인됨 — 과도한 확산은 (경계 밖으로 새는 빛이 늘어) 오히려 균일도를
+  // 악화시킬 수 있다. solveXY(피치 탐색까지 포함)를 여러 지점마다 돌리면 너무 느려지므로
+  // (실측: 9회 반복 시 스모크 테스트가 7분대로 느려짐), 먼저 최대 확산으로 solveXY 1회를
+  // 돌려 "그 피치"를 기준점으로 삼고, 그 피치에서 값싼 evalField로 다른 확산 지점들도 훑어본다
+  // (기준 피치를 최소 피치로 잡으면 안 됨 — 최소 피치에서는 어차피 LED가 촘촘해 확산의 이득이
+  // 거의 안 보여서 "확산이 항상 손해"로 잘못 결론 나는 걸 실측으로 확인함). 더 나은 지점을
+  // 찾으면 그 지점으로 solveXY를 다시 한 번만 더 돌린다 — 최악의 경우도 solveXY 2회로 끝남.
   let rMax = solveXY(spec, [level], GRID_SOLO, maxEffect);
+  {
+    const refP = rMax.pitchX, refPY = rMax.pitchY ?? rMax.pitchX;
+    const refPadX = rMax.padX ?? 0, refPadY = rMax.padY ?? 0;
+    const cheapUnifAt = (t) => {
+      const p = t === 1 ? maxParams : lerpParams(level, minEx.params, maxParams, t);
+      const e = t === 1 ? maxEffect : levelEffect({ levels: { [level]: p } }, level, depth);
+      return evalField(spec, e, refP, refPY, GRID_SOLO, refPadX, refPadY).unif;
+    };
+    const N_SAMPLES = 5;
+    let bestT = 1, bestCheapU = cheapUnifAt(1);
+    for (let i = 0; i < N_SAMPLES - 1; i++) {
+      const t = i / (N_SAMPLES - 1);
+      const u = cheapUnifAt(t);
+      if (u > bestCheapU) { bestCheapU = u; bestT = t; }
+    }
+    if (bestT !== 1) {
+      const cand = lerpParams(level, minEx.params, maxParams, bestT);
+      const candEffect = levelEffect({ levels: { [level]: cand } }, level, depth);
+      const rCand = solveXY(spec, [level], GRID_SOLO, candEffect);
+      if (rCand.feasible !== rMax.feasible ? rCand.feasible : (rCand.feasible ? rCand.leds < rMax.leds : rCand.U0 > rMax.U0)) {
+        rMax = rCand; maxParams = cand; maxEffect = candEffect;
+      }
+    }
+  }
 
   // L3처럼 위치 의존 edgeBoost 가 있는 레벨은 extremeDiffusionParams 의 mag() 프록시(수식만으로
   // 계산하는 근사치)가 실제 균일도와 어긋날 수 있다 — 테이퍼 폭(tw)과 보정 세기(boostMax)가
-  // edgeAngle 에 대해 반대 방향으로 움직여, 진짜 최적 각도가 mag() 최댓값 지점(가장 가파른 각도)
-  // 과 다른 중간 각도에 있는 경우가 실측으로 확인됨. 1단계가 infeasible 이면, 같은 최대 피치에서
-  // 실제 evalField 로 스키마 후보값들을 다시 훑어(좌표하강) 더 나은 조합이 있는지 확인한다.
+  // edgeAngle 에 대해 반대 방향으로 움직여, 진짜 최적 각도가 위 t-샘플(min↔max 직선 보간)에는
+  // 없는 조합(예: 두께는 최대인데 각도는 중간)에 있는 경우가 실측으로 확인됨. 위 1단계 최선이
+  // infeasible 이면, 그 지점에서 실제 evalField 로 스키마 후보값들을 다시 훑어(좌표하강) 더
+  // 나은 조합이 있는지 확인한다.
   if (!rMax.feasible && maxEffect.edgeBoost) {
     const truePMin = bounds(spec).pMin;
     const schema = LEVEL_SCHEMA[level];
     const realUnif = (p) => evalField(spec, levelEffect({ levels: { [level]: p } }, level, depth), truePMin, truePMin, GRID_SOLO, 0, 0).unif;
-    let best = { ...maxParams }, bestU = realUnif(best);
+    let bp = { ...maxParams }, bestU = realUnif(bp);
     for (let round = 0; round < 2; round++) {
       for (const f of schema.fields) {
         if (f.fixed) continue;
         const candidates = f.type === 'select' ? f.options
           : [f.min, f.max, ...Array.from({ length: 7 }, (_, i) => f.min + (f.max - f.min) * (i + 1) / 8)];
         for (const v of candidates) {
-          const cand = { ...best, [f.key]: v };
+          const cand = { ...bp, [f.key]: v };
           const u = realUnif(cand);
-          if (u > bestU) { bestU = u; best = cand; }
+          if (u > bestU) { bestU = u; bp = cand; }
         }
       }
     }
     if (bestU > realUnif(maxParams)) {
-      const refinedEffect = levelEffect({ levels: { [level]: best } }, level, depth);
+      const refinedEffect = levelEffect({ levels: { [level]: bp } }, level, depth);
       const rRefined = solveXY(spec, [level], GRID_SOLO, refinedEffect);
-      if (rRefined.feasible || rRefined.U0 > rMax.U0) { rMax = rRefined; maxParams = best; maxEffect = refinedEffect; }
+      if (rRefined.feasible || rRefined.U0 > rMax.U0) { rMax = rRefined; maxParams = bp; maxEffect = refinedEffect; }
     }
   }
 
@@ -230,8 +263,8 @@ function autoTuneLevel(spec, level) {
   }
 
   // 2단계: 그 피치·오버행(=LED 개수)을 고정한 채, 그 지점에서만 필요한 최소 확산을 이진탐색으로
-  // 찾는다. (다시 탐색할 필요가 없으므로 solveXY 대신 단일 evalField 로 충분히 가볍다.)
-  const minEx = extremeDiffusionParams(level, depth, 'min');
+  // 찾는다(다시 탐색할 필요가 없으므로 solveXY 대신 단일 evalField 로 충분히 가볍다). minEx는
+  // 1단계에서 이미 구해둔 것을 그대로 쓴다.
   const pX = rMax.pitchX, pY = rMax.pitchY ?? rMax.pitchX;
   const padX = rMax.padX ?? 0, padY = rMax.padY ?? 0;
   const unifAt = (t) => evalField(spec, effectAt(level, depth, minEx.params, maxParams, t), pX, pY, GRID_SOLO, padX, padY).unif;

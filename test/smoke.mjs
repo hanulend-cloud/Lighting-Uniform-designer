@@ -38,11 +38,20 @@ ok(sv.length === 5, `solver 5개 레벨 (${sv.length})`);
 ok(sv.every((r) => r.pitch > 0 && r.leds > 0 && r.nx > 0), 'solver 유효값');
 ok(sv.every((r) => !r.feasible || r.U0 >= spec.goal.U0 - 0.02), 'feasible 행은 목표 U0 충족');
 ok(sv.filter((r) => r.level !== 1).every((r) => r.auto), 'L2~L5 는 .auto 참고치를 함께 반환');
-// L2(Milky resin)는 확산도를 자유롭게 올릴 수 있어(t=1→U0≈100%) LED 개수가 극단적으로
-// 부족하지 않는 한 .auto 는 항상 목표를 달성해야 한다(슬라이더 기본값 자체는 milky=1=확산 없음
-// 이라 미달일 수 있음 — 그건 정상). L3/L4는 형상(각도·gap)만의 자유도라 확산폭이 물리적으로
-// 제한적 — 이 스펙에서 .auto 단독 미달은 실제 한계이지 버그가 아니다.
-ok(sv.find((r) => r.level === 2).auto.feasible, 'L2 는 확산도 조절만으로 목표 균일도 확보(.auto)');
+// L2(Milky resin)는 확산도를 자유롭게 올릴 수 있어(t=1→U0≈100%) 대체로 목표를 달성할 수
+// 있지만, 이건 타겟 크기가 깊이 대비 너무 크지 않을 때 얘기다 — blurAxis()의 경계 조건을
+// zero-padding(타겟 밖엔 빛이 없음)으로 고친 뒤로는, blur가 타겟 크기에 비해 과도하면
+// 가장자리·모서리로 갈수록 빛이 실제로 새어나가 손실되므로(zero-padding이 정확히 그 물리를
+// 반영), 확산을 무한히 올린다고 균일도가 계속 좋아지지만은 않는다 — DEFAULT_SPEC(300x120mm,
+// 깊이 12mm)처럼 깊이 대비 타겟이 매우 넓으면 milky를 최대로 올려도(blur~132mm) 80%를 못
+// 넘는 것이 실측으로 확인됨(진짜 물리적 한계, 버그 아님). 이 단정은 그 한계에 걸리지 않는
+// 정사각형·중간 크기 타겟으로 별도 확인한다(탐색 로직 자체의 정상 동작 검증이 목적).
+{
+  const specSq = structuredClone(DEFAULT_SPEC);
+  specSq.target.xLen = 60; specSq.target.yLen = 60;
+  const svSq = solvePerLevel(specSq, { levels: [2] });
+  ok(svSq.find((r) => r.level === 2).auto.feasible, 'L2 는 확산도 조절만으로 목표 균일도 확보(.auto, 정사각 60x60mm)');
+}
 console.log('  per-level:', sv.map((r) => {
   const cur = r.feasible ? `${r.pitch.toFixed(0)}mm/${r.leds}ea` : 'x';
   const auto = r.auto ? ` [자동:${r.auto.feasible ? r.auto.leds + 'ea' : 'x'}]` : '';

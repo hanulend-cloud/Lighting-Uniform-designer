@@ -159,6 +159,11 @@ function run() {
   resEval.metrics = m;
   resEval.edgeMargin = edgeMargin;    // 히트맵이 실제 판정 마진과 동일하게 표시하도록 전달
 
+  const geomFixture = { x: spec.target.xLen + 2 * (combo.padX ?? 0), y: spec.target.yLen + 2 * (combo.padY ?? 0) };
+  resEval.fixture = geomFixture;      // 오버행이 있으면 LED가 타겟 밖까지 나가므로, 히트맵에도
+                                       // "타겟보다 큰 기구 영역"을 점선으로 표시해 LED가 빨간
+                                       // 타겟 경계 밖에 보이는 게 정상임을 알 수 있게 함.
+
   const geom = buildGeometry(spec, {
     depth, ledPitch: pitchX, ledPitchY: pitchY, active,
     decenterX: eff.decenterX, decenterY: eff.decenterY,
@@ -176,7 +181,7 @@ function run() {
   updateLevels($('#levels'), solo, activeSet, spec.goal.U0, onApplyAuto);
   renderVerdict($('#verdict'), combo, tags, spec.goal);
 
-  last = { common, m, depth, view: geom.view, edgeMargin };
+  last = { common, m, depth, view: geom.view, edgeMargin, fixture: geomFixture };
   last.combo = combo; last.geom = geom; last.active = active;
   if (autoHeat) renderHeat();
   else $('#pane-heat').classList.add('stale');
@@ -192,6 +197,7 @@ function renderHeat() {
   res.metrics = last.m;
   res.edgeMargin = last.edgeMargin;
   res.view = last.view;
+  res.fixture = last.fixture;
   drawHeatmap($('#heatmap'), res, sizeVisuals(last.view.x1 - last.view.x0));
   $('#pane-heat').classList.remove('stale');
 }

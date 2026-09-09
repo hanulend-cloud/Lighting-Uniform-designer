@@ -67,6 +67,16 @@ export function drawHeatmap(canvas, res, pxmm) {
     ctx.fillRect(ox + imgW - mx, iy + my, mx, imgH - 2 * my);
   }
 
+  // 기구 외곽(오버행으로 타겟보다 큰 경우) — 점선. 오버행이 있으면 LED가 빨간 타겟 경계 밖에
+  // 찍혀 보이는 게 정상인데, 이 표시가 없으면 "타겟 범위와 안 맞는다"는 오해를 살 수 있어 추가.
+  if (res.fixture && (res.fixture.x > ex.x1 - ex.x0 + 0.01 || res.fixture.y > ex.y1 - ex.y0 + 0.01)) {
+    const padOvX = (res.fixture.x - (ex.x1 - ex.x0)) / 2 * s;
+    const padOvY = (res.fixture.y - (ex.y1 - ex.y0)) / 2 * s;
+    ctx.strokeStyle = 'rgba(124,138,160,0.9)'; ctx.lineWidth = 1.5; ctx.setLineDash([6, 3]);
+    ctx.strokeRect(ox - padOvX, iy - padOvY, imgW + 2 * padOvX, imgH + 2 * padOvY);
+    ctx.setLineDash([]);
+  }
+
   // 목표 타겟 Size 경계 — 굵은 빨강으로 명확히 표시 (필드 범위 자체가 타겟 [0,X]×[0,Y]).
   ctx.strokeStyle = '#e11d2e'; ctx.lineWidth = 3; ctx.strokeRect(ox, iy, imgW, imgH);
   // 계산영역(마진 제외 판정 영역) 점선 — 실제 판정 마진과 동일. 마진 0(예: L3 보강 활성)이면
@@ -77,8 +87,18 @@ export function drawHeatmap(canvas, res, pxmm) {
     ctx.setLineDash([]);
   }
 
-  // LED 위치 점
-  if (res.leds?.length) {
+  // LED 위치 점 — LED가 많으면(피치가 좁아 점이 빽빽해지면) 불투명한 점들이 촘촘히 겹쳐
+  // 그 아래의 매끄러운 색 그라디언트를 가려 마치 얼룩덜룩 불균일한 것처럼 보이는 착시가
+  // 생긴다(실측 확인: 필드 자체는 완전히 매끄럽고 좌우 대칭인데, 점을 끄면 그 사실이 바로
+  // 보임). 점 사이 화면 간격이 너무 좁아지면(약 4px 이하) 점을 생략하고 개수만 범례에 남긴다.
+  const LED_DOT_MIN_SPACING_PX = 12;
+  let minLedSpacingPx = Infinity;
+  for (let k = 1; k < (res.leds?.length ?? 0); k++) {
+    const d = Math.hypot(sx(res.leds[k].x) - sx(res.leds[k - 1].x), sy(res.leds[k].y) - sy(res.leds[k - 1].y));
+    if (d > 0.01 && d < minLedSpacingPx) minLedSpacingPx = d;
+  }
+  const showLedDots = res.leds?.length && minLedSpacingPx >= LED_DOT_MIN_SPACING_PX;
+  if (showLedDots) {
     ctx.fillStyle = 'rgba(255,207,63,0.85)';
     for (const p of res.leds) {
       ctx.beginPath(); ctx.arc(sx(p.x), sy(p.y), 1.6, 0, 7); ctx.fill();
@@ -88,7 +108,10 @@ export function drawHeatmap(canvas, res, pxmm) {
   const m = res.metrics || {};
   const ledCount = res.leds?.length ?? 0;
   ctx.fillStyle = '#9aa6bf'; ctx.font = '12px system-ui'; ctx.textAlign = 'right';
-  ctx.fillText(`균일도 ${(m.U0 * 100 || 0).toFixed(0)}% · LED ${ledCount}개 · 빨강=타겟 Size · 점선=계산영역 · ●=LED`, w - PAD.R, PAD.T - 6);
+  const fixtureNote = res.fixture && (res.fixture.x > ex.x1 - ex.x0 + 0.01 || res.fixture.y > ex.y1 - ex.y0 + 0.01)
+    ? ' · 회색점선=기구(오버행)' : '';
+  const ledNote = showLedDots ? ' · ●=LED' : ' · LED점 생략(너무 촘촘함)';
+  ctx.fillText(`균일도 ${(m.U0 * 100 || 0).toFixed(0)}% · LED ${ledCount}개 · 빨강=타겟 Size · 흰점선=계산영역${fixtureNote}${ledNote}`, w - PAD.R, PAD.T - 6);
 }
 
 function turbo(t) {

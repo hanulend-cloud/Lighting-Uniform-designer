@@ -108,7 +108,12 @@ export function levelEffect(spec, level, depth) {
       const fracTrapped = clamp(Math.pow(Math.cos(critAngle), mLamb + 2), 0, 0.9);
 
       const minThk = Math.max(1, (spec.body?.baseThk ?? 3) * 0.5);
-      const wallThk = Math.max(minThk, p.wallThk ?? 3);
+      // 상한(d - LED높이 - 여유)을 클램프하지 않으면, 실제로는 깊이 제약상 담길 수 없는 두께
+      // (예: depth=3mm인데 wallThk=7.7mm 입력)가 광학 계산에 그대로 쓰여 물리적으로 불가능한
+      // 만큼 blur가 부풀려진다 — l3BotZAt()/bodyProfile()(형상 계산)은 이미 이 상한을 적용하고
+      // 있었는데 여기(광학 계산)만 빠져 있어 형상과 광학이 서로 다른 두께를 쓰던 버그.
+      const maxThk = Math.max(minThk, d - (spec.led?.sizeZ ?? 0.5) - 0.5);
+      const wallThk = Math.max(minThk, Math.min(p.wallThk ?? 3, maxThk));
       // 반사당 측면 이동거리 계수 — 임계각으로 진행하는 광선이 슬래브 상·하면을 한 번 왕복(TIR
       // 1회 바운스)할 때 옆으로 이동하는 거리 = 2·두께·tan(임계각). 이 부피 자체엔 확산제·추출
       // 패턴이 없으므로(사용자 지정 형상: 매끈한 균일두께 용기 + 가장자리 테이퍼만) 갇힌 빛이

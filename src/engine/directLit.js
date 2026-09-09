@@ -168,21 +168,48 @@ export function computeField(spec, opt) {
     }
   }
 
-  const field = new Float64Array(NX * NY);
-  for (let j = 0; j < NY; j++) {
-    const py = NY === 1 ? Y / 2 : y0 + (y1 - y0) * (j / (NY - 1));
-    for (let i = 0; i < NX; i++) {
-      const px = NX === 1 ? X / 2 : x0 + (x1 - x0) * (i / (NX - 1));
+  // 산란 blur (X/Y 개별, mm 단위는 호출측이 난이도별로 계산)
+  const bX = opt.blurMmX ?? opt.blurMm ?? 0;
+  const bY = opt.blurMmY ?? opt.blurMm ?? 0;
+
+  // blur 커널이 타겟 경계를 넘어 뻗는 만큼 계산 범위를 양쪽으로 넓혀, 그 영역도 "실제로 거기
+  // 있는 LED가 만드는 진짜(미확산) 조도"로 채운 뒤 블러하고, 다시 타겟 영역만 잘라낸다.
+  // (예전엔 경계 밖을 아예 빛이 없는 것으로 취급(zero-padding)해 경계가 늘 어둡게, 그 전엔
+  // 반대로 잘린 만큼을 재정규화해 경계가 늘 밝게 나오는 오류가 각각 있었다 — 둘 다 "밖에 뭐가
+  // 있는지 모른다"를 임의로 가정한 게 문제였고, 실제로는 LED 위치를 이미 알고 있으니 그
+  // 영역까지 정직하게 계산하면 양쪽 오류가 다 사라진다.)
+  // 확장 폭은 셀 수로 캡: 3σ 그대로 쓰면(예: milky 강한 확산, 수백 mm) blurAxis 자체의 커널
+  // 반경도 같이 커져(그 상한이 배열 크기이므로) 컨볼루션 비용이 격자 크기의 제곱에 가깝게
+  // 늘어난다 — 실측으로 넓은 타겟+강한 확산 조합에서 계산 1회가 3초 가까이(작은 타겟 대비
+  // 50배) 걸리는 걸 확인했다. 16셀 정도의 확장만으로도(실측 비교: 무제한 대비 오차 <0.2%p)
+  // 경계 왜곡은 이미 거의 다 사라지므로, 이 캡으로 정확도 손실은 무시할 만한 수준을 유지하며
+  // 속도를 크게 회복한다.
+  const EX_CAP = 16;
+  const exNX = stepX > 0 ? Math.min(EX_CAP, Math.ceil(3 * bX / stepX)) : 0;
+  const exNY = NY > 1 && stepY > 0 ? Math.min(EX_CAP, Math.ceil(3 * bY / stepY)) : 0;
+  const ENX = NX + 2 * exNX, ENY = NY + 2 * exNY;
+  const ex0 = x0 - exNX * stepX, ey0 = y0 - exNY * stepY;
+
+  const efield = new Float64Array(ENX * ENY);
+  for (let j = 0; j < ENY; j++) {
+    const py = ENY === 1 ? Y / 2 : ey0 + j * stepY;
+    for (let i = 0; i < ENX; i++) {
+      const px = ex0 + i * stepX;
       let E = 0;
       for (let s = 0; s < src.length; s += 3) E += src[s + 2] * sample(K, px - src[s], py - src[s + 1]);
-      field[j * NX + i] = E;
+      efield[j * ENX + i] = E;
     }
   }
 
-  // 산란 blur (X/Y 개별, mm 단위는 호출측이 난이도별로 계산) + 프레넬·소재 투과율
-  const bX = opt.blurMmX ?? opt.blurMm ?? 0;
-  const bY = opt.blurMmY ?? opt.blurMm ?? 0;
-  blurSeparable(field, NX, NY, bX / stepX, bY / stepY);
+  blurSeparable(efield, ENX, ENY, bX / stepX, bY / stepY);
+
+  // 확장 계산분 중 원래 타겟 영역([0,X]×[0,Y])만 다시 잘라낸다.
+  const field = new Float64Array(NX * NY);
+  for (let j = 0; j < NY; j++) {
+    const srcRow = (j + exNY) * ENX + exNX;
+    for (let i = 0; i < NX; i++) field[j * NX + i] = efield[srcRow + i];
+  }
+
   const T = fresnelT(spec.body?.n ?? 1) * (opt.transmit ?? 1);
   if (T !== 1) for (let k = 0; k < field.length; k++) field[k] *= T;
 
@@ -246,19 +273,23 @@ function blurAxis(f, nx, ny, sigma, horiz) {
   for (let k = 0; k < ker.length; k++) ker[k] /= s;
   const tmp = new Float64Array(f.length);
   for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) {
-    // 경계에서 바깥쪽 탭을 가장자리 값으로 반복(clamp)하면, 커널 반경이 배열보다 훨씬 클 때
-    // (예: 강한 확산 재질을 얇은 타겟에 적용) 가장자리 값이 수십 배 과대 반영되어 결과가
-    // 요동친다. 실제로 타겟 밖에는 빛이 없으므로 범위 밖 탭은 제외하고 유효 가중치로만 재정규화.
+    // 경계 밖 탭 = 0(zero-padding, "타겟 밖에는 빛이 없다"를 그대로 반영) — 범위 밖 탭을
+    // 유효 가중치만으로 재정규화(divide by wsum)하면 잘린 만큼을 "안쪽과 똑같이 밝았을 것"
+    // 이라 가정하는 셈이 되어, 가장자리로 갈수록 오히려 값이 커지는(LED에서 먼 도메인 경계가
+    // LED 바로 위보다 더 밝아지는) 정반대 결과가 실측으로 확인됨 — 전체 커널 가중치(s, 이미
+    // 정규화됨)로 나눠 잘린 부분을 0으로 취급해야 한다. (이전엔 바깥쪽을 가장자리 값으로
+    // 반복(clamp)해 커널이 배열보다 훨씬 클 때 수십 배 과대 반영되는 문제가 있었는데, 그 수정
+    // 으로 "제외 후 재정규화"를 썼다가 이번엔 반대 방향 오류가 생긴 것 — zero-padding이 두
+    // 문제 모두 없는 올바른 경계 조건.)
     const center = horiz ? i : j;
-    let acc = 0, wsum = 0;
+    let acc = 0;
     for (let k = -r; k <= r; k++) {
       const pos = center + k;
       if (pos < 0 || pos > n - 1) continue;
       const ii = horiz ? pos : i, jj = horiz ? j : pos;
-      const wk = ker[k + r];
-      acc += f[jj * nx + ii] * wk; wsum += wk;
+      acc += f[jj * nx + ii] * ker[k + r];
     }
-    tmp[j * nx + i] = wsum > 0 ? acc / wsum : f[j * nx + i];
+    tmp[j * nx + i] = acc;
   }
   f.set(tmp);
 }
