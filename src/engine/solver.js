@@ -78,30 +78,51 @@ export function solveCombo(spec, active) {
 
 const clamp = (v, lo, hi) => (v < lo ? lo : v > hi ? hi : v);
 
+// 합리적 최소 LED 개수 — 이 미만이면(solveXY 참고) 피치 상한을 낮춰 재탐색한다.
+const N_MIN_LEDS = 6;
+
 // ---- 기구물 오버행(타겟보다 최대 spec.opt.maxOverhang 만큼 크게) 자동탐색 ----
 // 오버행이 크면 가장자리 LED 지원이 늘어 균일도엔 유리하지만, 기구 자체가 커져 LED 수가 늘 수도
 // 있어 무조건 유리하지 않다 — 몇 지점을 실제로 계산해 LED 수가 가장 적은(불가능하면 균일도가
 // 가장 높은) 오버행을 고른다. X·Y 동일 비율로만 넓힌다(한쪽만 넓히는 비대칭은 다루지 않음).
-function solveXY(spec, active, gridN, effOverride) {
+function solveXY(spec, active, gridN, effOverride, pMaxOverride) {
   const { X, Y } = bounds(spec);
   const maxOv = clamp(spec.opt.maxOverhang ?? 0.10, 0, 1);
-  if (maxOv <= 0) return solveXYAt(spec, active, gridN, effOverride, 0, 0);
+  const best = maxOv <= 0 ? solveXYAt(spec, active, gridN, effOverride, 0, 0, pMaxOverride) : (() => {
+    let best = null;
+    for (const ov of [0, maxOv * 0.5, maxOv]) {
+      const r = solveXYAt(spec, active, gridN, effOverride, ov * X / 2, ov * Y / 2, pMaxOverride);
+      if (!best) { best = r; continue; }
+      if (r.feasible !== best.feasible) { if (r.feasible) best = r; continue; }
+      if (r.feasible) { if (r.leds < best.leds) best = r; }
+      else if (r.U0 > best.U0) best = r;
+    }
+    return best;
+  })();
 
-  let best = null;
-  for (const ov of [0, maxOv * 0.5, maxOv]) {
-    const r = solveXYAt(spec, active, gridN, effOverride, ov * X / 2, ov * Y / 2);
-    if (!best) { best = r; continue; }
-    if (r.feasible !== best.feasible) { if (r.feasible) best = r; continue; }
-    if (r.feasible) { if (r.leds < best.leds) best = r; }
-    else if (r.U0 > best.U0) best = r;
+  // 확산이 아주 강하면(예: 좁고 긴 타겟 + milky 최대) 균일도가 피치에 거의 무관해져, "LED 개수
+  // 최소화" 목적함수가 극단적으로 성긴 해(예: LED 2개)를 그대로 골라버린다 — 수치상 균일도는
+  // 만족해도 광원 2~3개에 전적으로 의존해 제조 공차·확산재 편차 여유가 없는 비현실적 설계가
+  // 된다(실측: 100×20mm 타겟에서 605개↔2개로 급전환). N_MIN_LEDS 미만으로 나온 "성공" 해만
+  // 골라 그 조건에서만 피치 상한(과 오버행 재탐색)을 낮춰 다시 풀어본다 — 정상적으로 이미 충분한
+  // LED 수가 나온 케이스(대부분)는 원래 탐색 그대로 두어, 기존 해의 안정성(예: L4 좁은 안전망
+  // 스캔 결과)을 건드리지 않는다. 그래도 목표를 못 채우면(성긴 해가 유일한 해) 원래 해를 유지.
+  if (!pMaxOverride && best?.feasible && best.leds < N_MIN_LEDS) {
+    const densityFloorPMax = Math.sqrt((X * Y) / N_MIN_LEDS);
+    if (densityFloorPMax > bounds(spec).pMin) {
+      const denser = solveXY(spec, active, gridN, effOverride, densityFloorPMax);
+      if (denser?.feasible) return denser;
+    }
   }
   return best;
 }
 
 // effOverride 를 주면 combinedEffect(spec, active) 대신 그 확산 효과를 그대로 사용
-// (레벨 단독 자동탐색이 그 레벨 고유 파라미터로 만든 효과를 넣기 위함).
-function solveXYAt(spec, active, gridN, effOverride, padX, padY) {
-  const { maxD, target, pMin: truePMin, pMax, X, Y } = bounds(spec);
+// (레벨 단독 자동탐색이 그 레벨 고유 파라미터로 만든 효과를 넣기 위함). pMaxOverride 를 주면
+// bounds(spec)의 피치 상한 대신 그 값을 쓴다(합리적 LED 밀도 하한 재탐색용, solveXY 참고).
+function solveXYAt(spec, active, gridN, effOverride, padX, padY, pMaxOverride) {
+  const { maxD, target, pMin: truePMin, pMax: boundPMax, X, Y } = bounds(spec);
+  const pMax = pMaxOverride != null ? Math.max(truePMin, Math.min(boundPMax, pMaxOverride)) : boundPMax;
   const eff = effOverride ?? combinedEffect(spec, maxD, active);
   const at = memoEval(spec, eff, gridN, padX, padY);
 
