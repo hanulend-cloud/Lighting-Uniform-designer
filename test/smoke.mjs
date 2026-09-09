@@ -3,7 +3,7 @@ import { DEFAULT_SPEC } from '../src/model/defaults.js';
 import { computeField } from '../src/engine/directLit.js';
 import { metrics, localGradient } from '../src/engine/uniformity.js';
 import { optimize } from '../src/engine/optimizer.js';
-import { solvePerLevel } from '../src/engine/solver.js';
+import { solvePerLevel, solveSolo } from '../src/engine/solver.js';
 
 let fail = 0;
 const ok = (cond, msg) => { console.log((cond ? 'PASS ' : 'FAIL ') + msg); if (!cond) fail++; };
@@ -38,19 +38,27 @@ ok(sv.length === 5, `solver 5개 레벨 (${sv.length})`);
 ok(sv.every((r) => r.pitch > 0 && r.leds > 0 && r.nx > 0), 'solver 유효값');
 ok(sv.every((r) => !r.feasible || r.U0 >= spec.goal.U0 - 0.02), 'feasible 행은 목표 U0 충족');
 ok(sv.filter((r) => r.level !== 1).every((r) => r.auto), 'L2~L5 는 .auto 참고치를 함께 반환');
-// L2(Milky resin)는 확산도를 자유롭게 올릴 수 있어(t=1→U0≈100%) 대체로 목표를 달성할 수
-// 있지만, 이건 타겟 크기가 깊이 대비 너무 크지 않을 때 얘기다 — blurAxis()의 경계 조건을
-// zero-padding(타겟 밖엔 빛이 없음)으로 고친 뒤로는, blur가 타겟 크기에 비해 과도하면
-// 가장자리·모서리로 갈수록 빛이 실제로 새어나가 손실되므로(zero-padding이 정확히 그 물리를
-// 반영), 확산을 무한히 올린다고 균일도가 계속 좋아지지만은 않는다 — DEFAULT_SPEC(300x120mm,
-// 깊이 12mm)처럼 깊이 대비 타겟이 매우 넓으면 milky를 최대로 올려도(blur~132mm) 80%를 못
-// 넘는 것이 실측으로 확인됨(진짜 물리적 한계, 버그 아님). 이 단정은 그 한계에 걸리지 않는
-// 정사각형·중간 크기 타겟으로 별도 확인한다(탐색 로직 자체의 정상 동작 검증이 목적).
+// L2(Milky resin) 확산은 후방산란→기판 반사 재순환(levelEffect case 2)이라 blur 가 깊이의
+// ~1.2배 수준까지만 커진다. 확산(blur)은 LED 사이 리플만 없앨 뿐 가장자리 falloff 를 들어올리진
+// 못하므로, 측벽이 흡수(wallRefl=0)면 가장자리·모서리가 어두워 L2 단독으로는 목표에 못 미치는
+// 게 물리적으로 맞다(예전 공식 blur=11×depth 는 배열 전체를 거대 봉우리로 뭉개 이 효과를 가렸음).
+// 실제 기구는 백색 측벽이므로 wallRefl 을 준 조건으로 탐색 로직의 정상 동작을 검증한다.
 {
   const specSq = structuredClone(DEFAULT_SPEC);
-  specSq.target.xLen = 60; specSq.target.yLen = 60;
+  specSq.target.xLen = 60; specSq.target.yLen = 60; specSq.body.wallRefl = 0.8;
   const svSq = solvePerLevel(specSq, { levels: [2] });
-  ok(svSq.find((r) => r.level === 2).auto.feasible, 'L2 는 확산도 조절만으로 목표 균일도 확보(.auto, 정사각 60x60mm)');
+  ok(svSq.find((r) => r.level === 2).auto.feasible, 'L2 는 확산도 조절만으로 목표 균일도 확보(.auto, 정사각 60x60mm, 측벽반사 0.8)');
+}
+// 좁은 스트립(100x20mm, LED 1mm, milky 최대, 측벽반사 0.8): 깊이가 얕을수록 확산(∝깊이)이
+// 약해져 LED 가 점진적으로 늘어나야 한다 — 특정 깊이에서 605개↔2개로 급전환되던 회귀 방지.
+{
+  const strip = structuredClone(DEFAULT_SPEC);
+  strip.target.xLen = 100; strip.target.yLen = 20; strip.goal.U0 = 0.85;
+  strip.led.sizeX = 1; strip.led.sizeY = 1; strip.body.wallRefl = 0.8;
+  strip.levels[2] = { on: true, milky: 10, decenterX: 0, decenterY: 0 };
+  const byDepth = [4, 6, 8].map((d) => { const s = structuredClone(strip); s.space.depth = d; return solveSolo(s, [2]); });
+  ok(byDepth.every((r) => r.feasible), `L2 스트립: 깊이 4/6/8mm 모두 달성 (${byDepth.map((r) => r.leds + 'ea').join('/')})`);
+  ok(byDepth[0].leds >= byDepth[1].leds && byDepth[1].leds >= byDepth[2].leds, 'L2 스트립: 깊이↓ → LED 개수 단조 증가');
 }
 console.log('  per-level:', sv.map((r) => {
   const cur = r.feasible ? `${r.pitch.toFixed(0)}mm/${r.leds}ea` : 'x';

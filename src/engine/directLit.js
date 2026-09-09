@@ -157,14 +157,18 @@ export function computeField(spec, opt) {
   const { NX, NY, x0, x1, y0, y1, stepX, stepY } = grid;
   const X = spec.target.xLen, Y = spec.target.yLen;
   const refl = opt.wallRefl ?? spec.body?.wallRefl ?? 0;   // 기구 측벽 반사
+  // 측벽 위치 = 기구물 경계(오버행 padX/padY 만큼 타겟 밖) — 타겟 경계에 놓으면 오버행 LED 가
+  // 벽 "바깥"에 있는 셈이 되어 이미지가 엉뚱한 곳에 생긴다.
+  const wx0 = -(opt.padX ?? 0), wx1 = X + (opt.padX ?? 0);
+  const wy0 = -(opt.padY ?? 0), wy1 = Y + (opt.padY ?? 0);
 
   // 소스 목록: 실제 LED + 측벽 1-bounce 이미지 (flat array: x, y, scale)
   const src = [];
   for (const l of leds) {
     src.push(l.x, l.y, 1);
     if (refl > 0) {
-      src.push(-l.x, l.y, refl, 2 * X - l.x, l.y, refl,
-              l.x, -l.y, refl, l.x, 2 * Y - l.y, refl);
+      src.push(2 * wx0 - l.x, l.y, refl, 2 * wx1 - l.x, l.y, refl,
+              l.x, 2 * wy0 - l.y, refl, l.x, 2 * wy1 - l.y, refl);
     }
   }
 

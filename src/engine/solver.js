@@ -78,22 +78,32 @@ export function solveCombo(spec, active) {
   return preferReasonableInfeasible(spec, combinedEffect(spec, spec.space.depth, active), r, GRID);
 }
 
-// 목표 미달로 최종 확정된 결과의 대표 피치가 필요 이상으로 촘촘하면(예: 확산이 강해 균일도가
-// 피치에 거의 무관한 경우 — 실측: 100×20mm 타겟에서 605개=77.5%, 6개=78.6%로 사실상 동급),
-// "LED를 더 넣으면 될 것"이란 잘못된 인상을 준다. 합리적 밀도(N_MIN_LEDS) 피치에서도 다시
-// 평가해 균일도가 크게(0.5%p 넘게) 나쁘지 않으면 그 쪽으로 대체한다. solveXY/solveXYAt 내부
-// 탐색(autoTuneLevel 의 참고 피치 선정 등)에는 절대 쓰지 않고, 사용자에게 보여줄 "최종 확정
-// infeasible" 결과에만 적용한다 — 내부에 섞으면 그 대체값이 다른 탐색의 기준점으로 다시 쓰여
-// 전혀 다른(대개 더 나쁜) 결과로 튀는 문제가 실측으로 확인됨(L4/L5 auto 참고치 회귀).
+// 목표 미달로 최종 확정된 결과의 대표 피치는 항상 최소 피치(LED 최대)로 나오는데, 균일도가
+// 어느 밀도부터 더 이상 좋아지지 않는다면(포화) 그 위의 LED 는 "더 넣으면 될 것"이란 잘못된
+// 인상만 준다. 최소 피치부터 합리적 밀도(N_MIN_LEDS) 피치까지 로그 간격으로 훑어 최고 균일도의
+// 0.5%p 안에 드는 가장 성긴 피치(무릎점)를 대표값으로 고른다 — 확산이 약할수록 무릎점이 촘촘한
+// 쪽(≈깊이의 몇 배)으로 자연히 이동하므로 "깊이가 얕을수록 LED 가 점진적으로 늘어나는" 추세가
+// 그대로 드러난다. solveXY/solveXYAt 내부 탐색(autoTuneLevel 의 참고 피치 선정 등)에는 절대
+// 쓰지 않고, 사용자에게 보여줄 "최종 확정 infeasible" 결과에만 적용한다 — 내부에 섞으면 그
+// 대체값이 다른 탐색의 기준점으로 다시 쓰여 전혀 다른(대개 더 나쁜) 결과로 튀는 문제가 실측으로
+// 확인됨(L4/L5 auto 참고치 회귀).
 function preferReasonableInfeasible(spec, eff, r, gridN) {
   if (r.feasible) return r;
   const { X, Y, pMin: truePMin, pMax: truePMax } = bounds(spec);
-  const densityFloorPMax = Math.min(truePMax, Math.sqrt((X * Y) / N_MIN_LEDS));
-  if (!(densityFloorPMax > truePMin && densityFloorPMax > r.pitchX + 0.01)) return r;
+  const pFloor = Math.min(truePMax, Math.sqrt((X * Y) / N_MIN_LEDS));
+  if (!(pFloor > truePMin && pFloor > r.pitchX + 0.01)) return r;
   const padX = r.padX ?? 0, padY = r.padY ?? 0;
-  const rFloor = evalField(spec, eff, densityFloorPMax, densityFloorPMax, gridN, padX, padY);
-  if (rFloor.unif < r.U0 - 0.005) return r;
-  return pack(densityFloorPMax, densityFloorPMax, rFloor, X, Y, false, r.target, eff, spec.space.depth, padX, padY);
+  const KNEE_N = 7;
+  const cands = [{ p: r.pitchX, u: r.U0, res: null }];
+  for (let i = 1; i <= KNEE_N; i++) {
+    const p = r.pitchX * Math.pow(pFloor / r.pitchX, i / KNEE_N);
+    const res = evalField(spec, eff, p, p, gridN, padX, padY);
+    cands.push({ p, u: res.unif, res });
+  }
+  const bestU = Math.max(...cands.map((c) => c.u));
+  const knee = [...cands].reverse().find((c) => c.u >= bestU - 0.005);
+  if (!knee.res) return r;
+  return pack(knee.p, knee.p, knee.res, X, Y, false, r.target, eff, spec.space.depth, padX, padY);
 }
 
 const clamp = (v, lo, hi) => (v < lo ? lo : v > hi ? hi : v);

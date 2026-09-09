@@ -23,7 +23,7 @@ python -m http.server 5173 # http://localhost:5173
 
 | 영역 | 내용 |
 |---|---|
-| 광학 | 역제곱 + 배광(Lambertian/Gaussian), 근접장 발광면 분할 적분, 반사판 1-bounce, 확산판 blur·투과율 |
+| 광학 | 역제곱 + 배광(Lambertian/Gaussian), 근접장 발광면 분할 적분, 측벽 1-bounce(측벽반사 입력), L2 확산 = 후방산란→기판 반사 재순환 모델(blur ∝ 깊이)·투과율 |
 | 균일도 | U0 = E_min/E_avg(1순위), CV(RMSE), 국부 gradient, E_min/E_max — 평가면: 출광면 바로 위 |
 | 배열 | LED 2D/3D(선형/평면) 자동 분류, 피치·수량 산출 |
 | 최적화 | coarse grid 탐색 → 제약 필터 → Pareto front → Top 2 (최저비용 / 균일도 여유), 민감도 |
@@ -54,7 +54,7 @@ src/
 
 ## 보정 필요
 
-배광·확산 blur 계수(`diffuser.blurK`), 비용 단가는 임시값입니다. 실측/해석해로 캘리브레이션하세요 (`프로젝트.md` §3.7).
+확산 계수(L2: `src/model/levels.js` 의 기판 반사율 `BOARD_REFL`·후방산란율 0.9, L3~L5 blur 식), 비용 단가는 임시값입니다. 실측/해석해로 캘리브레이션하세요 (`프로젝트.md` §3.7).
 
 ## License
 
