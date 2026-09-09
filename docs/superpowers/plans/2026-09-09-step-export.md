@@ -622,14 +622,14 @@ function loadOc() {
   if (!ocPromise) {
     ocPromise = import(/* webpackIgnore: true */ OC_BASE + 'opencascade.full.js').then((mod) =>
       mod.default({ locateFile: (p) => (p.endsWith('.wasm') ? OC_BASE + 'opencascade.full.wasm' : p) })
-    );
+    ).catch((e) => { ocPromise = null; throw e; }); // 실패 시 재시도 가능하도록 캐시를 되돌림
   }
   return ocPromise;
 }
 
 self.onmessage = async (ev) => {
-  const { spec, combo, geom } = ev.data;
   try {
+    const { spec, combo, geom } = ev.data; // try 안에서 구조분해 — ev.data 가 잘못돼도 postMessage(error)로 보고됨
     const oc = await loadOc();
     const onProgress = (done, total, label) => self.postMessage({ type: 'progress', done, total, label });
     const r = buildStepForSpec(oc, spec, combo, geom, onProgress);
