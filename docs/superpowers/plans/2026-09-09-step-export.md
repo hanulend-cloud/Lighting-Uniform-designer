@@ -363,7 +363,11 @@ export function buildBodySolid(oc, { X, Y, topZ, botZAt, nx = 60, ny = 24 }) {
   wallStrip(botPts.map((r) => r[0]).reverse(), topPts.map((r) => r[0]).reverse()); // x=0
   wallStrip(botPts.map((r) => r[nx - 1]), topPts.map((r) => r[nx - 1]));          // x=X
 
-  return sewToSolid(oc, faces);
+  // 윗면/바닥면과 4개 옆벽의 삼각형 정점 순서(winding)가 서로 반대라 sewToSolid() 결과가
+  // 전체적으로 뒤집힌(부호가 음수인) 솔리드가 된다 — Sewing이 관대해 겉보기엔 닫힌 솔리드로
+  // 보이지만(실측: volumeOf()의 Math.abs()가 이걸 가려왔음), 제작용 STEP에는 부적절해 마지막에
+  // 전체를 한 번 뒤집어 바로잡는다.
+  return sewToSolid(oc, faces).Reversed();
 }
 ```
 
@@ -434,12 +438,27 @@ import { l3BotZAt, l4BotZAt, levelParams } from '../model/levels.js';
 
 const PCB_THK = 1; // mm — 스펙에 값이 없어 기본값 사용(설계 문서 §범위)
 
+// 솔리드를 X축 기준 180도 회전시켜 "위로 돌출"하던 형상을 "아래로 돌출"하게 뒤집는다.
+// 회전(determinant +1)은 면 방향(orientation)을 그대로 보존한다 — 처음엔 height를 음수로
+// 넘겨 꼭짓점만 뒤집으려 했으나, 그건 사실상 Z축 미러(determinant -1)라 면 방향이 반전되어
+// Boolean Fuse가 돌기를 "구멍"처럼 취급해 결과 부피가 거의 0이 되는 문제가 실측으로 확인됨
+// (body+bump fuse가 1200대신 0.17만 나옴) — 회전으로 바꿔 해결.
+function flipDown(oc, shape) {
+  const trsf = new oc.gp_Trsf_1();
+  const axis = new oc.gp_Ax1_2(new oc.gp_Pnt_3(0, 0, 0), new oc.gp_Dir_4(1, 0, 0));
+  trsf.SetRotation_1(axis, Math.PI);
+  const xf = new oc.BRepBuilderAPI_Transform_2(shape, trsf, false);
+  const moved = xf.Shape();
+  axis.delete(); trsf.delete(); xf.delete();
+  return moved;
+}
+
 // 활성 레벨 조합에서 botZAt(x,y) 함수를 만든다. bodyProfile()과 동일한 우선순위(L4가 L3를 대체).
-function makeBotZAt(spec, active, depth) {
+// leds/halfP는 호출측(buildStepForSpec)이 넘긴다 — spec 객체에 임시 필드를 얹지 않기 위함
+// (그렇게 하면 예외 발생 시 caller가 예상 못한 채로 spec이 오염된 상태로 남는 문제가 있었음).
+function makeBotZAt(spec, active, depth, leds, halfP) {
   const A = active instanceof Set ? active : new Set(active);
   if (A.has(4)) {
-    const leds = spec.__stepLeds; // buildStepInputs()가 채워 넣음
-    const halfP = spec.__stepHalfP;
     const near = (x, y) => leds.length ? Math.min(...leds.map((l) => Math.hypot(x - l.x, y - l.y))) : 1e9;
     return (x, y) => l4BotZAt(spec, A, depth, near(x, y), halfP);
   }
@@ -448,12 +467,17 @@ function makeBotZAt(spec, active, depth) {
   return () => depth - baseThk;
 }
 
-// L5 돌기 하나의 로컬 솔리드(z=0이 바닥 부착면, +z가 돌출 방향)를 만든다.
+// L5 돌기 하나의 로컬 솔리드(면 방향이 올바른 양의 부피로 나오도록 height 는 항상 양수로
+// 빌드) + flipDown 으로 뒤집어 "기구물 하단"(바디 바깥쪽, LED 방향)으로 돌출하게 만든다.
+// 로컬 z=0 이 부착면(바디의 하단면과 맞닿는 면).
 function buildL5Bump(oc, p5) {
   const sizeX = p5.sizeX ?? 0.3, sizeY = p5.sizeY ?? 0.3, h = p5.depth ?? 0.2;
-  if (p5.ptype === 'dome') return coneBump(oc, sizeX, sizeY, h, 10);
-  if (p5.ptype === 'prism') return ridgeBump(oc, sizeX, sizeY, h);
-  return coneBump(oc, sizeX, sizeY, h, 4); // pyramid(기본)
+  const up = p5.ptype === 'dome' ? coneBump(oc, sizeX, sizeY, h, 10)
+    : p5.ptype === 'prism' ? ridgeBump(oc, sizeX, sizeY, h)
+    : coneBump(oc, sizeX, sizeY, h, 4); // pyramid(기본)
+  const down = flipDown(oc, up);
+  up.delete();
+  return down;
 }
 
 // L5 돌기가 놓일 위치(피치 기반 격자, LED 배열과 별개 — sizeX/Y=pitch)를 계산.
@@ -483,11 +507,10 @@ export function buildStepForSpec(oc, spec, combo, geom, onProgress) {
   const depth = combo.depth;
   const X = spec.target.xLen, Y = spec.target.yLen;
 
-  spec.__stepLeds = geom.leds;
-  spec.__stepHalfP = geom.l4HalfP ?? Math.max(1, Math.min(combo.pitchX, combo.pitchY ?? combo.pitchX) / 2);
-  const botZAt = makeBotZAt(spec, active, depth);
+  const halfP = geom.l4HalfP ?? Math.max(1, Math.min(combo.pitchX, combo.pitchY ?? combo.pitchX) / 2);
+  const botZAt = makeBotZAt(spec, active, depth, geom.leds, halfP);
 
-  const body = buildBodySolid(oc, { X, Y, topZ: depth, botZAt });
+  let body = buildBodySolid(oc, { X, Y, topZ: depth, botZAt });
 
   const shapes = [body];
 
@@ -500,13 +523,16 @@ export function buildStepForSpec(oc, spec, combo, geom, onProgress) {
     let done = 0;
     for (const p of positions) {
       const local = buildL5Bump(oc, p5);
-      const z = depth; // 바디 윗면에 부착
+      const z = botZAt(p.x, p.y); // 바디 "하단"면(위치별 실제 두께)에 부착 — 상수 depth(윗면)가 아님
       bumps.push(translate(oc, local, p.x, p.y, z));
       local.delete();
       done++;
       if (onProgress && done % 50 === 0) onProgress(done, positions.length, 'L5 돌기 생성');
     }
     const fused = fuseAll(oc, [body, ...bumps], (i, total) => onProgress?.(i, total, 'L5 돌기 결합'));
+    body.delete();               // fuseAll()의 계약: shapes[0](=body)은 호출측이 정리
+    for (const b of bumps) b.delete();
+    body = fused;
     shapes[0] = fused;
   }
 
@@ -517,14 +543,18 @@ export function buildStepForSpec(oc, spec, combo, geom, onProgress) {
     shapes.push(translate(oc, local, l.x - ledSize.x / 2, l.y - ledSize.y / 2, 0));
     local.delete();
   }
+  onProgress?.(geom.leds.length, geom.leds.length, 'LED 배치');
 
   // PCB — 타겟 전체 크기, LED 바로 아래(z<0).
   const pcbLocal = box(oc, X, Y, PCB_THK);
   shapes.push(translate(oc, pcbLocal, 0, 0, -PCB_THK));
   pcbLocal.delete();
 
+  onProgress?.(1, 1, 'STEP 직렬화');
   const stepText = shapesToStepText(oc, shapes);
-  return { stepText, solidCount: shapes.length, bodyVolume: volumeOf(oc, shapes[0]) };
+  const bodyVolume = volumeOf(oc, shapes[0]);
+  for (const s of shapes) s.delete();   // 이 함수가 만든 모든 솔리드는 이 함수가 정리한다
+  return { stepText, solidCount: shapes.length, bodyVolume };
 }
 ```
 
@@ -568,10 +598,21 @@ git commit -m "feat: add STEP export orchestrator (body + LED + PCB + L5 bumps)"
 
 - [ ] **Step 1: 작성**
 
+`opencascade.full.js`를 실제로 다운로드해 직접 확인한 결과(브라우저 없이도 파일 자체로 확정
+가능했음 — 아래 원래 Step 2로 있던 "브라우저에서만 확인 가능" 항목은 이제 불필요), 이 파일은
+**classic script가 아니라 ES 모듈**이다(`export default Module;`로 끝남 — `Module`은
+`function(moduleArg){ ...; return Module.ready }` 형태의 표준 Emscripten MODULARIZE 팩토리).
+즉 `importScripts()`(classic worker 전용)로는 애초에 로드가 안 되고(문법 에러), **module
+worker**(`new Worker(url, {type:'module'})`)여야 `import`로 로드할 수 있다. module worker는
+정적 `import`도 지원하므로 `step-export.js`도 동적 `import()` 대신 정적으로 가져온다.
+
 ```js
 // STEP 내보내기 전용 Web Worker — 무거운 OpenCASCADE 연산이 메인 UI를 멈추지 않게 분리.
-// classic worker(importScripts 사용, type:'module' 아님 — opencascade.full.js가 UMD/전역
-// 스크립트라 이 쪽이 더 안전).
+// module worker(new Worker(url, {type:'module'})로 기동해야 함 — opencascade.full.js가
+// `export default Module;`로 끝나는 ES 모듈이라 classic worker의 importScripts()로는 로드
+// 자체가 SyntaxError로 실패함을 실제 파일을 받아 확인함.
+
+import { buildStepForSpec } from './step-export.js';
 
 const OC_VERSION = '2.0.0-beta.b5ff984';
 const OC_BASE = `https://cdn.jsdelivr.net/npm/opencascade.js@${OC_VERSION}/dist/`;
@@ -579,9 +620,9 @@ const OC_BASE = `https://cdn.jsdelivr.net/npm/opencascade.js@${OC_VERSION}/dist/
 let ocPromise = null;
 function loadOc() {
   if (!ocPromise) {
-    importScripts(OC_BASE + 'opencascade.full.js');
-    // opencascade.full.js는 Emscripten 표준 팩토리를 self.opencascade 전역에 남긴다.
-    ocPromise = self.opencascade({ locateFile: (p) => (p.endsWith('.wasm') ? OC_BASE + 'opencascade.full.wasm' : p) });
+    ocPromise = import(/* webpackIgnore: true */ OC_BASE + 'opencascade.full.js').then((mod) =>
+      mod.default({ locateFile: (p) => (p.endsWith('.wasm') ? OC_BASE + 'opencascade.full.wasm' : p) })
+    );
   }
   return ocPromise;
 }
@@ -590,7 +631,6 @@ self.onmessage = async (ev) => {
   const { spec, combo, geom } = ev.data;
   try {
     const oc = await loadOc();
-    const { buildStepForSpec } = await import('./step-export.js');
     const onProgress = (done, total, label) => self.postMessage({ type: 'progress', done, total, label });
     const r = buildStepForSpec(oc, spec, combo, geom, onProgress);
     self.postMessage({ type: 'done', stepText: r.stepText, solidCount: r.solidCount });
@@ -600,26 +640,27 @@ self.onmessage = async (ev) => {
 };
 ```
 
-- [ ] **Step 2: 실제 loadOc() 팩토리 전역명 확인 — 브라우저 없이는 확정 불가한 유일한 부분**
-
-`opencascade.full.js`는 Emscripten 산출물이라 팩토리 전역명이 빌드 설정(`EXPORT_NAME`)에 달려 있다. Node 스파이크(Task 2~4)는 `opencascade.js/dist/node.js`(npm 래퍼)를 썼기 때문에 이 전역명을 실제로 확인하지 못했다 — 이 단계에서 브라우저로 직접 확인한다.
+- [ ] **Step 2: `opencascade.full.js`가 ES 모듈로서 import 가능하고 default export가 함수인지만
+  Node로 가볍게 확인(실제 팩토리 호출/실행까지는 Node에서 확인 불가 — 아래 이유 참고)**
 
 ```bash
 node -e "
-const https = require('https');
-https.get('https://cdn.jsdelivr.net/npm/opencascade.js@2.0.0-beta.b5ff984/dist/opencascade.full.js', (res) => {
-  let data = '';
-  res.on('data', (c) => { if (data.length < 200000) data += c; });
-  res.on('end', () => {
-    const m = data.match(/var Module=typeof (\w+)/);
-    console.log('factory var name guess:', m && m[1]);
-    console.log(data.slice(0, 400));
-  });
-});
+import('opencascade.js/dist/opencascade.full.js').then((mod) => {
+  console.log('default export type:', typeof mod.default);
+  process.exit(0);
+}).catch((e) => { console.log('import FAILED:', e.message); process.exit(1); });
 "
 ```
 
-파일 앞부분(`Module["ready"]=...`, `moduleOverrides=...`)에서 실제 전역 변수/export 이름을 확인하고, `self.opencascade`가 아니라면 Task 5 Step 1의 `self.opencascade(...)` 호출부를 확인된 이름으로 고친다. (Task 2 스파이크에서 확인된 Node용 `dist/node.js`는 `import initOpenCascade from ...` ESM 래퍼였고, `dist/opencascade.full.js`는 그 밑단의 raw Emscripten glue라 이름 규칙이 다를 수 있다.)
+Expected: `default export type: function`.
+
+(주의: 이 팩토리를 실제로 **호출**하는 것까지 Node에서 확인하려 해봤으나 실패한다 — 파일 내부의
+Node 분기 코드가 ESM 컨텍스트엔 없는 `__dirname`을 참조해 `ReferenceError`가 난다. 이건 이
+파일이 브라우저/워커용으로 빌드된 것이라 Node CJS 전용 관례에 안 맞아서 생기는, Node에서
+직접 실행할 때만 나는 문제다 — 실제 목표 환경인 브라우저 module worker에서는
+`ENVIRONMENT_IS_NODE`가 false라 이 코드 경로 자체를 안 타므로 무관하다. npm 패키지가 Node용으로
+별도 `dist/node.js`를 제공하는 이유가 바로 이 차이 때문이다. 팩토리 호출까지의 최종 확인은
+Task 6 Step 5의 실제 브라우저 테스트에서 한다.)
 
 - [ ] **Step 3: Commit**
 
@@ -685,7 +726,9 @@ export function exportStep(spec, combo, geom, active) {
     if (!ok) return;
   }
 
-  const worker = new Worker(new URL('./step-worker.js', import.meta.url));
+  // module worker — step-worker.js가 opencascade.full.js(export default 로 끝나는 ES 모듈)를
+  // import 하므로 classic worker(기본값)로는 로드가 안 됨.
+  const worker = new Worker(new URL('./step-worker.js', import.meta.url), { type: 'module' });
   const el = overlay('STEP 생성 중…');
 
   worker.onmessage = (ev) => {
@@ -930,6 +973,10 @@ Expected: `node_modules` 항목 존재.
 | 화면 렌더링과 동일한 형상 공식 재사용 | Task 1(l3BotZAt), Task 4(l4BotZAt/bodyProfile 재사용) |
 
 **알려진 리스크 / 실행자가 반드시 확인해야 할 것:**
-- Task 5 Step 2 — `opencascade.full.js`의 실제 팩토리 전역명은 브라우저 없이 확정하지 못했다(Node 경로는 npm 래퍼를 써서 우회했음). 이 계획에서 유일하게 "실행해서 확인 필요"로 남겨둔 부분이니 반드시 Step 2·Task 6 Step 5(브라우저 수동 확인)를 건너뛰지 말 것.
+- (해결됨) `opencascade.full.js`의 실제 모듈 형식은 파일을 직접 받아 확인했다 — classic
+  script가 아니라 `export default Module;`로 끝나는 ES 모듈이라, worker는 반드시
+  `{type:'module'}`로 띄워야 한다(Task 5·6에 반영됨). 다만 그 팩토리를 실제로 **호출**해
+  끝까지 초기화되는지는 Node에서 확인이 안 되므로(브라우저 전용 코드 경로), Task 6 Step 5의
+  실제 브라우저 확인은 여전히 건너뛰지 말 것.
 - L5 "오목"(`dir: '오목'`)은 이번 범위에서 Boolean Cut을 구현하지 않았다(설계 문서에 명시된 범위 밖 — "돌출"만 지원). 필요하면 별도 태스크로 추가.
 - `BRepAlgoAPI_Fuse`를 수천 번 순차 호출하는 구조라, 정말 수천 개 돌기가 있으면 여전히 느릴 수 있다(설계 문서에서 이미 사용자에게 안내한 리스크).
