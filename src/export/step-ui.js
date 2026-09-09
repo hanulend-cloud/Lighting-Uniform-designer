@@ -29,6 +29,9 @@ export function exportStep(spec, combo, geom, active) {
     if (!ok) return;
   }
 
+  const btn = document.getElementById('btn-step');
+  if (btn) btn.disabled = true;   // 진행 중 재클릭(특히 키보드 Enter/Space) 방지 — 동시 워커 방지
+
   // module worker — step-worker.js가 opencascade.full.js(export default 로 끝나는 ES 모듈)를
   // import 하므로 classic worker(기본값)로는 로드가 안 됨.
   const worker = new Worker(new URL('./step-worker.js', import.meta.url), { type: 'module' });
@@ -40,6 +43,7 @@ export function exportStep(spec, combo, geom, active) {
       el.textContent = `STEP 생성 중… (${msg.label} ${msg.done}/${msg.total})`;
     } else if (msg.type === 'done') {
       hideOverlay();
+      if (btn) btn.disabled = false;
       const blob = new Blob([msg.stepText], { type: 'application/step' });
       const a = document.createElement('a');
       a.href = URL.createObjectURL(blob);
@@ -49,6 +53,7 @@ export function exportStep(spec, combo, geom, active) {
       worker.terminate();
     } else if (msg.type === 'error') {
       hideOverlay();
+      if (btn) btn.disabled = false;
       alert('STEP 생성 실패: ' + msg.message);
       console.error('STEP export failed:', msg.message);
       worker.terminate();
@@ -56,6 +61,7 @@ export function exportStep(spec, combo, geom, active) {
   };
   worker.onerror = (e) => {
     hideOverlay();
+    if (btn) btn.disabled = false;
     alert('STEP 생성 실패: ' + e.message);
     worker.terminate();
   };
