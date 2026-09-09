@@ -1,0 +1,109 @@
+<h2>색상 · 구성 스타일 — 3가지 방향</h2>
+<p class="subtitle">확정된 구조(상단 필수바 / 좌 모니터링 / 우 결과 + L2~L5: 확산소재·형상-기본·형상-정밀·미세패턴)를 그대로 축소 렌더링했습니다.</p>
+
+<style>
+  .mini-app { border-radius: 10px; overflow: hidden; font-size: 10px; border: 1px solid #222; }
+  .mini-hd { padding: 7px 10px; font-weight: 800; font-size: 11px; display:flex; justify-content:space-between; align-items:center; }
+  .mini-body { display:flex; gap:8px; padding:8px; }
+  .mini-panel { flex:1; border-radius:7px; padding:8px; }
+  .mini-panel .t { font-size:9px; font-weight:800; text-transform:uppercase; letter-spacing:.05em; margin-bottom:6px; opacity:.8; }
+  .mini-card { border-radius:6px; padding:6px 7px; margin-bottom:5px; }
+  .mini-card b { display:block; font-size:10.5px; }
+  .mini-tile { display:inline-block; border-radius:4px; padding:3px 7px; font-size:9px; font-weight:700; margin:2px 3px 0 0; }
+  .swatches { display:flex; gap:5px; margin-top:8px; }
+  .sw { width:22px; height:22px; border-radius:5px; border:1px solid rgba(255,255,255,.15); }
+</style>
+
+<div class="options" data-choice-group="color" style="display:flex; flex-direction:column; gap:22px;">
+
+  <div class="option" data-choice="a" onclick="toggleSelect(this)">
+    <div class="letter">A</div>
+    <div class="content" style="width:100%">
+      <h3>존별 색상 코딩 (입력=블루 / 모니터링=앰버 / 결과=그린)</h3>
+      <p>세 구역을 각각 다른 색 계열로 칠해서, 어느 영역을 보고 있는지 색만으로 바로 구분되게.</p>
+      <div class="mini-app" style="background:#0a0d14;">
+        <div class="mini-hd" style="background:#0d1830; color:#cfe0ff; border-bottom:2px solid #3a6bd6;">필수 입력 · 타겟 100×50 · LED 1×1mm · 목표 80%</div>
+        <div class="mini-body">
+          <div class="mini-panel" style="background:#1a1408; border:1px solid #7a5a1c;">
+            <div class="t" style="color:#e0a83c;">모니터링</div>
+            <div class="mini-card" style="background:#241c0c; border:1px solid #5c4620;">
+              <b style="color:#ffd27a;">균일도 87.5% · 목표달성</b>
+              <span style="color:#c9ab6f;">LED 130개 · pitch 10mm</span>
+            </div>
+            <span class="mini-tile" style="background:#241c0c;color:#e0a83c;border:1px solid #5c4620;">확산소재 21ea</span>
+            <span class="mini-tile" style="background:#241c0c;color:#e0a83c;border:1px solid #5c4620;">미세패턴 130ea</span>
+          </div>
+          <div class="mini-panel" style="background:#0a1c15; border:1px solid #2c6b4c;">
+            <div class="t" style="color:#3fcf94;">결과</div>
+            <div style="display:flex; gap:5px;">
+              <div style="flex:1; height:34px; background:#0e2419; border-radius:5px;"></div>
+              <div style="flex:1; height:34px; background:#0e2419; border-radius:5px;"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="swatches"><div class="sw" style="background:#3a6bd6"></div><div class="sw" style="background:#e0a83c"></div><div class="sw" style="background:#3fcf94"></div><div class="sw" style="background:#0a0d14"></div></div>
+    </div>
+  </div>
+
+  <div class="option" data-choice="b" onclick="toggleSelect(this)">
+    <div class="letter">B</div>
+    <div class="content" style="width:100%">
+      <h3>모노톤 + 단일 강조색 (시안)</h3>
+      <p>배경은 통일된 짙은 남색 계열 하나로, 상태(달성/미달)만 초록·주황으로 표시. 구역 구분은 색이 아니라 여백·테두리 두께로.</p>
+      <div class="mini-app" style="background:#0b0e16;">
+        <div class="mini-hd" style="background:#111725; color:#dfe6f5; border-bottom:1px solid #222c40;">필수 입력 · 타겟 100×50 · LED 1×1mm · 목표 80%</div>
+        <div class="mini-body">
+          <div class="mini-panel" style="background:#0e1320; border:1px solid #202b42;">
+            <div class="t" style="color:#8ea3c9;">모니터링</div>
+            <div class="mini-card" style="background:#0c111c; border:1px solid #1c2842;">
+              <b style="color:#39e0a0;">균일도 87.5% · 목표달성</b>
+              <span style="color:#8695b3;">LED 130개 · pitch 10mm</span>
+            </div>
+            <span class="mini-tile" style="background:#0c111c;color:#5ec8ff;border:1px solid #1c2842;">확산소재 21ea</span>
+            <span class="mini-tile" style="background:#0c111c;color:#5ec8ff;border:1px solid #1c2842;">미세패턴 130ea</span>
+          </div>
+          <div class="mini-panel" style="background:#0e1320; border:1px solid #202b42;">
+            <div class="t" style="color:#8ea3c9;">결과</div>
+            <div style="display:flex; gap:5px;">
+              <div style="flex:1; height:34px; background:#0c111c; border-radius:5px;"></div>
+              <div style="flex:1; height:34px; background:#0c111c; border-radius:5px;"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="swatches"><div class="sw" style="background:#5ec8ff"></div><div class="sw" style="background:#39e0a0"></div><div class="sw" style="background:#e8905a"></div><div class="sw" style="background:#0b0e16"></div></div>
+    </div>
+  </div>
+
+  <div class="option" data-choice="c" onclick="toggleSelect(this)">
+    <div class="letter">C</div>
+    <div class="content" style="width:100%">
+      <h3>절충형 — 은은한 존 색조 + 강한 상태색</h3>
+      <p>배경은 거의 통일(다크네이비), 각 구역은 테두리·헤더 라벨만 옅게 색 구분(존 인식은 되지만 화면이 알록달록하지 않음). 균일도 달성/미달 같은 "결과"는 채도 높게 강조해 눈에 확 띔.</p>
+      <div class="mini-app" style="background:#0b0e16;">
+        <div class="mini-hd" style="background:#111725; color:#dfe6f5; border-bottom:2px solid #4a7bd6;">필수 입력 · 타겟 100×50 · LED 1×1mm · 목표 80%</div>
+        <div class="mini-body">
+          <div class="mini-panel" style="background:#10141f; border:1px solid #33405a; border-left:3px solid #e0a83c;">
+            <div class="t" style="color:#e0a83c;">모니터링</div>
+            <div class="mini-card" style="background:#0c111c; border:1px solid #1c2842;">
+              <b style="color:#37d67a;">균일도 87.5% · 목표달성</b>
+              <span style="color:#8695b3;">LED 130개 · pitch 10mm</span>
+            </div>
+            <span class="mini-tile" style="background:#0c111c;color:#8fb4ff;border:1px solid #2c3a55;">확산소재 21ea</span>
+            <span class="mini-tile" style="background:#0c111c;color:#8fb4ff;border:1px solid #2c3a55;">미세패턴 130ea</span>
+          </div>
+          <div class="mini-panel" style="background:#10141f; border:1px solid #33405a; border-left:3px solid #3fcf94;">
+            <div class="t" style="color:#3fcf94;">결과</div>
+            <div style="display:flex; gap:5px;">
+              <div style="flex:1; height:34px; background:#0c111c; border-radius:5px;"></div>
+              <div style="flex:1; height:34px; background:#0c111c; border-radius:5px;"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="swatches"><div class="sw" style="background:#4a7bd6"></div><div class="sw" style="background:#e0a83c"></div><div class="sw" style="background:#3fcf94"></div><div class="sw" style="background:#37d67a"></div></div>
+    </div>
+  </div>
+
+</div>

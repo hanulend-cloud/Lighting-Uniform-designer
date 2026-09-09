@@ -1,0 +1,157 @@
+<h2>수정본 v3 — 높이 정렬 + L4·L5 실제 조정 인자 + LED수/피치 강조</h2>
+<p class="subtitle">좌우 열 높이를 맞추고(우측을 구조모니터링:최종구조 = 대략 65:35로 분할), L4·L5에 실제 조정 가능한 파라미터를 모두 노출했습니다. LED수·피치는 카드 제목 옆에 배지로 크게 표시.</p>
+
+<style>
+  .app { background:#eef0f3; border-radius:12px; border:1px solid #dde1e8; overflow:hidden;
+    font-family: system-ui, sans-serif; color:#20262f; }
+  .app-hd { background:#f7f8fa; padding:12px 20px; border-bottom:1px solid #dde1e8; }
+  .app-hd h1 { font-size:18px; margin:0; font-weight:800; }
+  .app-hd small { font-size:12px; color:#8390a6; margin-left:8px; font-weight:400; }
+
+  .reqbar { background:#f7f8fa; border-bottom:2px solid #3a6bd6; padding:10px 20px; }
+  .reqbar .lbl { display:inline-block; font-size:10.5px; font-weight:800; color:#fff; background:#e5484d;
+    padding:3px 9px; border-radius:10px; text-transform:uppercase; letter-spacing:.04em; margin-right:10px; }
+  .reqbar .fields { display:inline-flex; flex-wrap:wrap; gap:14px; font-size:13px; color:#454e60; vertical-align:middle; }
+  .reqbar .fields b { color:#1a2030; }
+
+  .body2 { display:flex; gap:12px; padding:12px 20px; align-items:stretch; height:430px; }
+  .zone { border-radius:10px; padding:10px 12px; background:#f7f8fa; border:1px solid #dde1e8;
+    display:flex; flex-direction:column; min-height:0; }
+  .zone.mon { flex:0 0 44%; border-left:4px solid #d99a20; }
+  .zone.res { flex:1 1 56%; display:flex; flex-direction:column; gap:10px; padding:0; background:none; border:none; }
+  .ztitle { font-size:11px; font-weight:800; text-transform:uppercase; letter-spacing:.05em; margin-bottom:8px; flex:0 0 auto; }
+  .zone.mon .ztitle { color:#a3700f; }
+
+  .verdict-card { background:#ffffff; border:1px solid #e4e7ee; border-radius:7px; padding:9px 11px; margin-bottom:9px; flex:0 0 auto; }
+  .verdict-card .big { font-size:18px; font-weight:800; color:#1c9a5b; }
+  .verdict-card .big span { font-size:11.5px; font-weight:700; margin-left:6px; }
+  .verdict-card .sub { font-size:11.5px; color:#5a6478; margin-top:3px; }
+
+  .optlbl { font-size:10px; font-weight:800; color:#fff; background:#3a6bd6; padding:2px 8px;
+    border-radius:9px; text-transform:uppercase; letter-spacing:.04em; display:inline-block; margin-bottom:7px; flex:0 0 auto; }
+
+  .lv4 { display:grid; grid-template-columns: repeat(2, 1fr); grid-template-rows: repeat(2, 1fr); gap:6px; flex:1 1 auto; min-height:0; }
+  .lvcard { background:#ffffff; border:1px solid #e4e7ee; border-radius:7px; padding:7px 8px; display:flex; flex-direction:column; min-height:0; overflow:hidden; }
+  .lvcard.on { border-color:#3a6bd6; box-shadow: 0 0 0 1px #3a6bd6 inset; }
+  .lvcard .hd { display:flex; align-items:baseline; justify-content:space-between; gap:5px; flex:0 0 auto; }
+  .lvcard .nmwrap { display:flex; align-items:baseline; gap:5px; }
+  .lvcard .nm { font-size:12px; font-weight:800; color:#1a2030; }
+  .lvcard .code { font-size:9px; font-weight:700; color:#8390a6; }
+  .lvcard .ledbadge { font-size:10.5px; font-weight:800; padding:1px 6px; border-radius:8px; white-space:nowrap; }
+  .lvcard .ledbadge.ok { background:#e7f7ee; color:#1c9a5b; }
+  .lvcard .ledbadge.ng { background:#fdeee3; color:#c96a26; }
+  .lvcard .pitchline { font-size:9.5px; color:#8390a6; margin-top:1px; flex:0 0 auto; }
+  .lvcard .role { font-size:9.5px; color:#6b7690; margin:4px 0; line-height:1.25; flex:0 0 auto; }
+  .lvcard .fields { display:flex; flex-wrap:wrap; gap:3px; flex:1 1 auto; align-content:flex-start; overflow:hidden; }
+  .lvcard .fi { background:#f7f8fa; border:1px solid #e4e7ee; border-radius:4px; padding:2px 5px; font-size:9px; color:#454e60; white-space:nowrap; }
+  .lvcard .fi i { font-style:normal; color:#9aa4b5; }
+  .lvcard .auto { font-size:9px; color:#8390a6; margin-top:4px; flex:0 0 auto; border-top:1px dashed #e4e7ee; padding-top:3px; }
+  .lvcard .apply { font-size:9px; background:#eef2fb; color:#2f5fd6; border:1px solid #d3ddf5;
+    border-radius:5px; padding:1px 6px; margin-left:4px; display:inline-block; cursor:pointer; }
+
+  .subzone { border-radius:10px; padding:10px 12px; border:1px solid #dde1e8; background:#f7f8fa;
+    display:flex; flex-direction:column; min-height:0; }
+  .subzone.live { border-left:4px solid #1f9d5c; flex:0 0 65%; }
+  .subzone.final { border-left:4px solid #7a4fd6; flex:0 0 calc(35% - 10px); }
+  .ztitle.live { color:#1a8a52; } .ztitle.final { color:#6a3fc0; }
+  .ztitle .note { font-weight:400; text-transform:none; color:#8390a6; font-size:10px; }
+  .grid2x2 { display:grid; grid-template-columns:1fr 1fr; grid-template-rows:1fr 1fr; gap:7px; flex:1 1 auto; min-height:0; }
+  .canvasph { background:#eceef2; border:1px solid #dde1e8; border-radius:6px;
+    display:flex; align-items:center; justify-content:center; font-size:10px; color:#9aa4b5; }
+  .finalrow { display:flex; gap:7px; flex:1 1 auto; min-height:0; }
+  .finalph { flex:1; background:#eceef2; border:1px solid #dde1e8; border-radius:6px;
+    display:flex; align-items:center; justify-content:center; font-size:10px; color:#9aa4b5; }
+</style>
+
+<div class="app">
+  <div class="app-hd"><h1>Uniform Design Simulator <small>Phase 1 · 직하형 · 확산판 없음</small></h1></div>
+
+  <div class="reqbar">
+    <span class="lbl">필수</span>
+    <span class="fields">
+      <span>타겟 <b>100 × 50</b> mm</span>
+      <span>LED <b>1 × 1</b> mm · 지향각 <b>120°</b></span>
+      <span>깊이 <b>3</b> mm</span>
+      <span>몸체두께 <b>1</b> mm</span>
+      <span>목표균일도 <b>80%</b></span>
+    </span>
+  </div>
+
+  <div class="body2">
+    <div class="zone mon">
+      <div class="ztitle">설계변경</div>
+      <div class="verdict-card">
+        <div class="big">87.5% <span>목표 달성</span></div>
+        <div class="sub"><b>형상·정밀 + 미세패턴</b> · LED 130개 · X10×Y10mm</div>
+      </div>
+
+      <span class="optlbl">선택 · 조합 가능</span>
+      <div class="lv4">
+        <div class="lvcard">
+          <div class="hd"><span class="nmwrap"><span class="code">L2</span><span class="nm">확산소재</span></span><span class="ledbadge ng">91개 · 14mm</span></div>
+          <div class="pitchline">X14×Y14mm</div>
+          <div class="role">Milky resin 확산제 배합</div>
+          <div class="fields"><span class="fi">밀키<i>5</i></span></div>
+          <div class="auto">자동:21개(80%) <span class="apply">적용</span></div>
+        </div>
+
+        <div class="lvcard">
+          <div class="hd"><span class="nmwrap"><span class="code">L3</span><span class="nm">형상·기본</span></span><span class="ledbadge ng">325개 · 4mm</span></div>
+          <div class="pitchline">X4×Y4mm</div>
+          <div class="role">LED 주변 평탄부+간격</div>
+          <div class="fields"><span class="fi">gap<i>0.5</i></span><span class="fi">flatX<i>4</i></span><span class="fi">flatY<i>4</i></span></div>
+        </div>
+
+        <div class="lvcard on">
+          <div class="hd"><span class="nmwrap"><span class="code">L4</span><span class="nm">형상·정밀</span></span><span class="ledbadge ok">170개 · 10mm</span></div>
+          <div class="pitchline">X10×Y10mm</div>
+          <div class="role">전이부 각도·기울기 (L3 대체)</div>
+          <div class="fields">
+            <span class="fi">gap<i>2</i></span><span class="fi">flatX<i>4</i></span><span class="fi">flatY<i>4</i></span>
+            <span class="fi">각도X<i>45°</i></span><span class="fi">각도Y<i>45°</i></span><span class="fi">Gap확대<i>8</i></span>
+          </div>
+        </div>
+
+        <div class="lvcard on">
+          <div class="hd"><span class="nmwrap"><span class="code">L5</span><span class="nm">미세패턴</span></span><span class="ledbadge ok">130개 · 10mm</span></div>
+          <div class="pitchline">X10×Y10mm</div>
+          <div class="role">하단 돌기 배열 산란</div>
+          <div class="fields">
+            <span class="fi">패턴<i>피라미드</i></span><span class="fi">크기X<i>2</i></span><span class="fi">크기Y<i>2</i></span>
+            <span class="fi">각도X<i>50°</i></span><span class="fi">각도Y<i>50°</i></span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="zone res">
+      <div class="subzone live">
+        <div class="ztitle live">구조 모니터링 <span class="note">· 조정할 때마다 갱신</span></div>
+        <div class="grid2x2">
+          <div class="canvasph">단면도</div>
+          <div class="canvasph">입체뷰</div>
+          <div class="canvasph">조도 히트맵</div>
+          <div class="canvasph">X·Y 프로파일</div>
+        </div>
+      </div>
+      <div class="subzone final">
+        <div class="ztitle final">최종 구조 <span class="note">· 확정된 제작 도면</span></div>
+        <div class="finalrow">
+          <div class="finalph">TOP VIEW</div>
+          <div class="finalph">SIDE VIEW</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="options" data-choice-group="finalcheckv3" style="margin-top:18px;">
+  <div class="option" data-choice="good" onclick="toggleSelect(this)">
+    <div class="letter">✓</div>
+    <div class="content"><h3>이대로 좋다</h3><p>이 방향으로 실제 코드에 반영</p></div>
+  </div>
+  <div class="option" data-choice="more" onclick="toggleSelect(this)">
+    <div class="letter">△</div>
+    <div class="content"><h3>더 손볼 부분 있음</h3><p>터미널에 적어주세요</p></div>
+  </div>
+</div>

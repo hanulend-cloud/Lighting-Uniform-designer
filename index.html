@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Uniform Design Simulator</title>
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <header>
+    <h1>Uniform Design Simulator <small>Phase 1 · 직하형 · 확산판 없음</small></h1>
+    <div class="actions">
+      <button id="btn-reset">기본값</button>
+      <button id="btn-export">JSON 내보내기</button>
+      <label class="import">불러오기<input type="file" id="file-import" accept="application/json" hidden /></label>
+    </div>
+  </header>
+
+  <!-- 필수 입력 (타겟/LED/목표/몸체두께) -->
+  <div id="inputbar">
+    <span class="zbadge req">필수</span>
+    <form id="controls"></form>
+  </div>
+
+  <main>
+    <!-- 좌: 설계변경 (판정 + L2~L5 조합) -->
+    <section id="design-wrap">
+      <div class="zone-hd design">설계변경</div>
+      <div class="pane col" id="pane-verdict">
+        <div id="verdict"></div>
+      </div>
+      <div class="a-hd"><span class="zbadge opt">선택 · 조합 가능</span>
+        <span class="muted">파라미터 수정 시 즉시 반영</span></div>
+      <div id="levels"></div>
+      <div id="timing" class="muted"></div>
+    </section>
+
+    <!-- 우: 결과 = 구조 모니터링(라이브) + 최종 구조(제작 도면) -->
+    <section id="results-wrap">
+      <div class="subzone live">
+        <div class="zone-hd live">구조 모니터링 <span class="note">· 조정할 때마다 갱신</span></div>
+        <div class="live-grid">
+          <div class="pane" id="pane-section"><canvas id="section"></canvas></div>
+          <div class="pane" id="pane-iso"><canvas id="iso"></canvas></div>
+          <div class="pane col" id="pane-heat">
+            <div class="pane-title heat-bar">
+              <span>조도 히트맵</span>
+              <span class="heat-ctl">
+                <label><input type="checkbox" id="heat-auto"> 자동</label>
+                <button id="heat-render">조도 렌더링</button>
+              </span>
+            </div>
+            <canvas id="heatmap"></canvas>
+          </div>
+          <div class="pane col" id="pane-prof">
+            <div class="pane-title">X·Y축 조도 프로파일 (LED열 / LED사이)</div>
+            <canvas id="anprofile"></canvas>
+          </div>
+        </div>
+      </div>
+
+      <div class="subzone final">
+        <div class="zone-hd final">최종 구조 <span class="note">· 확정된 제작 도면</span></div>
+        <div class="final-row">
+          <div class="pane col" id="pane-plan">
+            <div class="pane-title">TOP VIEW · 평면 배치</div>
+            <canvas id="plan"></canvas>
+          </div>
+          <div class="pane col" id="pane-section-mini">
+            <div class="pane-title">SIDE VIEW · 단면 형상</div>
+            <canvas id="section-mini"></canvas>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script type="module" src="./src/main.js"></script>
+</body>
+</html>

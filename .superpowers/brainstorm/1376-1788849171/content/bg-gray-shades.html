@@ -1,0 +1,105 @@
+<h2>절충형(C) — 배경 그레이 톤 3단계</h2>
+<p class="subtitle">지금 배경(짙은 네이비 #0b0e16)에서 얼마나 밝은 그레이로 갈지 3단계로 만들었습니다. 패널·글자 대비도 같이 맞췄어요.</p>
+
+<style>
+  .mini-app { border-radius: 10px; overflow: hidden; font-size: 10px; border: 1px solid #222; }
+  .mini-hd { padding: 7px 10px; font-weight: 800; font-size: 11px; }
+  .mini-body { display:flex; gap:8px; padding:8px; }
+  .mini-panel { flex:1; border-radius:7px; padding:8px; }
+  .mini-panel .t { font-size:9px; font-weight:800; text-transform:uppercase; letter-spacing:.05em; margin-bottom:6px; opacity:.85; }
+  .mini-card { border-radius:6px; padding:6px 7px; margin-bottom:5px; }
+  .mini-card b { display:block; font-size:10.5px; }
+  .mini-tile { display:inline-block; border-radius:4px; padding:3px 7px; font-size:9px; font-weight:700; margin:2px 3px 0 0; }
+  .hexlabel { font-size:9px; color:#8794ad; margin-top:6px; }
+</style>
+
+<div class="options" data-choice-group="bggray" style="display:flex; flex-direction:column; gap:22px;">
+
+  <div class="option" data-choice="a" onclick="toggleSelect(this)">
+    <div class="letter">A</div>
+    <div class="content" style="width:100%">
+      <h3>살짝만 밝게 — 뉴트럴 다크그레이</h3>
+      <div class="mini-app" style="background:#1a1c22;">
+        <div class="mini-hd" style="background:#22252c; color:#eef1f7; border-bottom:2px solid #5a86dd;">필수 입력 · 타겟 100×50 · LED 1×1mm · 목표 80%</div>
+        <div class="mini-body">
+          <div class="mini-panel" style="background:#212429; border:1px solid #3a3f4a; border-left:3px solid #e0a83c;">
+            <div class="t" style="color:#e6b862;">모니터링</div>
+            <div class="mini-card" style="background:#191b20; border:1px solid #33383f;">
+              <b style="color:#4ee092;">균일도 87.5% · 목표달성</b>
+              <span style="color:#a3aebd;">LED 130개 · pitch 10mm</span>
+            </div>
+            <span class="mini-tile" style="background:#191b20;color:#9dc0ff;border:1px solid #33383f;">확산소재 21ea</span>
+            <span class="mini-tile" style="background:#191b20;color:#9dc0ff;border:1px solid #33383f;">미세패턴 130ea</span>
+          </div>
+          <div class="mini-panel" style="background:#212429; border:1px solid #3a3f4a; border-left:3px solid #3fcf94;">
+            <div class="t" style="color:#5edcae;">결과</div>
+            <div style="display:flex; gap:5px;">
+              <div style="flex:1; height:34px; background:#191b20; border-radius:5px;"></div>
+              <div style="flex:1; height:34px; background:#191b20; border-radius:5px;"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="hexlabel">배경 #1a1c22 · 패널 #212429</div>
+    </div>
+  </div>
+
+  <div class="option" data-choice="b" onclick="toggleSelect(this)">
+    <div class="letter">B</div>
+    <div class="content" style="width:100%">
+      <h3>중간 — 미드 차콜그레이</h3>
+      <div class="mini-app" style="background:#2a2d34;">
+        <div class="mini-hd" style="background:#32363e; color:#f3f5f9; border-bottom:2px solid #6a94e6;">필수 입력 · 타겟 100×50 · LED 1×1mm · 목표 80%</div>
+        <div class="mini-body">
+          <div class="mini-panel" style="background:#32363e; border:1px solid #474c57; border-left:3px solid #e0a83c;">
+            <div class="t" style="color:#f0c579;">모니터링</div>
+            <div class="mini-card" style="background:#292c33; border:1px solid #41454e;">
+              <b style="color:#5ce8a0;">균일도 87.5% · 목표달성</b>
+              <span style="color:#b7c0cf;">LED 130개 · pitch 10mm</span>
+            </div>
+            <span class="mini-tile" style="background:#292c33;color:#aecbff;border:1px solid #41454e;">확산소재 21ea</span>
+            <span class="mini-tile" style="background:#292c33;color:#aecbff;border:1px solid #41454e;">미세패턴 130ea</span>
+          </div>
+          <div class="mini-panel" style="background:#32363e; border:1px solid #474c57; border-left:3px solid #3fcf94;">
+            <div class="t" style="color:#6de6bc;">결과</div>
+            <div style="display:flex; gap:5px;">
+              <div style="flex:1; height:34px; background:#292c33; border-radius:5px;"></div>
+              <div style="flex:1; height:34px; background:#292c33; border-radius:5px;"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="hexlabel">배경 #2a2d34 · 패널 #32363e</div>
+    </div>
+  </div>
+
+  <div class="option" data-choice="c" onclick="toggleSelect(this)">
+    <div class="letter">C</div>
+    <div class="content" style="width:100%">
+      <h3>더 밝게 — 라이트 슬레이트그레이</h3>
+      <div class="mini-app" style="background:#3c4049;">
+        <div class="mini-hd" style="background:#454a54; color:#fafbfd; border-bottom:2px solid #7ba3f0;">필수 입력 · 타겟 100×50 · LED 1×1mm · 목표 80%</div>
+        <div class="mini-body">
+          <div class="mini-panel" style="background:#454a54; border:1px solid #5a606c; border-left:3px solid #e0a83c;">
+            <div class="t" style="color:#f5d08d;">모니터링</div>
+            <div class="mini-card" style="background:#3a3e47; border:1px solid #545964;">
+              <b style="color:#6bedac;">균일도 87.5% · 목표달성</b>
+              <span style="color:#ccd3de;">LED 130개 · pitch 10mm</span>
+            </div>
+            <span class="mini-tile" style="background:#3a3e47;color:#bcd5ff;border:1px solid #54596;">확산소재 21ea</span>
+            <span class="mini-tile" style="background:#3a3e47;color:#bcd5ff;border:1px solid #54596;">미세패턴 130ea</span>
+          </div>
+          <div class="mini-panel" style="background:#454a54; border:1px solid #5a606c; border-left:3px solid #3fcf94;">
+            <div class="t" style="color:#7fedc4;">결과</div>
+            <div style="display:flex; gap:5px;">
+              <div style="flex:1; height:34px; background:#3a3e47; border-radius:5px;"></div>
+              <div style="flex:1; height:34px; background:#3a3e47; border-radius:5px;"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="hexlabel">배경 #3c4049 · 패널 #454a54</div>
+    </div>
+  </div>
+
+</div>

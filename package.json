@@ -1,0 +1,14 @@
+{
+  "name": "uniform-design-simulator",
+  "version": "0.1.0",
+  "description": "조명기구 균일도 설계 1차 사양 엔진 (Phase 1, 직하형, 무빌드 웹앱)",
+  "type": "module",
+  "scripts": {
+    "dev": "npx --yes serve -l 5173 .",
+    "start": "npx --yes serve -l 5173 .",
+    "test": "node test/smoke.mjs"
+  },
+  "keywords": ["lighting", "optics", "uniformity", "led", "dfm", "simulator"],
+  "license": "MIT",
+  "private": true
+}

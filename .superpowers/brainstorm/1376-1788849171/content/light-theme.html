@@ -1,0 +1,78 @@
+<h2>라이트 테마 — 화이트 베이스 2단계</h2>
+<p class="subtitle">다크 계열에서 완전히 전환합니다. 존 구분(테두리 색)·상태색(달성=초록/미달=주황)은 유지하되 라이트 배경에 맞게 채도·명도를 다시 잡았습니다.</p>
+
+<style>
+  .mini-app { border-radius: 10px; overflow: hidden; font-size: 10px; border: 1px solid #dfe2e8; box-shadow: 0 1px 3px rgba(20,20,30,.06); }
+  .mini-hd { padding: 7px 10px; font-weight: 800; font-size: 11px; }
+  .mini-body { display:flex; gap:8px; padding:8px; }
+  .mini-panel { flex:1; border-radius:7px; padding:8px; }
+  .mini-panel .t { font-size:9px; font-weight:800; text-transform:uppercase; letter-spacing:.05em; margin-bottom:6px; }
+  .mini-card { border-radius:6px; padding:6px 7px; margin-bottom:5px; }
+  .mini-card b { display:block; font-size:10.5px; }
+  .mini-tile { display:inline-block; border-radius:4px; padding:3px 7px; font-size:9px; font-weight:700; margin:2px 3px 0 0; }
+  .hexlabel { font-size:9px; color:#8794ad; margin-top:6px; }
+</style>
+
+<div class="options" data-choice-group="lighttheme" style="display:flex; flex-direction:column; gap:22px;">
+
+  <div class="option" data-choice="a" onclick="toggleSelect(this)">
+    <div class="letter">A</div>
+    <div class="content" style="width:100%">
+      <h3>거의 순백 + 카드만 흰색 분리</h3>
+      <p>배경은 아주 옅은 그레이(#f6f7f9), 카드/패널은 순백(#ffffff)이라 카드가 살짝 떠 보이는 느낌.</p>
+      <div class="mini-app" style="background:#f6f7f9;">
+        <div class="mini-hd" style="background:#ffffff; color:#1c2230; border-bottom:2px solid #3a6bd6;">필수 입력 · 타겟 100×50 · LED 1×1mm · 목표 80%</div>
+        <div class="mini-body">
+          <div class="mini-panel" style="background:#ffffff; border:1px solid #e4e7ee; border-left:3px solid #d99a20;">
+            <div class="t" style="color:#b8790f;">모니터링</div>
+            <div class="mini-card" style="background:#fbfaf5; border:1px solid #eee1c2;">
+              <b style="color:#1c9a5b;">균일도 87.5% · 목표달성</b>
+              <span style="color:#5a6478;">LED 130개 · pitch 10mm</span>
+            </div>
+            <span class="mini-tile" style="background:#eef2fb;color:#2f5fd6;border:1px solid #d3ddf5;">확산소재 21ea</span>
+            <span class="mini-tile" style="background:#eef2fb;color:#2f5fd6;border:1px solid #d3ddf5;">미세패턴 130ea</span>
+          </div>
+          <div class="mini-panel" style="background:#ffffff; border:1px solid #e4e7ee; border-left:3px solid #1f9d5c;">
+            <div class="t" style="color:#1f9d5c;">결과</div>
+            <div style="display:flex; gap:5px;">
+              <div style="flex:1; height:34px; background:#f1f3f7; border-radius:5px;"></div>
+              <div style="flex:1; height:34px; background:#f1f3f7; border-radius:5px;"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="hexlabel">배경 #f6f7f9 · 카드 #ffffff</div>
+    </div>
+  </div>
+
+  <div class="option" data-choice="b" onclick="toggleSelect(this)">
+    <div class="letter">B</div>
+    <div class="content" style="width:100%">
+      <h3>웜그레이 화이트 — 은은한 톤온톤</h3>
+      <p>배경·카드 모두 흰색 계열이지만 아주 살짝 톤 차이만(순백 대비를 줄여 눈부심을 낮춤). "화이트에 그레이가 살짝" 느낌에 더 가까움.</p>
+      <div class="mini-app" style="background:#eef0f3;">
+        <div class="mini-hd" style="background:#f7f8fa; color:#20262f; border-bottom:2px solid #3a6bd6;">필수 입력 · 타겟 100×50 · LED 1×1mm · 목표 80%</div>
+        <div class="mini-body">
+          <div class="mini-panel" style="background:#f7f8fa; border:1px solid #dde1e8; border-left:3px solid #d99a20;">
+            <div class="t" style="color:#a3700f;">모니터링</div>
+            <div class="mini-card" style="background:#ffffff; border:1px solid #e9e2cf;">
+              <b style="color:#1c9a5b;">균일도 87.5% · 목표달성</b>
+              <span style="color:#5f6a80;">LED 130개 · pitch 10mm</span>
+            </div>
+            <span class="mini-tile" style="background:#e6ecfa;color:#2955c4;border:1px solid #cdd9f2;">확산소재 21ea</span>
+            <span class="mini-tile" style="background:#e6ecfa;color:#2955c4;border:1px solid #cdd9f2;">미세패턴 130ea</span>
+          </div>
+          <div class="mini-panel" style="background:#f7f8fa; border:1px solid #dde1e8; border-left:3px solid #1f9d5c;">
+            <div class="t" style="color:#1a8a52;">결과</div>
+            <div style="display:flex; gap:5px;">
+              <div style="flex:1; height:34px; background:#eceef2; border-radius:5px;"></div>
+              <div style="flex:1; height:34px; background:#eceef2; border-radius:5px;"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="hexlabel">배경 #eef0f3 · 카드 #f7f8fa / #ffffff</div>
+    </div>
+  </div>
+
+</div>

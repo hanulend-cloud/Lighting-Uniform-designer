@@ -1,0 +1,71 @@
+<h2>L1~L5 스트립 — 필수/선택 구분 + L1 균형감</h2>
+<p class="subtitle">A안(현재 구조 유지)을 기준으로, L1~L5 스트립 내부를 어떻게 구성할지 3가지로 만들어봤습니다. 공통: 상단 입력바는 "필수" 배지, L1~L5는 "선택(조합 가능)" 배지로 구분.</p>
+
+<style>
+  .req-badge, .opt-badge { display:inline-block; font-size:9px; font-weight:800; padding:2px 7px;
+    border-radius:10px; text-transform:uppercase; letter-spacing:.04em; margin-right:6px; }
+  .req-badge { background: rgba(255,90,90,0.18); color:#ff9d9d; border:1px solid #c85a5a; }
+  .opt-badge { background: rgba(90,170,255,0.18); color:#9dc4ff; border:1px solid #4a7bd6; }
+  .sec-hd { font-size:11px; color:#9aa6bf; margin: 10px 0 5px; display:flex; align-items:center; }
+  .card5 { display:flex; gap:6px; }
+  .card5 .lvcard { flex:1; background:#111725; border:1px solid #222c40; border-radius:8px; padding:7px 8px; font-size:10.5px; }
+  .card5 .lvcard.thin { background:#0d1220; border-style:dashed; opacity:.85; }
+  .card5 .lvcard b { display:block; color:#8fb4ff; font-size:11px; margin-bottom:2px; }
+  .card5 .role { color:#7f8ba6; font-size:9.5px; line-height:1.3; display:block; margin-bottom:5px; min-height:22px; }
+  .card5 .miniinput { background:#0c111c; border:1px solid #2c3a55; border-radius:3px; padding:2px 4px; color:#aeb9d0; font-size:9px; display:inline-block; margin:1px 2px 0 0; }
+  .card5 .lvcard.base { flex: 0.6; }
+</style>
+
+<div class="options" data-choice-group="strip" style="display:flex; flex-direction:column; gap:20px;">
+
+  <div class="option" data-choice="a" onclick="toggleSelect(this)">
+    <div class="letter">A</div>
+    <div class="content" style="width:100%">
+      <h3>동일 크기 5카드 + 역할 한 줄로 균형</h3>
+      <p>L1도 L2~L5와 똑같은 카드 크기. 대신 모든 카드에 "이 단계가 하는 일" 한 줄을 넣어 L1의 빈 느낌을 채움.</p>
+      <div class="sec-hd"><span class="req-badge">필수</span>타겟 · LED · 목표균일도 (상단 바)</div>
+      <div class="sec-hd" style="margin-top:10px;"><span class="opt-badge">선택 · 조합 가능</span>확산/형상 방식 — 켜는 만큼 균일도 확보</div>
+      <div class="card5">
+        <div class="lvcard"><b>L1 기본 두께</b><span class="role">평판 몸체 두께만 조정. 광학 효과 없음 — 다른 단계와 항상 함께 적용됨</span><span class="miniinput">두께 3mm</span></div>
+        <div class="lvcard"><b>L2 Milky 확산</b><span class="role">수지에 확산제 배합. 강할수록 균일 ↑ · 투과율 ↓</span><span class="miniinput">밀키 5</span></div>
+        <div class="lvcard"><b>L3 Flat+Gap</b><span class="role">LED 주변 평탄부+간격으로 1차 확산</span><span class="miniinput">gap 2</span><span class="miniinput">flat 4</span></div>
+        <div class="lvcard"><b>L4 경사 형상</b><span class="role">전이부 각도·기울기로 확산 조절</span><span class="miniinput">각도 45°</span></div>
+        <div class="lvcard"><b>L5 미세패턴</b><span class="role">하단 돌기 배열로 산란 확산</span><span class="miniinput">피라미드</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="option" data-choice="b" onclick="toggleSelect(this)">
+    <div class="letter">B</div>
+    <div class="content" style="width:100%">
+      <h3>L1은 "기준값"으로 상단 입력바에 흡수</h3>
+      <p>L1(두께)은 광학에 영향이 없으니 애초에 "선택 단계"가 아니라 상단 필수 입력바의 기구 사양 항목으로 옮김. 선택 스트립은 실제 확산 방식인 L2~L5만 4카드로 꽉 차게 배치.</p>
+      <div class="sec-hd"><span class="req-badge">필수</span>타겟 · LED · 목표균일도 · <b style="color:#cfe0ff">몸체 두께</b> (상단 바)</div>
+      <div class="sec-hd" style="margin-top:10px;"><span class="opt-badge">선택 · 조합 가능</span>확산/형상 방식 4종 — 하나 이상 켜야 목표 달성 가능</div>
+      <div class="card5">
+        <div class="lvcard"><b>L2 Milky 확산</b><span class="role">수지에 확산제 배합. 강할수록 균일 ↑ · 투과율 ↓</span><span class="miniinput">밀키 5</span></div>
+        <div class="lvcard"><b>L3 Flat+Gap</b><span class="role">LED 주변 평탄부+간격으로 1차 확산</span><span class="miniinput">gap 2</span><span class="miniinput">flat 4</span></div>
+        <div class="lvcard"><b>L4 경사 형상</b><span class="role">전이부 각도·기울기로 확산 조절</span><span class="miniinput">각도 45°</span></div>
+        <div class="lvcard"><b>L5 미세패턴</b><span class="role">하단 돌기 배열로 산란 확산</span><span class="miniinput">피라미드</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="option" data-choice="c" onclick="toggleSelect(this)">
+    <div class="letter">C</div>
+    <div class="content" style="width:100%">
+      <h3>L1은 작게 · L2~L5는 크게 (비중 차등)</h3>
+      <p>L1은 "항상 켜져있는 기준"이라 얇은 카드로 왼쪽에 붙이고, 실제 선택지인 L2~L5만 넓은 카드로 강조. 필수/선택 배지는 A안과 동일.</p>
+      <div class="sec-hd"><span class="req-badge">필수</span>타겟 · LED · 목표균일도 (상단 바)</div>
+      <div class="sec-hd" style="margin-top:10px;"><span class="opt-badge">선택 · 조합 가능</span>확산/형상 방식 — L1은 항상 적용되는 기준</div>
+      <div class="card5">
+        <div class="lvcard base thin"><b>L1</b><span class="role">기준 두께<br>(광학 무관)</span><span class="miniinput">3mm</span></div>
+        <div class="lvcard"><b>L2 Milky 확산</b><span class="role">확산제 배합 — 균일 ↑ 투과 ↓</span><span class="miniinput">밀키 5</span></div>
+        <div class="lvcard"><b>L3 Flat+Gap</b><span class="role">평탄부+간격 1차 확산</span><span class="miniinput">gap 2</span></div>
+        <div class="lvcard"><b>L4 경사 형상</b><span class="role">전이부 각도 확산</span><span class="miniinput">각도 45°</span></div>
+        <div class="lvcard"><b>L5 미세패턴</b><span class="role">하단 돌기 산란</span><span class="miniinput">피라미드</span></div>
+      </div>
+    </div>
+  </div>
+
+</div>

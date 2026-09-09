@@ -1,0 +1,46 @@
+<h2>L2~L5 네이밍 — 실제 카드에 넣어봤습니다</h2>
+<p class="subtitle">L3·L4는 같은 "형상" 계열의 기본형/정밀형 관계(L4를 켜면 L3는 자동 대체)라 이름에도 그 관계가 드러나게 짝지었습니다.</p>
+
+<style>
+  .card5 { display:flex; gap:6px; }
+  .card5 .lvcard { flex:1; background:#111725; border:1px solid #222c40; border-radius:8px; padding:8px 9px; font-size:10.5px; }
+  .card5 .lvcard b.nm { display:block; color:#8fb4ff; font-size:12.5px; margin-bottom:1px; }
+  .card5 .lvcard .code { color:#5c6786; font-size:9.5px; font-weight:700; letter-spacing:.03em; }
+  .card5 .role { color:#8390ab; font-size:9.5px; line-height:1.35; display:block; margin:4px 0 6px; min-height:26px; }
+  .card5 .miniinput { background:#0c111c; border:1px solid #2c3a55; border-radius:3px; padding:2px 4px; color:#aeb9d0; font-size:9px; display:inline-block; margin:1px 2px 0 0; }
+  .fam-tag { font-size:8.5px; color:#5c6786; }
+</style>
+
+<div class="options" data-choice-group="naming" style="display:flex; flex-direction:column; gap:20px;">
+
+  <div class="option" data-choice="a" onclick="toggleSelect(this)">
+    <div class="letter">A</div>
+    <div class="content" style="width:100%">
+      <h3>소재확산 · 근접확산 · 정밀형상 · 표면산란</h3>
+      <p>물리 메커니즘이 뭔지(소재를 바꾸는지/형상을 바꾸는지/표면을 바꾸는지) 바로 드러나는 이름.</p>
+      <div class="card5">
+        <div class="lvcard"><span class="code">L2</span><b class="nm">소재확산</b><span class="role">Milky resin — 수지 자체에 확산제 배합</span><span class="miniinput">밀키 5</span></div>
+        <div class="lvcard"><span class="code">L3</span><b class="nm">근접확산</b><span class="fam-tag">형상 · 기본형</span><span class="role">LED 주변 평탄부+간격으로 1차 확산</span><span class="miniinput">gap 2</span></div>
+        <div class="lvcard"><span class="code">L4</span><b class="nm">정밀형상</b><span class="fam-tag">형상 · 정밀형 (L3 대체)</span><span class="role">전이부 각도·기울기까지 조정</span><span class="miniinput">각도 45°</span></div>
+        <div class="lvcard"><span class="code">L5</span><b class="nm">표면산란</b><span class="role">하단 미세돌기 배열로 산란</span><span class="miniinput">피라미드</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="option" data-choice="b" onclick="toggleSelect(this)">
+    <div class="letter">B</div>
+    <div class="content" style="width:100%">
+      <h3>확산소재 · 형상-기본 · 형상-정밀 · 미세패턴</h3>
+      <p>L3·L4를 "형상" 한 계열로 묶어 이름 자체에서 서로 대체 관계임을 바로 알 수 있게.</p>
+      <div class="card5">
+        <div class="lvcard"><span class="code">L2</span><b class="nm">확산소재</b><span class="role">Milky resin — 수지 자체에 확산제 배합</span><span class="miniinput">밀키 5</span></div>
+        <div class="lvcard"><span class="code">L3</span><b class="nm">형상 · 기본</b><span class="role">LED 주변 평탄부+간격으로 1차 확산</span><span class="miniinput">gap 2</span></div>
+        <div class="lvcard"><span class="code">L4</span><b class="nm">형상 · 정밀</b><span class="role">전이부 각도·기울기까지 조정 (L3 대체)</span><span class="miniinput">각도 45°</span></div>
+        <div class="lvcard"><span class="code">L5</span><b class="nm">미세패턴</b><span class="role">하단 돌기 배열로 산란 확산</span><span class="miniinput">피라미드</span></div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<p class="subtitle" style="margin-top:14px;">이름이 마음에 안 들면 특정 레벨만 짚어 다른 단어로 바꿔달라고 해주셔도 됩니다.</p>
