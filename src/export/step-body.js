@@ -47,5 +47,5 @@ export function buildBodySolid(oc, { X, Y, topZ, botZAt, nx = 60, ny = 24 }) {
   wallStrip(botPts.map((r) => r[0]).reverse(), topPts.map((r) => r[0]).reverse()); // x=0
   wallStrip(botPts.map((r) => r[nx - 1]), topPts.map((r) => r[nx - 1]));          // x=X
 
-  return sewToSolid(oc, faces);
+  return sewToSolid(oc, faces).Reversed();
 }
