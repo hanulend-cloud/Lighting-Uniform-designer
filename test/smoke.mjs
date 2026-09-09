@@ -38,26 +38,29 @@ ok(sv.length === 5, `solver 5개 레벨 (${sv.length})`);
 ok(sv.every((r) => r.pitch > 0 && r.leds > 0 && r.nx > 0), 'solver 유효값');
 ok(sv.every((r) => !r.feasible || r.U0 >= spec.goal.U0 - 0.02), 'feasible 행은 목표 U0 충족');
 ok(sv.filter((r) => r.level !== 1).every((r) => r.auto), 'L2~L5 는 .auto 참고치를 함께 반환');
-// L2(Milky resin) 확산은 후방산란→기판 반사 재순환(levelEffect case 2)이라 blur 가 깊이의
-// ~1.2배 수준까지만 커진다. 확산(blur)은 LED 사이 리플만 없앨 뿐 가장자리 falloff 를 들어올리진
-// 못하므로, 측벽이 흡수(wallRefl=0)면 가장자리·모서리가 어두워 L2 단독으로는 목표에 못 미치는
-// 게 물리적으로 맞다(예전 공식 blur=11×depth 는 배열 전체를 거대 봉우리로 뭉개 이 효과를 가렸음).
-// 실제 기구는 백색 측벽이므로 wallRefl 을 준 조건으로 탐색 로직의 정상 동작을 검증한다.
+// L2(Milky resin) 확산은 후방산란→기판 반사 재순환(levelEffect case 2)이라 blur 가 깊이 수준
+// 까지만 커진다. 확산(blur)은 LED 사이 리플만 없앨 뿐 가장자리 falloff 를 들어올리진 못하고,
+// 측벽은 투명 수지의 프레넬 반사(수직입사 5%, 스침각에서만 큼)뿐이라 가장자리 보강도 제한적
+// — 그래서 L2 단독으로 목표를 못 미치는 조건이 흔하며 이는 물리적으로 맞다(예전 공식
+// blur=11×depth 는 배열 전체를 거대 봉우리로 뭉개 이 효과를 가렸음). 탐색 로직 자체의 정상
+// 동작은 달성 가능한 조건(정사각 60x60mm, 깊이 12mm)으로 검증한다.
 {
   const specSq = structuredClone(DEFAULT_SPEC);
-  specSq.target.xLen = 60; specSq.target.yLen = 60; specSq.body.wallRefl = 0.8;
+  specSq.target.xLen = 60; specSq.target.yLen = 60;
   const svSq = solvePerLevel(specSq, { levels: [2] });
-  ok(svSq.find((r) => r.level === 2).auto.feasible, 'L2 는 확산도 조절만으로 목표 균일도 확보(.auto, 정사각 60x60mm, 측벽반사 0.8)');
+  ok(svSq.find((r) => r.level === 2).auto.feasible, 'L2 는 확산도 조절만으로 목표 균일도 확보(.auto, 정사각 60x60mm)');
 }
-// 좁은 스트립(100x20mm, LED 1mm, milky 최대, 측벽반사 0.8): 깊이가 얕을수록 확산(∝깊이)이
-// 약해져 LED 가 점진적으로 늘어나야 한다 — 특정 깊이에서 605개↔2개로 급전환되던 회귀 방지.
+// 좁은 스트립(100x20mm, LED 1mm, milky 최대): 깊이가 얕을수록 확산(∝깊이)이 약해져 LED 가
+// 점진적으로 늘어나야 한다 — 특정 깊이에서 605개↔2개로 급전환되던 회귀 방지. 목표 미달이어도
+// 대표 LED 수(무릎점)는 같은 추세를 따라야 한다.
 {
   const strip = structuredClone(DEFAULT_SPEC);
   strip.target.xLen = 100; strip.target.yLen = 20; strip.goal.U0 = 0.85;
-  strip.led.sizeX = 1; strip.led.sizeY = 1; strip.body.wallRefl = 0.8;
+  strip.led.sizeX = 1; strip.led.sizeY = 1;
   strip.levels[2] = { on: true, milky: 10, decenterX: 0, decenterY: 0 };
   const byDepth = [4, 6, 8].map((d) => { const s = structuredClone(strip); s.space.depth = d; return solveSolo(s, [2]); });
-  ok(byDepth.every((r) => r.feasible), `L2 스트립: 깊이 4/6/8mm 모두 달성 (${byDepth.map((r) => r.leds + 'ea').join('/')})`);
+  console.log('  L2 스트립 깊이 4/6/8mm:', byDepth.map((r) => `${r.leds}ea/${(r.U0 * 100).toFixed(0)}%${r.feasible ? '' : '(미달)'}`).join('  '));
+  ok(byDepth.every((r) => r.pitch > 2.5), 'L2 스트립: 어느 깊이에서도 최소 피치(2mm, 605개)로 튀지 않음');
   ok(byDepth[0].leds >= byDepth[1].leds && byDepth[1].leds >= byDepth[2].leds, 'L2 스트립: 깊이↓ → LED 개수 단조 증가');
 }
 console.log('  per-level:', sv.map((r) => {

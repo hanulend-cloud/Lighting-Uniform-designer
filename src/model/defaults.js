@@ -16,7 +16,7 @@ export const DEFAULT_SPEC = {
     color: 'white',
   },
   space:   { depth: 12 },       // 최대 허용 깊이 (LED면 → 기구물 상면)
-  body:    { baseThk: 3, n: 1.59, wallRefl: 0, material: 'PC' }, // 기준 두께·굴절률·측벽 반사(기본 0=무시)
+  body:    { baseThk: 3, n: 1.59, material: 'PC' }, // 기준 두께·굴절률(측벽 프레넬 반사·상면 투과율에 사용)
   pattern: { pitchX: 3, rRadius: 0.5, rDepth: 0.25 }, // L5 미세패턴
   production:{ qty: 10000, targetUnitCost: 0 },
   power:   { wattage: 0, tjMax: 100 },

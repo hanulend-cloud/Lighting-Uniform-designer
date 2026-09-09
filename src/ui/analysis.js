@@ -129,7 +129,7 @@ export function renderVerdict(el, combo, tags, goalSpec) {
     </div>
     <div class="v-sub">투과율 ${T}%</div>
     ${overhangLine}
-    ${met ? '' : '<div class="v-sub hint">→ 측벽반사↑(기구) · 오버행↑ · 확산 적용(L2 Milky·L3~5) · 깊이 조정</div>'}
+    ${met ? '' : '<div class="v-sub hint">→ 오버행↑ · 확산 적용(L2 Milky·L3~5) · 깊이 조정</div>'}
     <div class="v-sub">참고 — min/avg ${(combo.minAvg * 100).toFixed(0)}% · CV ${(combo.cv * 100).toFixed(1)}%${cvW} · 인접변화율 ${(combo.grad * 100).toFixed(1)}%${gW}</div>`;
 }
 

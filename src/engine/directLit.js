@@ -3,7 +3,7 @@
 //       배열/이미지 소스는 커널의 이중선형 보간 조회로 합산.
 
 import {
-  lambertianExponent, gaussianSigma, relIntensity, axialIntensityFromFlux, fresnelT,
+  lambertianExponent, gaussianSigma, relIntensity, axialIntensityFromFlux, fresnelT, fresnelR,
 } from './photometry.js';
 
 const DEG = Math.PI / 180;
@@ -156,21 +156,32 @@ export function computeField(spec, opt) {
 
   const { NX, NY, x0, x1, y0, y1, stepX, stepY } = grid;
   const X = spec.target.xLen, Y = spec.target.yLen;
-  const refl = opt.wallRefl ?? spec.body?.wallRefl ?? 0;   // 기구 측벽 반사
+  // 기구 측벽(캐비티 안쪽 = 투명 몸체 수지 벽, 공기→n 계면) 1-bounce 이미지. 반사율은 상수가
+  // 아니라 프레넬: 이미지 소스→관찰점 광선이 벽면(수직면)에 닿는 입사각으로 매 샘플마다 계산
+  // (cosI = 벽 법선 방향 성분 / 광선 길이). 옆으로 낮게 진행하는 빛(벽에 거의 수직 입사)은 5%
+  // 정도만 돌아오고, 위로 가파르게 진행하는 빛(스침각 입사)일수록 많이 돌아온다.
   // 측벽 위치 = 기구물 경계(오버행 padX/padY 만큼 타겟 밖) — 타겟 경계에 놓으면 오버행 LED 가
   // 벽 "바깥"에 있는 셈이 되어 이미지가 엉뚱한 곳에 생긴다.
+  const nBody = spec.body?.n ?? 1;
   const wx0 = -(opt.padX ?? 0), wx1 = X + (opt.padX ?? 0);
   const wy0 = -(opt.padY ?? 0), wy1 = Y + (opt.padY ?? 0);
 
-  // 소스 목록: 실제 LED + 측벽 1-bounce 이미지 (flat array: x, y, scale)
+  // 소스 목록 (flat array: x, y, kind) — kind 0=LED, 1=X벽 이미지, 2=Y벽 이미지.
+  // 벽에서 3·od 보다 먼 LED 의 이미지는 생략: 벽 바로 앞 지점에서조차 상대 조도가
+  // (1/(1+(L/od)²))² < 1%, 거기에 수직입사 프레넬 5% 가 곱해져 0.05% 미만 — 대신 소스 수가
+  // 5배로 늘어 solve 전체가 수 배 느려지는 것(실측: 스모크 테스트 80s → 10분 초과)을 막는다.
   const src = [];
+  const wCut = 3 * od;
   for (const l of leds) {
-    src.push(l.x, l.y, 1);
-    if (refl > 0) {
-      src.push(2 * wx0 - l.x, l.y, refl, 2 * wx1 - l.x, l.y, refl,
-              l.x, 2 * wy0 - l.y, refl, l.x, 2 * wy1 - l.y, refl);
+    src.push(l.x, l.y, 0);
+    if (nBody > 1) {
+      if (l.x - wx0 < wCut) src.push(2 * wx0 - l.x, l.y, 1);
+      if (wx1 - l.x < wCut) src.push(2 * wx1 - l.x, l.y, 1);
+      if (l.y - wy0 < wCut) src.push(l.x, 2 * wy0 - l.y, 2);
+      if (wy1 - l.y < wCut) src.push(l.x, 2 * wy1 - l.y, 2);
     }
   }
+  const od2 = od * od;
 
   // 산란 blur (X/Y 개별, mm 단위는 호출측이 난이도별로 계산)
   const bX = opt.blurMmX ?? opt.blurMm ?? 0;
@@ -200,7 +211,15 @@ export function computeField(spec, opt) {
     for (let i = 0; i < ENX; i++) {
       const px = ex0 + i * stepX;
       let E = 0;
-      for (let s = 0; s < src.length; s += 3) E += src[s + 2] * sample(K, px - src[s], py - src[s + 1]);
+      for (let s = 0; s < src.length; s += 3) {
+        const dx = px - src[s], dy = py - src[s + 1], kind = src[s + 2];
+        let w = 1;
+        if (kind !== 0) {
+          const lateral = kind === 1 ? Math.abs(dx) : Math.abs(dy);
+          w = fresnelR(lateral / Math.sqrt(dx * dx + dy * dy + od2), nBody);
+        }
+        E += w * sample(K, dx, dy);
+      }
       efield[j * ENX + i] = E;
     }
   }

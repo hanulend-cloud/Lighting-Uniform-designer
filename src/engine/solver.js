@@ -7,7 +7,7 @@
 
 import { computeField, evalGrid, centeredCount } from './directLit.js';
 import { metrics, localGradient } from './uniformity.js';
-import { combinedEffect, levelEffect, LEVEL_SCHEMA, extremeDiffusionParams, lerpParams, effectiveEdgeMargin } from '../model/levels.js';
+import { combinedEffect, levelEffect, levelParams, LEVEL_SCHEMA, extremeDiffusionParams, lerpParams, effectiveEdgeMargin } from '../model/levels.js';
 
 // 판정 격자 셀 크기 상한(mm) — directLit.evalGrid 가 이 값으로 X·Y 해상도를 유도한다.
 // 1.5mm 는 실측으로 수렴을 확인한 값(그 아래 1mm 와 결과 차이 ~0.3%p) — 더 굵게 하면(예: 4mm)
@@ -229,7 +229,19 @@ export function solvePerLevel(spec, opt = {}) {
   const levels = opt.levels ?? spec.opt.difficultyLevels ?? [1, 2, 3, 4, 5];
   return levels.map((level) => {
     const cur = { level, ...solveSolo(spec, [level]) };
-    if (level !== 1 && LEVEL_SCHEMA[level]) cur.auto = autoTuneLevel(spec, level);
+    if (level !== 1 && LEVEL_SCHEMA[level]) {
+      cur.auto = autoTuneLevel(spec, level);
+      // 둘 다 미달이면 현재 슬라이더 값의 해가 자동탐색 해보다 나을 수 있다(자동탐색은 최소
+      // 피치를 기준점으로 확산을 고르는데, 성긴 배치가 더 좋은 비단조 구간에선 그 기준점이
+      // 나쁜 자리라서). "최소가능(자동)"이 현재값보다 못한 모순을 사용자에게 보이지 않도록
+      // 현재 해를 자동 참고치로 채택한다.
+      if (!cur.feasible && !cur.auto.feasible && cur.U0 > cur.auto.U0) {
+        cur.auto = {
+          feasible: false, pitch: cur.pitch, leds: cur.leds, U0: cur.U0, params: levelParams(spec, level),
+          transmit: cur.transmit, overhang: cur.overhang, fixtureX: cur.fixtureX, fixtureY: cur.fixtureY,
+        };
+      }
+    }
     return cur;
   });
 }

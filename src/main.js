@@ -33,7 +33,6 @@ const CONTROL_GROUPS = [
   ] },
   { name: '기구', items: [
     ['levels.1.thk', '몸체두께', 'mm', 0.5, 20, 0.5],
-    ['body.wallRefl', '측벽반사', '', 0, 0.95, 0.05],
   ] },
 ];
 

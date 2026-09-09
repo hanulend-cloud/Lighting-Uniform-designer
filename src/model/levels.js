@@ -17,7 +17,7 @@ export const LEVEL_SCHEMA = {
       { key: 'decenterX', label: 'De-centerX', unit: 'mm', min: -30, max: 30, step: 1, adv: true },
       { key: 'decenterY', label: 'De-centerY', unit: 'mm', min: -30, max: 30, step: 1, adv: true },
     ],
-    desc: 'Milky resin 사용도. 1=투명(효과 없음), 10=최대(후방산란→기판 반사 재순환으로 확산 최대·투과율 최저). 확산은 캐비티 깊이에 비례하며, 가장자리 손실은 측벽 반사율(기구)로 보강. De-center는 LED 배열 전체를 타겟 중심에서 X·Y로 밀어 배치 공차/비대칭을 검토하는 용도(광학 확산과는 무관, 배치만 이동).',
+    desc: 'Milky resin 사용도. 1=투명(효과 없음), 10=최대(후방산란→기판 반사 재순환으로 확산 최대·투과율 최저). 확산은 캐비티 깊이에 비례. De-center는 LED 배열 전체를 타겟 중심에서 X·Y로 밀어 배치 공차/비대칭을 검토하는 용도(광학 확산과는 무관, 배치만 이동).',
   },
   3: {
     label: '형상·기본', hint: '균일두께 용기(도파관/TIR 라이트가이드) · 중앙 평탄 + 가장자리 사출빼기 테이퍼',
@@ -68,9 +68,9 @@ export const LEVEL_DEFAULTS = {
 const clamp = (v, lo, hi) => (v < lo ? lo : v > hi ? hi : v);
 const iso = (b, transmit) => ({ blurX: b, blurY: b, transmit });
 
-// LED 기판 면(백색 솔더마스크 또는 반사시트)의 확산 반사율 — L2 재순환 확산의 기준값. 아직
-// 입력 항목이 아니며(측벽은 body.wallRefl 로 별도 입력), 실측 시 캘리브레이션 대상.
-const BOARD_REFL = 0.8;
+// LED 기판 면(솔더마스크·부품·패턴 혼재)의 확산 반사율 — L2 재순환 확산의 기준값. 백색
+// 반사시트를 가정하지 않고 보수적으로 잡음(사용자 지정). 입력 항목은 아니며 실측 시 캘리브레이션 대상.
+const BOARD_REFL = 0.5;
 
 export function levelParams(spec, level) {
   return { ...LEVEL_DEFAULTS[level], ...(spec?.levels?.[level] || {}) };
@@ -100,7 +100,7 @@ export function levelEffect(spec, level, depth) {
       // 판 두께 안의 전방산란(≈두께 수준, 1~3mm)은 이보다 훨씬 작아 생략.
       // 예전 공식(blur = milky·depth·11)은 blur 를 타겟보다 훨씬 크게 잡아 배열 전체가 하나의
       // 거대한 봉우리로 뭉개졌고, 그 결과 (a) 균일도가 피치에 무관해져 LED 수 결정이 무의미해지고
-      // (b) 측벽 반사(body.wallRefl)의 영향이 완전히 가려졌다 — 100×20mm 스트립 실측 비교로 확인.
+      // (b) 측벽 반사의 영향이 완전히 가려졌다 — 100×20mm 스트립 실측 비교로 확인.
       const t = clamp(((p.milky ?? 1) - 1) / 9, 0, 1);
       const Rd = 0.9 * t;
       const rho = Rd * BOARD_REFL;

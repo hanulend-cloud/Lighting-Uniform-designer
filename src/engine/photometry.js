@@ -21,6 +21,18 @@ export function relIntensity(model, theta, p) {
   return Math.pow(Math.max(0, Math.cos(theta)), p.m);
 }
 
+// 공기(n=1) → 굴절률 n 매질 계면의 프레넬 반사율(비편광 = s·p 평균). cosI = 입사각의 코사인.
+// 수직입사 ≈ ((n-1)/(n+1))² (PC 5%), 스침각으로 갈수록 1에 접근.
+export function fresnelR(cosI, n) {
+  if (!n || n <= 1) return 0;
+  const c = cosI < 0 ? 0 : cosI > 1 ? 1 : cosI;
+  const sinT = Math.sqrt(Math.max(0, 1 - c * c)) / n;
+  const cosT = Math.sqrt(Math.max(0, 1 - sinT * sinT));
+  const rs = (c - n * cosT) / (c + n * cosT);
+  const rp = (cosT - n * c) / (cosT + n * c);
+  return 0.5 * (rs * rs + rp * rp);
+}
+
 // 굴절률 n 슬래브의 2계면 수직입사 투과율 (프레넬)
 export function fresnelT(n) {
   if (!n || n <= 1) return 1;
