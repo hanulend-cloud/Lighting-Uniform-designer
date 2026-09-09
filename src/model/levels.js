@@ -302,3 +302,23 @@ export function bodyProfile(spec, active, leds, depth, pitch, nx = 160) {
   }
   return pts;
 }
+
+// L3(균일두께 용기)의 실제 2D 두께 함수 — bodyProfile의 X단면 공식을 X·Y 모두 반영하도록
+// 일반화. directLit.js applyEdgeBoost()가 쓰는 "둥근 모서리 인지 가장자리 거리" 공식과
+// 반드시 같은 형태를 유지해야 광학 계산(edgeBoost)과 STEP 형상이 일치한다.
+export function l3BotZAt(spec, depth, x, y) {
+  const X = spec.target.xLen, Y = spec.target.yLen;
+  const sp3 = levelParams(spec, 3);
+  const baseThk = spec.levels?.[1]?.on ? (levelParams(spec, 1).thk ?? spec.body.baseThk) : spec.body.baseThk;
+  const minBody = Math.max(1, baseThk * 0.5);
+  const topZ = depth;
+  const wallThk = Math.max(minBody, Math.min(sp3.wallThk ?? 3, topZ - spec.led.sizeZ - 0.5));
+  const edgeAngleRad = clamp(sp3.edgeAngle ?? 45, 1, 89) * Math.PI / 180;
+  const tw = wallThk > minBody ? (wallThk - minBody) / Math.tan(edgeAngleRad) : 0;
+  const r = Math.max(0, Math.min(sp3.edgeR ?? 0, tw));
+
+  const dx = Math.min(x, X - x), dy = Math.min(y, Y - y);
+  const edgeDist = (dx < r && dy < r) ? r - Math.hypot(r - dx, r - dy) : Math.min(dx, dy);
+  const thk = edgeDist >= tw ? wallThk : Math.max(minBody, wallThk - Math.tan(edgeAngleRad) * (tw - edgeDist));
+  return topZ - thk;
+}
