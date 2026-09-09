@@ -10,6 +10,7 @@ import { drawIso } from './ui/iso.js';
 import { drawPlan } from './ui/plan.js';
 import { drawHeatmap } from './ui/heatmap.js';
 import { buildLevels, updateLevels, renderVerdict, drawProfiles } from './ui/analysis.js';
+import { exportStep } from './export/step-ui.js';
 
 const LS_KEY = 'uds.spec.v9';
 
@@ -74,6 +75,10 @@ function buildForm() {
     form.appendChild(grp);
   }
   $('#btn-reset').onclick = () => { spec = structuredClone(DEFAULT_SPEC); soloCache = {}; mount(); schedule(); };
+  $('#btn-step').onclick = () => {
+    if (!last) return;
+    exportStep(spec, last.combo, last.geom, last.active);
+  };
   $('#btn-export').onclick = exportJson;
   $('#file-import').onchange = importJson;
 }
@@ -172,6 +177,7 @@ function run() {
   renderVerdict($('#verdict'), combo, tags, spec.goal);
 
   last = { common, m, depth, view: geom.view, edgeMargin };
+  last.combo = combo; last.geom = geom; last.active = active;
   if (autoHeat) renderHeat();
   else $('#pane-heat').classList.add('stale');
 
