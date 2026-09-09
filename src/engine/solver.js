@@ -69,11 +69,31 @@ function memoEval(spec, eff, gridN, padX = 0, padY = 0) {
 }
 
 export function solveSolo(spec, active) {
-  return solveXY(spec, active, GRID_SOLO);
+  const r = solveXY(spec, active, GRID_SOLO);
+  return preferReasonableInfeasible(spec, combinedEffect(spec, spec.space.depth, active), r, GRID_SOLO);
 }
 
 export function solveCombo(spec, active) {
-  return solveXY(spec, active, GRID);
+  const r = solveXY(spec, active, GRID);
+  return preferReasonableInfeasible(spec, combinedEffect(spec, spec.space.depth, active), r, GRID);
+}
+
+// 목표 미달로 최종 확정된 결과의 대표 피치가 필요 이상으로 촘촘하면(예: 확산이 강해 균일도가
+// 피치에 거의 무관한 경우 — 실측: 100×20mm 타겟에서 605개=77.5%, 6개=78.6%로 사실상 동급),
+// "LED를 더 넣으면 될 것"이란 잘못된 인상을 준다. 합리적 밀도(N_MIN_LEDS) 피치에서도 다시
+// 평가해 균일도가 크게(0.5%p 넘게) 나쁘지 않으면 그 쪽으로 대체한다. solveXY/solveXYAt 내부
+// 탐색(autoTuneLevel 의 참고 피치 선정 등)에는 절대 쓰지 않고, 사용자에게 보여줄 "최종 확정
+// infeasible" 결과에만 적용한다 — 내부에 섞으면 그 대체값이 다른 탐색의 기준점으로 다시 쓰여
+// 전혀 다른(대개 더 나쁜) 결과로 튀는 문제가 실측으로 확인됨(L4/L5 auto 참고치 회귀).
+function preferReasonableInfeasible(spec, eff, r, gridN) {
+  if (r.feasible) return r;
+  const { X, Y, pMin: truePMin, pMax: truePMax } = bounds(spec);
+  const densityFloorPMax = Math.min(truePMax, Math.sqrt((X * Y) / N_MIN_LEDS));
+  if (!(densityFloorPMax > truePMin && densityFloorPMax > r.pitchX + 0.01)) return r;
+  const padX = r.padX ?? 0, padY = r.padY ?? 0;
+  const rFloor = evalField(spec, eff, densityFloorPMax, densityFloorPMax, gridN, padX, padY);
+  if (rFloor.unif < r.U0 - 0.005) return r;
+  return pack(densityFloorPMax, densityFloorPMax, rFloor, X, Y, false, r.target, eff, spec.space.depth, padX, padY);
 }
 
 const clamp = (v, lo, hi) => (v < lo ? lo : v > hi ? hi : v);
@@ -277,9 +297,10 @@ function autoTuneLevel(spec, level) {
   }
 
   if (!rMax.feasible) {
+    const rr = preferReasonableInfeasible(spec, maxEffect, rMax, GRID_SOLO);
     return {
-      feasible: false, pitch: rMax.pitch, leds: rMax.leds, U0: rMax.U0, params: maxParams,
-      transmit: maxEffect.transmit, overhang: rMax.overhang, fixtureX: rMax.fixtureX, fixtureY: rMax.fixtureY,
+      feasible: false, pitch: rr.pitch, leds: rr.leds, U0: rr.U0, params: maxParams,
+      transmit: maxEffect.transmit, overhang: rr.overhang, fixtureX: rr.fixtureX, fixtureY: rr.fixtureY,
     };
   }
 
