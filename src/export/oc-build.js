@@ -65,6 +65,7 @@ export function fuseAll(oc, shapes, onProgress) {
     const fuse = new oc.BRepAlgoAPI_Fuse_3(acc, shapes[i], new oc.Message_ProgressRange_1());
     const next = fuse.Shape();
     fuse.delete();
+    if (i > 1) acc.delete();   // don't delete shapes[0] (caller-owned) on first iteration
     acc = next;
     if (onProgress) onProgress(i, shapes.length - 1);
   }
@@ -81,6 +82,8 @@ export function volumeOf(oc, shape) {
 
 // 밑면 N각형(중심 0,0,0, 반경 half) + 꼭짓점(0,0,height) 을 갖는 뿔 솔리드.
 // L5 pyramid(sides=4)/dome(sides=10, 곡면 근사) 모두 이 함수로 만든다.
+// sides=4: 정확한 축 정렬 사각형 밑면(패킹용). 그 외: 타원(hx,hy)에 내접하는 N각형 근사
+// (sizeX!==sizeY면 정다각형이 아닌 찌그러진 근사 형태이니 장식용 dome 등에만 쓸 것).
 export function coneBump(oc, sizeX, sizeY, height, sides) {
   const hx = sizeX / 2, hy = sizeY / 2;
   const base = [];
@@ -139,5 +142,6 @@ export function shapesToStepText(oc, shapes) {
   writer.Write(fname);
   const text = oc.FS.readFile(fname, { encoding: 'utf8' });
   writer.delete();
+  progress.delete();
   return text;
 }
