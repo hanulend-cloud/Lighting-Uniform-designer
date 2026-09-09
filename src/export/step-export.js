@@ -18,15 +18,15 @@ function flipDown(oc, shape) {
   const axis = new oc.gp_Ax1_2(new oc.gp_Pnt_3(0, 0, 0), new oc.gp_Dir_4(1, 0, 0));
   trsf.SetRotation_1(axis, Math.PI);
   const xf = new oc.BRepBuilderAPI_Transform_2(shape, trsf, false);
-  return xf.Shape();
+  const moved = xf.Shape();
+  axis.delete(); trsf.delete(); xf.delete();
+  return moved;
 }
 
 // 활성 레벨 조합에서 botZAt(x,y) 함수를 만든다. bodyProfile()과 동일한 우선순위(L4가 L3를 대체).
-function makeBotZAt(spec, active, depth) {
+function makeBotZAt(spec, active, depth, leds, halfP) {
   const A = active instanceof Set ? active : new Set(active);
   if (A.has(4)) {
-    const leds = spec.__stepLeds; // buildStepInputs()가 채워 넣음
-    const halfP = spec.__stepHalfP;
     const near = (x, y) => leds.length ? Math.min(...leds.map((l) => Math.hypot(x - l.x, y - l.y))) : 1e9;
     return (x, y) => l4BotZAt(spec, A, depth, near(x, y), halfP);
   }
@@ -75,11 +75,10 @@ export function buildStepForSpec(oc, spec, combo, geom, onProgress) {
   const depth = combo.depth;
   const X = spec.target.xLen, Y = spec.target.yLen;
 
-  spec.__stepLeds = geom.leds;
-  spec.__stepHalfP = geom.l4HalfP ?? Math.max(1, Math.min(combo.pitchX, combo.pitchY ?? combo.pitchX) / 2);
-  const botZAt = makeBotZAt(spec, active, depth);
+  const halfP = geom.l4HalfP ?? Math.max(1, Math.min(combo.pitchX, combo.pitchY ?? combo.pitchX) / 2);
+  const botZAt = makeBotZAt(spec, active, depth, geom.leds, halfP);
 
-  const body = buildBodySolid(oc, { X, Y, topZ: depth, botZAt });
+  let body = buildBodySolid(oc, { X, Y, topZ: depth, botZAt });
 
   const shapes = [body];
 
@@ -99,6 +98,9 @@ export function buildStepForSpec(oc, spec, combo, geom, onProgress) {
       if (onProgress && done % 50 === 0) onProgress(done, positions.length, 'L5 돌기 생성');
     }
     const fused = fuseAll(oc, [body, ...bumps], (i, total) => onProgress?.(i, total, 'L5 돌기 결합'));
+    body.delete();               // fuseAll()의 계약: shapes[0](=body)은 호출측이 정리
+    for (const b of bumps) b.delete();
+    body = fused;
     shapes[0] = fused;
   }
 
@@ -109,12 +111,16 @@ export function buildStepForSpec(oc, spec, combo, geom, onProgress) {
     shapes.push(translate(oc, local, l.x - ledSize.x / 2, l.y - ledSize.y / 2, 0));
     local.delete();
   }
+  onProgress?.(geom.leds.length, geom.leds.length, 'LED 배치');
 
   // PCB — 타겟 전체 크기, LED 바로 아래(z<0).
   const pcbLocal = box(oc, X, Y, PCB_THK);
   shapes.push(translate(oc, pcbLocal, 0, 0, -PCB_THK));
   pcbLocal.delete();
 
+  onProgress?.(1, 1, 'STEP 직렬화');
   const stepText = shapesToStepText(oc, shapes);
-  return { stepText, solidCount: shapes.length, bodyVolume: volumeOf(oc, shapes[0]) };
+  const bodyVolume = volumeOf(oc, shapes[0]);
+  for (const s of shapes) s.delete();
+  return { stepText, solidCount: shapes.length, bodyVolume };
 }
