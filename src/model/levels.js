@@ -29,18 +29,17 @@ export const LEVEL_SCHEMA = {
     desc: '기구물 전체가 하나의 균일두께(두께) 용기 형상 — 진짜 도파관(TIR). LED 방출광 중 임계각 밖으로 나가는 성분은 슬래브 안에서 전반사(TIR)로 갇혀 옆으로 퍼진다 — 두께가 두꺼울수록 더 멀리 퍼져 확산이 커짐(도파관 원리, 전역 효과). 가장자리는 사출빼기용 각도(가장자리각도)로 얇아지며 그 경사면이 갇힌 빛의 실제 탈출구라 국소적으로 더 밝아짐. 네 모서리는 모서리R로 둥글게 해 집광(핫스팟) 없이 고르게 퍼지도록 함.',
   },
   4: {
-    label: '형상·정밀', hint: 'X·Y 각도/크기 개별 조정 (L3 대체)',
+    label: '형상·자유(도파관)', hint: 'X·Y 독립 두께 프로필(중심·중간·가장자리) · L3 대체',
     fields: [
-      { key: 'gap', label: 'Gap', unit: 'mm', min: 0.5, max: 15, step: 0.5 },
-      { key: 'flatX', label: 'FlatX', unit: 'mm', min: 1, max: 40, step: 1 },
-      { key: 'flatY', label: 'FlatY', unit: 'mm', min: 1, max: 40, step: 1 },
-      { key: 'angleX', label: '각도X', unit: '°', min: 5, max: 85, step: 5 },
-      { key: 'angleY', label: '각도Y', unit: '°', min: 5, max: 85, step: 5 },
-      { key: 'rise', label: 'Gap확대', unit: 'mm', min: 0, max: 25, step: 1 },
-      { key: 'radiusX', label: 'R(X)', unit: 'mm', min: 0, max: 15, step: 0.5, adv: true },
-      { key: 'radiusY', label: 'R(Y)', unit: 'mm', min: 0, max: 15, step: 0.5, adv: true },
+      { key: 'tx0', label: 'X중심', unit: 'mm', min: 0.5, max: 10, step: 0.5 },
+      { key: 'tx100', label: 'X가장자리', unit: 'mm', min: 0.5, max: 10, step: 0.5 },
+      { key: 'ty0', label: 'Y중심', unit: 'mm', min: 0.5, max: 10, step: 0.5 },
+      { key: 'ty100', label: 'Y가장자리', unit: 'mm', min: 0.5, max: 10, step: 0.5 },
+      { key: 'tx50', label: 'X중간', unit: 'mm', min: 0.5, max: 10, step: 0.5, adv: true },
+      { key: 'ty50', label: 'Y중간', unit: 'mm', min: 0.5, max: 10, step: 0.5, adv: true },
+      { key: 'edgeR', label: '모서리R', unit: 'mm', min: 0, max: 50, step: 1, adv: true },
     ],
-    desc: 'L3 형상의 전이부 경사각과 flat 크기를 X·Y로 개별 조정. (켜지면 L3 대체) LED 정면은 FLAT 유지, 그 바깥은 flat과 접선으로 이어지다 지정한 각도(angleX·Y)의 직선 경사로 자연스럽게(꺾임 없이) 이어지는 R(X)·R(Y) 라운드 전이 — R이 클수록 확산도 강화.',
+    desc: '기구물 두께를 X·Y축 각각 중심→가장자리 3점(중심·중간·가장자리)으로 독립 지정하는 도파관 형상. (켜지면 L3 대체) L3와 같은 TIR 원리로, 그 축의 중심 두께가 두꺼울수록 갇힌 빛이 그 방향으로 더 멀리 퍼져 확산이 커진다 — X·Y를 다르게 주면 축별로 확산 강도가 실제로 달라진다. 중간 지점은 가장자리 근처 형상(볼록/오목)을 보조적으로 다듬는다. 모서리R로 네 모서리를 둥글게 해 집광 없이 고르게 퍼지도록 함.',
   },
   5: {
     label: '미세패턴', hint: '기구물 하단 돌기 · 크기=pitch(패킹), X·Y 각도',
@@ -61,7 +60,7 @@ export const LEVEL_DEFAULTS = {
   1: { on: true, thk: 3 },
   2: { on: false, milky: 1, decenterX: 0, decenterY: 0 },
   3: { on: true, wallThk: 3, edgeAngle: 45, edgeR: 5 },
-  4: { on: false, gap: 2, flatX: 4, flatY: 4, angleX: 45, angleY: 45, rise: 8, radiusX: 0, radiusY: 0 },
+  4: { on: false, tx0: 3, tx50: 2, tx100: 1, ty0: 3, ty50: 2, ty100: 1, edgeR: 5 },
   5: { on: false, ptype: 'pyramid', sizeX: 0.3, sizeY: 0.3, angleX: 40, angleY: 40, dir: '돌출', depth: 0.2 },
 };
 
@@ -71,6 +70,19 @@ const iso = (b, transmit) => ({ blurX: b, blurY: b, transmit });
 // LED 기판 면(솔더마스크·부품·패턴 혼재)의 확산 반사율 — L2 재순환 확산의 기준값. 백색
 // 반사시트를 가정하지 않고 보수적으로 잡음(사용자 지정). 입력 항목은 아니며 실측 시 캘리브레이션 대상.
 const BOARD_REFL = 0.5;
+
+// TIR(전반사) 도파관 공통 물리량 — L3·L4가 공유. 굴절률 n·LED 빔각으로 정해지는 임계각 기반
+// 갇힘비율(fracTrapped)과, 두께 1mm당 옆으로 퍼지는 거리 계수(K_RANGE, 1회 바운스 보수적 상한).
+function tirParams(spec, d) {
+  const n = spec.body?.n ?? 1.59;
+  const critAngle = n > 1 ? Math.asin(1 / n) : Math.PI / 2;
+  const mLamb = lambertianExponent(spec.led?.beamX ?? 120);
+  const fracTrapped = clamp(Math.pow(Math.cos(critAngle), mLamb + 2), 0, 0.9);
+  const minThk = Math.max(1, (spec.body?.baseThk ?? 3) * 0.5);
+  const maxThk = Math.max(minThk, d - (spec.led?.sizeZ ?? 0.5) - 0.5);
+  const K_RANGE = 2 * Math.tan(critAngle);
+  return { fracTrapped, minThk, maxThk, K_RANGE };
+}
 
 export function levelParams(spec, level) {
   return { ...LEVEL_DEFAULTS[level], ...(spec?.levels?.[level] || {}) };
@@ -110,51 +122,51 @@ export function levelEffect(spec, level, depth) {
     }
 
     case 3: {
-      // 균일두께 용기 = 진짜 도파관(TIR 라이트가이드). LED 방출광 중 임계각(굴절률 n 기준) 밖으로
-      // 나가는 성분은 슬래브 안에서 전반사(TIR)로 갇혀 옆으로 퍼지다가 가장자리(테이퍼)나 표면에서
-      // 빠져나간다 — 두 가지 효과로 모델링:
-      //  ① 전역 확산(bulk blur): 갇히는 광량 비율(fracTrapped, Lambertian 각분포 적분)만큼을 두께에
-      //     비례한 넓은 blur 로 재분배 — wallThk 가 두꺼울수록 갇힌 빛이 더 멀리 퍼져 확산이 커짐.
-      //  ② 가장자리 보정(edgeBoost): 갇힌 빛이 실제로 빠져나가는 지점 = 테이퍼 경사면이라, 가장자리
-      //     에 가까울수록 국소적으로 더 밝아짐(기존 로직 유지).
-      const n = spec.body?.n ?? 1.59;
-      const critAngle = n > 1 ? Math.asin(1 / n) : Math.PI / 2;
-      const mLamb = lambertianExponent(spec.led?.beamX ?? 120);
-      const fracTrapped = clamp(Math.pow(Math.cos(critAngle), mLamb + 2), 0, 0.9);
-
-      const minThk = Math.max(1, (spec.body?.baseThk ?? 3) * 0.5);
-      // 상한(d - LED높이 - 여유)을 클램프하지 않으면, 실제로는 깊이 제약상 담길 수 없는 두께
-      // (예: depth=3mm인데 wallThk=7.7mm 입력)가 광학 계산에 그대로 쓰여 물리적으로 불가능한
-      // 만큼 blur가 부풀려진다 — l3BotZAt()/bodyProfile()(형상 계산)은 이미 이 상한을 적용하고
-      // 있었는데 여기(광학 계산)만 빠져 있어 형상과 광학이 서로 다른 두께를 쓰던 버그.
-      const maxThk = Math.max(minThk, d - (spec.led?.sizeZ ?? 0.5) - 0.5);
+      // 균일두께 용기 = 진짜 도파관(TIR 라이트가이드). 물리량은 tirParams() 공유(L4와 동일 유도).
+      const { fracTrapped, minThk, maxThk, K_RANGE } = tirParams(spec, d);
       const wallThk = Math.max(minThk, Math.min(p.wallThk ?? 3, maxThk));
-      // 반사당 측면 이동거리 계수 — 임계각으로 진행하는 광선이 슬래브 상·하면을 한 번 왕복(TIR
-      // 1회 바운스)할 때 옆으로 이동하는 거리 = 2·두께·tan(임계각). 이 부피 자체엔 확산제·추출
-      // 패턴이 없으므로(사용자 지정 형상: 매끈한 균일두께 용기 + 가장자리 테이퍼만) 갇힌 빛이
-      // 여러 번 바운스해도 위쪽 면으로 새 나갈 통로가 없다 — "바운스 1회분" 거리를 보수적
-      // 상한으로 삼는다(예전엔 이 계수를 4로 임의 고정해, 두께만 늘려도 몇 개 안 되는 LED로
-      // 목표를 달성하는 비현실적인 결과가 나왔다 — 실측 지적으로 확인 후 물리량으로 교체).
-      const K_RANGE = 2 * Math.tan(critAngle);
       const bulkBlur = K_RANGE * wallThk * fracTrapped;
 
-      // 가장자리 보정은 보조 효과로만 — 너무 강하면(넓은 tw · 큰 boostMax) 이미 잘 밝던 지점까지
-      // 밀어올려 그 자체가 새 최댓값이 되어 min/max 를 오히려 악화시킴을 실측으로 확인.
-      // 주 메커니즘은 위 bulkBlur(검증된 단조 개선)이고, 이건 그 위에 얹는 작은 다듬기 정도로 제한.
+      // 가장자리 보정은 보조 효과로만(주 메커니즘은 위 bulkBlur) — 기존 필드 최댓값을 못 넘게
+      // 캡을 씌워 비단조 악화를 막는다(directLit.js applyTaperEdgeBoost 참고).
       const edgeAngleDeg = clamp(p.edgeAngle ?? 45, 1, 89);
       const edgeAngleRad = edgeAngleDeg * Math.PI / 180;
       const tw = wallThk > minThk ? (wallThk - minThk) / Math.tan(edgeAngleRad) : 0;
       const boostMax = clamp(0.03 * (wallThk - minThk) * Math.sin(edgeAngleRad), 0, 0.25);
       const cornerR = Math.max(0, p.edgeR ?? 0);
-      return { blurX: bulkBlur, blurY: bulkBlur, transmit: 0.97, edgeBoost: { tw, boostMax, cornerR } };
+      return {
+        blurX: bulkBlur, blurY: bulkBlur, transmit: 0.97,
+        edgeBoost: { tw, boostMax, cornerR, hasBoost: tw > 0 && boostMax > 0, searchMag: boostMax + cornerR * 0.01 },
+      };
     }
 
     case 4: {
-      const rise = p.rise ?? 8;
-      // R(radiusX/Y)만큼 flat→경사 전이가 둥글게(라운드) 이어져 광량 변화가 더 매끄러워짐 → 확산 보강.
-      // (자동탐색이 각도·R 자유도로 LED수를 최소화할 때 R도 실제로 쓸 수 있는 손잡이가 되도록)
-      const f = (ang, r) => 0.35 * rise + 0.007 * (ang ?? 45) * Math.sqrt(Math.max(0, rise)) + 0.05 * d + 0.15 * (r ?? 0);
-      return { blurX: f(p.angleX, p.radiusX), blurY: f(p.angleY, p.radiusY), transmit: 0.95 };
+      // 자유형상 도파관 — L3와 같은 TIR 벌크 블러를 X·Y축 각각의 "중심 두께"로 독립 적용한다.
+      // 캡이 없는 항이라 tx0≠ty0 이면 두 축의 확산 강도가 실제로 달라진다(핵심 개선).
+      const { fracTrapped, minThk, maxThk, K_RANGE } = tirParams(spec, d);
+      const clampThk = (v, fb) => Math.max(minThk, Math.min(v ?? fb, maxThk));
+      const tx0 = clampThk(p.tx0, 3), tx50 = clampThk(p.tx50, 2), tx100 = clampThk(p.tx100, 1);
+      const ty0 = clampThk(p.ty0, 3), ty50 = clampThk(p.ty50, 2), ty100 = clampThk(p.ty100, 1);
+      const bulkBlurX = K_RANGE * tx0 * fracTrapped;
+      const bulkBlurY = K_RANGE * ty0 * fracTrapped;
+
+      // 보조 보정: 중심→가장자리 두께 낙차만큼 L3와 동일한 계수(0.03)·캡(0.25)으로 국소 보정
+      // 세기를 정한다. 실제 픽셀별 보정은 directLit.js applyAxisEdgeBoost()가 수행(Task 2, 이번
+      // 태스크의 범위 밖 — computeField는 아직 이 edgeBoost.kind='axis'를 소비하지 않는다).
+      const boostMaxX = clamp(0.03 * (tx0 - tx100), 0, 0.25);
+      const boostMaxY = clamp(0.03 * (ty0 - ty100), 0, 0.25);
+      const cornerR = Math.max(0, p.edgeR ?? 0);
+      return {
+        blurX: bulkBlurX, blurY: bulkBlurY, transmit: 0.97,
+        edgeBoost: {
+          kind: 'axis',
+          x: { pts: [tx0, tx50, tx100], boostMax: boostMaxX },
+          y: { pts: [ty0, ty50, ty100], boostMax: boostMaxY },
+          cornerR,
+          hasBoost: boostMaxX > 0 || boostMaxY > 0,
+          searchMag: boostMaxX + boostMaxY + cornerR * 0.01,
+        },
+      };
     }
 
     case 5: {
@@ -187,7 +199,7 @@ export function extremeDiffusionParams(level, depth, mode = 'max') {
   // 같은 비교축에 더해 자동탐색이 그 손잡이도 실제로 밀어볼 수 있게 한다(모서리R은 보조 가중치).
   const mag = (p) => {
     const e = levelEffect({ levels: { [level]: p } }, level, depth);
-    const edgeMag = e.edgeBoost ? e.edgeBoost.boostMax + e.edgeBoost.cornerR * 0.01 : 0;
+    const edgeMag = e.edgeBoost ? e.edgeBoost.searchMag : 0;
     return Math.hypot(e.blurX, e.blurY) + edgeMag;
   };
 
@@ -232,19 +244,15 @@ export function combinedEffect(spec, depth, active) {
     T *= e.transmit;
     decenterX += e.decenterX ?? 0;
     decenterY += e.decenterY ?? 0;
-    if (e.edgeBoost) edgeBoost = e.edgeBoost;   // 현재는 L3 만 제공(위치 의존 가장자리 보정)
+    if (e.edgeBoost) edgeBoost = e.edgeBoost;   // L3 또는 L4(둘 중 켜진 쪽) — 위치 의존 가장자리 보정
   }
   return { blurX: Math.sqrt(bx2), blurY: Math.sqrt(by2), transmit: T, decenterX, decenterY, edgeBoost, active: [...A] };
 }
 
-// 판정용 가장자리 마진 — L3(균일두께 용기)가 켜져 있으면 마진을 0으로 낮춰(=가장자리까지 전부
-// 판정) 그 보강 효과가 실제로 반영되게 한다. boostMax 는 진짜 경계(거리 0)에서 최대이고 tw
-// 지점에서는 0으로 사그라들므로, 마진을 tw 로만 줄이면 정작 보강이 강한 구간은 여전히 제외돼
-// 버린다(실측 확인) — L3 가 있으면 그 근거로 경계까지 그대로 신뢰하고 평가한다.
-// (L3 가 없으면 항상 기본 마진 그대로.)
+// 판정용 가장자리 마진 — L3·L4 중 켜진 쪽이 실제로 가장자리를 보강한다는 근거(hasBoost)가
+// 있으면 마진을 0으로 낮춰(=가장자리까지 전부 판정) 그 보강 효과가 실제로 반영되게 한다.
 export function effectiveEdgeMargin(baseMargin, edgeBoost) {
-  if (!edgeBoost || !(edgeBoost.tw > 0) || !(edgeBoost.boostMax > 0)) return baseMargin;
-  return 0;
+  return edgeBoost?.hasBoost ? 0 : baseMargin;
 }
 
 // L4: flatHalf 밖 반경 rel(mm, flat 경계로부터) 위치에서의 상승량(mm). bodyProfile(X 단면)과
