@@ -151,8 +151,8 @@ export function levelEffect(spec, level, depth) {
       const bulkBlurY = K_RANGE * ty0 * fracTrapped;
 
       // 보조 보정: 중심→가장자리 두께 낙차만큼 L3와 동일한 계수(0.03)·캡(0.25)으로 국소 보정
-      // 세기를 정한다. 실제 픽셀별 보정은 directLit.js applyAxisEdgeBoost()가 수행(Task 2, 이번
-      // 태스크의 범위 밖 — computeField는 아직 이 edgeBoost.kind='axis'를 소비하지 않는다).
+      // 세기를 정한다. 실제 픽셀별 보정은 directLit.js의 applyAxisEdgeBoost()가 이 edgeBoost.kind
+      // ='axis'를 소비해 수행한다(computeField → applyEdgeBoost 디스패치).
       const boostMaxX = clamp(0.03 * (tx0 - tx100), 0, 0.25);
       const boostMaxY = clamp(0.03 * (ty0 - ty100), 0, 0.25);
       const cornerR = Math.max(0, p.edgeR ?? 0);
