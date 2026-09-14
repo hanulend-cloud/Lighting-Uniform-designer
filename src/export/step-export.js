@@ -24,12 +24,9 @@ function flipDown(oc, shape) {
 }
 
 // 활성 레벨 조합에서 botZAt(x,y) 함수를 만든다. bodyProfile()과 동일한 우선순위(L4가 L3를 대체).
-function makeBotZAt(spec, active, depth, leds, halfP) {
+function makeBotZAt(spec, active, depth) {
   const A = active instanceof Set ? active : new Set(active);
-  if (A.has(4)) {
-    const near = (x, y) => leds.length ? Math.min(...leds.map((l) => Math.hypot(x - l.x, y - l.y))) : 1e9;
-    return (x, y) => l4BotZAt(spec, A, depth, near(x, y), halfP);
-  }
+  if (A.has(4)) return (x, y) => l4BotZAt(spec, depth, x, y);
   if (A.has(3)) return (x, y) => l3BotZAt(spec, depth, x, y);
   const baseThk = A.has(1) ? (levelParams(spec, 1).thk ?? spec.body.baseThk) : spec.body.baseThk;
   return () => depth - baseThk;
@@ -75,8 +72,7 @@ export function buildStepForSpec(oc, spec, combo, geom, onProgress, activeIn) {
   const depth = combo.depth;
   const X = spec.target.xLen, Y = spec.target.yLen;
 
-  const halfP = geom.l4HalfP ?? Math.max(1, Math.min(combo.pitchX, combo.pitchY ?? combo.pitchX) / 2);
-  const botZAt = makeBotZAt(spec, active, depth, geom.leds, halfP);
+  const botZAt = makeBotZAt(spec, active, depth);
 
   let body = buildBodySolid(oc, { X, Y, topZ: depth, botZAt });
 
