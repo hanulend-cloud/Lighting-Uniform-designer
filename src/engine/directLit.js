@@ -257,7 +257,7 @@ export function computeField(spec, opt) {
   // L3 균일두께 용기(라이트가이드) — 가장자리(둥근 모서리 cornerR)에 가까울수록 boostMax 까지
   // 밝기를 가산(위치 의존, 균일 blur 와 별개). 옆으로 향하던 빛이 테이퍼 경사면에서 정면으로
   // 꺾여 나가는 것의 1차 근사.
-  if (opt.edgeBoost && opt.edgeBoost.tw > 0 && opt.edgeBoost.boostMax > 0) {
+  if (opt.edgeBoost && opt.edgeBoost.hasBoost) {
     applyEdgeBoost(field, NX, NY, x0, x1, y0, y1, X, Y, opt.edgeBoost);
   }
 
@@ -268,7 +268,13 @@ export function computeField(spec, opt) {
 // 타겟 경계까지의 거리(둥근 모서리 cornerR 반영)가 tw 안쪽이면 경계에 가까울수록
 // (1+boostMax)까지 밝기를 가산한다. 1D(ny===1)에서는 Y 경계는 고려하지 않는다(정사각 셀
 // 유도 방식과 동일한 단순화).
+// L3(단일 테이퍼)와 L4(X·Y 독립 프로필)는 edgeBoost 모양이 달라 각자의 함수로 분기한다.
 function applyEdgeBoost(f, nx, ny, x0, x1, y0, y1, X, Y, edge) {
+  if (edge.kind === 'axis') applyAxisEdgeBoost(f, nx, ny, x0, x1, y0, y1, X, Y, edge);
+  else applyTaperEdgeBoost(f, nx, ny, x0, x1, y0, y1, X, Y, edge);
+}
+
+function applyTaperEdgeBoost(f, nx, ny, x0, x1, y0, y1, X, Y, edge) {
   const { tw, boostMax } = edge;
   const r = Math.min(Math.max(0, edge.cornerR ?? 0), tw);
   // 평균 대비 "절대량"으로 더한다(곱하지 않음) — 곱셈이면 이미 밝은 지점(예: X중앙·Y가장자리)이
@@ -291,6 +297,44 @@ function applyEdgeBoost(f, nx, ny, x0, x1, y0, y1, X, Y, edge) {
         const t = edgeDist <= 0 ? 1 : 1 - edgeDist / tw;
         const idx = j * nx + i;
         f[idx] = Math.min(maxF, f[idx] + avg * boostMax * t);
+      }
+    }
+  }
+}
+
+// pts=[중심,중간,가장자리] 두께(mm), halfLen=그 축의 중심→가장자리 거리(mm), dist=가장자리로부터의
+// 거리(0=가장자리..halfLen=중심). 반환값은 "중심 두께 대비 얼마나 깎였는지"의 비율(0=안 깎임,
+// 1=가장자리 두께까지 다 깎임) — L3의 t(=1-edgeDist/tw)와 같은 역할을 프로필 기반으로 일반화한 것.
+// 중간 지점이 중심보다 두꺼운 비단조 프로필도 허용하기 위해 살짝 초과(1.3)까지만 클램프한다.
+function axisRamp(pts, halfLen, dist) {
+  const f = halfLen > 0 ? Math.min(1, Math.max(0, dist / halfLen)) : 1;   // 0=가장자리,1=중심
+  const thk = f <= 0.5 ? pts[2] + (pts[1] - pts[2]) * (f / 0.5) : pts[1] + (pts[0] - pts[1]) * ((f - 0.5) / 0.5);
+  const range = Math.max(1e-6, pts[0] - pts[2]);
+  return Math.min(1.3, Math.max(0, (pts[0] - thk) / range));
+}
+
+// L4(X·Y 독립 두께 프로필)의 가장자리 보정 — applyTaperEdgeBoost와 같은 "평균 대비 절대량,
+// 기존 최댓값 캡" 원칙을 X·Y 두 축 각각의 램프 중 더 큰 쪽(Math.max)으로 적용한다.
+function applyAxisEdgeBoost(f, nx, ny, x0, x1, y0, y1, X, Y, edge) {
+  const { x: ex, y: ey, cornerR } = edge;
+  const halfX = X / 2, halfY = Y / 2;
+  const r = Math.max(0, Math.min(cornerR ?? 0, Math.min(halfX, halfY)));
+  let sum = 0, maxF = -Infinity;
+  for (let k = 0; k < f.length; k++) { sum += f[k]; if (f[k] > maxF) maxF = f[k]; }
+  const avg = f.length ? sum / f.length : 0;
+  for (let j = 0; j < ny; j++) {
+    const py = ny === 1 ? Y / 2 : y0 + (y1 - y0) * (j / (ny - 1));
+    const dy = ny === 1 ? halfY : Math.min(py, Y - py);
+    for (let i = 0; i < nx; i++) {
+      const px = nx === 1 ? X / 2 : x0 + (x1 - x0) * (i / (nx - 1));
+      const dx = Math.min(px, X - px);
+      const rounded = (dx < r && dy < r) ? r - Math.hypot(r - dx, r - dy) : null;
+      const dxEff = rounded == null ? dx : rounded;
+      const dyEff = rounded == null ? dy : rounded;
+      const boost = Math.max(ex.boostMax * axisRamp(ex.pts, halfX, dxEff), ey.boostMax * axisRamp(ey.pts, halfY, dyEff));
+      if (boost > 0) {
+        const idx = j * nx + i;
+        f[idx] = Math.min(maxF, f[idx] + avg * boost);
       }
     }
   }
