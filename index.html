@@ -41,7 +41,6 @@
       <div class="subzone live">
         <div class="zone-hd live">구조 모니터링 <span class="note">· 조정할 때마다 갱신</span></div>
         <div class="live-grid">
-          <div class="pane" id="pane-section"><canvas id="section"></canvas></div>
           <div class="pane" id="pane-iso"><canvas id="iso"></canvas></div>
           <div class="pane col" id="pane-heat">
             <div class="pane-title heat-bar">
@@ -75,6 +74,17 @@
       </div>
     </section>
   </main>
+
+  <!-- 그래프 팝업 확대 -->
+  <div id="zoom-modal" class="zoom-modal" hidden>
+    <div class="zoom-modal-inner">
+      <div class="zoom-modal-hd">
+        <span id="zoom-title"></span>
+        <button id="zoom-close" title="닫기 (Esc)">✕</button>
+      </div>
+      <div id="zoom-slot" class="zoom-slot"></div>
+    </div>
+  </div>
 
   <script type="module" src="./src/main.js"></script>
 </body>

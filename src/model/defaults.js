@@ -6,8 +6,12 @@ import { LEVEL_DEFAULTS } from './levels.js';
 export { LEVEL_DEFAULTS };
 
 export const DEFAULT_SPEC = {
-  target:  { xLen: 300, yLen: 120, shape: 'flat' },
-  goal:    { U0: 0.80, cvMax: 0.15, gradMax: 0.20, edgeMargin: 0.05 },
+  ver: 10,                      // 저장 스펙 마이그레이션용(main.migrate)
+  target:  { xLen: 100, yLen: 100, shape: 'flat' },
+  // edgeMargin: 균일도 판정에서 제외할 가장자리 비율(축별). 0 = 타겟 전체에서 균일도를 확보한다
+  // (기본). 베젤이 타겟 가장자리를 가리는 제품이면 그 폭만큼 올려 판정을 완화할 수 있다.
+  // centerArea: 균일도 1차 판정 영역 = 타겟 면적의 중심 이 비율(0.95 → 각 변 1.27% 씩 안쪽).
+  goal:    { U0: 0.80, cvMax: 0.15, gradMax: 0.20, edgeMargin: 0, centerArea: 0.95 },
   led: {
     sizeX: 2, sizeY: 2, sizeZ: 0.5,
     beamX: 120, beamY: 120,
@@ -40,7 +44,9 @@ export const DEFAULT_SPEC = {
   },
 
   // pitchMin은 보조 하한 — 실제 최소 피치는 LED 크기(led.sizeX/Y)+1mm가 결정.
-  // maxOverhang: 기구물이 타겟보다 최대 이 비율만큼(X·Y 동일) 커지는 것까지 자동탐색 허용 —
-  // 가장자리 LED 지원을 늘려 균일도 저하를 보강(0.10 = 최대 10%).
+  // maxOverhang: LED 배치를 포함한 전체 기구 크기가 타겟 X·Y 각각의 크기 대비 최대 이 비율까지만
+  // 커지도록 허용(0.10 → 기구 ≤ 1.1·X × 1.1·Y, 각 변 +5%). 가장자리 조도 저하 폭은 깊이(LED→
+  // 관찰면)가 정하므로 후보는 깊이 배수 mm 로 잡되(solver.overhangCandidates) 축별로 이 캡에서
+  // 잘린다 — 짧은 축은 캡이 깊이보다 작을 수 있고, 그러면 타겟 전체 판정에서 목표를 못 채운다.
   opt: { pitchMin: 1, pitchMax: 80, maxOverhang: 0.10, difficultyLevels: [1, 2, 3, 4, 5], weightProfile: 'balanced' },
 };

@@ -13,9 +13,10 @@ function check(name, cond, detail = '') {
   else { console.log('FAIL', name, detail); fail++; }
 }
 
-// DEFAULT_SPEC 은 타겟이 300x120mm 라 LED 수백 개(~5분/케이스, Task 4 실측)가 나온다 — 스모크
-// 테스트는 형상 파이프라인 정상 동작 확인이 목적이라 20x20mm 소형 타겟으로 낮춰 전체 스위트가
-// 몇 분 안에 끝나게 한다(정확한 LED 배치 최적화 결과 자체는 이미 test/smoke.mjs 가 검증함).
+// DEFAULT_SPEC 타겟 그대로도 LED 수십~수백 개가 나와 STEP 빌드가 느려질 수 있다(Task 4 실측,
+// 수 분/케이스) — 스모크 테스트는 형상 파이프라인 정상 동작 확인이 목적이라 20x20mm 소형 타겟
+// 으로 낮춰 전체 스위트가 몇 분 안에 끝나게 한다(정확한 LED 배치 최적화 결과 자체는 이미
+// test/smoke.mjs 가 검증함).
 function specWith(levels) {
   const spec = JSON.parse(JSON.stringify(DEFAULT_SPEC));
   spec.target.xLen = 20; spec.target.yLen = 20;

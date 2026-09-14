@@ -20,25 +20,40 @@ export function classifyDimension(spec, od) {
 // 저하 보강), 판정 대상 타겟 자체는 그대로 [0,X]×[0,Y] 유지.
 export function ledPositions(spec, pitchX, pitchY, offX = 0, offY = 0, padX = 0, padY = 0) {
   // 항상 X·Y 격자로 배치. 좁은 타겟이면 centered() 가 자연히 1열(또는 2열)을 준다.
-  const xs = centered(spec.target.xLen, pitchX, padX).map((x) => x + offX);
-  const ys = centered(spec.target.yLen, pitchY ?? pitchX, padY).map((y) => y + offY);
+  const xs = anchoredAxis(spec.target.xLen, pitchX, padX, spec.led.sizeX).map((x) => x + offX);
+  const ys = anchoredAxis(spec.target.yLen, pitchY ?? pitchX, padY, spec.led.sizeY).map((y) => y + offY);
   const pos = [];
   for (const y of ys) for (const x of xs) pos.push({ x, y });
   return pos;
 }
 
-// LED 균등 배치. 타겟 영역 [0,len] (+ 오버행 pad 만큼 양쪽으로 확장) 안에 배치.
-export function centeredCount(len, pitch, pad = 0) {
-  return Math.max(1, Math.round((len + 2 * pad) / pitch));
-}
-function centered(len, pitch, pad = 0) {
-  const total = len + 2 * pad;
-  const inner = Math.max(1, Math.round(total / pitch));
-  if (inner === 1) return [total / 2 - pad];
-  const start = (total - (inner - 1) * pitch) / 2 - pad;
+// LED 1축 배치 — 개수 n 을 정하고 타겟 중심 대칭으로 기구 경계(타겟 ±pad, LED 반폭 안쪽)까지
+// 균등하게 펼친다. 피치 p 는 "간격 상한"이며 n = ceil(usable/p)+1, 실제 간격 = usable/(n−1) ≤ p.
+// LED 개수 조절의 의미: n 을 늘리면(추가) 중심 대칭을 유지하며 촘촘해지고, n 을 줄이면(제거)
+// 가장자리 지원이 먼저 줄어든다 — 판정은 중심부(타겟 면적의 중심 95%)에서 하므로 "중심부가
+// 목표를 만족하는 최소 n" 을 찾는 것이 곧 "가장자리부터 뺀다"는 원칙이다. 같은 n 에서 피치를
+// 경계까지 펼치는 이유: n 개로 낼 수 있는 가장자리 지원의 최대(피치를 줄여 중심에 몰면 같은
+// 개수로 가장자리만 어두워진다 — 실측: 300×120 L1 230개 → 중심몰림 336개).
+// 홀수 n 이면 중심에 LED, 짝수면 중심 양옆 대칭 — 중심에 LED 가 꼭 있어야 하는 것은 아니다.
+// 성긴 쪽 위상: 피치 ≥ 허용폭(usable)이면 2열(양끝, 중심 비움), 피치 ≥ 2·허용폭이면 1열(중앙).
+// 좁은 축(예: 100×11 타겟, 깊이 7)에서는 중심 1열보다 "양끝 2열 + X 피치 축소"가 같은 개수로
+// 가장자리까지 더 균일하다 — 예전 규칙(허용폭 ≤ 피치 → 무조건 1열)은 2열 위상을 아예 탐색
+// 대상에서 빼 버려 1열(중심)에서 3열로 건너뛰었다.
+function anchoredAxis(len, pitch, pad, size) {
+  const lo = -pad + size / 2, hi = len + pad - size / 2;
+  const usable = hi - lo;
+  if (!(usable > 0) || pitch >= 2 * usable) return [len / 2];
+  const n = Math.ceil(usable / pitch - 1e-9) + 1;
+  const pe = usable / (n - 1);
   const xs = [];
-  for (let i = 0; i < inner; i++) xs.push(start + i * pitch);
+  for (let i = 0; i < n; i++) xs.push(lo + i * pe);
   return xs;
+}
+export function ledCounts(spec, pitchX, pitchY, padX = 0, padY = 0) {
+  return {
+    nx: anchoredAxis(spec.target.xLen, pitchX, padX, spec.led.sizeX).length,
+    ny: anchoredAxis(spec.target.yLen, pitchY ?? pitchX, padY, spec.led.sizeY).length,
+  };
 }
 
 function makeGrid(spec, dim, nx, ny) {
@@ -146,7 +161,8 @@ export function computeField(spec, opt) {
   const od = (opt.depth ?? opt.od) + 0.1;  // LED → 관찰면 = 기구물 상면 +0.1mm
   const dim = opt.dim || classifyDimension(spec, od);
 
-  const leds = ledPositions(spec, opt.pitchX, opt.pitchY ?? opt.pitchX, opt.decenterX ?? 0, opt.decenterY ?? 0, opt.padX ?? 0, opt.padY ?? 0);
+  // opt.leds: LED 좌표 목록을 직접 준 경우(비균일 배치 실험·검증용) 그대로 사용
+  const leds = opt.leds ?? ledPositions(spec, opt.pitchX, opt.pitchY ?? opt.pitchX, opt.decenterX ?? 0, opt.decenterY ?? 0, opt.padX ?? 0, opt.padY ?? 0);
   let nx = opt.nx ?? 101;
   let ny = opt.ny;                                 // 미지정이면 makeGrid 가 정사각 셀로 유도
   if (opt.nx == null && leds.length > 800) nx = leds.length > 2500 ? 41 : 61;
@@ -163,8 +179,10 @@ export function computeField(spec, opt) {
   // 측벽 위치 = 기구물 경계(오버행 padX/padY 만큼 타겟 밖) — 타겟 경계에 놓으면 오버행 LED 가
   // 벽 "바깥"에 있는 셈이 되어 이미지가 엉뚱한 곳에 생긴다.
   const nBody = spec.body?.n ?? 1;
-  const wx0 = -(opt.padX ?? 0), wx1 = X + (opt.padX ?? 0);
-  const wy0 = -(opt.padY ?? 0), wy1 = Y + (opt.padY ?? 0);
+  // pad 가 음수(최외곽 LED 열을 타겟 안쪽으로 들인 배치)여도 기구 벽은 타겟 경계에 있다.
+  const fpX = Math.max(0, opt.padX ?? 0), fpY = Math.max(0, opt.padY ?? 0);
+  const wx0 = -fpX, wx1 = X + fpX;
+  const wy0 = -fpY, wy1 = Y + fpY;
 
   // 소스 목록 (flat array: x, y, kind) — kind 0=LED, 1=X벽 이미지, 2=Y벽 이미지.
   // 벽에서 3·od 보다 먼 LED 의 이미지는 생략: 벽 바로 앞 지점에서조차 상대 조도가

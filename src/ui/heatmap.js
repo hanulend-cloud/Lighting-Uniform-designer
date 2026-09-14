@@ -13,19 +13,19 @@ export function drawHeatmap(canvas, res, pxmm) {
   const ex = res.extent;                         // 필드 범위 (보통 [0,X]×[0,Y])
   const view = res.view || { x0: ex.x0, x1: ex.x1, y0: ex.y0, y1: ex.y1 };
   const vw = view.x1 - view.x0, vh = view.y1 - view.y0;
+  const eg = Math.min(0.3, Math.max(0, res.edgeMargin ?? 0));
+  const hasOverhang = !!res.fixture && (res.fixture.x > ex.x1 - ex.x0 + 0.01 || res.fixture.y > ex.y1 - ex.y0 + 0.01);
 
-  // X·Y 동일 스케일 — 패널 안에 다 들어오도록 축소만 하고(pxmm 초과 확대는 안 함), 레터박스 중앙 정렬
-  const availW = w - PAD.L - PAD.R, availH = h - PAD.T - PAD.B;
+  // X·Y 동일 스케일 — 패널 안에 다 들어오도록 축소만 하고(pxmm 초과 확대는 안 함), 레터박스 중앙 정렬.
+  // 아래쪽엔 치수선 + 한 줄에 한 사실만(좁은 3분할 패널에서도 안 겹치게) — 실제로 그릴 줄 수만큼만 예약.
+  const botLines = 3 + (hasOverhang ? 1 : 0) + (eg > 0 ? 1 : 0) + (res.center ? 1 : 0);
+  const BOT = 35 + botLines * 14;
+  const availW = w - PAD.L - PAD.R, availH = h - PAD.T - BOT;
   const s = Math.min(pxmm, availW / vw, availH / vh);
   const ox0 = PAD.L + Math.max(0, (availW - vw * s) / 2);
   const oy = PAD.T + Math.max(0, (availH - vh * s) / 2);
   const sx = (x) => ox0 + (x - view.x0) * s;
   const sy = (y) => oy + (view.y1 - y) * s;      // world y-up → screen y-down
-
-  // 마진(res.edgeMargin, 계산영역 점선·어둡게 표시용) — 색 스케일 기준(max)은 마진과 무관하게
-  // 화면에 보이는 전체 필드에서 구한다(마진 안으로만 잡으면 마진 밖 값이 더 밝을 때 화면에
-  // 1.0(포화)을 넘는 색이 나올 수 있음).
-  const eg = Math.min(0.3, Math.max(0, res.edgeMargin ?? 0.05));
 
   // 색 스케일 = v / max(필드 전체) — "최댓값 대비 상대 밝기". 예전엔 (v-min)/(max-min) 으로
   // min~max 구간을 컬러맵 전체(0~1)에 늘려 그렸는데, 이러면 균일도 93%(min이 max의 93%)처럼
@@ -87,6 +87,14 @@ export function drawHeatmap(canvas, res, pxmm) {
     ctx.setLineDash([]);
   }
 
+  // 중심부(1차 판정 영역 = 경계에서 od 안쪽) — 청록 점선
+  const cz = res.center;
+  if (cz && (cz.fx > 0 || cz.fy > 0)) {
+    ctx.strokeStyle = 'rgba(56,224,214,0.9)'; ctx.setLineDash([5, 3]); ctx.lineWidth = 1.2;
+    ctx.strokeRect(ox + imgW * cz.fx, iy + imgH * cz.fy, imgW * (1 - 2 * cz.fx), imgH * (1 - 2 * cz.fy));
+    ctx.setLineDash([]);
+  }
+
   // LED 위치 점 — LED가 많으면(피치가 좁아 점이 빽빽해지면) 불투명한 점들이 촘촘히 겹쳐
   // 그 아래의 매끄러운 색 그라디언트를 가려 마치 얼룩덜룩 불균일한 것처럼 보이는 착시가
   // 생긴다(실측 확인: 필드 자체는 완전히 매끄럽고 좌우 대칭인데, 점을 끄면 그 사실이 바로
@@ -105,13 +113,123 @@ export function drawHeatmap(canvas, res, pxmm) {
     }
   }
 
+  // 최솟값 위치 마커 — 프로파일 그래프(중심을 지나는 단면 2개)는 모서리처럼 그 단면 밖에 있는
+  // 진짜 최저점을 못 보여줄 수 있어, 판정 영역(res.center 있으면 그 기준, 없으면 마진) 안에서
+  // 실제 최솟값 지점을 찾아 표시한다 — "그래프상 min%"과 "판정 수치"가 다를 때 이유를 바로 보여줌.
+  {
+    const cfx = res.center ? res.center.fx : eg, cfy = res.center ? res.center.fy : eg;
+    const i0 = Math.round(cfx * (nx - 1)), i1 = Math.max(i0 + 1, nx - i0);
+    const j0 = ny >= 6 ? Math.round(cfy * (ny - 1)) : 0, j1 = Math.max(j0 + 1, ny - j0);
+    let minV = Infinity, mi = i0, mj = j0;
+    for (let j = j0; j < j1; j++) for (let i = i0; i < i1; i++) {
+      const v = field[j * nx + i];
+      if (v < minV) { minV = v; mi = i; mj = j; }
+    }
+    if (Number.isFinite(minV) && minV < Infinity) {
+      const wx = ex.x0 + (ex.x1 - ex.x0) * (nx > 1 ? mi / (nx - 1) : 0.5);
+      const wy = ex.y0 + (ex.y1 - ex.y0) * (ny > 1 ? mj / (ny - 1) : 0.5);
+      const mxp = sx(wx), myp = sy(wy);
+      const drawMark = (lw, color) => {
+        ctx.lineWidth = lw; ctx.strokeStyle = color;
+        ctx.beginPath(); ctx.arc(mxp, myp, 6, 0, 7); ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(mxp - 10, myp); ctx.lineTo(mxp - 3, myp);
+        ctx.moveTo(mxp + 3, myp); ctx.lineTo(mxp + 10, myp);
+        ctx.moveTo(mxp, myp - 10); ctx.lineTo(mxp, myp - 3);
+        ctx.moveTo(mxp, myp + 3); ctx.lineTo(mxp, myp + 10);
+        ctx.stroke();
+      };
+      drawMark(3.2, 'rgba(0,0,0,0.65)');   // 어떤 배경색 위에서도 보이도록 검은 테두리 먼저
+      drawMark(1.4, '#ffffff');
+      const label = `최소 ${(minV / max * 100).toFixed(0)}% @ (${wx.toFixed(0)}, ${wy.toFixed(0)})`;
+      ctx.font = 'bold 11px system-ui';
+      const tw = ctx.measureText(label).width;
+      const lx = Math.min(Math.max(mxp - tw / 2 - 4, ox + 2), ox + imgW - tw - 8);
+      const ly = myp > iy + imgH / 2 ? myp - 15 : myp + 15;
+      ctx.fillStyle = 'rgba(15,20,32,0.85)';
+      ctx.fillRect(lx - 2, ly - 11, tw + 8, 15);
+      ctx.fillStyle = '#ffffff'; ctx.textAlign = 'left';
+      ctx.fillText(label, lx + 2, ly + 1);
+    }
+  }
+
   const m = res.metrics || {};
   const ledCount = res.leds?.length ?? 0;
+  // 패널이 좁아도(3분할 배치) 겹치지 않도록: 색·기호 범례처럼 매번 안 변하는 설명은 캔버스
+  // title 툴팁(호버 시 표시)으로 옮기고, 화면에는 바뀌는 핵심 수치만 짧게 그린다.
+  const uniText = res.center
+    ? `중심부 균일도 ${(res.center.U0c * 100 || 0).toFixed(0)}% · 전체 ${(m.U0 * 100 || 0).toFixed(0)}%`
+    : `균일도 ${(m.U0 * 100 || 0).toFixed(0)}%`;
   ctx.fillStyle = '#9aa6bf'; ctx.font = '12px system-ui'; ctx.textAlign = 'right';
-  const fixtureNote = res.fixture && (res.fixture.x > ex.x1 - ex.x0 + 0.01 || res.fixture.y > ex.y1 - ex.y0 + 0.01)
-    ? ' · 회색점선=기구(오버행)' : '';
-  const ledNote = showLedDots ? ' · ●=LED' : ' · LED점 생략(너무 촘촘함)';
-  ctx.fillText(`균일도 ${(m.U0 * 100 || 0).toFixed(0)}% · LED ${ledCount}개 · 빨강=타겟 Size · 흰점선=계산영역${fixtureNote}${ledNote}`, w - PAD.R, PAD.T - 6);
+  ctx.fillText(`${uniText} · LED ${ledCount}개`, w - PAD.R, PAD.T - 6);
+  canvas.title = [
+    '빨강=타겟', res.center ? '청록점선=중심부(판정)' : null, eg > 0 ? '흰점선=계산영역' : null,
+    eg > 0 ? '어둡게=판정제외 마진' : null, hasOverhang ? '회색점선=기구(오버행)' : null,
+    showLedDots ? '●=LED' : 'LED점 생략(너무 촘촘함)', '⊕=판정영역 최솟값 지점',
+    res.cellMm ? `격자 ${(+res.cellMm.toFixed(2))}mm` : null,
+  ].filter(Boolean).join(' · ');
+
+  // ── 치수 표기 (mm) ─────────────────────────────────────────────────────────────
+  // 타겟·계산영역·기구의 실제 크기를 숫자로 명시. 마진은 축별 "비율"(edgeMargin)이라 가로가 긴
+  // 타겟에서는 X 마진(mm)이 Y 마진보다 훨씬 커서 좌우 어두운 띠가 넓게 보이는데, 그 사실을
+  // 수치로 드러내 "가장자리가 불균일하다"는 오해를 막는다(어두운 띠는 실제 조도가 아니라 오버레이).
+  const fmt = (v) => String(+v.toFixed(1));
+  const tX = ex.x1 - ex.x0, tY = ex.y1 - ex.y0;
+  const mXmm = tX * eg, mYmm = tY * eg;
+  const cX = tX - 2 * mXmm, cY = tY - 2 * mYmm;
+  const fx = res.fixture?.x ?? tX, fy = res.fixture?.y ?? tY;
+  const ovX = Math.max(0, (fx - tX) / 2), ovY = Math.max(0, (fy - tY) / 2);
+
+  // 외곽(기구 점선 포함) 기준 좌표
+  const padOvXpx = hasOverhang ? ovX * s : 0, padOvYpx = hasOverhang ? ovY * s : 0;
+  const left = ox - padOvXpx, bottom = iy + imgH + padOvYpx;
+
+  // 타겟 가로 치수선 (아래) — 빨간 타겟 경계와 같은 폭
+  const dimY = bottom + 9;
+  ctx.strokeStyle = '#e11d2e'; ctx.fillStyle = '#e11d2e'; ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(ox, dimY); ctx.lineTo(ox + imgW, dimY);
+  ctx.moveTo(ox, dimY - 4); ctx.lineTo(ox, dimY + 4);
+  ctx.moveTo(ox + imgW, dimY - 4); ctx.lineTo(ox + imgW, dimY + 4);
+  ctx.stroke();
+  ctx.font = '11px system-ui'; ctx.textAlign = 'center';
+  ctx.fillText(`${fmt(tX)} mm`, ox + imgW / 2, dimY + 12);
+
+  // 타겟 세로 치수선 (왼쪽)
+  const dimX = left - 8;
+  ctx.beginPath();
+  ctx.moveTo(dimX, iy); ctx.lineTo(dimX, iy + imgH);
+  ctx.moveTo(dimX - 4, iy); ctx.lineTo(dimX + 4, iy);
+  ctx.moveTo(dimX - 4, iy + imgH); ctx.lineTo(dimX + 4, iy + imgH);
+  ctx.stroke();
+  ctx.save();
+  ctx.translate(dimX - 4, iy + imgH / 2); ctx.rotate(-Math.PI / 2);
+  ctx.textAlign = 'center'; ctx.fillText(`${fmt(tY)} mm`, 0, 0);
+  ctx.restore();
+
+  // (기구 크기는 아래 치수 목록에 이미 표기 — 상단 범례와 겹치던 별도 라벨은 제거)
+
+  // 치수 텍스트 — 한 줄에 사실 하나씩(좁은 3분할 패널에서도 안 겹치게). 줄 수는 위 botLines와 일치.
+  ctx.textAlign = 'left'; ctx.font = '11px system-ui';
+  let ty = dimY + 26;
+  ctx.fillStyle = '#e11d2e'; ctx.fillText(`타겟 ${fmt(tX)}×${fmt(tY)}mm`, PAD.L, ty); ty += 14;
+  ctx.fillStyle = '#9aa6bf'; ctx.fillText(`기구 ${fmt(fx)}×${fmt(fy)}mm`, PAD.L, ty); ty += 14;
+  if (hasOverhang) {
+    ctx.fillText(`오버행 X ${fmt(ovX)} / Y ${fmt(ovY)}mm`, PAD.L, ty); ty += 14;
+  }
+  ctx.fillStyle = '#e8edf7'; ctx.fillText(`계산영역 ${fmt(cX)}×${fmt(cY)}mm`, PAD.L, ty); ty += 14;
+  if (eg > 0) {
+    ctx.fillStyle = '#9aa6bf';
+    ctx.fillText(`판정제외 마진 ${(eg * 100).toFixed(0)}% = X ${fmt(mXmm)} / Y ${fmt(mYmm)}mm`, PAD.L, ty); ty += 14;
+  }
+  if (res.center) {
+    const c = res.center;
+    const cw = tX * (1 - 2 * c.fx), ch = tY * (1 - 2 * c.fy);
+    ctx.fillStyle = 'rgba(56,224,214,0.95)';
+    const flag = `${c.centerBright ? '' : ' ⚠테두리>중심'}${c.fullPass ? '' : ' ⚠전체미달'}`;
+    ctx.fillText(`중심부(${((c.areaFrac ?? 0.95) * 100).toFixed(0)}%) ${fmt(cw)}×${fmt(ch)}mm · ${(c.U0c * 100).toFixed(1)}%${flag}`, PAD.L, ty);
+    canvas.title += ` · 중심부 인셋 = 경계에서 X ${fmt(tX * c.fx)} / Y ${fmt(tY * c.fy)}mm 안쪽`;
+  }
 }
 
 function turbo(t) {

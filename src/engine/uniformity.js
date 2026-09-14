@@ -1,23 +1,45 @@
 // 균일도 지표 — 프로젝트.md §Stage1 (관찰면 = 출광면 바로 위)
 // 필드는 전체 타겟 영역을 담고, 지표는 가장자리 마진(edgeFrac)을 뺀 유효영역에서 계산.
 
-// 유효영역 인덱스 범위 [i0, i1) x [j0, j1)
-function region(nx, ny, edgeFrac) {
-  const f = Math.min(0.3, Math.max(0, edgeFrac || 0));
+// 유효영역 인덱스 범위 [i0, i1) x [j0, j1) — 축별 제외 비율(edgeFrac: X, edgeFracY: Y, 미지정이면 X 와 같게)
+function region(nx, ny, edgeFrac, edgeFracY) {
+  const f = Math.min(0.34, Math.max(0, edgeFrac || 0));
+  const fy = Math.min(0.34, Math.max(0, edgeFracY ?? f));
   const i0 = Math.round(f * (nx - 1));
   let j0 = 0, j1 = ny;
-  if (ny >= 6) j0 = Math.round(f * (ny - 1));
+  if (ny >= 6) j0 = Math.round(fy * (ny - 1));
   j1 = ny - j0;
   return [i0, Math.max(i0 + 1, nx - i0), j0, Math.max(j0 + 1, j1)];
 }
 
-export function metrics(field, nx, ny, edgeFrac = 0) {
+// 중심부 = 타겟 면적의 중심 areaFrac(기본 95%) 영역. 각 축을 √areaFrac 로 축소한 동심 직사각형이므로
+// 축별 인셋 비율 = (1 − √areaFrac)/2 (95% → 각 변 1.27%). 판정(균일도)은 이 영역에서 하고, 바깥
+// 5% 는 가장자리로 본다. (goal.centerArea 로 조절)
+export function centerZoneFrac(areaFrac = 0.95) {
+  const a = Math.min(1, Math.max(0.01, areaFrac));
+  const f = (1 - Math.sqrt(a)) / 2;
+  return { fx: f, fy: f };
+}
+// 테두리 밝음 판정: 중심부 우선 설계는 밝기 최댓값이 중심부 안에 있어야 한다(가장자리로 갈수록
+// 완만히 떨어지는 프로파일). 허용치 0 = "전체 최댓값 ∈ 중심부" 그 자체이며 임의 상수가 아니다.
+// (1% 같은 허용치를 두면 테두리가 0.9% 밝은 3행 배치와 중심이 최댓값인 4행 배치를 구분 못 한다.)
+export const RIM_TOL = 0;
+// 중심부 판정: 중심부 min/max, 테두리 초과 밝기(전체 max / 중심부 max − 1)
+export function centerMetrics(field, nx, ny, fx, fy) {
+  const [i0, i1, j0, j1] = region(nx, ny, fx, fy);
+  let mn = Infinity, mxC = -Infinity, mxAll = -Infinity;
+  for (let k = 0; k < field.length; k++) if (field[k] > mxAll) mxAll = field[k];
+  for (let j = j0; j < j1; j++) for (let i = i0; i < i1; i++) { const v = field[j * nx + i]; if (v < mn) mn = v; if (v > mxC) mxC = v; }
+  return { minMax: mxC > 0 ? mn / mxC : 0, rimBright: mxC > 0 ? Math.max(0, mxAll / mxC - 1) : 0 };
+}
+
+export function metrics(field, nx, ny, edgeFrac = 0, edgeFracY) {
   // 유효영역 값 수집
   let vals;
   if (!nx) {
     vals = field instanceof Float64Array ? field.slice() : Float64Array.from(field);
   } else {
-    const [i0, i1, j0, j1] = region(nx, ny, edgeFrac);
+    const [i0, i1, j0, j1] = region(nx, ny, edgeFrac, edgeFracY);
     vals = new Float64Array((i1 - i0) * (j1 - j0));
     let k = 0;
     for (let j = j0; j < j1; j++) for (let i = i0; i < i1; i++) vals[k++] = field[j * nx + i];

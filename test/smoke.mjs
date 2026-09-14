@@ -36,7 +36,7 @@ ok(opt.top2.length >= 1, `Top2 산출 (${opt.top2.length})`);
 const sv = solvePerLevel(spec);
 ok(sv.length === 5, `solver 5개 레벨 (${sv.length})`);
 ok(sv.every((r) => r.pitch > 0 && r.leds > 0 && r.nx > 0), 'solver 유효값');
-ok(sv.every((r) => !r.feasible || r.U0 >= spec.goal.U0 - 0.02), 'feasible 행은 목표 U0 충족');
+ok(sv.every((r) => !r.feasible || r.U0c >= spec.goal.U0 - 0.02), 'feasible 행은 중심부 목표 U0 충족');
 ok(sv.filter((r) => r.level !== 1).every((r) => r.auto), 'L2~L5 는 .auto 참고치를 함께 반환');
 // L2(Milky resin) 확산은 후방산란→기판 반사 재순환(levelEffect case 2)이라 blur 가 깊이 수준
 // 까지만 커진다. 확산(blur)은 LED 사이 리플만 없앨 뿐 가장자리 falloff 를 들어올리진 못하고,
@@ -44,9 +44,12 @@ ok(sv.filter((r) => r.level !== 1).every((r) => r.auto), 'L2~L5 는 .auto 참고
 // — 그래서 L2 단독으로 목표를 못 미치는 조건이 흔하며 이는 물리적으로 맞다(예전 공식
 // blur=11×depth 는 배열 전체를 거대 봉우리로 뭉개 이 효과를 가렸음). 탐색 로직 자체의 정상
 // 동작은 달성 가능한 조건(정사각 60x60mm, 깊이 12mm)으로 검증한다.
+// 판정은 베젤 마진 5% 를 명시: 타겟 전체 판정(기본 마진 0)에서는 기구 크기 제한(타겟 대비
+// +10% → 각 변 3mm)이 깊이 12mm 에 한참 못 미쳐 어느 깊이에서도 물리적으로 미달이라(실측:
+// 깊이 4/6/8mm 모두 U0 63~72%) 탐색 로직이 아니라 제약을 검사하는 셈이 되기 때문.
 {
   const specSq = structuredClone(DEFAULT_SPEC);
-  specSq.target.xLen = 60; specSq.target.yLen = 60;
+  specSq.target.xLen = 60; specSq.target.yLen = 60; specSq.goal.edgeMargin = 0.05;
   const svSq = solvePerLevel(specSq, { levels: [2] });
   ok(svSq.find((r) => r.level === 2).auto.feasible, 'L2 는 확산도 조절만으로 목표 균일도 확보(.auto, 정사각 60x60mm)');
 }
@@ -56,6 +59,7 @@ ok(sv.filter((r) => r.level !== 1).every((r) => r.auto), 'L2~L5 는 .auto 참고
 {
   const strip = structuredClone(DEFAULT_SPEC);
   strip.target.xLen = 100; strip.target.yLen = 20; strip.goal.U0 = 0.85;
+  strip.goal.edgeMargin = 0.05;   // 위 60x60 과 같은 이유(Y 캡 1mm) — 추세 검증은 베젤 마진 판정으로
   strip.led.sizeX = 1; strip.led.sizeY = 1;
   strip.levels[2] = { on: true, milky: 10, decenterX: 0, decenterY: 0 };
   const byDepth = [4, 6, 8].map((d) => { const s = structuredClone(strip); s.space.depth = d; return solveSolo(s, [2]); });

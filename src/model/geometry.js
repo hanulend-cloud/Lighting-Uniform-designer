@@ -22,7 +22,7 @@ export function buildGeometry(spec, opt = {}) {
   // 표시 뷰 범위 = 타겟 영역[0,X]×[0,Y] + 여백(3% 또는 LED 오버행 중 더 큰 쪽 — 오버행 LED가
   // 프레임 밖으로 잘리지 않게)
   const X = spec.target.xLen, Y = spec.target.yLen;
-  const padX = Math.max(X * 0.03, ledPadX * 1.15), padY = Math.max(Y * 0.03, ledPadY * 1.15);
+  const padX = Math.max(X * 0.03, Math.max(0, ledPadX) * 1.15), padY = Math.max(Y * 0.03, Math.max(0, ledPadY) * 1.15);
   const view = { x0: -padX, x1: X + padX, y0: -padY, y1: Y + padY };
 
   const p2 = levelParams(spec, 2);
@@ -57,7 +57,7 @@ export function buildGeometry(spec, opt = {}) {
     leds,
     ledSize: { x: spec.led.sizeX, y: spec.led.sizeY, z: spec.led.sizeZ },
     target: { x: X, y: Y },
-    fixture: { x: X + 2 * ledPadX, y: Y + 2 * ledPadY },
+    fixture: { x: X + 2 * Math.max(0, ledPadX), y: Y + 2 * Math.max(0, ledPadY) },   // 음수 pad(안쪽 배치)는 기구를 줄이지 않음
     view,
     levelText: tags.length ? tags.join(' + ') : '기본 평판',
     diffuseVisual, patternVisual, planShape, l4Height, l4HalfP: halfPShape,
