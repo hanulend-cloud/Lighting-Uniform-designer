@@ -1,5 +1,5 @@
 // 새 L4(X·Y 독립 두께 프로필) 물리·형상 검증 + L3 리팩터 회귀 방지.
-import { levelEffect } from '../src/model/levels.js';
+import { levelEffect, l4BotZAt, bodyProfile, l3BotZAt } from '../src/model/levels.js';
 import { DEFAULT_SPEC } from '../src/model/defaults.js';
 import { computeField, evalGrid } from '../src/engine/directLit.js';
 
@@ -63,6 +63,48 @@ function baseSpec() {
   check('L4 edgeBoost 적용 후 필드가 유한하고 양수', Number.isFinite(boostedMax) && boostedMax > 0, `max=${boostedMax}`);
   check('L4 edgeBoost가 필드 최댓값을 넘어서지 않음(캡 유지)', boostedMax <= unboostedMax + 1e-9,
     `boostedMax=${boostedMax} unboostedMax=${unboostedMax}`);
+}
+
+// l4BotZAt 형상 — 중심/가장자리 두께가 min(Tx,Ty)로 결합되는지 확인.
+{
+  const spec = baseSpec();
+  spec.levels[4] = { on: true, tx0: 6, tx50: 4, tx100: 2, ty0: 3, ty50: 2.5, ty100: 1.5, edgeR: 0 };
+  const X = spec.target.xLen, Y = spec.target.yLen, depth = spec.space.depth;
+
+  const thkCenter = depth - l4BotZAt(spec, depth, X / 2, Y / 2);
+  check('중심 두께 = min(tx0,ty0)=3', Math.abs(thkCenter - 3) < 0.01, `thk=${thkCenter}`);
+
+  const thkXEdge = depth - l4BotZAt(spec, depth, 0, Y / 2);
+  check('X 가장자리(Y중앙) 두께 = min(tx100=2, ty0=3) = 2', Math.abs(thkXEdge - 2) < 0.01, `thk=${thkXEdge}`);
+
+  const thkYEdge = depth - l4BotZAt(spec, depth, X / 2, 0);
+  check('Y 가장자리(X중앙) 두께 = min(tx0=6, ty100=1.5) = 1.5', Math.abs(thkYEdge - 1.5) < 0.01, `thk=${thkYEdge}`);
+}
+
+// 모서리R을 켜도(코너 라운드) 두께가 물리적 범위([minThk,maxThk]) 안에서 유한하게 나오는지.
+{
+  const spec = baseSpec();
+  spec.levels[4] = { on: true, tx0: 6, tx50: 4, tx100: 1.5, ty0: 6, ty50: 4, ty100: 1.5, edgeR: 10 };
+  const depth = spec.space.depth;
+  const thkCorner = depth - l4BotZAt(spec, depth, 3, 3);
+  check('모서리R 근처 두께가 유한하고 [1.5,11] 범위 안', Number.isFinite(thkCorner) && thkCorner >= 1.4 && thkCorner <= 11.1, `thk=${thkCorner}`);
+}
+
+// bodyProfile()의 L3 분기가 l3BotZAt(spec,depth,x,Y/2)와 정확히 일치하는지 (비정사각 타겟에서
+// Y거리도 테이퍼에 영향을 주는 새 동작을 고정) — 회귀 방지.
+{
+  const spec = baseSpec();
+  spec.target.xLen = 100; spec.target.yLen = 30; // 비정사각: Y/2=15가 tw보다 작을 수 있는 케이스
+  spec.levels[3] = { on: true, wallThk: 8, edgeAngle: 30, edgeR: 0 };
+  spec.levels[4].on = false;
+  const depth = spec.space.depth;
+  const prof = bodyProfile(spec, [1, 3], depth, 5);
+  let allMatch = true;
+  for (const p of prof) {
+    const expected = l3BotZAt(spec, depth, p.x, spec.target.yLen / 2);
+    if (Math.abs(p.botZ - expected) > 1e-9) allMatch = false;
+  }
+  check('bodyProfile L3 분기 = l3BotZAt(x, Y/2) 일치', allMatch);
 }
 
 process.exitCode = fail ? 1 : 0;

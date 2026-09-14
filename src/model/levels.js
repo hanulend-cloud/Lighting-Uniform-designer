@@ -255,77 +255,48 @@ export function effectiveEdgeMargin(baseMargin, edgeBoost) {
   return edgeBoost?.hasBoost ? 0 : baseMargin;
 }
 
-// L4: flatHalf 밖 반경 rel(mm, flat 경계로부터) 위치에서의 상승량(mm). bodyProfile(X 단면)과
-// plan.js(2D 등고선 — TOP VIEW 가 실제 형상과 다르게 보이던 문제)가 공식을 공유해 두 뷰가
-// 같은 형상을 그리도록 한다.
-function l4RiseAt(sp, rel) {
-  const riseMax = sp.rise ?? 8;
-  const angle = clamp(sp.angleX ?? 45, 1, 85) * Math.PI / 180;
-  const slope = Math.tan(angle);
-  const radiusX = Math.max(0, sp.radiusX ?? 0);
-  if (radiusX <= 0) return Math.min(riseMax, slope * rel);
-  // 원호(flat과 접선) → 각도(angle)에 도달하면 직선 경사로 연속(탄젠트) 전환
-  const relAtTangent = radiusX * Math.sin(angle);
-  const riseAmt = rel <= relAtTangent
-    ? radiusX - Math.sqrt(Math.max(0, radiusX * radiusX - rel * rel))
-    : radiusX * (1 - Math.cos(angle)) + slope * (rel - relAtTangent);
-  return Math.min(riseMax, riseAmt);
+// L4(자유형상 도파관)용 축별 두께 프로필 평가 — pts=[중심,중간,가장자리] 두께(mm),
+// halfLen=중심→가장자리 거리(mm), dist=가장자리로부터의 거리(0=가장자리..halfLen=중심).
+// directLit.js의 axisRamp()와 짝을 이루는 함수지만, 여긴 절대 두께(mm)를 반환한다는 점이 다르다.
+function axisThickAt(pts, halfLen, dist) {
+  const f = halfLen > 0 ? clamp(dist / halfLen, 0, 1) : 1;   // 0=가장자리,1=중심
+  return f <= 0.5 ? pts[2] + (pts[1] - pts[2]) * (f / 0.5) : pts[1] + (pts[0] - pts[1]) * ((f - 0.5) / 0.5);
 }
 
-// L4 전체 높이(botZ, mm): LED 로부터의 거리(dist, mm — X 단면이면 |x-ledX|, 2D 등고선이면
-// 실제 반경거리)에서의 기구물 하면 위치. bodyProfile 과 buildGeometry(plan.js 용) 가 공유.
-export function l4BotZAt(spec, active, depth, dist, halfP) {
-  const ledTop = spec.led.sizeZ;
-  const topZ = depth;
-  const A = active instanceof Set ? active : new Set(active);
-  const baseThk = A.has(1) ? (levelParams(spec, 1).thk ?? spec.body.baseThk) : spec.body.baseThk;
-  const minBody = Math.max(1, baseThk * 0.5);
-  const sp = levelParams(spec, 4);
-  const gap = clamp(sp.gap ?? 2, 0.5, Math.max(0.5, topZ - ledTop - minBody));
-  const flatHalf = (sp.flatX ?? 4) / 2;
-  if (dist <= flatHalf) return ledTop + gap;
-  const rel = Math.min(dist - flatHalf, halfP);
-  return Math.min(topZ - minBody, ledTop + gap + l4RiseAt(sp, rel));
+// L4(자유형상 도파관)의 실제 2D 두께 함수 — X·Y 각각 3점 프로필을 평가해 min(Tx,Ty)로 결합한다.
+// l3BotZAt과 같은 "둥근 모서리 인지 거리" 공식을 재사용해 광학 계산(directLit.js
+// applyAxisEdgeBoost)과 STEP 형상이 일치하게 한다. bodyProfile·plan.js·step-export.js가 공유.
+export function l4BotZAt(spec, depth, x, y) {
+  const X = spec.target.xLen, Y = spec.target.yLen;
+  const sp4 = levelParams(spec, 4);
+  const { minThk, maxThk } = tirParams(spec, depth);
+  const clampThk = (v, fb) => Math.max(minThk, Math.min(v ?? fb, maxThk));
+  const tx = [clampThk(sp4.tx0, 3), clampThk(sp4.tx50, 2), clampThk(sp4.tx100, 1)];
+  const ty = [clampThk(sp4.ty0, 3), clampThk(sp4.ty50, 2), clampThk(sp4.ty100, 1)];
+  const r = Math.max(0, Math.min(sp4.edgeR ?? 0, Math.min(X, Y) / 2));
+
+  const dx = Math.min(x, X - x), dy = Math.min(y, Y - y);
+  const rounded = (dx < r && dy < r) ? r - Math.hypot(r - dx, r - dy) : null;
+  const dxEff = rounded == null ? dx : rounded;
+  const dyEff = rounded == null ? dy : rounded;
+  const thk = Math.min(axisThickAt(tx, X / 2, dxEff), axisThickAt(ty, Y / 2, dyEff));
+  return depth - thk;
 }
 
-// 기구물 단면(X 방향): 활성 형상 난이도 기준
-export function bodyProfile(spec, active, leds, depth, pitch, nx = 160) {
+// 기구물 단면(X 방향, Y=중앙 대표 슬라이스): 활성 형상 난이도 기준
+export function bodyProfile(spec, active, depth, nx = 160) {
   const A = new Set(active ?? activeLevels(spec));
-  const X = spec.target.xLen;
-  const ledTop = spec.led.sizeZ;
-  const topZ = depth;
+  const X = spec.target.xLen, Y = spec.target.yLen;
   const baseThk = A.has(1) ? (levelParams(spec, 1).thk ?? spec.body.baseThk) : spec.body.baseThk;
-  const minBody = Math.max(1, baseThk * 0.5);
-
+  const topZ = depth;
   const useL4 = A.has(4), useL3 = A.has(3) && !useL4;
-
-  if (useL3) {
-    // 균일두께 용기(라이트가이드): 중앙 평탄(wallThk) + 가장자리 사출빼기 테이퍼(edgeAngle).
-    // X 단면이라 코너 R(2D)은 표시하지 않음 — 광학 계산(computeField)에서는 2D로 반영.
-    const sp3 = levelParams(spec, 3);
-    const wallThk = Math.max(minBody, Math.min(sp3.wallThk ?? 3, topZ - ledTop - 0.5));
-    const edgeAngleRad = clamp(sp3.edgeAngle ?? 45, 1, 89) * Math.PI / 180;
-    const tw = wallThk > minBody ? (wallThk - minBody) / Math.tan(edgeAngleRad) : 0;
-    const pts3 = [];
-    for (let i = 0; i < nx; i++) {
-      const x = (i / (nx - 1)) * X;
-      const edx = Math.min(x, X - x);
-      const thk = edx >= tw ? wallThk : Math.max(minBody, wallThk - Math.tan(edgeAngleRad) * (tw - edx));
-      pts3.push({ x, botZ: topZ - thk, topZ });
-    }
-    return pts3;
-  }
-
-  // 이 아래는 L4(형상·정밀)만 해당 — L3 는 위에서 이미 반환됨. l4BotZAt() 이 실제 형상 계산을
-  // 전담 — plan.js(TOP VIEW 2D 등고선)도 같은 함수를 써서 두 뷰가 어긋나지 않게 한다.
-  const lxs = [...new Set(leds.map((l) => l.x))].sort((a, b) => a - b);
-  const near = lxs.length ? (x) => Math.min(...lxs.map((v) => Math.abs(x - v))) : () => 1e9;
-  const halfP = Math.max(1, pitch / 2);
 
   const pts = [];
   for (let i = 0; i < nx; i++) {
     const x = (i / (nx - 1)) * X;
-    const botZ = useL4 ? l4BotZAt(spec, A, depth, near(x), halfP) : topZ - baseThk;
+    const botZ = useL4 ? l4BotZAt(spec, depth, x, Y / 2)
+      : useL3 ? l3BotZAt(spec, depth, x, Y / 2)
+      : topZ - baseThk;
     pts.push({ x, botZ, topZ });
   }
   return pts;
