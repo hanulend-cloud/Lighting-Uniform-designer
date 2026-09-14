@@ -45,28 +45,6 @@ export function drawPlan(canvas, g) {
   ctx.strokeRect(px(X * 0.05), py(Y * 0.95), bw * 0.9, bh * 0.9);
   ctx.setLineDash([]);
 
-  // L4 — 실제 반경별 두께를 동심원 등고선으로 표시. SIDE VIEW(단면도)와 같은 l4Height() 함수를
-  // 써서 두 뷰가 같은 형상을 그리도록 함 — 예전엔 여기 flat 패드 사각형만 그려서 SIDE VIEW의
-  // 굴곡진(scalloped) 실제 형상과 안 맞아 보이는 문제가 있었음.
-  if (g.l4Height && g.l4HalfP > 0) {
-    const topZ = g.depth;
-    const maxThk = topZ - g.l4Height(0);
-    const minThk = topZ - g.l4Height(g.l4HalfP);
-    const range = Math.max(0.01, maxThk - minThk);
-    const RINGS = 14;
-    for (const p of g.leds) {
-      for (let k = RINGS; k >= 1; k--) {
-        const rMm = (k / RINGS) * g.l4HalfP;
-        const thk = topZ - g.l4Height(rMm);
-        const t = Math.max(0, Math.min(1, (thk - minThk) / range));   // 0(얇음)~1(LED 바로 위, 두꺼움)
-        ctx.fillStyle = `rgba(124,176,255,${(0.05 + 0.32 * t).toFixed(3)})`;
-        ctx.beginPath();
-        ctx.arc(px(p.x), py(p.y), Math.max(0.5, rMm * pxmm), 0, Math.PI * 2);
-        ctx.fill();
-      }
-    }
-  }
-
   // L5 — 패턴 표시 (격자 점, 화면상 과장)
   if (g.patternVisual) {
     ctx.fillStyle = 'rgba(94,224,176,0.5)';
@@ -98,7 +76,6 @@ export function drawPlan(canvas, g) {
   ctx.fillStyle = C.text; ctx.font = '600 14px system-ui'; ctx.textAlign = 'left';
   ctx.fillText(`평면 배치 · 최종 적용: ${g.levelText}`, PAD.L, 15);
   ctx.fillStyle = C.dim; ctx.font = '12px system-ui';
-  const pad = g.planShape ? ` · flat ${g.planShape.flatX}×${g.planShape.flatY}mm` : '';
   const grid = xs.length && ys.length ? ` (${xs.length}×${ys.length})` : '';
-  ctx.fillText(`LED ${g.leds.length}개${grid} · ${g.dim} · ${X}×${Y}mm${pad}`, PAD.L, h - 7);
+  ctx.fillText(`LED ${g.leds.length}개${grid} · ${g.dim} · ${X}×${Y}mm`, PAD.L, h - 7);
 }
