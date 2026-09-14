@@ -6,7 +6,7 @@ import { LEVEL_DEFAULTS } from './levels.js';
 export { LEVEL_DEFAULTS };
 
 export const DEFAULT_SPEC = {
-  ver: 10,                      // 저장 스펙 마이그레이션용(main.migrate)
+  ver: 11,                      // 저장 스펙 마이그레이션용(main.migrate) — L4 스키마 교체(v11)
   target:  { xLen: 100, yLen: 100, shape: 'flat' },
   // edgeMargin: 균일도 판정에서 제외할 가장자리 비율(축별). 0 = 타겟 전체에서 균일도를 확보한다
   // (기본). 베젤이 타겟 가장자리를 가리는 제품이면 그 폭만큼 올려 판정을 완화할 수 있다.
