@@ -46,3 +46,16 @@ export function axialIntensityFromFlux(fluxLm, model, p) {
   if (model === 'gaussian') return fluxLm / (2 * Math.PI * p.sigma * p.sigma); // 소각 근사
   return (fluxLm * (p.m + 1)) / (2 * Math.PI);                                  // ∫cos^m dΩ = 2π/(m+1)
 }
+
+// directLit.js의 필드값은 광도(I0, cd)를 거리(od 등, mm 단위)로 나눠(E=I·cosθ/d²) 계산되므로
+// fluxLm>0(절대 모드)일 때 단위가 cd/mm² 다 — 조도(lux=cd/m²)로 바꾸려면 (1000mm/m)²=1e6을
+// 곱해야 한다. fluxLm<=0(상대 모드)일 때는 절대 단위가 의미 없으므로 호출측에서 이 값을
+// 쓰지 않아야 한다(참고: 상대 모드는 field 값 자체가 임의 스케일이라 애초에 lux가 아님).
+export const LUX_PER_FIELD_UNIT = 1e6;
+
+// 램버시안 확산 출사면 가정: 그 면에 도달한 조도(E, lux)를 그대로 내보내는(투과율은 이미
+// field 계산에 반영됨) 확산체의 휘도는 L(cd/m²) = E(lx)/π — 균일 확산판·디스플레이 백라이트
+// 설계에서 표준적으로 쓰는 변환(비어링 램버트 법칙).
+export function illuminanceToLuminance(lux) {
+  return lux / Math.PI;
+}

@@ -27,6 +27,7 @@ const CONTROL_GROUPS = [
     ['led.sizeY', '크기Y', 'mm', 0.2, 30, 0.1],
     ['led.beamX', '지향각X', '°', 10, 180, 5],
     ['led.beamY', '지향각Y', '°', 10, 180, 5],
+    ['led.fluxLm', '광속(0=상대값)', 'lm', 0, 500, 1],
   ] },
   { name: '목표', items: [
     ['goal.U0', '균일도', '', 0.30, 0.98, 0.01],
@@ -213,6 +214,15 @@ function heatGrid(spec) {
   return { nx: Math.max(2, Math.round(X / cell) + 1), ny: Math.max(2, Math.round(Y / cell) + 1), cell };
 }
 let lastHeat = null;   // 조도 렌더링 결과 — 히트맵 팝업 확대 시 재계산 없이 재사용
+// 히트맵 단위 — 색 패턴(값/최댓값)은 어느 단위든 동일하다(상수배라 비율이 안 바뀜). fluxLm=0
+// (상대 모드)이면 lux/cd·m² 실단위가 무의미해 heatmap.js가 자동으로 상대값(%)으로 되돌린다.
+let heatUnit = 'rel';
+function heatOpt() { return { unit: heatUnit, fluxLm: spec.led.fluxLm ?? 0 }; }
+function updateHeatTitle() {
+  const label = { rel: '조도 히트맵', lux: '조도 히트맵 (lux)', cdm2: '휘도 히트맵 (cd/m²)' }[heatUnit];
+  const el = $('#heat-title');
+  if (el) el.textContent = label;
+}
 function renderHeat() {
   if (!last) return;
   const hg = heatGrid(spec);
@@ -224,7 +234,7 @@ function renderHeat() {
   res.center = last.center;
   res.cellMm = hg.cell;
   lastHeat = res;
-  drawHeatmap($('#heatmap'), res, sizeVisuals(last.view.x1 - last.view.x0, '#pane-heat'));
+  drawHeatmap($('#heatmap'), res, sizeVisuals(last.view.x1 - last.view.x0, '#pane-heat'), heatOpt());
   $('#pane-heat').classList.remove('stale');
 }
 
@@ -256,7 +266,7 @@ function redrawZoomKind(kind, canvas) {
     case 'iso': drawIso(canvas, last.geom); break;
     case 'plan': drawPlan(canvas, last.geom); break;
     case 'profile': if (last.resEval) drawProfiles(canvas, last.resEval, spec.goal.U0); break;
-    case 'heat': if (lastHeat) drawHeatmap(canvas, lastHeat, 1e9); break;
+    case 'heat': if (lastHeat) drawHeatmap(canvas, lastHeat, 1e9, heatOpt()); break;
   }
 }
 // sizeVisuals는 컨테이너의 clientWidth를 읽으므로, canvas의 현재 부모(원래 pane 또는
@@ -326,6 +336,15 @@ function mount() {
   const auto = $('#heat-auto');
   auto.checked = autoHeat;
   auto.onchange = () => { autoHeat = auto.checked; if (autoHeat) renderHeat(); };
+  const unitSel = $('#heat-unit');
+  unitSel.value = heatUnit;
+  unitSel.onchange = () => {
+    heatUnit = unitSel.value;
+    updateHeatTitle();
+    // 필드 재계산 없이 캐시된 lastHeat를 새 단위로 다시 그리기만 하면 된다(색 패턴은 불변).
+    if (lastHeat) drawHeatmap($('#heatmap'), lastHeat, sizeVisuals(last.view.x1 - last.view.x0, '#pane-heat'), heatOpt());
+  };
+  updateHeatTitle();
 }
 
 // 구버전 저장값 보정

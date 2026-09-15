@@ -44,8 +44,13 @@
           <div class="pane" id="pane-iso"><canvas id="iso"></canvas></div>
           <div class="pane col" id="pane-heat">
             <div class="pane-title heat-bar">
-              <span>조도 히트맵</span>
+              <span id="heat-title">조도 히트맵</span>
               <span class="heat-ctl">
+                <select id="heat-unit" title="색 패턴은 항상 상대값(값/최댓값)이라 단위를 바꿔도 그림은 그대로입니다 — 최소·최대 지점의 숫자만 바뀝니다.">
+                  <option value="rel">상대값(%)</option>
+                  <option value="lux">조도(lux)</option>
+                  <option value="cdm2">휘도(cd/m²)</option>
+                </select>
                 <label><input type="checkbox" id="heat-auto"> 자동</label>
                 <button id="heat-render">조도 렌더링</button>
               </span>

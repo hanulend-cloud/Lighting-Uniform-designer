@@ -56,6 +56,27 @@ const base = {
   const all = texts.join('\n');
   ok(/계산영역[^\n]*1000\s*[×x]\s*200/.test(all), '마진 0 → 계산영역=타겟 치수');
 }
+// 4) 조도/휘도 절대 단위 — 상대 모드(fluxLm=0 또는 미지정)면 lux/cd·m² 라벨이 전혀 없어야 하고,
+// fluxLm>0 이면 field(=1, 내부표현) × 1e6(mm²→m²) = 1,000,000 lux, 휘도는 그걸 π로 나눈 값.
+{
+  const texts = [];
+  drawHeatmap(fakeCanvas(texts), { ...base, fixture: { x: 1000, y: 200 } }, 0.5, { unit: 'lux', fluxLm: 0 });
+  const all = texts.join('\n');
+  ok(!/lux/.test(all), '상대 모드(fluxLm=0)에서는 lux 단위 미표기(상대값 %로 대체)');
+}
+{
+  const texts = [];
+  drawHeatmap(fakeCanvas(texts), { ...base, fixture: { x: 1000, y: 200 } }, 0.5, { unit: 'lux', fluxLm: 100 });
+  const all = texts.join('\n');
+  ok(/1000000\s*lux/.test(all), `조도 절대값(1,000,000 lux) 표기 (field=1 × 1e6)`);
+}
+{
+  const texts = [];
+  drawHeatmap(fakeCanvas(texts), { ...base, fixture: { x: 1000, y: 200 } }, 0.5, { unit: 'cdm2', fluxLm: 100 });
+  const all = texts.join('\n');
+  const expected = (1000000 / Math.PI).toFixed(0);
+  ok(all.includes(`${expected} cd/m²`), `휘도 절대값(조도/π = ${expected} cd/m²) 표기`);
+}
 
 console.log(fail ? `\n${fail} FAIL` : '\nALL PASS');
 process.exit(fail ? 1 : 0);

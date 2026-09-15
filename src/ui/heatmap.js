@@ -4,8 +4,21 @@
 // 필드는 타겟 [0,X]×[0,Y] 만 담고, 뷰 안의 해당 위치에 배치. 점선=균일도 계산영역.
 
 import { fitCanvas, PAD } from './canvas-util.js';
+import { LUX_PER_FIELD_UNIT, illuminanceToLuminance } from '../engine/photometry.js';
 
-export function drawHeatmap(canvas, res, pxmm) {
+// field 값(내부 표현) → 선택한 단위의 숫자 문자열. 상대 모드(fluxLm<=0)거나 unit='rel'이면
+// null(호출측이 기존처럼 %로 표시). 색 패턴 자체는 이 선택과 무관하게 항상 값/최댓값이다 —
+// 단위 변환은 모든 픽셀에 같은 상수를 곱할 뿐이라 비율(그림)은 절대 바뀌지 않는다.
+function absLabel(fieldValue, unit, fluxLm) {
+  if (unit === 'rel' || !fluxLm || fluxLm <= 0) return null;
+  const lux = fieldValue * LUX_PER_FIELD_UNIT;
+  const v = unit === 'lux' ? lux : illuminanceToLuminance(lux);
+  return `${v.toFixed(v < 10 ? 2 : 0)} ${unit === 'lux' ? 'lux' : 'cd/m²'}`;
+}
+
+export function drawHeatmap(canvas, res, pxmm, opt = {}) {
+  const unit = opt.unit === 'lux' || opt.unit === 'cdm2' ? opt.unit : 'rel';
+  const fluxLm = opt.fluxLm ?? 0;
   const { ctx, w, h } = fitCanvas(canvas);
   ctx.fillStyle = '#0f1420'; ctx.fillRect(0, 0, w, h);
 
@@ -141,7 +154,8 @@ export function drawHeatmap(canvas, res, pxmm) {
       };
       drawMark(3.2, 'rgba(0,0,0,0.65)');   // 어떤 배경색 위에서도 보이도록 검은 테두리 먼저
       drawMark(1.4, '#ffffff');
-      const label = `최소 ${(minV / max * 100).toFixed(0)}% @ (${wx.toFixed(0)}, ${wy.toFixed(0)})`;
+      const abs = absLabel(minV, unit, fluxLm);
+      const label = `최소 ${(minV / max * 100).toFixed(0)}%${abs ? ` (${abs})` : ''} @ (${wx.toFixed(0)}, ${wy.toFixed(0)})`;
       ctx.font = 'bold 11px system-ui';
       const tw = ctx.measureText(label).width;
       const lx = Math.min(Math.max(mxp - tw / 2 - 4, ox + 2), ox + imgW - tw - 8);
@@ -160,13 +174,15 @@ export function drawHeatmap(canvas, res, pxmm) {
   const uniText = res.center
     ? `중심부 균일도 ${(res.center.U0c * 100 || 0).toFixed(0)}% · 전체 ${(m.U0 * 100 || 0).toFixed(0)}%`
     : `균일도 ${(m.U0 * 100 || 0).toFixed(0)}%`;
+  const maxAbs = absLabel(max, unit, fluxLm);
   ctx.fillStyle = '#9aa6bf'; ctx.font = '12px system-ui'; ctx.textAlign = 'right';
-  ctx.fillText(`${uniText} · LED ${ledCount}개`, w - PAD.R, PAD.T - 6);
+  ctx.fillText(`${uniText} · LED ${ledCount}개${maxAbs ? ` · 최대 ${maxAbs}` : ''}`, w - PAD.R, PAD.T - 6);
   canvas.title = [
     '빨강=타겟', res.center ? '청록점선=중심부(판정)' : null, eg > 0 ? '흰점선=계산영역' : null,
     eg > 0 ? '어둡게=판정제외 마진' : null, hasOverhang ? '회색점선=기구(오버행)' : null,
     showLedDots ? '●=LED' : 'LED점 생략(너무 촘촘함)', '⊕=판정영역 최솟값 지점',
     res.cellMm ? `격자 ${(+res.cellMm.toFixed(2))}mm` : null,
+    unit !== 'rel' && !(fluxLm > 0) ? 'LED 광속(lm)을 0보다 크게 설정해야 실제 단위가 표시됩니다(현재 상대값)' : null,
   ].filter(Boolean).join(' · ');
 
   // ── 치수 표기 (mm) ─────────────────────────────────────────────────────────────
