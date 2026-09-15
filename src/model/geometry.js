@@ -3,7 +3,7 @@
 // 난이도별 물리/형상은 levels.js 에 위임. 활성 난이도 조합을 반영.
 
 import { classifyDimension, ledPositions } from '../engine/directLit.js';
-import { LEVEL_SCHEMA, levelParams, levelEffect, combinedEffect, activeLevels, bodyProfile, effectiveEdgeMargin } from './levels.js';
+import { LEVEL_SCHEMA, levelParams, levelEffect, combinedEffect, activeLevels, bodyProfile, effectiveEdgeMargin, l4BotZAt } from './levels.js';
 
 export { levelEffect, combinedEffect, activeLevels, LEVEL_SCHEMA, effectiveEdgeMargin };
 export const scatterMm = (spec, level, depth) => levelEffect(spec, level, depth).blurX;
@@ -27,8 +27,7 @@ export function buildGeometry(spec, opt = {}) {
 
   const p2 = levelParams(spec, 2);
   const p5 = levelParams(spec, 5);
-  // 새 L4는 L3처럼 매끈한 도파관 형상이라(부피 확산재가 아님) 밀키 점묘 오버레이를 켜지 않는다.
-  const diffuseVisual = active.has(2) && (p2.milky ?? 1) > 1.5;
+  const diffuseVisual = (active.has(2) && (p2.milky ?? 1) > 1.5) || active.has(4);
   const patternVisual = active.has(5)
     ? { type: p5.ptype || 'pyramid',
         sizeX: p5.sizeX ?? 0.3, sizeY: p5.sizeY ?? 0.3,
@@ -36,6 +35,19 @@ export function buildGeometry(spec, opt = {}) {
         angleX: p5.angleX ?? 40, angleY: p5.angleY ?? 40,
         dir: p5.dir ?? '돌출', depth: p5.depth ?? 0.2 }
     : null;
+
+  // 평면도용 형상 정보: LED 중심 flat 패드 크기 (L4 전용 — L3 는 타겟 전체 1개의 형상이라
+  // LED별 flat 패드 개념이 없음)
+  const useL4 = active.has(4);
+  const sp4 = useL4 ? levelParams(spec, 4) : null;
+  const planShape = sp4
+    ? { kind: 'L4', flatX: sp4.flatX ?? 4, flatY: sp4.flatY ?? 4, gap: sp4.gap ?? 2 }
+    : null;
+
+  // TOP VIEW 2D 등고선용 — SIDE VIEW(bodyProfile)와 같은 l4BotZAt() 을 공유해 두 뷰가 서로 다른
+  // 형상으로 보이던 문제(패드만 있고 실제 굴곡은 안 보임)를 해소.
+  const halfPShape = Math.max(1, Math.min(pitchX, pitchY) / 2);
+  const l4Height = useL4 ? (dist) => l4BotZAt(spec, active, depth, dist, halfPShape) : null;
 
   const tags = [...active].sort().map((l) => `L${l}`);
 
@@ -48,8 +60,8 @@ export function buildGeometry(spec, opt = {}) {
     fixture: { x: X + 2 * Math.max(0, ledPadX), y: Y + 2 * Math.max(0, ledPadY) },   // 음수 pad(안쪽 배치)는 기구를 줄이지 않음
     view,
     levelText: tags.length ? tags.join(' + ') : '기본 평판',
-    diffuseVisual, patternVisual,
+    diffuseVisual, patternVisual, planShape, l4Height, l4HalfP: halfPShape,
     ledTop: spec.led.sizeZ,
-    bodyProfile: (nx = 160) => bodyProfile(spec, [...active], depth, nx),
+    bodyProfile: (nx = 160) => bodyProfile(spec, [...active], leds, depth, pitchX, nx),
   };
 }

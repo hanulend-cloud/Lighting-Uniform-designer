@@ -20,16 +20,7 @@ export const LEVEL_SCHEMA = {
     desc: 'Milky resin 사용도. 1=투명(효과 없음), 10=최대(후방산란→기판 반사 재순환으로 확산 최대·투과율 최저). 확산은 캐비티 깊이에 비례. De-center는 LED 배열 전체를 타겟 중심에서 X·Y로 밀어 배치 공차/비대칭을 검토하는 용도(광학 확산과는 무관, 배치만 이동).',
   },
   3: {
-    label: '형상·기본', hint: '균일두께 용기(도파관/TIR 라이트가이드) · 중앙 평탄 + 가장자리 사출빼기 테이퍼',
-    fields: [
-      { key: 'wallThk', label: '두께', unit: 'mm', min: 0.5, max: 10, step: 0.5 },
-      { key: 'edgeAngle', label: '가장자리각도', unit: '°', min: 5, max: 85, step: 5 },
-      { key: 'edgeR', label: '모서리R', unit: 'mm', min: 0, max: 50, step: 1 },
-    ],
-    desc: '기구물 전체가 하나의 균일두께(두께) 용기 형상 — 진짜 도파관(TIR). LED 방출광 중 임계각 밖으로 나가는 성분은 슬래브 안에서 전반사(TIR)로 갇혀 옆으로 퍼진다 — 두께가 두꺼울수록 더 멀리 퍼져 확산이 커짐(도파관 원리, 전역 효과). 가장자리는 사출빼기용 각도(가장자리각도)로 얇아지며 그 경사면이 갇힌 빛의 실제 탈출구라 국소적으로 더 밝아짐. 네 모서리는 모서리R로 둥글게 해 집광(핫스팟) 없이 고르게 퍼지도록 함.',
-  },
-  4: {
-    label: '형상·자유(도파관)', hint: 'X·Y 독립 두께 프로필(중심·중간·가장자리) · L3 대체',
+    label: '형상·자유(도파관)', hint: 'X·Y 독립 두께 프로필(중심·중간·가장자리) · 균일두께 도파관(TIR)',
     fields: [
       { key: 'tx0', label: 'X중심', unit: 'mm', min: 0.5, max: 10, step: 0.5 },
       { key: 'tx100', label: 'X가장자리', unit: 'mm', min: 0.5, max: 10, step: 0.5 },
@@ -39,7 +30,21 @@ export const LEVEL_SCHEMA = {
       { key: 'ty50', label: 'Y중간', unit: 'mm', min: 0.5, max: 10, step: 0.5, adv: true },
       { key: 'edgeR', label: '모서리R', unit: 'mm', min: 0, max: 50, step: 1, adv: true },
     ],
-    desc: '기구물 두께를 X·Y축 각각 중심→가장자리 3점(중심·중간·가장자리)으로 독립 지정하는 도파관 형상. (켜지면 L3 대체) L3와 같은 TIR 원리로, 그 축의 중심 두께가 두꺼울수록 갇힌 빛이 그 방향으로 더 멀리 퍼져 확산이 커진다 — X·Y를 다르게 주면 축별로 확산 강도가 실제로 달라진다. 중간 지점은 가장자리 근처 형상(볼록/오목)을 보조적으로 다듬는다. 모서리R로 네 모서리를 둥글게 해 집광 없이 고르게 퍼지도록 함.',
+    desc: '기구물 두께를 X·Y축 각각 중심→가장자리 3점(중심·중간·가장자리)으로 독립 지정하는 균일두께 도파관(TIR) 형상. LED 방출광 중 임계각 밖으로 나가는 성분은 슬래브 안에서 전반사(TIR)로 갇혀 옆으로 퍼진다 — 그 축의 중심 두께가 두꺼울수록 갇힌 빛이 그 방향으로 더 멀리 퍼져 확산이 커진다(도파관 원리). X·Y를 다르게 주면 축별로 확산 강도가 실제로 달라진다. 중간 지점은 가장자리 근처 형상(볼록/오목)을 보조적으로 다듬는다. 모서리R로 네 모서리를 둥글게 해 집광(핫스팟) 없이 고르게 퍼지도록 함.',
+  },
+  4: {
+    label: '형상·정밀', hint: 'X·Y 각도/크기 개별 조정 (L3 대체)',
+    fields: [
+      { key: 'gap', label: 'Gap', unit: 'mm', min: 0.5, max: 15, step: 0.5 },
+      { key: 'flatX', label: 'FlatX', unit: 'mm', min: 1, max: 40, step: 1 },
+      { key: 'flatY', label: 'FlatY', unit: 'mm', min: 1, max: 40, step: 1 },
+      { key: 'angleX', label: '각도X', unit: '°', min: 5, max: 85, step: 5 },
+      { key: 'angleY', label: '각도Y', unit: '°', min: 5, max: 85, step: 5 },
+      { key: 'rise', label: 'Gap확대', unit: 'mm', min: 0, max: 25, step: 1 },
+      { key: 'radiusX', label: 'R(X)', unit: 'mm', min: 0, max: 15, step: 0.5, adv: true },
+      { key: 'radiusY', label: 'R(Y)', unit: 'mm', min: 0, max: 15, step: 0.5, adv: true },
+    ],
+    desc: 'L3 형상의 전이부 경사각과 flat 크기를 X·Y로 개별 조정. (켜지면 L3 대체) LED 정면은 FLAT 유지, 그 바깥은 flat과 접선으로 이어지다 지정한 각도(angleX·Y)의 직선 경사로 자연스럽게(꺾임 없이) 이어지는 R(X)·R(Y) 라운드 전이 — R이 클수록 확산도 강화.',
   },
   5: {
     label: '미세패턴', hint: '기구물 하단 돌기 · 크기=pitch(패킹), X·Y 각도',
@@ -59,8 +64,8 @@ export const LEVEL_SCHEMA = {
 export const LEVEL_DEFAULTS = {
   1: { on: true, thk: 3 },
   2: { on: false, milky: 1, decenterX: 0, decenterY: 0 },
-  3: { on: true, wallThk: 3, edgeAngle: 45, edgeR: 5 },
-  4: { on: false, tx0: 3, tx50: 2, tx100: 1, ty0: 3, ty50: 2, ty100: 1, edgeR: 5 },
+  3: { on: true, tx0: 3, tx50: 2, tx100: 1, ty0: 3, ty50: 2, ty100: 1, edgeR: 5 },
+  4: { on: false, gap: 2, flatX: 4, flatY: 4, angleX: 45, angleY: 45, rise: 8, radiusX: 0, radiusY: 0 },
   5: { on: false, ptype: 'pyramid', sizeX: 0.3, sizeY: 0.3, angleX: 40, angleY: 40, dir: '돌출', depth: 0.2 },
 };
 
@@ -71,8 +76,9 @@ const iso = (b, transmit) => ({ blurX: b, blurY: b, transmit });
 // 반사시트를 가정하지 않고 보수적으로 잡음(사용자 지정). 입력 항목은 아니며 실측 시 캘리브레이션 대상.
 const BOARD_REFL = 0.5;
 
-// TIR(전반사) 도파관 공통 물리량 — L3·L4가 공유. 굴절률 n·LED 빔각으로 정해지는 임계각 기반
-// 갇힘비율(fracTrapped)과, 두께 1mm당 옆으로 퍼지는 거리 계수(K_RANGE, 1회 바운스 보수적 상한).
+// TIR(전반사) 도파관 물리량 — L3(X·Y 독립 두께 프로필)가 사용. 굴절률 n·LED 빔각으로 정해지는
+// 임계각 기반 갇힘비율(fracTrapped)과, 두께 1mm당 옆으로 퍼지는 거리 계수(K_RANGE, 1회 바운스
+// 보수적 상한).
 function tirParams(spec, d) {
   const n = spec.body?.n ?? 1.59;
   const critAngle = n > 1 ? Math.asin(1 / n) : Math.PI / 2;
@@ -122,27 +128,8 @@ export function levelEffect(spec, level, depth) {
     }
 
     case 3: {
-      // 균일두께 용기 = 진짜 도파관(TIR 라이트가이드). 물리량은 tirParams() 공유(L4와 동일 유도).
-      const { fracTrapped, minThk, maxThk, K_RANGE } = tirParams(spec, d);
-      const wallThk = Math.max(minThk, Math.min(p.wallThk ?? 3, maxThk));
-      const bulkBlur = K_RANGE * wallThk * fracTrapped;
-
-      // 가장자리 보정은 보조 효과로만(주 메커니즘은 위 bulkBlur) — 기존 필드 최댓값을 못 넘게
-      // 캡을 씌워 비단조 악화를 막는다(directLit.js applyTaperEdgeBoost 참고).
-      const edgeAngleDeg = clamp(p.edgeAngle ?? 45, 1, 89);
-      const edgeAngleRad = edgeAngleDeg * Math.PI / 180;
-      const tw = wallThk > minThk ? (wallThk - minThk) / Math.tan(edgeAngleRad) : 0;
-      const boostMax = clamp(0.03 * (wallThk - minThk) * Math.sin(edgeAngleRad), 0, 0.25);
-      const cornerR = Math.max(0, p.edgeR ?? 0);
-      return {
-        blurX: bulkBlur, blurY: bulkBlur, transmit: 0.97,
-        edgeBoost: { tw, boostMax, cornerR, hasBoost: tw > 0 && boostMax > 0, searchMag: boostMax + cornerR * 0.01 },
-      };
-    }
-
-    case 4: {
-      // 자유형상 도파관 — L3와 같은 TIR 벌크 블러를 X·Y축 각각의 "중심 두께"로 독립 적용한다.
-      // 캡이 없는 항이라 tx0≠ty0 이면 두 축의 확산 강도가 실제로 달라진다(핵심 개선).
+      // 균일두께 도파관(TIR) — X·Y축 각각의 "중심 두께"로 bulk-blur를 독립 적용한다. 캡이
+      // 없는 항이라 tx0≠ty0 이면 두 축의 확산 강도가 실제로 달라진다(핵심 개선).
       const { fracTrapped, minThk, maxThk, K_RANGE } = tirParams(spec, d);
       const clampThk = (v, fb) => Math.max(minThk, Math.min(v ?? fb, maxThk));
       const tx0 = clampThk(p.tx0, 3), tx50 = clampThk(p.tx50, 2), tx100 = clampThk(p.tx100, 1);
@@ -150,8 +137,8 @@ export function levelEffect(spec, level, depth) {
       const bulkBlurX = K_RANGE * tx0 * fracTrapped;
       const bulkBlurY = K_RANGE * ty0 * fracTrapped;
 
-      // 보조 보정: 중심→가장자리 두께 낙차만큼 L3와 동일한 계수(0.03)·캡(0.25)으로 국소 보정
-      // 세기를 정한다. 실제 픽셀별 보정은 directLit.js의 applyAxisEdgeBoost()가 이 edgeBoost.kind
+      // 보조 보정: 중심→가장자리 두께 낙차만큼 계수(0.03)·캡(0.25)으로 국소 보정 세기를
+      // 정한다. 실제 픽셀별 보정은 directLit.js의 applyAxisEdgeBoost()가 이 edgeBoost.kind
       // ='axis'를 소비해 수행한다(computeField → applyEdgeBoost 디스패치).
       const boostMaxX = clamp(0.03 * (tx0 - tx100), 0, 0.25);
       const boostMaxY = clamp(0.03 * (ty0 - ty100), 0, 0.25);
@@ -167,6 +154,14 @@ export function levelEffect(spec, level, depth) {
           searchMag: boostMaxX + boostMaxY + cornerR * 0.01,
         },
       };
+    }
+
+    case 4: {
+      const rise = p.rise ?? 8;
+      // R(radiusX/Y)만큼 flat→경사 전이가 둥글게(라운드) 이어져 광량 변화가 더 매끄러워짐 → 확산 보강.
+      // (자동탐색이 각도·R 자유도로 LED수를 최소화할 때 R도 실제로 쓸 수 있는 손잡이가 되도록)
+      const f = (ang, r) => 0.35 * rise + 0.007 * (ang ?? 45) * Math.sqrt(Math.max(0, rise)) + 0.05 * d + 0.15 * (r ?? 0);
+      return { blurX: f(p.angleX, p.radiusX), blurY: f(p.angleY, p.radiusY), transmit: 0.95 };
     }
 
     case 5: {
@@ -255,7 +250,7 @@ export function effectiveEdgeMargin(baseMargin, edgeBoost) {
   return edgeBoost?.hasBoost ? 0 : baseMargin;
 }
 
-// L4(자유형상 도파관)용 축별 두께 프로필 평가 — pts=[중심,중간,가장자리] 두께(mm),
+// L3(자유형상 도파관)용 축별 두께 프로필 평가 — pts=[중심,중간,가장자리] 두께(mm),
 // halfLen=중심→가장자리 거리(mm), dist=가장자리로부터의 거리(0=가장자리..halfLen=중심).
 // directLit.js의 axisRamp()와 짝을 이루는 함수지만, 여긴 절대 두께(mm)를 반환한다는 점이 다르다.
 function axisThickAt(pts, halfLen, dist) {
@@ -263,17 +258,17 @@ function axisThickAt(pts, halfLen, dist) {
   return f <= 0.5 ? pts[2] + (pts[1] - pts[2]) * (f / 0.5) : pts[1] + (pts[0] - pts[1]) * ((f - 0.5) / 0.5);
 }
 
-// L4(자유형상 도파관)의 실제 2D 두께 함수 — X·Y 각각 3점 프로필을 평가해 min(Tx,Ty)로 결합한다.
-// l3BotZAt과 같은 "둥근 모서리 인지 거리" 공식을 재사용해 광학 계산(directLit.js
-// applyAxisEdgeBoost)과 STEP 형상이 일치하게 한다. bodyProfile·plan.js·step-export.js가 공유.
-export function l4BotZAt(spec, depth, x, y) {
+// L3(자유형상 도파관)의 실제 2D 두께 함수 — X·Y 각각 3점 프로필을 평가해 min(Tx,Ty)로 결합한다.
+// directLit.js의 applyAxisEdgeBoost가 쓰는 "둥근 모서리 인지 거리" 공식과 반드시 같은 형태를
+// 유지해야 광학 계산과 STEP 형상이 일치한다. bodyProfile·step-export.js가 공유.
+export function l3BotZAt(spec, depth, x, y) {
   const X = spec.target.xLen, Y = spec.target.yLen;
-  const sp4 = levelParams(spec, 4);
+  const sp3 = levelParams(spec, 3);
   const { minThk, maxThk } = tirParams(spec, depth);
   const clampThk = (v, fb) => Math.max(minThk, Math.min(v ?? fb, maxThk));
-  const tx = [clampThk(sp4.tx0, 3), clampThk(sp4.tx50, 2), clampThk(sp4.tx100, 1)];
-  const ty = [clampThk(sp4.ty0, 3), clampThk(sp4.ty50, 2), clampThk(sp4.ty100, 1)];
-  const r = Math.max(0, Math.min(sp4.edgeR ?? 0, Math.min(X, Y) / 2));
+  const tx = [clampThk(sp3.tx0, 3), clampThk(sp3.tx50, 2), clampThk(sp3.tx100, 1)];
+  const ty = [clampThk(sp3.ty0, 3), clampThk(sp3.ty50, 2), clampThk(sp3.ty100, 1)];
+  const r = Math.max(0, Math.min(sp3.edgeR ?? 0, Math.min(X, Y) / 2));
 
   const dx = Math.min(x, X - x), dy = Math.min(y, Y - y);
   const rounded = (dx < r && dy < r) ? r - Math.hypot(r - dx, r - dy) : null;
@@ -283,41 +278,58 @@ export function l4BotZAt(spec, depth, x, y) {
   return depth - thk;
 }
 
-// 기구물 단면(X 방향, Y=중앙 대표 슬라이스): 활성 형상 난이도 기준
-export function bodyProfile(spec, active, depth, nx = 160) {
+// L4: flatHalf 밖 반경 rel(mm, flat 경계로부터) 위치에서의 상승량(mm). bodyProfile(X 단면)과
+// plan.js(2D 등고선 — TOP VIEW 가 실제 형상과 다르게 보이던 문제)가 공식을 공유해 두 뷰가
+// 같은 형상을 그리도록 한다.
+function l4RiseAt(sp, rel) {
+  const riseMax = sp.rise ?? 8;
+  const angle = clamp(sp.angleX ?? 45, 1, 85) * Math.PI / 180;
+  const slope = Math.tan(angle);
+  const radiusX = Math.max(0, sp.radiusX ?? 0);
+  if (radiusX <= 0) return Math.min(riseMax, slope * rel);
+  // 원호(flat과 접선) → 각도(angle)에 도달하면 직선 경사로 연속(탄젠트) 전환
+  const relAtTangent = radiusX * Math.sin(angle);
+  const riseAmt = rel <= relAtTangent
+    ? radiusX - Math.sqrt(Math.max(0, radiusX * radiusX - rel * rel))
+    : radiusX * (1 - Math.cos(angle)) + slope * (rel - relAtTangent);
+  return Math.min(riseMax, riseAmt);
+}
+
+// L4 전체 높이(botZ, mm): LED 로부터의 거리(dist, mm — X 단면이면 |x-ledX|, 2D 등고선이면
+// 실제 반경거리)에서의 기구물 하면 위치. bodyProfile 과 buildGeometry(plan.js 용) 가 공유.
+export function l4BotZAt(spec, active, depth, dist, halfP) {
+  const ledTop = spec.led.sizeZ;
+  const topZ = depth;
+  const A = active instanceof Set ? active : new Set(active);
+  const baseThk = A.has(1) ? (levelParams(spec, 1).thk ?? spec.body.baseThk) : spec.body.baseThk;
+  const minBody = Math.max(1, baseThk * 0.5);
+  const sp = levelParams(spec, 4);
+  const gap = clamp(sp.gap ?? 2, 0.5, Math.max(0.5, topZ - ledTop - minBody));
+  const flatHalf = (sp.flatX ?? 4) / 2;
+  if (dist <= flatHalf) return ledTop + gap;
+  const rel = Math.min(dist - flatHalf, halfP);
+  return Math.min(topZ - minBody, ledTop + gap + l4RiseAt(sp, rel));
+}
+
+// 기구물 단면(X 방향): 활성 형상 난이도 기준
+export function bodyProfile(spec, active, leds, depth, pitch, nx = 160) {
   const A = new Set(active ?? activeLevels(spec));
   const X = spec.target.xLen, Y = spec.target.yLen;
   const baseThk = A.has(1) ? (levelParams(spec, 1).thk ?? spec.body.baseThk) : spec.body.baseThk;
   const topZ = depth;
   const useL4 = A.has(4), useL3 = A.has(3) && !useL4;
 
+  const lxs = useL4 ? [...new Set(leds.map((l) => l.x))].sort((a, b) => a - b) : null;
+  const near = useL4 ? (lxs.length ? (x) => Math.min(...lxs.map((v) => Math.abs(x - v))) : () => 1e9) : null;
+  const halfP = useL4 ? Math.max(1, pitch / 2) : null;
+
   const pts = [];
   for (let i = 0; i < nx; i++) {
     const x = (i / (nx - 1)) * X;
-    const botZ = useL4 ? l4BotZAt(spec, depth, x, Y / 2)
+    const botZ = useL4 ? l4BotZAt(spec, A, depth, near(x), halfP)
       : useL3 ? l3BotZAt(spec, depth, x, Y / 2)
       : topZ - baseThk;
     pts.push({ x, botZ, topZ });
   }
   return pts;
-}
-
-// L3(균일두께 용기)의 실제 2D 두께 함수 — bodyProfile의 X단면 공식을 X·Y 모두 반영하도록
-// 일반화. directLit.js applyEdgeBoost()가 쓰는 "둥근 모서리 인지 가장자리 거리" 공식과
-// 반드시 같은 형태를 유지해야 광학 계산(edgeBoost)과 STEP 형상이 일치한다.
-export function l3BotZAt(spec, depth, x, y) {
-  const X = spec.target.xLen, Y = spec.target.yLen;
-  const sp3 = levelParams(spec, 3);
-  const baseThk = spec.levels?.[1]?.on ? (levelParams(spec, 1).thk ?? spec.body.baseThk) : spec.body.baseThk;
-  const minBody = Math.max(1, baseThk * 0.5);
-  const topZ = depth;
-  const wallThk = Math.max(minBody, Math.min(sp3.wallThk ?? 3, topZ - spec.led.sizeZ - 0.5));
-  const edgeAngleRad = clamp(sp3.edgeAngle ?? 45, 1, 89) * Math.PI / 180;
-  const tw = wallThk > minBody ? (wallThk - minBody) / Math.tan(edgeAngleRad) : 0;
-  const r = Math.max(0, Math.min(sp3.edgeR ?? 0, tw));
-
-  const dx = Math.min(x, X - x), dy = Math.min(y, Y - y);
-  const edgeDist = (dx < r && dy < r) ? r - Math.hypot(r - dx, r - dy) : Math.min(dx, dy);
-  const thk = edgeDist >= tw ? wallThk : Math.max(minBody, wallThk - Math.tan(edgeAngleRad) * (tw - edgeDist));
-  return topZ - thk;
 }

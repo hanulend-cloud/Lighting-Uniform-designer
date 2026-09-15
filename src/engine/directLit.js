@@ -268,7 +268,8 @@ export function computeField(spec, opt) {
 // 타겟 경계까지의 거리(둥근 모서리 cornerR 반영)가 tw 안쪽이면 경계에 가까울수록
 // (1+boostMax)까지 밝기를 가산한다. 1D(ny===1)에서는 Y 경계는 고려하지 않는다(정사각 셀
 // 유도 방식과 동일한 단순화).
-// L3(단일 테이퍼)와 L4(X·Y 독립 프로필)는 edgeBoost 모양이 달라 각자의 함수로 분기한다.
+// edgeBoost.kind==='axis'면 축별(X·Y 독립) 프로필 보정, 그 외(taper)는 단일 경사면 보정 —
+// 어느 레벨이 어느 모양을 만드는지는 levels.js 쪽 사정이라 여기선 모양으로만 분기한다.
 function applyEdgeBoost(f, nx, ny, x0, x1, y0, y1, X, Y, edge) {
   if (edge.kind === 'axis') applyAxisEdgeBoost(f, nx, ny, x0, x1, y0, y1, X, Y, edge);
   else applyTaperEdgeBoost(f, nx, ny, x0, x1, y0, y1, X, Y, edge);
@@ -304,8 +305,9 @@ function applyTaperEdgeBoost(f, nx, ny, x0, x1, y0, y1, X, Y, edge) {
 
 // pts=[중심,중간,가장자리] 두께(mm), halfLen=그 축의 중심→가장자리 거리(mm), dist=가장자리로부터의
 // 거리(0=가장자리..halfLen=중심). 반환값은 "중심 두께 대비 얼마나 깎였는지"의 비율(0=안 깎임,
-// 1=가장자리 두께까지 다 깎임) — L3의 t(=1-edgeDist/tw)와 같은 역할을 프로필 기반으로 일반화한 것.
-// 중간 지점이 중심보다 두꺼운 비단조 프로필도 허용하기 위해 살짝 초과(1.3)까지만 클램프한다.
+// 1=가장자리 두께까지 다 깎임) — applyTaperEdgeBoost의 t(=1-edgeDist/tw)와 같은 역할을 프로필
+// 기반으로 일반화한 것. 중간 지점이 중심보다 두꺼운 비단조 프로필도 허용하기 위해 살짝 초과
+// (1.3)까지만 클램프한다.
 function axisRamp(pts, halfLen, dist) {
   const f = halfLen > 0 ? Math.min(1, Math.max(0, dist / halfLen)) : 1;   // 0=가장자리,1=중심
   const thk = f <= 0.5 ? pts[2] + (pts[1] - pts[2]) * (f / 0.5) : pts[1] + (pts[0] - pts[1]) * ((f - 0.5) / 0.5);
@@ -313,7 +315,7 @@ function axisRamp(pts, halfLen, dist) {
   return Math.min(1.3, Math.max(0, (pts[0] - thk) / range));
 }
 
-// L4(X·Y 독립 두께 프로필)의 가장자리 보정 — applyTaperEdgeBoost와 같은 "평균 대비 절대량,
+// L3(X·Y 독립 두께 프로필)의 가장자리 보정 — applyTaperEdgeBoost와 같은 "평균 대비 절대량,
 // 기존 최댓값 캡" 원칙을 X·Y 두 축 각각의 램프 중 더 큰 쪽(Math.max)으로 적용한다.
 function applyAxisEdgeBoost(f, nx, ny, x0, x1, y0, y1, X, Y, edge) {
   const { x: ex, y: ey, cornerR } = edge;

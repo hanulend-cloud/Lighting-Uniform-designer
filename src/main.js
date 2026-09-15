@@ -12,7 +12,7 @@ import { drawHeatmap } from './ui/heatmap.js';
 import { buildLevels, updateLevels, renderVerdict, drawProfiles } from './ui/analysis.js';
 import { exportStep } from './export/step-ui.js';
 
-const LS_KEY = 'uds.spec.v10';
+const LS_KEY = 'uds.spec.v11';
 
 // 좌측: 가장 기본적인 설계 조건만 — 그룹(타겟/LED/목표)으로 묶어 표시
 // [path, label, unit, min, max, step]

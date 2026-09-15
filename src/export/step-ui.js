@@ -76,7 +76,7 @@ export function exportStep(spec, combo, geom, active) {
   worker.postMessage({
     spec: JSON.parse(JSON.stringify(spec)),
     combo: { depth: combo.depth, pitchX: combo.pitchX, pitchY: combo.pitchY, padX: combo.padX, padY: combo.padY },
-    geom: { leds: geom.leds, ledSize: geom.ledSize },
+    geom: { leds: geom.leds, ledSize: geom.ledSize, l4HalfP: geom.l4HalfP },
     active,
   });
 }
