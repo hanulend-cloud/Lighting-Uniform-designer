@@ -150,9 +150,9 @@ main { flex: 1 1 auto; min-height: 0; display: grid;
 .zone-hd.live { color: #1a8a52; }
 .zone-hd.final { color: #6a3fc0; }
 
-/* 3D 입체도 · 히트맵 · 프로파일 한 줄 배치 — 단면도(중복 정보) 제거로 각 패널이 세로로
-   더 커져 시인성이 좋아진다. */
-.live-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; grid-template-rows: 1fr;
+/* 3D 입체도 · 히트맵 두 줄 배치 — X·Y 프로파일 그래프(중복 정보, 실사용 우선순위 낮음)를 빼고
+   히트맵에 그만큼의 폭을 더 줘 조도/휘도 컨트롤과 그림이 좁아서 안 보이던 문제를 없앤다. */
+.live-grid { display: grid; grid-template-columns: 0.75fr 1.25fr; grid-template-rows: 1fr;
   gap: 8px; flex: 1 1 auto; min-height: 0; margin-top: 8px; }
 .final-row { display: flex; gap: 8px; flex: 1 1 auto; min-height: 0; margin-top: 8px; }
 .final-row > .pane { flex: 1 1 0; min-width: 0; }
@@ -181,14 +181,19 @@ main { flex: 1 1 auto; min-height: 0; display: grid;
 .zoom-modal-inner { width: min(94vw, 1500px); height: min(90vh, 950px); background: #ffffff;
   border-radius: 10px; display: flex; flex-direction: column; overflow: hidden; box-shadow: 0 10px 40px rgba(0,0,0,.35); }
 .zoom-modal-hd { flex: 0 0 auto; display: flex; align-items: center; justify-content: space-between;
-  padding: 10px 14px; border-bottom: 1px solid #e4e7ee; font-size: 14px; font-weight: 700; color: #1a2030; }
+  padding: 10px 14px; border-bottom: 1px solid #e4e7ee; font-size: 14px; font-weight: 700; color: #1a2030; gap: 10px; }
+.zoom-modal-ctl-slot { display: flex; align-items: center; gap: 6px; flex: 1 1 auto; justify-content: flex-end; }
+.zoom-modal-ctl-slot:empty { display: none; }
+/* 히트맵 확대(.heat-ctl)를 어두운 패널에서 밝은 모달 헤더로 옮길 때도 읽히도록 색만 보정 */
+.zoom-modal-ctl-slot .heat-eye-ctl input[type="number"] { background: #f2f4f8; color: #1a2030; border-color: #d3d8e0; }
 #zoom-close { background: #f2f4f8; color: #454e60; border: 1px solid #d3d8e0; border-radius: 6px;
   width: 28px; height: 28px; font-size: 13px; cursor: pointer; }
 #zoom-close:hover { background: #eef2fb; border-color: #b7c6ea; }
 .zoom-slot { flex: 1 1 auto; min-height: 0; display: flex; }
 .zoom-slot canvas { flex: 1 1 auto; width: 100%; height: 100%; display: block; min-height: 0; }
 
-.heat-bar { display: flex; align-items: center; justify-content: space-between; gap: 6px; padding: 6px 8px; }
+.heat-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between;
+  gap: 4px 6px; padding: 6px 8px; }
 .heat-bar > span:first-child { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .heat-ctl { display: flex; align-items: center; gap: 6px; font-weight: 400; flex: 0 0 auto; }
 .heat-ctl label { display: flex; align-items: center; gap: 3px; font-size: 12px; color: #6b7690; cursor: pointer; white-space: nowrap; }

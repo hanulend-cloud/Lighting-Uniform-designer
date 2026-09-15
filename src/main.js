@@ -9,7 +9,7 @@ import { drawSection } from './ui/section.js';
 import { drawIso } from './ui/iso.js';
 import { drawPlan } from './ui/plan.js';
 import { drawHeatmap } from './ui/heatmap.js';
-import { buildLevels, updateLevels, renderVerdict, drawProfiles } from './ui/analysis.js';
+import { buildLevels, updateLevels, renderVerdict } from './ui/analysis.js';
 import { exportStep } from './export/step-ui.js';
 
 const LS_KEY = 'uds.spec.v11';
@@ -187,14 +187,13 @@ function run() {
   drawIso($('#iso'), geom);
   drawPlan($('#plan'), geom);
   drawSection($('#section-mini'), geom, sizeVisuals(geom.view.x1 - geom.view.x0, '#section-mini'));
-  drawProfiles($('#anprofile'), resEval, spec.goal.U0);
 
   const solo = [2, 3, 4, 5].map((l) => soloRow(l));
   updateLevels($('#levels'), solo, activeSet, spec.goal.U0, onApplyAuto);
   renderVerdict($('#verdict'), combo, tags, spec.goal);
 
   last = { common, m, depth, view: geom.view, edgeMargin, fixture: geomFixture, center };
-  last.combo = combo; last.geom = geom; last.active = active; last.resEval = resEval;
+  last.combo = combo; last.geom = geom; last.active = active;
   if (autoHeat) renderHeat();
   else $('#pane-heat').classList.add('stale');
 
@@ -263,11 +262,10 @@ function sizeVisuals(worldW, ref) {
 const ZOOM_PANES = [
   { pane: '#pane-iso', canvas: '#iso', title: '3D 입체도', kind: 'iso' },
   { pane: '#pane-heat', canvas: '#heatmap', title: '조도 히트맵', kind: 'heat' },
-  { pane: '#pane-prof', canvas: '#anprofile', title: 'X·Y축 조도 프로파일', kind: 'profile' },
   { pane: '#pane-plan', canvas: '#plan', title: 'TOP VIEW · 평면 배치', kind: 'plan' },
   { pane: '#pane-section-mini', canvas: '#section-mini', title: 'SIDE VIEW · 단면 형상', kind: 'sectionMini' },
 ];
-let zoomState = null; // { canvas, originalParent, originalNext, kind }
+let zoomState = null; // { canvas, originalParent, originalNext, kind, ctl, ctlOriginalParent, ctlOriginalNext }
 
 function redrawZoomKind(kind, canvas) {
   if (!last) return;
@@ -278,7 +276,6 @@ function redrawZoomKind(kind, canvas) {
       break;
     case 'iso': drawIso(canvas, last.geom); break;
     case 'plan': drawPlan(canvas, last.geom); break;
-    case 'profile': if (last.resEval) drawProfiles(canvas, last.resEval, spec.goal.U0); break;
     case 'heat': if (lastHeat) drawHeatmap(canvas, lastHeat, 1e9, heatOpt()); break;
   }
 }
@@ -290,8 +287,16 @@ function openZoom(cfg) {
   const canvas = $(cfg.canvas);
   const modal = $('#zoom-modal');
   const slot = $('#zoom-slot');
-  zoomState = { canvas, originalParent: canvas.parentNode, originalNext: canvas.nextSibling, kind: cfg.kind };
+  // 히트맵은 조도/휘도 전환 컨트롤(.heat-ctl)도 캔버스와 같이 모달로 옮긴다 — 확대해서 볼 때
+  // 좁은 원래 패널에 갇혀 있던 단위 전환·거리/눈간격 입력을 그대로 쓸 수 있게 하기 위함
+  // (아이디가 그대로라 mount()에서 이미 걸어둔 이벤트 리스너가 그대로 작동한다).
+  const ctl = cfg.kind === 'heat' ? $('.heat-ctl') : null;
+  zoomState = {
+    canvas, originalParent: canvas.parentNode, originalNext: canvas.nextSibling, kind: cfg.kind,
+    ctl, ctlOriginalParent: ctl?.parentNode ?? null, ctlOriginalNext: ctl?.nextSibling ?? null,
+  };
   $('#zoom-title').textContent = cfg.title;
+  if (ctl) $('#zoom-modal-ctl-slot').appendChild(ctl);
   slot.appendChild(canvas);
   modal.hidden = false;
   // 레이아웃이 안정된 뒤(모달 크기 확정 후) 새 크기로 다시 그린다
@@ -300,8 +305,9 @@ function openZoom(cfg) {
 
 function closeZoom() {
   if (!zoomState) return;
-  const { canvas, originalParent, originalNext, kind } = zoomState;
+  const { canvas, originalParent, originalNext, kind, ctl, ctlOriginalParent, ctlOriginalNext } = zoomState;
   originalParent.insertBefore(canvas, originalNext);
+  if (ctl && ctlOriginalParent) ctlOriginalParent.insertBefore(ctl, ctlOriginalNext);
   $('#zoom-modal').hidden = true;
   zoomState = null;
   requestAnimationFrame(() => requestAnimationFrame(() => redrawZoomKind(kind, canvas)));
@@ -314,11 +320,11 @@ function setupZoom() {
     const btn = document.createElement('button');
     btn.className = 'pane-zoom-btn'; btn.title = '확대'; btn.textContent = '⤢';
     btn.addEventListener('click', (e) => { e.stopPropagation(); openZoom(cfg); });
-    // 제목줄(pane-title)이 있으면 그 줄의 컨트롤 옆에, 없으면(단면·아이소) 우상단 오버레이로
-    const ctl = pane.querySelector('.heat-ctl');
+    // 제목줄(pane-title)이 있으면 그 줄 맨 끝에, 없으면(단면·아이소) 우상단 오버레이로.
+    // 히트맵의 .heat-ctl(단위 선택 등)은 항목이 많아 그 안에 넣으면 좁은 패널에서 확대 버튼
+    // 자체가 밀려나 안 보이는 문제가 있었다 — title(space-between) 맨 끝에 따로 둔다.
     const title = pane.querySelector('.pane-title');
-    if (ctl) ctl.appendChild(btn);
-    else if (title) title.appendChild(btn);
+    if (title) title.appendChild(btn);
     else { btn.classList.add('overlay'); pane.appendChild(btn); }
   }
   $('#zoom-close').addEventListener('click', closeZoom);
