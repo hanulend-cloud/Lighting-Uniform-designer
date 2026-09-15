@@ -89,7 +89,7 @@ const _kcache = new Map();
 
 function kernelFor(spec, od, grid) {
   const key = [
-    od.toFixed(3), grid.NX, grid.NY, grid.stepX.toFixed(3),
+    od.toFixed(3), grid.NX, grid.NY, grid.stepX.toFixed(3), grid.stepY.toFixed(3),
     spec.led.beamX, spec.led.model, spec.led.fluxLm, spec.led.sizeX, spec.led.sizeY,
     spec.target.xLen, spec.target.yLen,
   ].join('|');
@@ -184,19 +184,21 @@ export function computeField(spec, opt) {
   const wx0 = -fpX, wx1 = X + fpX;
   const wy0 = -fpY, wy1 = Y + fpY;
 
-  // 소스 목록 (flat array: x, y, kind) — kind 0=LED, 1=X벽 이미지, 2=Y벽 이미지.
-  // 벽에서 3·od 보다 먼 LED 의 이미지는 생략: 벽 바로 앞 지점에서조차 상대 조도가
-  // (1/(1+(L/od)²))² < 1%, 거기에 수직입사 프레넬 5% 가 곱해져 0.05% 미만 — 대신 소스 수가
-  // 5배로 늘어 solve 전체가 수 배 느려지는 것(실측: 스모크 테스트 80s → 10분 초과)을 막는다.
-  const src = [];
+  // 직접광 소스(LED)와 벽 이미지(1=X벽, 2=Y벽)를 분리해서 담는다 — 벽 이미지는 아래에서 blur
+  // 전이 아니라 후에 따로 더한다(이유는 벽 이미지 합산부 주석 참고). 벽에서 3·od 보다 먼 LED 의
+  // 이미지는 생략: 벽 바로 앞 지점에서조차 상대 조도가 (1/(1+(L/od)²))² < 1%, 거기에 수직입사
+  // 프레넬 5% 가 곱해져 0.05% 미만 — 대신 소스 수가 5배로 늘어 solve 전체가 수 배 느려지는 것
+  // (실측: 스모크 테스트 80s → 10분 초과)을 막는다.
+  const ledSrc = [];
+  const wallSrc = [];
   const wCut = 3 * od;
   for (const l of leds) {
-    src.push(l.x, l.y, 0);
+    ledSrc.push(l.x, l.y);
     if (nBody > 1) {
-      if (l.x - wx0 < wCut) src.push(2 * wx0 - l.x, l.y, 1);
-      if (wx1 - l.x < wCut) src.push(2 * wx1 - l.x, l.y, 1);
-      if (l.y - wy0 < wCut) src.push(l.x, 2 * wy0 - l.y, 2);
-      if (wy1 - l.y < wCut) src.push(l.x, 2 * wy1 - l.y, 2);
+      if (l.x - wx0 < wCut) wallSrc.push(2 * wx0 - l.x, l.y, 1);
+      if (wx1 - l.x < wCut) wallSrc.push(2 * wx1 - l.x, l.y, 1);
+      if (l.y - wy0 < wCut) wallSrc.push(l.x, 2 * wy0 - l.y, 2);
+      if (wy1 - l.y < wCut) wallSrc.push(l.x, 2 * wy1 - l.y, 2);
     }
   }
   const od2 = od * od;
@@ -229,14 +231,8 @@ export function computeField(spec, opt) {
     for (let i = 0; i < ENX; i++) {
       const px = ex0 + i * stepX;
       let E = 0;
-      for (let s = 0; s < src.length; s += 3) {
-        const dx = px - src[s], dy = py - src[s + 1], kind = src[s + 2];
-        let w = 1;
-        if (kind !== 0) {
-          const lateral = kind === 1 ? Math.abs(dx) : Math.abs(dy);
-          w = fresnelR(lateral / Math.sqrt(dx * dx + dy * dy + od2), nBody);
-        }
-        E += w * sample(K, dx, dy);
+      for (let s = 0; s < ledSrc.length; s += 2) {
+        E += sample(K, px - ledSrc[s], py - ledSrc[s + 1]);
       }
       efield[j * ENX + i] = E;
     }
@@ -249,6 +245,37 @@ export function computeField(spec, opt) {
   for (let j = 0; j < NY; j++) {
     const srcRow = (j + exNY) * ENX + exNX;
     for (let i = 0; i < NX; i++) field[j * NX + i] = efield[srcRow + i];
+  }
+
+  // 측벽(캐비티 안쪽 = 투명 몸체 수지 벽, 공기→n 계면) 1-bounce 이미지는 직접광 blur 이후에
+  // 따로 더한다. 반사율은 상수가 아니라 프레넬: 이미지 소스→관찰점 광선이 벽면(수직면)에 닿는
+  // 입사각으로 매 샘플마다 계산(cosI = 벽 법선 방향 성분 / 광선 길이) — 옆으로 낮게 진행하는
+  // 빛(벽에 거의 수직 입사)은 5% 정도만 돌아오고, 위로 가파르게 진행하는 빛(스침각 입사)일수록
+  // 많이 돌아온다.
+  //
+  // blur 전에 다른 소스들과 합쳐서 함께 블러링하면(예전 구현), L3처럼 blur 자체가 굵은 조합에서
+  // 벽 근처의 좁은 반사 띠가 안쪽까지 넓게 퍼져 중심부보다 오히려 두드러지는 문제가 실측으로
+  // 확인됨 — LED-벽 간격이 좁은(LED 반폭만 띄우는 기본 배치) 곳에서 특히 심하다. 벽 반사는
+  // 매끈한 벽면의 정반사(specular) 근사라 L3/L2 의 "벌크 안에서 여러 번 갇혀 무작위로 퍼지는"
+  // 확산과는 물리적으로 다른 경로이므로, 같은 blur 커널을 씌우는 것 자체가 두 메커니즘을
+  // 섞는 것이었다. 이제 벽 반사는 직접광과 동일하게 그 자신의 1/r² 감쇠만 가지고 blur 없이
+  // 더해져, L1 단독처럼 blur=0 인 경우와 동일한 세기로 좁게만 기여한다(L1 이 이 보강에 의존하는
+  // 기존 테스트들과 결과가 같음을 확인).
+  if (wallSrc.length) {
+    for (let j = 0; j < NY; j++) {
+      const py = NY === 1 ? Y / 2 : y0 + (y1 - y0) * (j / (NY - 1));
+      for (let i = 0; i < NX; i++) {
+        const px = NX === 1 ? X / 2 : x0 + (x1 - x0) * (i / (NX - 1));
+        let E = 0;
+        for (let s = 0; s < wallSrc.length; s += 3) {
+          const dx = px - wallSrc[s], dy = py - wallSrc[s + 1], kind = wallSrc[s + 2];
+          const lateral = kind === 1 ? Math.abs(dx) : Math.abs(dy);
+          const w = fresnelR(lateral / Math.sqrt(dx * dx + dy * dy + od2), nBody);
+          E += w * sample(K, dx, dy);
+        }
+        field[j * NX + i] += E;
+      }
+    }
   }
 
   const T = fresnelT(spec.body?.n ?? 1) * (opt.transmit ?? 1);

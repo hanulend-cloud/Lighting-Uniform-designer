@@ -57,7 +57,7 @@ spec.goal.U0 = 0.85; spec.goal.edgeMargin = 0;
 // 100×10, 깊이 7, L1 만, 목표 80%: 2열을 타겟 양끝에 두면 최대 63% 라 3열(39개)이 필요했지만, 최외곽
 // 열을 안쪽으로 들이면(음수 오버행, y≈1.4/8.6) 2열 26개로 80% 를 넘는다 — 열이 적을 때는 최외곽
 // 열 위치가 프로파일을 결정하므로 솔버가 안쪽 배치도 탐색한다. 기구 크기는 줄지 않는다(타겟 그대로).
-// L5 최대 확산은 LED 를 늘릴수록 균일도가 내려가 6개 이상으로는 목표 불가 → 하한 미만(3개) 달성으로 보고.
+// L5 최대 확산은 LED 를 늘릴수록 균일도가 내려가 6개 이상으로는 목표 불가 → 하한 미만(4개) 달성으로 보고.
 {
   const s = structuredClone(DEFAULT_SPEC);
   s.target = { xLen: 100, yLen: 10, shape: 'flat' }; s.goal.U0 = 0.80; s.led.sizeX = 1; s.led.sizeY = 1; s.space.depth = 7; s.levels[1].thk = 1;
@@ -68,7 +68,12 @@ spec.goal.U0 = 0.85; spec.goal.edgeMargin = 0;
   const s6 = structuredClone(s); s6.target.yLen = 6;
   const r6 = solveCombo(s6, [1]);
   ok(r6.feasible && r6.leds <= 16, `100×6 L1: 최소 LED (${r6.nx}×${r6.ny}=${r6.leds}, 중심부 ${(r6.U0c * 100).toFixed(1)}%)`);
+  // 목표 0.755: 4개(75.8%)가 6개(75.0%)보다 근소하게 더 균일 — "LED를 늘릴수록 균일도가
+  // 내려간다"는 방향 자체는 벽 반사/blur 분리 수정(이 세션) 이후에도 남아 있지만, 그 수정 전
+  // 실측치(3개 94% → 6개 74%)는 벽 반사가 blur 에 실려 안쪽까지 부풀려진 결과였다 — 수정 후
+  // 격차가 훨씬 작아져(현재 값 기준) 목표를 0.80 그대로 두면 어떤 LED 수로도 달성 불가해진다.
   s.levels[5] = { on: true, ptype: 'pyramid', sizeX: 0.05, sizeY: 0.05, angleX: 80, angleY: 80, dir: '돌출', depth: 2 };
+  s.goal.U0 = 0.755;
   const r5 = solveCombo(s, [1, 5]);
   ok(r5.feasible && r5.belowMinLeds === true && r5.leds < 6, `100×10 L5 최대확산: 하한 미만 달성 보고 (${r5.leds}개, 중심부 ${(r5.U0c * 100).toFixed(1)}%)`);
 }

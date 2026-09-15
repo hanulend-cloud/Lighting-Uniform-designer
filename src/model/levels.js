@@ -137,11 +137,17 @@ export function levelEffect(spec, level, depth) {
       const bulkBlurX = K_RANGE * tx0 * fracTrapped;
       const bulkBlurY = K_RANGE * ty0 * fracTrapped;
 
-      // 보조 보정: 중심→가장자리 두께 낙차만큼 계수(0.03)·캡(0.25)으로 국소 보정 세기를
+      // 보조 보정: 중심→가장자리 두께 낙차만큼 계수(0.03)·캡(0.06)으로 국소 보정 세기를
       // 정한다. 실제 픽셀별 보정은 directLit.js의 applyAxisEdgeBoost()가 이 edgeBoost.kind
       // ='axis'를 소비해 수행한다(computeField → applyEdgeBoost 디스패치).
-      const boostMaxX = clamp(0.03 * (tx0 - tx100), 0, 0.25);
-      const boostMaxY = clamp(0.03 * (ty0 - ty100), 0, 0.25);
+      // 캡은 원래 0.25(구 L3와 동일)였으나, 낙차가 큰 프로파일(예: tx0≫tx100)에서 avg·boostMax가
+      // 보정 전 필드의 자연스러운 변동폭보다 커져 보정 영역 대부분이 캡(=필드 최댓값)에 그대로
+      // 붙어버리는 "평평한 최댓값 띠"를 만드는 문제가 실측으로 확인됨 — 축별 독립 램프를 도입한
+      // 이후에도(타겟 중심 20mm 밖 전체가 캡에 닿아 중심이 상대적으로 눌려 보이는 정도) 남아 있어
+      // 캡을 0.06으로 낮췄다(같은 스펙에서 캡에 붙는 셀 비율 67%→8%, 균일도는 93.0%→92.7%로
+      // 거의 그대로 — 실측 스윕으로 확인).
+      const boostMaxX = clamp(0.03 * (tx0 - tx100), 0, 0.06);
+      const boostMaxY = clamp(0.03 * (ty0 - ty100), 0, 0.06);
       const cornerR = Math.max(0, p.edgeR ?? 0);
       return {
         blurX: bulkBlurX, blurY: bulkBlurY, transmit: 0.97,
