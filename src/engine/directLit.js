@@ -296,56 +296,48 @@ export function computeField(spec, opt) {
 // 시야각(휘도) 렌더링 — computeField()의 조도(illuminance)는 "각 지점에 수평으로 놓인 센서가
 // 받는 광량"이라 관측 위치와 무관하다(램버시안 확산이면 휘도도 L=E/π로 각도 무관 — 그래서
 // 단순 /π 변환은 그림이 안 바뀐다). 실제 눈으로 볼 때는 다르다: 근접 시야(예: 30cm)에서는
-// (1) 시차(parallax) — 같은 LED라도 화면 어디서 보느냐에 따라 눈-LED 직선이 관찰면을 지나는
-// 위치(= LED가 "보이는" 자리)가 달라지고, (2) 코원 앵글(cone angle) — LED 자신의 지향각
-// (cos^m 분포) 때문에 눈이 그 LED의 광축에서 벗어난 각도로 볼수록 어둡게 보인다. 이 두 효과
-// 모두 "눈이 어디 있느냐"에 진짜로 좌우되므로, 조도 히트맵과는 다른 그림이 나온다.
+// 시차(parallax) — 같은 화면 위치라도 눈이 어디 있느냐에 따라, 그 눈-화면 직선을 LED 평면까지
+// 연장했을 때 실제로 "보게 되는" 자리가 달라진다.
 //
-// 계산: 각 LED를 눈 위치로 "찍어보고"(그 방향의 relIntensity(θ)·1/거리² = 그 LED가 눈에 보이는
-// 밝기), 눈→LED 직선이 관찰면을 지나는 자리에 그 밝기를 뿌린다(양선형 보간) — 이게 그 LED가
-// 화면에서 "보이는 위치"다. 양쪽 눈(eyeSpacingMm 간격) 각각 계산해 평균 — 양안 융합의 단순화.
-// 확산(레벨 blur)은 시점과 무관하게 동일한 물리(산란)이므로 그대로 적용. 벽 반사·L3/L4 edgeBoost
-// 는 이 렌더링에는 반영하지 않는다(범위 밖 — LED 직접광 + 확산만으로도 시차·코원앵글 차이를
-// 보여주는 핵심은 충분히 드러난다).
+// 처음 구현은 "LED 하나당 눈에 보이는 밝기 1개 값을 그 LED의 시차-투영 위치 한 점에만 찍었는데,
+// 이러면 LED 자신의 넓은 지향각(cos^m 분포, 예: 120°)이 실제로 만드는 근접장 확산(=조도장이
+// 매끈해 보이는 이유, buildKernel 이 이미 계산)을 통째로 버려서 화면 대부분이 0이고 LED 자리만
+// 점점이 찍힌 부자연스러운 그림이 나왔다(실측 지적). 올바른 방법은 그 반대 방향이다 — 각
+// 화면 픽셀(px,py)마다 "눈→그 픽셀 직선을 LED 평면까지 연장한 자리(lx,ly)"를 구해, 거기서
+// computeField()와 완전히 같은 근접장 커널(buildKernel/sample, LED들의 지향각 확산을 그대로
+// 반영)로 밝기를 구한다 — 조도장과 똑같이 매끈하게 퍼지되, 시차 때문에 "어디를 샘플링하는지"만
+// 눈 위치에 따라 달라진다(가장자리로 갈수록 더 바깥쪽 LED 평면 위치를 보게 됨 — 눈이 가까울수록
+// 이 어긋남이 커진다). 확산(레벨 blur)은 시점과 무관하게 동일한 물리(산란)이므로 그대로 적용.
+// 양쪽 눈(eyeSpacingMm 간격) 각각 계산해 평균 — 양안 융합의 단순화. 벽 반사·L3/L4 edgeBoost는
+// 이 렌더링에는 반영하지 않는다(범위 밖).
 export function computeCameraLuminance(spec, opt) {
   const X = spec.target.xLen, Y = spec.target.yLen;
   const od = (opt.depth ?? opt.od) + 0.1;
   const leds = opt.leds ?? ledPositions(spec, opt.pitchX, opt.pitchY ?? opt.pitchX, opt.decenterX ?? 0, opt.decenterY ?? 0, opt.padX ?? 0, opt.padY ?? 0);
-  const NX = opt.nx ?? 101;
-  const NY = opt.ny ?? Math.max(2, Math.round(NX * Y / X));
-  const x0 = 0, x1 = X, y0 = 0, y1 = Y;
-  const stepX = X / Math.max(1, NX - 1), stepY = Y / Math.max(1, NY - 1);
-
-  const model = spec.led.model;
-  const p = model === 'gaussian' ? { sigma: gaussianSigma(spec.led.beamX) } : { m: lambertianExponent(spec.led.beamX) };
-  const I0 = axialIntensityFromFlux(spec.led.fluxLm, model, p);
+  const dim = opt.dim || classifyDimension(spec, od);
+  const grid = makeGrid(spec, dim, opt.nx ?? 101, opt.ny);
+  const K = kernelFor(spec, od, grid);
+  const { NX, NY, x0, x1, y0, y1, stepX, stepY } = grid;
 
   const viewDist = Math.max(1, opt.viewDistanceMm ?? 300);
   const eyeSep = Math.max(0, opt.eyeSpacingMm ?? 100);
   const eyeZ = od + viewDist;
-  const s = viewDist / eyeZ;                      // 눈→LED 직선이 관찰면(z=od)을 지나는 비율
+  const t = eyeZ / viewDist;                      // 뒤로(LED 평면까지) 투영하는 배율 = 1+od/viewDist
   const cx = X / 2, cy = Y / 2;
   const eyes = eyeSep > 0 ? [{ x: cx - eyeSep / 2, y: cy }, { x: cx + eyeSep / 2, y: cy }] : [{ x: cx, y: cy }];
 
   const field = new Float64Array(NX * NY);
   for (const eye of eyes) {
     const eyeField = new Float64Array(NX * NY);
-    for (const l of leds) {
-      const dxE = eye.x - l.x, dyE = eye.y - l.y;
-      const dE2 = dxE * dxE + dyE * dyE + eyeZ * eyeZ;
-      const theta = Math.atan2(Math.sqrt(dxE * dxE + dyE * dyE), eyeZ);   // 코원앵글: LED 광축→눈 방향
-      const brightness = (I0 * relIntensity(model, theta, p)) / dE2;      // 이 LED가 눈에 보이는 밝기
-
-      const apX = eye.x + (l.x - eye.x) * s, apY = eye.y + (l.y - eye.y) * s;  // 시차: 화면상 위치
-      const fx = (apX - x0) / stepX, fy = (apY - y0) / stepY;
-      if (fx < -1 || fx > NX || fy < -1 || fy > NY) continue;
-      const i0x = Math.floor(fx), j0y = Math.floor(fy);
-      const tx = fx - i0x, ty = fy - j0y;
-      for (let dj = 0; dj <= 1; dj++) for (let di = 0; di <= 1; di++) {
-        const ii = i0x + di, jj = j0y + dj;
-        if (ii < 0 || ii >= NX || jj < 0 || jj >= NY) continue;
-        const w = (di ? tx : 1 - tx) * (dj ? ty : 1 - ty);
-        eyeField[jj * NX + ii] += brightness * w;
+    for (let j = 0; j < NY; j++) {
+      const py = NY === 1 ? Y / 2 : y0 + (y1 - y0) * (j / (NY - 1));
+      for (let i = 0; i < NX; i++) {
+        const px = x0 + (x1 - x0) * (i / (NX - 1));
+        // 눈→(px,py) 직선을 LED 평면(z=0)까지 연장한 위치 — 시차로 실제 보게 되는 자리.
+        const lx = eye.x + (px - eye.x) * t, ly = eye.y + (py - eye.y) * t;
+        let E = 0;
+        for (const l of leds) E += sample(K, lx - l.x, ly - l.y);
+        eyeField[j * NX + i] = E;
       }
     }
     blurSeparable(eyeField, NX, NY, (opt.blurMmX ?? 0) / stepX, (opt.blurMmY ?? 0) / stepY);
