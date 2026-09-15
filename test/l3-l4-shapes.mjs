@@ -81,6 +81,33 @@ function baseSpec() {
   check('모서리R 근처 두께가 유한하고 [1.5,11] 범위 안', Number.isFinite(thkCorner) && thkCorner >= 1.4 && thkCorner <= 11.1, `thk=${thkCorner}`);
 }
 
+// 회귀 방지: tx0≫tx100(큰 낙차)·edgeR이 클 때도 edgeBoost가 타겟 중심(안쪽 절반)까지 번지면
+// 안 된다 — 번지면 가장자리 전체가 평평한 캡(최댓값)까지 떠올라 오히려 중심이 가장 어두워
+// 보이는 역전(edge-bright/center-dark) 프로파일이 나온다(실측 스펙으로 확인된 회귀). 중심에서는
+// boost가 정확히 0이어야 하므로 boosted/unboosted 필드값이 같아야 하고, 그러면서도 가장자리
+// 근처에서는 여전히 보정이 살아 있어야(전면 무력화 아님) 한다.
+{
+  const spec = baseSpec();
+  spec.target.xLen = 100; spec.target.yLen = 100;
+  spec.levels[3] = { on: true, tx0: 9, tx50: 2, tx100: 1, ty0: 9, ty50: 2, ty100: 1, edgeR: 45 };
+  const eff = levelEffect(spec, 3, spec.space.depth);
+  const commonOpt = {
+    depth: spec.space.depth, pitchX: 25, pitchY: 25, nx: 41, ny: 41,
+    blurMmX: eff.blurX, blurMmY: eff.blurY, transmit: eff.transmit,
+  };
+  const boosted = computeField(spec, { ...commonOpt, edgeBoost: eff.edgeBoost });
+  const unboosted = computeField(spec, { ...commonOpt, edgeBoost: undefined });
+  const cx = Math.floor(41 / 2), cy = cx; // step=2.5mm → cx=20 → x=50(정확히 중심)
+  const centerIdx = cy * 41 + cx;
+  check('중심(안쪽 절반)에서는 edgeBoost=0 (boosted===unboosted)',
+    Math.abs(boosted.field[centerIdx] - unboosted.field[centerIdx]) < 1e-9,
+    `boosted=${boosted.field[centerIdx]} unboosted=${unboosted.field[centerIdx]}`);
+  const edgeIdx = cy * 41 + 0; // x=0 (가장자리)
+  check('가장자리에서는 여전히 edgeBoost>0 (전면 무력화 아님)',
+    boosted.field[edgeIdx] > unboosted.field[edgeIdx] + 1e-9,
+    `boosted=${boosted.field[edgeIdx]} unboosted=${unboosted.field[edgeIdx]}`);
+}
+
 // bodyProfile()의 L3 분기가 l3BotZAt(spec,depth,x,Y/2)와 정확히 일치하는지(비정사각 타겟에서
 // Y거리도 형상에 영향을 주는지) — 회귀 방지.
 {

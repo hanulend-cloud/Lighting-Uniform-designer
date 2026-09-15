@@ -304,23 +304,33 @@ function applyTaperEdgeBoost(f, nx, ny, x0, x1, y0, y1, X, Y, edge) {
 }
 
 // pts=[중심,중간,가장자리] 두께(mm), halfLen=그 축의 중심→가장자리 거리(mm), dist=가장자리로부터의
-// 거리(0=가장자리..halfLen=중심). 반환값은 "중심 두께 대비 얼마나 깎였는지"의 비율(0=안 깎임,
-// 1=가장자리 두께까지 다 깎임) — applyTaperEdgeBoost의 t(=1-edgeDist/tw)와 같은 역할을 프로필
-// 기반으로 일반화한 것. 중간 지점이 중심보다 두꺼운 비단조 프로필도 허용하기 위해 살짝 초과
-// (1.3)까지만 클램프한다.
+// 거리(0=가장자리..halfLen=중심). 반환값은 "가장자리 절반(중간→가장자리) 대비 얼마나 깎였는지"의
+// 비율(0=중간 지점 이상, 1=가장자리 두께까지 다 깎임)이며, 중심측 절반(중심→중간)은 항상 0이다.
+//
+// 중심→가장자리 전체 구간(옛 구현)을 기준으로 램프를 잡으면, 중심-가장자리 두께 낙차가 큰
+// 형상(예: tx0=9.7·tx100=1)에서 "깎인 비율"이 타겟 절반 내내 1에 가깝게 포화돼 applyTaperEdgeBoost
+// 와 달리 보정 영역이 실제 가장자리 테이퍼 폭(tw)에 갇히지 못하고 타겟 절반 전체로 번진다.
+// avg·boostMax(최대 25%)만큼 캡(=기존 최댓값)까지 끌어올리는 픽셀이 그만큼 넓어지면, 그 넓은
+// 영역이 전부 캡값 근처의 평평한 "밝은 테두리"가 되어 — 정작 caps에 못 미치는 중심부가 상대적
+// 으로 가장 어둡게 보이는 역전된(edge-bright/center-dark) 프로파일이 실측으로 확인됨. 옛 L3의
+// tw(가장자리 테이퍼 폭)처럼 보정을 "가장자리에 진짜 가까운 절반"으로만 국한해 이 역전을 막는다.
 function axisRamp(pts, halfLen, dist) {
   const f = halfLen > 0 ? Math.min(1, Math.max(0, dist / halfLen)) : 1;   // 0=가장자리,1=중심
-  const thk = f <= 0.5 ? pts[2] + (pts[1] - pts[2]) * (f / 0.5) : pts[1] + (pts[0] - pts[1]) * ((f - 0.5) / 0.5);
-  const range = Math.max(1e-6, pts[0] - pts[2]);
-  return Math.min(1.3, Math.max(0, (pts[0] - thk) / range));
+  if (f > 0.5) return 0;   // 중심측 절반은 "벌크" — 보정 없음
+  const thk = pts[2] + (pts[1] - pts[2]) * (f / 0.5);
+  const range = Math.max(1e-6, pts[1] - pts[2]);
+  return Math.min(1.3, Math.max(0, (pts[1] - thk) / range));
 }
 
 // L3(X·Y 독립 두께 프로필)의 가장자리 보정 — applyTaperEdgeBoost와 같은 "평균 대비 절대량,
-// 기존 최댓값 캡" 원칙을 X·Y 두 축 각각의 램프 중 더 큰 쪽(Math.max)으로 적용한다.
+// 기존 최댓값 캡" 원칙을 X·Y 두 축 각각의 램프 중 더 큰 쪽(Math.max)으로 적용한다. 두 축의
+// dx/dy를 그대로(독립적으로) 쓴다 — 모서리에서 하나의 블렌드 거리로 합쳐버리면(예전 구현) X·Y
+// 각자의 실제 거리와 무관하게 같은 값을 강제로 공유하게 돼, 이 레벨의 핵심 취지인 "축별 독립
+// 효과"가 모서리 부근에서 깨진다. 모서리 자체는 두 축 램프 중 큰 쪽(Math.max)이 자연스럽게
+// 반영하므로 별도 블렌드가 없어도 매끄럽다.
 function applyAxisEdgeBoost(f, nx, ny, x0, x1, y0, y1, X, Y, edge) {
-  const { x: ex, y: ey, cornerR } = edge;
+  const { x: ex, y: ey } = edge;
   const halfX = X / 2, halfY = Y / 2;
-  const r = Math.max(0, Math.min(cornerR ?? 0, Math.min(halfX, halfY)));
   let sum = 0, maxF = -Infinity;
   for (let k = 0; k < f.length; k++) { sum += f[k]; if (f[k] > maxF) maxF = f[k]; }
   const avg = f.length ? sum / f.length : 0;
@@ -330,10 +340,7 @@ function applyAxisEdgeBoost(f, nx, ny, x0, x1, y0, y1, X, Y, edge) {
     for (let i = 0; i < nx; i++) {
       const px = nx === 1 ? X / 2 : x0 + (x1 - x0) * (i / (nx - 1));
       const dx = Math.min(px, X - px);
-      const rounded = (dx < r && dy < r) ? r - Math.hypot(r - dx, r - dy) : null;
-      const dxEff = rounded == null ? dx : rounded;
-      const dyEff = rounded == null ? dy : rounded;
-      const boost = Math.max(ex.boostMax * axisRamp(ex.pts, halfX, dxEff), ey.boostMax * axisRamp(ey.pts, halfY, dyEff));
+      const boost = Math.max(ex.boostMax * axisRamp(ex.pts, halfX, dx), ey.boostMax * axisRamp(ey.pts, halfY, dy));
       if (boost > 0) {
         const idx = j * nx + i;
         f[idx] = Math.min(maxF, f[idx] + avg * boost);
