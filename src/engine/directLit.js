@@ -418,7 +418,7 @@ export function computeCameraLuminance(spec, opt) {
   const T = fresnelT(spec.body?.n ?? 1) * (opt.transmit ?? 1);
   if (T !== 1) for (let k = 0; k < field.length; k++) field[k] *= T;
 
-  return { field, nx: NX, ny: NY, stepX, stepY, leds, depth: opt.depth ?? opt.od,
+  return { field, nx: NX, ny: NY, stepX, stepY, dim, leds, depth: opt.depth ?? opt.od,
            extent: { x0, x1, y0, y1 }, coneDeg, viewDistanceMm: viewDist };
 }
 

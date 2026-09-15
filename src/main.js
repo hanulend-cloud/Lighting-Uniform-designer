@@ -33,6 +33,7 @@ const CONTROL_GROUPS = [
     ['goal.U0', '균일도', '', 0.30, 0.98, 0.01],
     ['goal.centerArea', '중심부 면적비', '', 0.50, 1.00, 0.01],
     ['goal.edgeMargin', '판정제외 마진', '', 0, 0.30, 0.01],
+    { path: 'goal.metric', label: '판정기준', options: [['illum', '조도'], ['lumin', '휘도']] },
   ] },
   { name: '기구', items: [
     ['levels.1.thk', '몸체두께', 'mm', 0.5, 20, 0.5],
@@ -59,22 +60,40 @@ function buildForm() {
     const grp = document.createElement('div'); grp.className = 'ctl-group';
     const gl = document.createElement('span'); gl.className = 'grp-label'; gl.textContent = name;
     grp.appendChild(gl);
-    for (const [path, label, unit, min, max, step] of items) {
+    for (const item of items) {
       const row = document.createElement('label'); row.className = 'ctl';
-      row.title = `범위 ${min}~${max}${unit ? unit : ''}`;
-      const span = document.createElement('span'); span.textContent = label;
-      const input = document.createElement('input');
-      input.type = 'number'; input.min = min; input.max = max; input.step = step;
-      input.value = get(spec, path) ?? '';
-      input.dataset.path = path;
-      input.addEventListener('input', () => {
-        const v = parseFloat(input.value);
-        if (Number.isNaN(v)) return;
-        set(spec, path, v); schedule();
-      });
-      row.appendChild(span);
-      if (unit) { const u = document.createElement('i'); u.textContent = unit; row.appendChild(u); }
-      row.appendChild(input);
+      if (Array.isArray(item)) {
+        const [path, label, unit, min, max, step] = item;
+        row.title = `범위 ${min}~${max}${unit ? unit : ''}`;
+        const span = document.createElement('span'); span.textContent = label;
+        const input = document.createElement('input');
+        input.type = 'number'; input.min = min; input.max = max; input.step = step;
+        input.value = get(spec, path) ?? '';
+        input.dataset.path = path;
+        input.addEventListener('input', () => {
+          const v = parseFloat(input.value);
+          if (Number.isNaN(v)) return;
+          set(spec, path, v); schedule();
+        });
+        row.appendChild(span);
+        if (unit) { const u = document.createElement('i'); u.textContent = unit; row.appendChild(u); }
+        row.appendChild(input);
+      } else {
+        // 드롭다운(select) 항목 — 예: 판정기준(조도/휘도). 숫자 범위 입력과 달리 옵션 목록만 있음.
+        const { path, label, options } = item;
+        row.title = label;
+        const span = document.createElement('span'); span.textContent = label;
+        const sel = document.createElement('select');
+        sel.dataset.path = path;
+        for (const [val, text] of options) {
+          const o = document.createElement('option'); o.value = val; o.textContent = text;
+          sel.appendChild(o);
+        }
+        sel.value = get(spec, path) ?? options[0][0];
+        sel.addEventListener('change', () => { set(spec, path, sel.value); schedule(); });
+        row.appendChild(span);
+        row.appendChild(sel);
+      }
       grp.appendChild(row);
     }
     form.appendChild(grp);

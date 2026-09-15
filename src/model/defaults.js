@@ -11,7 +11,7 @@ export const DEFAULT_SPEC = {
   // edgeMargin: 균일도 판정에서 제외할 가장자리 비율(축별). 0 = 타겟 전체에서 균일도를 확보한다
   // (기본). 베젤이 타겟 가장자리를 가리는 제품이면 그 폭만큼 올려 판정을 완화할 수 있다.
   // centerArea: 균일도 1차 판정 영역 = 타겟 면적의 중심 이 비율(0.95 → 각 변 1.27% 씩 안쪽).
-  goal:    { U0: 0.80, cvMax: 0.15, gradMax: 0.20, edgeMargin: 0, centerArea: 0.95 },
+  goal:    { U0: 0.80, cvMax: 0.15, gradMax: 0.20, edgeMargin: 0, centerArea: 0.95, metric: 'illum' }, // metric: 'illum'(조도)|'lumin'(휘도) — 구조 최적화·판정 기준
   led: {
     sizeX: 2, sizeY: 2, sizeZ: 0.5,
     beamX: 120, beamY: 120,

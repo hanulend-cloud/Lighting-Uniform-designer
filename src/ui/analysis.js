@@ -128,6 +128,13 @@ export function renderVerdict(el, combo, tags, goalSpec) {
   const cvW = combo.cv > goalSpec.cvMax ? ' ⚠' : '';
   const gW = combo.grad > goalSpec.gradMax ? ' ⚠' : '';
   const T = (combo.transmit * 100).toFixed(0);
+  // 판정기준 배지 — '휘도' 선택 시에도 확산재(blur>0)가 있으면 램버시안 근사로 휘도=조도(패턴
+  // 동일)라 조도 계산을 그대로 재사용한다(directLit.computeCameraLuminance 주석 참고). 확산재가
+  // 없는데 '휘도'를 선택하면 실제로 LED 이미지(직접 시야) 기준으로 판정한 것이므로 구분해 보여준다.
+  const diffusing = (combo.blurX ?? 0) > 0 || (combo.blurY ?? 0) > 0;
+  const metricNote = goalSpec.metric === 'lumin'
+    ? (diffusing ? ' <span class="mut">(휘도 기준 · 확산재로 조도=휘도 패턴)</span>' : ' <span class="mut">(휘도 기준 · 직접 시야)</span>')
+    : '';
   const ledSub = met ? `<span class="mut">(${combo.nx}×${combo.ny})</span>` : '<span class="mut">(최소 피치로도 부족)</span>';
   const insetNote = (combo.padX < -0.001 || combo.padY < -0.001)
     ? `<div class="v-sub">최외곽 LED 열 안쪽 배치: X ${combo.padX < 0 ? (-combo.padX).toFixed(1) : 0} / Y ${combo.padY < 0 ? (-combo.padY).toFixed(1) : 0} mm (타겟 경계에서)</div>` : '';
@@ -137,7 +144,7 @@ export function renderVerdict(el, combo, tags, goalSpec) {
   // 최종(조합) 결과 — LED 개수 · Pitch X·Y · 균일도를 같은 비중의 카드 3개로 나란히 표시
   // ("공학적 OUT": 라벨+수치가 명확히 구분되는 스펙시트 형태).
   el.innerHTML = `
-    <div class="v-hd">적용 조합: <b>${name}</b> · 목표 균일도(min/max, 중심부 우선) ${(combo.target * 100).toFixed(0)}%
+    <div class="v-hd">적용 조합: <b>${name}</b> · 목표 균일도(min/max, 중심부 우선) ${(combo.target * 100).toFixed(0)}%${metricNote}
       <span class="v-status ${met ? 'ok' : 'ng'}">${statusText}</span></div>
     <div class="v-stats">
       <div class="v-stat-box"><span class="lbl">LED 개수</span><span class="val">${combo.leds}<i>개</i></span>${ledSub}</div>

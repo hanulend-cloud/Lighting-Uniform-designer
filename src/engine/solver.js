@@ -5,7 +5,7 @@
 // solveSolo : 저해상 — 난이도별 행 미리보기용 (5개를 매번 재계산해도 빠르게)
 // solveCombo: 고해상 — 실제 적용될 최종안
 
-import { computeField, evalGrid, ledCounts } from './directLit.js';
+import { computeField, computeCameraLuminance, evalGrid, ledCounts } from './directLit.js';
 import { metrics, localGradient, centerMetrics, centerZoneFrac, RIM_TOL } from './uniformity.js';
 import { combinedEffect, levelEffect, levelParams, LEVEL_SCHEMA, extremeDiffusionParams, lerpParams, effectiveEdgeMargin } from '../model/levels.js';
 
@@ -91,16 +91,34 @@ function searchSparsest(evalAt, target, pMin, pMax, seed, need = 2, iters = 8) {
   return done(bestP, false);
 }
 
+// 판정 기준(spec.goal.metric)이 'lumin'(휘도)이면: 확산재가 있는 조합(blur>0)은 램버시안 근사로
+// 휘도 ∝ 조도(L=E/π, 각도 무관, directLit.computeCameraLuminance 주석 참고)라 조도장을 그대로
+// 써도 균일도 수치(비율)가 완전히 같다 — 그래서 이 경우엔 계산량이 훨씬 싼 computeField 를 그대로
+// 쓴다. 확산재가 없는 조합(blur=0, 예: L1만 또는 L3/L4 형상만)은 그 반대로, 휘도가 조도와 근본적으로
+// 다른 물리량(직접 시야 — LED 칩 이미지)이라 실제로 computeCameraLuminance 를 평가해야 한다 —
+// 그 경우 "구조(피치·깊이)만으로 휘도 균일도를 확보"하는 게 물리적으로 거의 불가능함을(칩 크기
+// 스케일까지 촘촘해지지 않는 한) 탐색이 정직하게 보여준다(= 확산재가 필요하다는 결론).
+// coneDeg 는 히트맵 기본값과 맞춘 고정값 — 판정용이라 과도한 자유도를 늘리지 않는다.
+const LUMIN_CONE_DEG = 10;
 function evalField(spec, eff, pX, pY, gridN = GRID, padX = 0, padY = 0) {
   const g = evalGrid(spec, gridN);
-  const f = computeField(spec, {
-    depth: spec.space.depth, pitchX: pX, pitchY: pY, nx: g.nx, ny: g.ny,
-    blurMmX: eff.blurX, blurMmY: eff.blurY, transmit: eff.transmit,
-    decenterX: eff.decenterX ?? 0, decenterY: eff.decenterY ?? 0, edgeBoost: eff.edgeBoost,
-    padX, padY,
-  });
+  const usingCamera = spec.goal.metric === 'lumin' && !((eff.blurX ?? 0) > 0 || (eff.blurY ?? 0) > 0);
+  const f = usingCamera
+    ? computeCameraLuminance(spec, {
+        depth: spec.space.depth, pitchX: pX, pitchY: pY, nx: g.nx, ny: g.ny,
+        transmit: eff.transmit, decenterX: eff.decenterX ?? 0, decenterY: eff.decenterY ?? 0,
+        padX, padY, coneDeg: LUMIN_CONE_DEG,
+      })
+    : computeField(spec, {
+        depth: spec.space.depth, pitchX: pX, pitchY: pY, nx: g.nx, ny: g.ny,
+        blurMmX: eff.blurX, blurMmY: eff.blurY, transmit: eff.transmit,
+        decenterX: eff.decenterX ?? 0, decenterY: eff.decenterY ?? 0, edgeBoost: eff.edgeBoost,
+        padX, padY,
+      });
   // L3(균일두께 용기)가 켜져 있으면 그 보강 폭만큼 판정 마진을 줄여, 보강 효과가 실제로 반영되게 함.
-  const edge = effectiveEdgeMargin(spec.goal.edgeMargin ?? 0, eff.edgeBoost);
+  // computeCameraLuminance 는 edgeBoost 를 반영하지 않으므로(범위 밖, directLit.js 주석 참고) 그
+  // 경로에선 마진을 깎지 않는다 — 안 그러면 실제로는 없는 보강 효과가 있다고 가정하게 된다.
+  const edge = usingCamera ? (spec.goal.edgeMargin ?? 0) : effectiveEdgeMargin(spec.goal.edgeMargin ?? 0, eff.edgeBoost);
   const m = metrics(f.field, f.nx, f.ny, edge);
   // 중심부(타겟 면적의 중심 centerArea; 베젤 마진이 더 크면 그것) — 1차 판정 기준
   const cz = centerZoneFrac(spec.goal.centerArea ?? 0.95);
