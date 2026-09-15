@@ -84,6 +84,25 @@ function thicknessBounds(spec, d) {
   return { minThk, maxThk };
 }
 
+// 경사면(테이퍼) 재방향으로 실제 "추가로" 빠져나가는 광량 비율 — L3(edgeBoost.kind='axis')와
+// L4(edgeBoost.kind='radial')가 공유하는 물리량. 평탄면 기준 임계각(critAngle, n으로 결정)
+// 밖으로 나가는 광선은 LED 각분포(Lambertian cos^m, m=lambertianExponent(beamX))를 임계각까지
+// 적분한 누적 플럭스 비율로 정의되는 fracTrapped(=cos^(m+2)(critAngle), K_RANGE 유도와 동일
+// 지수)만큼 평탄면에서는 갇힌다. 경사각(slopeAngleRad)만큼 국소 법선이 기울어진 지점에서는
+// 유효 입사각이 그만큼 줄어, (critAngle+slopeAngleRad)까지의 광선이 실제로 빠져나간다 —
+// 그 차이(fracTrapped - 그 지점에서도 여전히 갇히는 비율)가 "경사면 덕분에 추가로 빠져나가는"
+// 비율이다. slopeAngleRad=0(평탄면)이면 0, slopeAngleRad≥(90°-critAngle)이면 fracTrapped
+// 전체(갇혔던 광량을 전부 회수)로 자연스럽게 포화한다 — 임의 상한(예전 0.06 캡)이 필요 없다.
+function edgeEscapeBoost(spec, slopeAngleRad) {
+  const n = spec.body?.n ?? 1.59;
+  const critAngle = n > 1 ? Math.asin(Math.min(1, 1 / n)) : Math.PI / 2;
+  const mLamb = lambertianExponent(spec.led?.beamX ?? 120);
+  const fracTrapped = clamp(Math.pow(Math.cos(critAngle), mLamb + 2), 0, 0.9);
+  const reach = Math.min(Math.PI / 2, critAngle + Math.max(0, slopeAngleRad));
+  const stillTrapped = Math.pow(Math.max(0, Math.cos(reach)), mLamb + 2);
+  return Math.max(0, fracTrapped - stillTrapped);
+}
+
 export function levelParams(spec, level) {
   return { ...LEVEL_DEFAULTS[level], ...(spec?.levels?.[level] || {}) };
 }
@@ -138,17 +157,15 @@ export function levelEffect(spec, level, depth) {
       const tx0 = clampThk(p.tx0, 3), tx50 = clampThk(p.tx50, 2), tx100 = clampThk(p.tx100, 1);
       const ty0 = clampThk(p.ty0, 3), ty50 = clampThk(p.ty50, 2), ty100 = clampThk(p.ty100, 1);
 
-      // 보조 보정: 중심→가장자리 두께 낙차만큼 계수(0.03)·캡(0.06)으로 국소 보정 세기를
-      // 정한다. 실제 픽셀별 보정은 directLit.js의 applyAxisEdgeBoost()가 이 edgeBoost.kind
-      // ='axis'를 소비해 수행한다(computeField → applyEdgeBoost 디스패치).
-      // 캡은 원래 0.25(구 L3와 동일)였으나, 낙차가 큰 프로파일(예: tx0≫tx100)에서 avg·boostMax가
-      // 보정 전 필드의 자연스러운 변동폭보다 커져 보정 영역 대부분이 캡(=필드 최댓값)에 그대로
-      // 붙어버리는 "평평한 최댓값 띠"를 만드는 문제가 실측으로 확인됨 — 축별 독립 램프를 도입한
-      // 이후에도(타겟 중심 20mm 밖 전체가 캡에 닿아 중심이 상대적으로 눌려 보이는 정도) 남아 있어
-      // 캡을 0.06으로 낮췄다(같은 스펙에서 캡에 붙는 셀 비율 67%→8%, 균일도는 93.0%→92.7%로
-      // 거의 그대로 — 실측 스윕으로 확인).
-      const boostMaxX = clamp(0.03 * (tx0 - tx100), 0, 0.06);
-      const boostMaxY = clamp(0.03 * (ty0 - ty100), 0, 0.06);
+      // 보조 보정 세기 = edgeEscapeBoost(경사각) — 그 축의 바깥 절반(중간→가장자리) 구간의
+      // 실제 경사각(두께 낙차/그 구간 거리)에서 얼마나 더 빠져나가는지를 물리량으로 구한다.
+      // 실제 픽셀별 보정은 directLit.js의 applyAxisEdgeBoost()가 이 edgeBoost.kind='axis'를
+      // 소비해 수행한다(computeField → applyEdgeBoost 디스패치).
+      const runX = Math.max(1e-6, (spec.target?.xLen ?? 100) / 4), runY = Math.max(1e-6, (spec.target?.yLen ?? 100) / 4);
+      const slopeX = Math.atan(Math.abs(tx50 - tx100) / runX);
+      const slopeY = Math.atan(Math.abs(ty50 - ty100) / runY);
+      const boostMaxX = edgeEscapeBoost(spec, slopeX);
+      const boostMaxY = edgeEscapeBoost(spec, slopeY);
       const cornerR = Math.max(0, p.edgeR ?? 0);
       return {
         blurX: 0, blurY: 0, transmit: 0.97,
@@ -172,10 +189,11 @@ export function levelEffect(spec, level, depth) {
       // LED 중심 기준 반경 보정으로 대체한다 — flat 패드 안쪽은 보정 0, 다음 LED와의 중간
       // 지점(가장 얇아지는 곳)에서 최대. 실제 픽셀별 보정은 directLit.js의
       // applyRadialEdgeBoost()가 (LED 배치·피치를 아는 computeField 시점에) 수행한다.
-      // 세기는 L3와 동일 계수(0.03)·캡(0.06) — rise(두께 낙차, mm)가 곧 L3의 tx0-tx100에 해당.
+      // 세기는 L3와 동일한 edgeEscapeBoost(경사각) — angleX가 이 rise 구간의 실제 경사각이다.
       const rise = Math.max(0, p.rise ?? 8);
       const flatHalf = Math.max(0, (p.flatX ?? 4) / 2);
-      const boostMax = clamp(0.03 * rise, 0, 0.06);
+      const angleXRad = clamp(p.angleX ?? 45, 1, 85) * Math.PI / 180;
+      const boostMax = rise > 0 ? edgeEscapeBoost(spec, angleXRad) : 0;
       return {
         blurX: 0, blurY: 0, transmit: 0.95,
         edgeBoost: {
@@ -189,15 +207,23 @@ export function levelEffect(spec, level, depth) {
     }
 
     case 5: {
+      // 미세패턴(피라미드/반구/프리즘)은 L3/L4와 달리 하단 전면을 조밀하게(pitch=크기) 덮는
+      // 실제 굴절면이라, 통과하는 모든 광선이 그 면의 경사(각도)만큼 편향된다 — 국소 taper가
+      // 아니라 면적 전체 blur로 표현하는 게 타당하다. cone(면당 굴절 편향각)은 thin-prism
+      // 근사 Δ≈(n-1)·θ(n=1.59 기준 계수 0.0103·θ_deg)와 각도 전 구간에서 정확히 1.26배
+      // 비율로 일치해(실측 검증) 임의값이 아니다 — 1.26배는 LED 각분포상 완전히 수직으로
+      // 들어오지 않는 광선의 추가 편향을 보수적으로 반영한 여유분. cone·d(면당 편향각×
+      // 관찰면까지 거리)가 곧 타겟면에서의 퍼짐(mm)이다. thin-prism 근사는 각도가 클수록
+      // (전반사에 가까워지며) 무너지므로 1.3rad(≈74.5°)에서 클램프.
+      // (이전 버전엔 패턴 "깊이"가 추가로 0.3~2.5배를 곱했는데, 같은 경사각이면 피라미드가
+      // 높든 낮든 개별 면의 굴절각은 동일해 물리적 근거가 없었다 — 제거.)
       const typeK = { pyramid: 1.0, dome: 0.78, prism: 0.55 }[p.ptype] ?? 0.8;
-      const depthMag = p.depth ?? 0.2;
-      const depthK = clamp(depthMag / 0.3, 0.3, 2.5);      // 깊이가 클수록(기준 0.3mm) 산란 강화
       const dirK = p.dir === '오목' ? 0.85 : 1.0;           // 오목(recess)은 빛이 덜 갇혀 산란이 소폭 약함
       // 돌기 크기 = 배열 pitch (맞닿게). 미세할수록 산란이 더 균질 → 약간 강화
       const f = (ang, sz) => {
         const cone = clamp(0.013 * (ang ?? 40) * typeK, 0, 1.3);   // facet 굴절 산란 반각
         const fine = 1 + 0.4 * clamp(1 - (sz ?? 0.3), 0, 1);
-        return cone * d * fine * depthK * dirK;
+        return cone * d * fine * dirK;
       };
       return { blurX: f(p.angleX, p.sizeX), blurY: f(p.angleY, p.sizeY), transmit: 1 - 0.09 * typeK };
     }

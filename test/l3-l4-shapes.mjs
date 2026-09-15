@@ -28,14 +28,25 @@ function baseSpec() {
   check('L3 edgeBoost.hasBoost=true', e.edgeBoost.hasBoost === true);
 }
 
-// 경사(중간→가장자리) 낙차가 큰 축일수록 그 축의 국소 보정(boostMax)이 커야 한다 — 형상(테이퍼)
-// 굴절만이 유효한 산란원이라는 새 모델에서, 축별 독립 효과는 이제 boostMax를 통해서만 나타난다.
+// 경사(중간→가장자리 구간의 실제 경사각)가 가파른 축일수록 그 축의 국소 보정(boostMax)이
+// 커야 한다(edgeEscapeBoost는 경사각의 단조증가 함수) — 형상(테이퍼) 굴절만이 유효한 산란원
+// 이라는 새 모델에서, 축별 독립 효과는 이제 boostMax를 통해서만 나타난다. 물리적 상한은
+// fracTrapped(해당 스펙의 n·LED 빔각으로 정해지는 값)를 넘지 않아야 한다(임의 캡 아님).
 {
   const spec = baseSpec();
   spec.levels[3] = { on: true, tx0: 4, tx50: 3.5, tx100: 3, ty0: 4, ty50: 3.75, ty100: 3.5, edgeR: 0 };
   const e = levelEffect(spec, 3, spec.space.depth);
-  check('X낙차(4→3=1) > Y낙차(4→3.5=0.5) → boostMaxX > boostMaxY (둘 다 캡 0.06 아래)',
-    e.edgeBoost.x.boostMax > e.edgeBoost.y.boostMax && e.edgeBoost.x.boostMax < 0.06,
+  check('X낙차(4→3=1) > Y낙차(4→3.5=0.5) → boostMaxX > boostMaxY',
+    e.edgeBoost.x.boostMax > e.edgeBoost.y.boostMax && e.edgeBoost.x.boostMax > 0 && e.edgeBoost.x.boostMax < 0.9,
+    `x=${e.edgeBoost.x.boostMax} y=${e.edgeBoost.y.boostMax}`);
+}
+
+// 경사각이 0(중간=가장자리 두께, 평탄)이면 보정도 0이어야 한다 — edgeEscapeBoost(0)=0.
+{
+  const spec = baseSpec();
+  spec.levels[3] = { on: true, tx0: 4, tx50: 3, tx100: 3, ty0: 4, ty50: 3, ty100: 3, edgeR: 0 };
+  const e = levelEffect(spec, 3, spec.space.depth);
+  check('경사각 0 → boostMax=0', e.edgeBoost.x.boostMax === 0 && e.edgeBoost.y.boostMax === 0,
     `x=${e.edgeBoost.x.boostMax} y=${e.edgeBoost.y.boostMax}`);
 }
 
@@ -141,23 +152,37 @@ function baseSpec() {
 // ---- L4(형상·정밀, 복원) ----
 
 // L3와 같은 원칙: 확산재 없는 투명 소재는 벌크 blur를 만들지 않는다(blurX=blurY=0) — L4도
-// 유일한 유효 보정은 LED 중심 기준 반경 edgeBoost뿐이다. rise가 커질수록(더 많이 얇아질수록)
-// 그 보정(boostMax)은 커져야 한다(단, L3와 동일 캡 0.06).
+// 유일한 유효 보정은 LED 중심 기준 반경 edgeBoost뿐이다. 세기(boostMax)는 rise 구간의 실제
+// 경사각인 angleX가 결정한다(edgeEscapeBoost, L3와 동일 물리) — rise는 "경사가 존재하는지"
+// (0이면 flat, 보정 없음)만 결정하고 세기 자체는 좌우하지 않는다(경사각이 같으면 rise 크기와
+// 무관하게 개별 면의 굴절각은 동일).
 {
   const spec = baseSpec();
-  spec.levels[4] = { on: true, gap: 2, flatX: 4, flatY: 4, angleX: 45, angleY: 45, rise: 1, radiusX: 0, radiusY: 0 };
-  const eBase = levelEffect(spec, 4, spec.space.depth);
+  spec.levels[4] = { on: true, gap: 2, flatX: 4, flatY: 4, angleX: 45, angleY: 45, rise: 0, radiusX: 0, radiusY: 0 };
+  const eFlat = levelEffect(spec, 4, spec.space.depth);
+  check('rise=0(평탄) → boostMax=0', eFlat.edgeBoost.boostMax === 0, `boostMax=${eFlat.edgeBoost.boostMax}`);
+  check('rise=0 → hasBoost=false', eFlat.edgeBoost.hasBoost === false);
+
+  const spec2 = baseSpec();
+  spec2.levels[4] = { on: true, gap: 2, flatX: 4, flatY: 4, angleX: 45, angleY: 45, rise: 8, radiusX: 0, radiusY: 0 };
+  const eBase = levelEffect(spec2, 4, spec.space.depth);
   check('L4는 벌크 blur가 없음(blurX=0)', eBase.blurX === 0, `blurX=${eBase.blurX}`);
   check('L4는 벌크 blur가 없음(blurY=0)', eBase.blurY === 0, `blurY=${eBase.blurY}`);
   check('L4 edgeBoost.kind === "radial"', eBase.edgeBoost.kind === 'radial');
-  check('L4 edgeBoost.hasBoost=true', eBase.edgeBoost.hasBoost === true);
+  check('rise>0 → boostMax>0', eBase.edgeBoost.boostMax > 0, `boostMax=${eBase.edgeBoost.boostMax}`);
 
-  const spec2 = baseSpec();
-  spec2.levels[4] = { on: true, gap: 2, flatX: 4, flatY: 4, angleX: 45, angleY: 45, rise: 1.5, radiusX: 0, radiusY: 0 };
-  const eRise = levelEffect(spec2, 4, spec.space.depth);
-  check('rise↑ → boostMax↑ (단조, 캡 아래)',
-    eRise.edgeBoost.boostMax > eBase.edgeBoost.boostMax && eRise.edgeBoost.boostMax < 0.06,
-    `base=${eBase.edgeBoost.boostMax} rise1.5=${eRise.edgeBoost.boostMax}`);
+  const spec3 = baseSpec();
+  spec3.levels[4] = { on: true, gap: 2, flatX: 4, flatY: 4, angleX: 45, angleY: 45, rise: 20, radiusX: 0, radiusY: 0 };
+  const eBigRise = levelEffect(spec3, 4, spec.space.depth);
+  check('같은 각도면 rise 크기와 무관하게 boostMax 동일(세기는 각도가 결정)',
+    Math.abs(eBigRise.edgeBoost.boostMax - eBase.edgeBoost.boostMax) < 1e-9,
+    `rise8=${eBase.edgeBoost.boostMax} rise20=${eBigRise.edgeBoost.boostMax}`);
+
+  const spec4 = baseSpec();
+  spec4.levels[4] = { on: true, gap: 2, flatX: 4, flatY: 4, angleX: 80, angleY: 80, rise: 8, radiusX: 0, radiusY: 0 };
+  const eSteep = levelEffect(spec4, 4, spec.space.depth);
+  check('각도↑ → boostMax↑ (단조)', eSteep.edgeBoost.boostMax > eBase.edgeBoost.boostMax,
+    `angle45=${eBase.edgeBoost.boostMax} angle80=${eSteep.edgeBoost.boostMax}`);
 }
 
 // l4BotZAt 형상 — flat 반경 안쪽은 평평(gap), 밖은 각도만큼 botZ가 커짐(재료가 얇아짐).
