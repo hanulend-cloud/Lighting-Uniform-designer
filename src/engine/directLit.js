@@ -143,6 +143,67 @@ function buildKernel(spec, od, grid) {
   return { data, kNx, kNy, dxMin, dyMin, stepX, stepY };
 }
 
+// ---- 직접 시야(확산재 없음) 카메라 렌더용 LED 이미지 커널 ----
+// buildKernel의 조도 커널은 "그 지점에 도달하는 총 에너지"(모든 각도에서 온 빛을 적분)라
+// 수신면 코사인(∝1/d²)이 들어가 LED 사이까지 매끈하게 퍼진다 — 확산재가 있어 빛의 방향을
+// 뒤섞는 면(L2 밀키, L5 미세패턴)의 휘도에는 맞는 근사(L=E/π, 각도 무관)지만, 확산재가 없는
+// 투명면은 그 반대다: 산란이 없으니 눈에서 표면의 한 점을 지나 LED 평면까지 그은 직선이
+// 실제로 LED 칩(sizeX×sizeY) 위에 떨어질 때만 그 LED가 "보이고", 벗어나면(칩 사이 간격,
+// 보통 LED 크기보다 훨씬 넓은 피치) 안 보인다 — 즉 조도장처럼 LED 사이까지 번지지 않고
+// LED 칩 자리에만 밝은 점이 찍히는 것이 물리적으로 맞다. 계단현상을 피하려고 칩 가장자리에서
+// 칩 크기만큼의 폭으로 smoothstep 페더링만 준다(빛이 실제로 새어나가는 정도가 아니라 순수
+// 안티에일리어싱). 각도에 따른 밝기 변화는 LED 자신의 지향각(cos^m)만 반영하고, 조도 커널의
+// 1/d²·수신면 코사인은 넣지 않는다(휘도는 매질 내에서 거리에 무관 — radiance invariance).
+const _fkcache = new Map();
+function footprintKernelFor(spec, od, grid) {
+  const key = [
+    od.toFixed(3), grid.stepX.toFixed(3), grid.stepY.toFixed(3),
+    spec.led.beamX, spec.led.model, spec.led.fluxLm, spec.led.sizeX, spec.led.sizeY,
+  ].join('|');
+  let K = _fkcache.get(key);
+  if (!K) {
+    K = buildFootprintKernel(spec, od, grid);
+    if (_fkcache.size > 48) _fkcache.clear();
+    _fkcache.set(key, K);
+  }
+  return K;
+}
+function smoothEdge(d, half, margin) {
+  const a = Math.abs(d);
+  if (a <= half) return 1;
+  if (a >= half + margin) return 0;
+  const t = (a - half) / margin;
+  return 1 - t * t * (3 - 2 * t);
+}
+function buildFootprintKernel(spec, od, grid) {
+  const model = spec.led.model;
+  const p = model === 'gaussian'
+    ? { sigma: gaussianSigma(spec.led.beamX) }
+    : { m: lambertianExponent(spec.led.beamX) };
+  const I0 = axialIntensityFromFlux(spec.led.fluxLm, model, p);
+  const halfX = spec.led.sizeX / 2, halfY = spec.led.sizeY / 2;
+  const marginX = Math.max(halfX, 0.25), marginY = Math.max(halfY, 0.25);
+  const { stepX, stepY } = grid;
+  const rx = Math.max(1, Math.ceil((halfX + marginX) / stepX));
+  const ry = Math.max(1, Math.ceil((halfY + marginY) / stepY));
+  const kNx = 2 * rx + 1, kNy = 2 * ry + 1;
+  const dxMin = -rx * stepX, dyMin = -ry * stepY;
+  const data = new Float64Array(kNx * kNy);
+  for (let b = 0; b < kNy; b++) {
+    const dy = dyMin + b * stepY;
+    const my = smoothEdge(dy, halfY, marginY);
+    for (let a = 0; a < kNx; a++) {
+      const dx = dxMin + a * stepX;
+      const mx = smoothEdge(dx, halfX, marginX);
+      const d = Math.sqrt(dx * dx + dy * dy + od * od);
+      const cos = od / d;
+      const I = I0 * relIntensity(model, Math.acos(Math.min(1, cos)), p);
+      data[b * kNx + a] = I * mx * my;
+    }
+  }
+  return { data, kNx, kNy, dxMin, dyMin, stepX, stepY };
+}
+
 function sample(K, dx, dy) {
   let fa = (dx - K.dxMin) / K.stepX;
   let fb = K.kNy > 1 ? (dy - K.dyMin) / K.stepY : 0;
@@ -299,15 +360,23 @@ export function computeField(spec, opt) {
 // 시차(parallax) — 같은 화면 위치라도 눈이 어디 있느냐에 따라, 그 눈-화면 직선을 LED 평면까지
 // 연장했을 때 실제로 "보게 되는" 자리가 달라진다.
 //
-// 처음 구현은 "LED 하나당 눈에 보이는 밝기 1개 값을 그 LED의 시차-투영 위치 한 점에만 찍었는데,
-// 이러면 LED 자신의 넓은 지향각(cos^m 분포, 예: 120°)이 실제로 만드는 근접장 확산(=조도장이
-// 매끈해 보이는 이유, buildKernel 이 이미 계산)을 통째로 버려서 화면 대부분이 0이고 LED 자리만
-// 점점이 찍힌 부자연스러운 그림이 나왔다(실측 지적). 올바른 방법은 그 반대 방향이다 — 각
-// 화면 픽셀(px,py)마다 "눈→그 픽셀 직선을 LED 평면까지 연장한 자리(lx,ly)"를 구해, 거기서
-// computeField()와 완전히 같은 근접장 커널(buildKernel/sample, LED들의 지향각 확산을 그대로
-// 반영)로 밝기를 구한다 — 조도장과 똑같이 매끈하게 퍼지되, 시차 때문에 "어디를 샘플링하는지"만
-// 눈 위치에 따라 달라진다(가장자리로 갈수록 더 바깥쪽 LED 평면 위치를 보게 됨 — 눈이 가까울수록
-// 이 어긋남이 커진다). 확산(레벨 blur)은 시점과 무관하게 동일한 물리(산란)이므로 그대로 적용.
+// 이 함수는 "확산재가 전혀 없는(L1만, 또는 L3/L4처럼 형상만 있는) 투명한 출광면"을 직접
+// 육안으로 봤을 때의 그림이다. 확산재가 있는 경우(L2 밀키·L5 미세패턴, blur>0)는 산란이
+// 빛의 방향을 뒤섞어 램버시안 면에 가까워지므로 어느 각도에서 봐도 휘도 ∝ 조도(L=E/π)이고
+// "패턴"은 조도장과 똑같다 — 그래서 그 경우엔 호출부(main.js)가 이 함수를 아예 쓰지 않고
+// 조도장을 그대로 재사용한다(무의미한 계산 낭비를 막고, "확산이 있는데 패턴이 또렷이
+// 달라진다"는 틀린 인상을 주지 않기 위함).
+//
+// 확산재가 없으면 그 반대다: 산란이 없으니 표면의 한 점은 "그 점을 지나 LED 평면까지 그은
+// 직선이 실제로 어느 LED 칩 위에 떨어지는가"에 따라서만 밝기가 정해진다(footprintKernel) —
+// LED 칩(수 mm)보다 훨씬 넓은 피치(보통 10~20mm)라 대부분의 표면 점에서는 어떤 LED도 보이지
+// 않는다(어둡다). 이건 조도장(모든 각도에서 온 에너지를 적분해 LED 사이까지 매끈히 퍼짐,
+// buildKernel)과는 근본적으로 다른 물리량이라 패턴이 뚜렷이 달라야 정상이다 — 실제로
+// 확산재 없는 백라이트를 육안으로 보면 개별 LED가 점점이 보이는 "핫스팟"이 그대로 나타나는
+// 현상(그래서 확산재를 쓰는 이유)과 일치한다.
+// 화면 픽셀(px,py)마다 "눈→그 픽셀 직선을 LED 평면까지 연장한 자리(lx,ly)"를 구해(시차),
+// 거기서 footprintKernel/sample로 밝기를 구한다 — 가장자리로 갈수록 더 바깥쪽 LED 평면
+// 위치를 보게 되어(눈이 가까울수록 어긋남이 커짐) 어느 LED가 보이는지 자체가 바뀐다.
 // 양쪽 눈(eyeSpacingMm 간격) 각각 계산해 평균 — 양안 융합의 단순화. 벽 반사·L3/L4 edgeBoost는
 // 이 렌더링에는 반영하지 않는다(범위 밖).
 export function computeCameraLuminance(spec, opt) {
@@ -316,7 +385,7 @@ export function computeCameraLuminance(spec, opt) {
   const leds = opt.leds ?? ledPositions(spec, opt.pitchX, opt.pitchY ?? opt.pitchX, opt.decenterX ?? 0, opt.decenterY ?? 0, opt.padX ?? 0, opt.padY ?? 0);
   const dim = opt.dim || classifyDimension(spec, od);
   const grid = makeGrid(spec, dim, opt.nx ?? 101, opt.ny);
-  const K = kernelFor(spec, od, grid);
+  const K = footprintKernelFor(spec, od, grid);
   const { NX, NY, x0, x1, y0, y1, stepX, stepY } = grid;
 
   const viewDist = Math.max(1, opt.viewDistanceMm ?? 300);

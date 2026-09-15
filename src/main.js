@@ -9,7 +9,7 @@ import { drawSection } from './ui/section.js';
 import { drawIso } from './ui/iso.js';
 import { drawPlan } from './ui/plan.js';
 import { drawHeatmap } from './ui/heatmap.js';
-import { buildLevels, updateLevels, renderVerdict } from './ui/analysis.js';
+import { buildLevels, updateLevels, renderVerdict, drawProfiles } from './ui/analysis.js';
 import { exportStep } from './export/step-ui.js';
 
 const LS_KEY = 'uds.spec.v11';
@@ -187,13 +187,14 @@ function run() {
   drawIso($('#iso'), geom);
   drawPlan($('#plan'), geom);
   drawSection($('#section-mini'), geom, sizeVisuals(geom.view.x1 - geom.view.x0, '#section-mini'));
+  drawProfiles($('#anprofile'), resEval, spec.goal.U0);
 
   const solo = [2, 3, 4, 5].map((l) => soloRow(l));
   updateLevels($('#levels'), solo, activeSet, spec.goal.U0, onApplyAuto);
   renderVerdict($('#verdict'), combo, tags, spec.goal);
 
   last = { common, m, depth, view: geom.view, edgeMargin, fixture: geomFixture, center };
-  last.combo = combo; last.geom = geom; last.active = active;
+  last.combo = combo; last.geom = geom; last.active = active; last.resEval = resEval;
   if (autoHeat) renderHeat();
   else $('#pane-heat').classList.add('stale');
 
@@ -214,9 +215,12 @@ function heatGrid(spec) {
 }
 let lastHeat = null;   // 최종 렌더링된(res.field가 화면에 실제 쓰인) 결과 — 팝업 확대 시 재계산 없이 재사용
 // 히트맵 단위. 'rel'/'lux'는 조도장(computeField) 그대로(숫자만 환산) — 색 패턴 불변(상수배).
-// 'cdm2'(휘도)는 시야각(코원앵글)·시차를 반영한 별도 렌더링(computeCameraLuminance)이라 그림
-// 자체가 달라진다. fluxLm=0(상대 모드)이면 lux/cd·m² 실단위가 무의미해 heatmap.js가 자동으로
-// 상대값(%)으로 되돌린다(색은 cdm2 선택 시 여전히 시야각 렌더링을 쓴다 — 그게 이 모드의 핵심).
+// 'cdm2'(휘도)는 확산재(L2/L5, blur>0)가 있으면 램버시안 근사(L=E/π, 각도 무관)라 조도장과
+// 패턴이 같아 그대로 쓰고, 확산재가 없으면(L1만 또는 L3/L4 형상만) 시야각(코원앵글)·시차를
+// 반영한 직접-시야 렌더링(computeCameraLuminance)으로 그림 자체가 달라진다 — 확산 유무에
+// 따라 "휘도가 조도와 얼마나 달라 보여야 하는가"가 실제로 다르기 때문(directLit.js 주석 참고).
+// fluxLm=0(상대 모드)이면 lux/cd·m² 실단위가 무의미해 heatmap.js가 자동으로 상대값(%)으로
+// 되돌린다.
 let heatUnit = 'rel';
 let heatViewDist = 300, heatEyeSep = 100;   // 육안 시야각 렌더링(휘도) 파라미터 — 거리·눈간격(mm)
 function heatOpt() { return { unit: heatUnit, fluxLm: spec.led.fluxLm ?? 0 }; }
@@ -237,7 +241,10 @@ function renderHeat() {
   res.fixture = last.fixture;
   res.center = last.center;
   res.cellMm = hg.cell;
-  if (heatUnit === 'cdm2') {
+  // 확산재(L2 밀키·L5 미세패턴)가 있어야 표면이 램버시안에 가까워져 "보는 각도"가 의미를
+  // 갖는다 — 확산재가 없으면(blur=0) 시야각 렌더링은 아래에서만 덧씌운다.
+  const diffusing = (last.common.blurMmX ?? 0) > 0 || (last.common.blurMmY ?? 0) > 0;
+  if (heatUnit === 'cdm2' && !diffusing) {
     // 판정 수치(균일도%·중심부 등)는 조도 기준 그대로 두고, 화면에 그릴 필드·격자만 시야각
     // 렌더링으로 바꿔치기한다 — "실제 판정"과 "육안으로 어떻게 보이는가"를 분리해서 보여준다.
     const cam = computeCameraLuminance(spec, {
@@ -262,6 +269,7 @@ function sizeVisuals(worldW, ref) {
 const ZOOM_PANES = [
   { pane: '#pane-iso', canvas: '#iso', title: '3D 입체도', kind: 'iso' },
   { pane: '#pane-heat', canvas: '#heatmap', title: '조도 히트맵', kind: 'heat' },
+  { pane: '#pane-prof', canvas: '#anprofile', title: 'X·Y축 조도 프로파일', kind: 'profile' },
   { pane: '#pane-plan', canvas: '#plan', title: 'TOP VIEW · 평면 배치', kind: 'plan' },
   { pane: '#pane-section-mini', canvas: '#section-mini', title: 'SIDE VIEW · 단면 형상', kind: 'sectionMini' },
 ];
@@ -276,6 +284,7 @@ function redrawZoomKind(kind, canvas) {
       break;
     case 'iso': drawIso(canvas, last.geom); break;
     case 'plan': drawPlan(canvas, last.geom); break;
+    case 'profile': if (last.resEval) drawProfiles(canvas, last.resEval, spec.goal.U0); break;
     case 'heat': if (lastHeat) drawHeatmap(canvas, lastHeat, 1e9, heatOpt()); break;
   }
 }

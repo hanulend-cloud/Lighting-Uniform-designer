@@ -150,9 +150,10 @@ main { flex: 1 1 auto; min-height: 0; display: grid;
 .zone-hd.live { color: #1a8a52; }
 .zone-hd.final { color: #6a3fc0; }
 
-/* 3D 입체도 · 히트맵 두 줄 배치 — X·Y 프로파일 그래프(중복 정보, 실사용 우선순위 낮음)를 빼고
-   히트맵에 그만큼의 폭을 더 줘 조도/휘도 컨트롤과 그림이 좁아서 안 보이던 문제를 없앤다. */
-.live-grid { display: grid; grid-template-columns: 0.75fr 1.25fr; grid-template-rows: 1fr;
+/* 3D 입체도 · 히트맵 · 프로파일 한 줄 배치. 히트맵의 단위 전환·거리/눈간격 컨트롤은
+   확대(zoom) 시 모달 헤더로 옮겨가므로(.heat-bar가 flex-wrap도 지원) 더 이상 좁은 3분할
+   때문에 안 보이는 문제가 없다 — 히트맵에 약간 더 폭을 준다. */
+.live-grid { display: grid; grid-template-columns: 0.9fr 1.2fr 0.9fr; grid-template-rows: 1fr;
   gap: 8px; flex: 1 1 auto; min-height: 0; margin-top: 8px; }
 .final-row { display: flex; gap: 8px; flex: 1 1 auto; min-height: 0; margin-top: 8px; }
 .final-row > .pane { flex: 1 1 0; min-width: 0; }
