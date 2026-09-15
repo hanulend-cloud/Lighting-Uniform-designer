@@ -183,6 +183,7 @@ export function drawHeatmap(canvas, res, pxmm, opt = {}) {
     showLedDots ? '●=LED' : 'LED점 생략(너무 촘촘함)', '⊕=판정영역 최솟값 지점',
     res.cellMm ? `격자 ${(+res.cellMm.toFixed(2))}mm` : null,
     unit !== 'rel' && !(fluxLm > 0) ? 'LED 광속(lm)을 0보다 크게 설정해야 실제 단위가 표시됩니다(현재 상대값)' : null,
+    '클릭=그 위치의 X·Y 단면을 아래 프로파일 그래프에 표시',
   ].filter(Boolean).join(' · ');
 
   // ── 치수 표기 (mm) ─────────────────────────────────────────────────────────────
@@ -246,6 +247,23 @@ export function drawHeatmap(canvas, res, pxmm, opt = {}) {
     ctx.fillText(`중심부(${((c.areaFrac ?? 0.95) * 100).toFixed(0)}%) ${fmt(cw)}×${fmt(ch)}mm · ${(c.U0c * 100).toFixed(1)}%${flag}`, PAD.L, ty);
     canvas.title += ` · 중심부 인셋 = 경계에서 X ${fmt(tX * c.fx)} / Y ${fmt(tY * c.fy)}mm 안쪽`;
   }
+
+  // 사용자가 클릭으로 고른 단면 위치 — 최솟값 마커(⊕)와 헷갈리지 않게 주황 십자로 따로 표시.
+  // X·Y축 프로파일 패널이 이 지점을 지나는 가로·세로 단면을 같이 그린다(analysis.drawProfiles).
+  if (opt.pick) {
+    const pxp = sx(opt.pick.x), pyp = sy(opt.pick.y);
+    ctx.lineWidth = 3.2; ctx.strokeStyle = 'rgba(0,0,0,0.65)';
+    ctx.beginPath(); ctx.moveTo(pxp - 9, pyp); ctx.lineTo(pxp + 9, pyp); ctx.moveTo(pxp, pyp - 9); ctx.lineTo(pxp, pyp + 9); ctx.stroke();
+    ctx.lineWidth = 1.6; ctx.strokeStyle = '#ff9d3f';
+    ctx.beginPath(); ctx.moveTo(pxp - 9, pyp); ctx.lineTo(pxp + 9, pyp); ctx.moveTo(pxp, pyp - 9); ctx.lineTo(pxp, pyp + 9); ctx.stroke();
+    ctx.beginPath(); ctx.arc(pxp, pyp, 4, 0, 7); ctx.stroke();
+    canvas.title += ' · 주황 십자=선택한 단면 위치(더블클릭으로 해제)';
+  }
+
+  // 클릭으로 단면 위치를 고를 수 있도록, 화면(px)↔실좌표(mm) 역변환에 필요한 값을 저장해둔다
+  // (main.js의 클릭 리스너가 사용). fitCanvas가 이미 DPR 보정을 해서 이 좌표계는 CSS px 기준 —
+  // getBoundingClientRect() 결과와 그대로 맞아떨어진다.
+  canvas._heat = { view, s, ox0, oy };
 }
 
 function turbo(t) {

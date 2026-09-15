@@ -206,16 +206,17 @@ function run() {
   drawIso($('#iso'), geom);
   drawPlan($('#plan'), geom);
   drawSection($('#section-mini'), geom, sizeVisuals(geom.view.x1 - geom.view.x0, '#section-mini'));
-  drawProfiles($('#anprofile'), resEval, spec.goal.U0);
 
   const solo = [2, 3, 4, 5].map((l) => soloRow(l));
   updateLevels($('#levels'), solo, activeSet, spec.goal.U0, onApplyAuto);
   renderVerdict($('#verdict'), combo, tags, spec.goal);
 
   last = { common, m, depth, view: geom.view, edgeMargin, fixture: geomFixture, center };
-  last.combo = combo; last.geom = geom; last.active = active; last.resEval = resEval;
+  last.combo = combo; last.geom = geom; last.active = active;
+  // X·Y 프로파일 그래프는 히트맵과 같은 필드(조도/휘도 단위 선택 포함)를 그대로 써서 그린다
+  // (renderHeat 안에서) — 여기선 히트맵과 함께 stale 처리만 한다.
   if (autoHeat) renderHeat();
-  else $('#pane-heat').classList.add('stale');
+  else { $('#pane-heat').classList.add('stale'); $('#pane-prof').classList.add('stale'); }
 
   $('#timing').textContent =
     `연산 ${(performance.now() - t0).toFixed(0)} ms · 목표 균일도 ${(spec.goal.U0 * 100).toFixed(0)}% · 깊이 ${depth}mm`;
@@ -242,13 +243,16 @@ let lastHeat = null;   // 최종 렌더링된(res.field가 화면에 실제 쓰�
 // 되돌린다.
 let heatUnit = 'rel';
 let heatConeDeg = 10;   // 육안 시야각 렌더링(휘도) 파라미터 — half cone angle(°): 패널 X 절반이 이 각도로 보이는 시야 거리를 역산해서 씀
-function heatOpt() { return { unit: heatUnit, fluxLm: spec.led.fluxLm ?? 0 }; }
+let profilePick = null;   // 히트맵을 클릭해 고른 단면 위치({x,y}mm) — X·Y 프로파일 그래프에 그 단면을 추가로 표시
+function heatOpt() { return { unit: heatUnit, fluxLm: spec.led.fluxLm ?? 0, pick: profilePick }; }
 function updateHeatTitle() {
   const label = { rel: '조도 히트맵', lux: '조도 히트맵 (lux)', cdm2: '휘도 히트맵 (육안 시야각, cd/m²)' }[heatUnit];
   const el = $('#heat-title');
   if (el) el.textContent = label;
   const eyeCtl = $('#heat-eye-ctl');
   if (eyeCtl) eyeCtl.hidden = heatUnit !== 'cdm2';
+  const profEl = $('#prof-title');
+  if (profEl) profEl.textContent = `X·Y축 ${heatUnit === 'cdm2' ? '휘도' : '조도'} 프로파일`;
 }
 function renderHeat() {
   if (!last) return;
@@ -273,7 +277,41 @@ function renderHeat() {
   }
   lastHeat = res;
   drawHeatmap($('#heatmap'), res, sizeVisuals(last.view.x1 - last.view.x0, '#pane-heat'), heatOpt());
+  drawProfiles($('#anprofile'), res, spec.goal.U0, profilePick);
   $('#pane-heat').classList.remove('stale');
+  $('#pane-prof').classList.remove('stale');
+}
+
+// 히트맵 클릭 → 그 위치(mm)를 X·Y 프로파일 단면으로 고정. heatmap.js가 drawHeatmap 때마다
+// canvas._heat 에 화면(px)↔실좌표(mm) 역변환 정보를 저장해두므로, 클릭 시점의 최신 값을 그대로
+// 쓴다(줌 팝업으로 옮겨져도 같은 엘리먼트라 그대로 동작). 더블클릭하면 선택 해제.
+function setupHeatPick() {
+  const canvas = $('#heatmap');
+  const posFromEvent = (e) => {
+    const d = canvas._heat; if (!d) return null;
+    const rect = canvas.getBoundingClientRect();
+    const mxp = e.clientX - rect.left, myp = e.clientY - rect.top;
+    const x = d.view.x0 + (mxp - d.ox0) / d.s;
+    const y = d.view.y1 - (myp - d.oy) / d.s;
+    if (!lastHeat) return null;
+    const ex = lastHeat.extent;
+    return { x: Math.min(ex.x1, Math.max(ex.x0, x)), y: Math.min(ex.y1, Math.max(ex.y0, y)) };
+  };
+  canvas.addEventListener('click', (e) => {
+    const p = posFromEvent(e); if (!p) return;
+    profilePick = p;
+    if (lastHeat) {
+      drawHeatmap(canvas, lastHeat, sizeVisuals(last.view.x1 - last.view.x0, '#' + canvas.parentElement.id), heatOpt());
+      drawProfiles($('#anprofile'), lastHeat, spec.goal.U0, profilePick);
+    }
+  });
+  canvas.addEventListener('dblclick', () => {
+    profilePick = null;
+    if (lastHeat) {
+      drawHeatmap(canvas, lastHeat, sizeVisuals(last.view.x1 - last.view.x0, '#' + canvas.parentElement.id), heatOpt());
+      drawProfiles($('#anprofile'), lastHeat, spec.goal.U0, profilePick);
+    }
+  });
 }
 
 // X 스케일(px/mm) — 지정한 pane(ref)의 실제 폭 기준으로 계산 (호출부마다 자기 폭을 넘김).
@@ -303,7 +341,7 @@ function redrawZoomKind(kind, canvas) {
       break;
     case 'iso': drawIso(canvas, last.geom); break;
     case 'plan': drawPlan(canvas, last.geom); break;
-    case 'profile': if (last.resEval) drawProfiles(canvas, last.resEval, spec.goal.U0); break;
+    case 'profile': if (lastHeat) drawProfiles(canvas, lastHeat, spec.goal.U0, profilePick); break;
     case 'heat': if (lastHeat) drawHeatmap(canvas, lastHeat, 1e9, heatOpt()); break;
   }
 }
@@ -323,7 +361,11 @@ function openZoom(cfg) {
     canvas, originalParent: canvas.parentNode, originalNext: canvas.nextSibling, kind: cfg.kind,
     ctl, ctlOriginalParent: ctl?.parentNode ?? null, ctlOriginalNext: ctl?.nextSibling ?? null,
   };
-  $('#zoom-title').textContent = cfg.title;
+  // 히트맵·프로파일은 조도/휘도 단위에 따라 제목이 바뀌므로(heat-title 참고) 고정 문자열 대신
+  // 현재 단위를 반영한 제목을 쓴다.
+  const unitLabel = { rel: '조도', lux: '조도', cdm2: '휘도' }[heatUnit];
+  $('#zoom-title').textContent = cfg.kind === 'heat' ? ($('#heat-title')?.textContent || cfg.title)
+    : cfg.kind === 'profile' ? `X·Y축 ${unitLabel} 프로파일` : cfg.title;
   if (ctl) $('#zoom-modal-ctl-slot').appendChild(ctl);
   slot.appendChild(canvas);
   modal.hidden = false;
@@ -432,6 +474,7 @@ spec = load() || structuredClone(DEFAULT_SPEC);
 migrate(spec);
 mount();
 setupZoom();
+setupHeatPick();
 window.addEventListener('resize', schedule);
 schedule();
 // 레이아웃이 안정된 뒤 한 번 더 그리고 히트맵 초기 1회 렌더

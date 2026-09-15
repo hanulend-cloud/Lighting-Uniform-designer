@@ -214,6 +214,9 @@ main { flex: 1 1 auto; min-height: 0; display: grid;
 #pane-heat.stale #heat-render { background: #d99a20; border-color: #c98d16; }
 #pane-heat.stale #heat-render::after { content: ' ●'; }
 #pane-heat.stale #heatmap { opacity: .5; }
+#heatmap { cursor: crosshair; }
+#pane-prof.stale { border-color: #e0a83c; }
+#pane-prof.stale #anprofile { opacity: .5; }
 
 .muted { color: #8390a6; font-size: 12px; }
 

@@ -159,7 +159,7 @@ export function renderVerdict(el, combo, tags, goalSpec) {
 
 // X·Y 양방향 조도 프로파일 — 각 방향의 'LED열 위' + 'LED 사이' 라인. 세로축 %(최댓값 대비), 가로축 mm 눈금,
 // LED 위치·중심부 경계·최솟값 수치 표시, 마우스 위치 수치 읽기.
-export function drawProfiles(canvas, res, target) {
+export function drawProfiles(canvas, res, target, pick) {
   const { ctx, w, h } = fitCanvas(canvas);
   ctx.fillStyle = '#0f1420'; ctx.fillRect(0, 0, w, h);
   const { field, nx, ny, extent, leds } = res;
@@ -187,6 +187,10 @@ export function drawProfiles(canvas, res, target) {
   const colP = xs.length >= 2 ? xs[1] - xs[0] : 0;
   const yLed = colAt(toI(ledX));
   const yBtw = colP ? colAt(toI(ledX + colP / 2)) : null;
+  // 사용자가 히트맵을 클릭해 고른 지점 — X패널은 그 y좌표를 지나는 가로단면, Y패널은 그
+  // x좌표를 지나는 세로단면을 추가로 보여준다(heatmap.js가 그 지점에 주황 십자로 표시).
+  const xPick = pick ? rowAt(toJ(pick.y)) : null;
+  const yPick = pick ? colAt(toI(pick.x)) : null;
 
   const posX = Array.from({ length: nx }, (_, i) => extent.x0 + (extent.x1 - extent.x0) * (nx > 1 ? i / (nx - 1) : 0.5));
   const posY = Array.from({ length: ny }, (_, j) => extent.y0 + (extent.y1 - extent.y0) * (ny > 1 ? j / (ny - 1) : 0.5));
@@ -202,10 +206,10 @@ export function drawProfiles(canvas, res, target) {
   const plotT = TOP, plotB = h - BOT;
   const half = (w - PAD.R - LBL * 2 - GAP) / 2;
   const panels = [
-    { name: 'X', l: LBL, r: LBL + half, pos: posX, curves: [{ name: 'LED열', vals: xLed, color: '#5ee0b0' }, ...(xBtw ? [{ name: '사이', vals: xBtw, color: '#3f6c9c', dash: [4, 3] }] : [])],
+    { name: 'X', l: LBL, r: LBL + half, pos: posX, curves: [{ name: 'LED열', vals: xLed, color: '#5ee0b0' }, ...(xBtw ? [{ name: '사이', vals: xBtw, color: '#3f6c9c', dash: [4, 3] }] : []), ...(xPick ? [{ name: `선택 y=${pick.y.toFixed(1)}`, vals: xPick, color: '#ff9d3f' }] : [])],
       ledPos: xs, zone: res.center ? [extent.x0 + (extent.x1 - extent.x0) * res.center.fx, extent.x1 - (extent.x1 - extent.x0) * res.center.fx] : null,
       at: `y=${ledY.toFixed(1)}${xBtw ? ` / ${(ledY + rowP / 2).toFixed(1)}` : ''}mm` },
-    { name: 'Y', l: LBL * 2 + half + GAP, r: w - PAD.R, pos: posY, curves: [{ name: 'LED열', vals: yLed, color: '#86b0ff' }, ...(yBtw ? [{ name: '사이', vals: yBtw, color: '#3f6c9c', dash: [4, 3] }] : [])],
+    { name: 'Y', l: LBL * 2 + half + GAP, r: w - PAD.R, pos: posY, curves: [{ name: 'LED열', vals: yLed, color: '#86b0ff' }, ...(yBtw ? [{ name: '사이', vals: yBtw, color: '#3f6c9c', dash: [4, 3] }] : []), ...(yPick ? [{ name: `선택 x=${pick.x.toFixed(1)}`, vals: yPick, color: '#ff9d3f' }] : [])],
       ledPos: ysL, zone: res.center ? [extent.y0 + (extent.y1 - extent.y0) * res.center.fy, extent.y1 - (extent.y1 - extent.y0) * res.center.fy] : null,
       at: `x=${ledX.toFixed(1)}${yBtw ? ` / ${(ledX + colP / 2).toFixed(1)}` : ''}mm` },
   ];
@@ -266,12 +270,12 @@ export function drawProfiles(canvas, res, target) {
   }
   // 범례(고정 설명)는 패널이 좁으면 매번 겹치거나 잘리므로 캔버스 title 툴팁으로 옮기고,
   // 화면에는 짧은 안내만 남긴다.
-  canvas.title = `세로축 = 최댓값 대비 % · 목표 ${tPct.toFixed(0)}% · 실선=LED열 ┄점선=LED사이 · ▲=LED 위치 · 청록점선=중심부 · 마우스를 올리면 수치 표시`;
+  canvas.title = `세로축 = 최댓값 대비 % · 목표 ${tPct.toFixed(0)}% · 실선=LED열 ┄점선=LED사이${pick ? ' · 굵은 주황=히트맵에서 선택한 단면(히트맵 더블클릭으로 해제)' : ' · 히트맵을 클릭하면 그 위치를 지나는 단면이 여기 추가됩니다'} · ▲=LED 위치 · 청록점선=중심부 · 마우스를 올리면 수치 표시`;
   ctx.textAlign = 'center'; ctx.fillStyle = '#e0b64a'; ctx.font = '11px system-ui';
   ctx.fillText(`목표 ${tPct.toFixed(0)}% · 마우스 올리면 수치 표시`, w / 2, h - 3);
 
   // 마우스 위치의 수치 읽기 — 그린 데이터를 캔버스에 보관하고 리스너는 한 번만 단다
-  canvas._prof = { panels, py, plotT, plotB, redraw: () => drawProfiles(canvas, res, target) };
+  canvas._prof = { panels, py, plotT, plotB, redraw: () => drawProfiles(canvas, res, target, pick) };
   if (!canvas._profHooked) {
     canvas._profHooked = true;
     canvas.addEventListener('mousemove', (e) => {
