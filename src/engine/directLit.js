@@ -5,6 +5,7 @@
 import {
   lambertianExponent, gaussianSigma, relIntensity, axialIntensityFromFlux, fresnelT, fresnelR,
 } from './photometry.js';
+import { l3BotZAt, l4BotZAt } from '../model/levels.js';
 
 const DEG = Math.PI / 180;
 
@@ -154,20 +155,6 @@ function buildKernel(spec, od, grid) {
 // 칩 크기만큼의 폭으로 smoothstep 페더링만 준다(빛이 실제로 새어나가는 정도가 아니라 순수
 // 안티에일리어싱). 각도에 따른 밝기 변화는 LED 자신의 지향각(cos^m)만 반영하고, 조도 커널의
 // 1/d²·수신면 코사인은 넣지 않는다(휘도는 매질 내에서 거리에 무관 — radiance invariance).
-const _fkcache = new Map();
-function footprintKernelFor(spec, od, grid) {
-  const key = [
-    od.toFixed(3), grid.stepX.toFixed(3), grid.stepY.toFixed(3),
-    spec.led.beamX, spec.led.model, spec.led.fluxLm, spec.led.sizeX, spec.led.sizeY,
-  ].join('|');
-  let K = _fkcache.get(key);
-  if (!K) {
-    K = buildFootprintKernel(spec, od, grid);
-    if (_fkcache.size > 48) _fkcache.clear();
-    _fkcache.set(key, K);
-  }
-  return K;
-}
 function smoothEdge(d, half, margin) {
   const a = Math.abs(d);
   if (a <= half) return 1;
@@ -175,33 +162,20 @@ function smoothEdge(d, half, margin) {
   const t = (a - half) / margin;
   return 1 - t * t * (3 - 2 * t);
 }
-function buildFootprintKernel(spec, od, grid) {
-  const model = spec.led.model;
-  const p = model === 'gaussian'
-    ? { sigma: gaussianSigma(spec.led.beamX) }
-    : { m: lambertianExponent(spec.led.beamX) };
-  const I0 = axialIntensityFromFlux(spec.led.fluxLm, model, p);
-  const halfX = spec.led.sizeX / 2, halfY = spec.led.sizeY / 2;
-  const marginX = Math.max(halfX, 0.25), marginY = Math.max(halfY, 0.25);
-  const { stepX, stepY } = grid;
-  const rx = Math.max(1, Math.ceil((halfX + marginX) / stepX));
-  const ry = Math.max(1, Math.ceil((halfY + marginY) / stepY));
-  const kNx = 2 * rx + 1, kNy = 2 * ry + 1;
-  const dxMin = -rx * stepX, dyMin = -ry * stepY;
-  const data = new Float64Array(kNx * kNy);
-  for (let b = 0; b < kNy; b++) {
-    const dy = dyMin + b * stepY;
-    const my = smoothEdge(dy, halfY, marginY);
-    for (let a = 0; a < kNx; a++) {
-      const dx = dxMin + a * stepX;
-      const mx = smoothEdge(dx, halfX, marginX);
-      const d = Math.sqrt(dx * dx + dy * dy + od * od);
-      const cos = od / d;
-      const I = I0 * relIntensity(model, Math.acos(Math.min(1, cos)), p);
-      data[b * kNx + a] = I * mx * my;
-    }
+
+// L3/L4가 깎아내는 바닥면(LED 쪽) 높이 — 형상이 없으면(shapeKind=null) null.
+// L4는 반경(최근접 LED까지 거리) 기반이라 leds/halfP가 필요하고, L3는 X·Y 축별 프로필이라
+// (x,y)만 있으면 된다. l3BotZAt/l4BotZAt은 levels.js가 STEP 내보내기·단면도와도 공유하는
+// 정본(定本) 수식이라, 여기서 새로 만들지 않고 그대로 재사용해 두 계산이 절대 어긋나지 않게 한다.
+const L4_ACTIVE_SET = new Set([1, 4]);
+function botZFor(spec, depth, shapeKind, leds, halfP, x, y) {
+  if (shapeKind === 'axis') return l3BotZAt(spec, depth, x, y);
+  if (shapeKind === 'radial') {
+    let near = Infinity;
+    for (const l of leds) { const d = Math.hypot(x - l.x, y - l.y); if (d < near) near = d; }
+    return l4BotZAt(spec, L4_ACTIVE_SET, depth, near, halfP);
   }
-  return { data, kNx, kNy, dxMin, dyMin, stepX, stepY };
+  return null;
 }
 
 function sample(K, dx, dy) {
@@ -354,6 +328,68 @@ export function computeField(spec, opt) {
            extent: { x0, x1, y0, y1 } };
 }
 
+// 눈에서 화면점(px,py,topZ)을 향한 시선이 실제로 LED 평면(z=ledTop)의 어디를 "보는지" 구한다 —
+// 윗면(항상 평평, topZ)에서 스넬 굴절로 몸체(n_body) 안으로 꺾여 들어가고, L3/L4가 있으면
+// 바닥면(경사면)에서 다시 굴절(또는 전반사)해 LED 위 공극을 가로지른다. TIR로 그 방향에서
+// 아예 안 보이면 null.
+const REFRACT_EPS = 0.05;   // 바닥면 국소 법선 수치미분 스텝(mm)
+const REFRACT_ITERS = 6;    // 바닥면 교차점 고정점 반복 횟수 — 경사가 완만해(각 45° 이하) 대개 2~3회면 수렴
+function traceRefractedLedPos(spec, topZ, nBody, shapeKind, leds, halfP, ledTop, px, py, eye) {
+  const hx0 = px - eye.x, hy0 = py - eye.y;
+  const horiz0 = Math.hypot(hx0, hy0);
+  const vert = Math.abs(topZ - eye.z);
+  const hx = horiz0 > 0 ? hx0 / horiz0 : 0, hy = horiz0 > 0 ? hy0 / horiz0 : 0;
+
+  // 윗면(공기→몸체) 굴절: 방위각은 그대로, 극각만 스넬로 꺾인다.
+  const tanAir = vert > 0 ? horiz0 / vert : 0;
+  const sinAir = tanAir / Math.hypot(1, tanAir);
+  const sinBody = sinAir / nBody;
+  const cosBody = Math.sqrt(Math.max(1e-9, 1 - sinBody * sinBody));
+  const tanBody = sinBody / cosBody;
+
+  if (shapeKind == null) {
+    // 바닥면이 평평 — 균일 매질을 곧장 LED 평면까지 직진.
+    const s = topZ - ledTop;
+    return { x: px + hx * tanBody * s, y: py + hy * tanBody * s, cosEmit: cosBody };
+  }
+
+  // 몸체 내부 진행방향(단위벡터, 아래로 -z)
+  const dx = hx * sinBody, dy = hy * sinBody, dz = -cosBody;
+
+  // 고정점 반복으로 바닥면(botZ)과의 교차점을 찾는다 — 첫 추정은 수평 이동을 무시한 값.
+  let s = topZ - botZFor(spec, topZ, shapeKind, leds, halfP, px, py);
+  let xB = px, yB = py;
+  for (let i = 0; i < REFRACT_ITERS; i++) {
+    xB = px + dx / -dz * s; yB = py + dy / -dz * s;
+    const newS = topZ - botZFor(spec, topZ, shapeKind, leds, halfP, xB, yB);
+    if (Math.abs(newS - s) < 1e-4) { s = newS; break; }
+    s = newS;
+  }
+  const zB = topZ - s;
+
+  // 바닥면 국소 법선(수치미분, 공극 쪽=바깥 방향)
+  const e = REFRACT_EPS;
+  const dzdx = (botZFor(spec, topZ, shapeKind, leds, halfP, xB + e, yB)
+             - botZFor(spec, topZ, shapeKind, leds, halfP, xB - e, yB)) / (2 * e);
+  const dzdy = (botZFor(spec, topZ, shapeKind, leds, halfP, xB, yB + e)
+             - botZFor(spec, topZ, shapeKind, leds, halfP, xB, yB - e)) / (2 * e);
+  const nlen = Math.hypot(dzdx, dzdy, 1) || 1;
+  const outX = dzdx / nlen, outY = dzdy / nlen, outZ = -1 / nlen;
+
+  // 바닥면에서 스넬 굴절(몸체 n_body → 공극 n=1). N = 입사매질(몸체) 쪽을 향하는 법선(=-out).
+  const Nx = -outX, Ny = -outY, Nz = -outZ;
+  const cosI = -(dx * Nx + dy * Ny + dz * Nz);
+  const sin2T = nBody * nBody * Math.max(0, 1 - cosI * cosI);
+  if (sin2T > 1) return null;                              // 전반사 — 이 방향에서는 LED가 안 보임
+  const cosT = Math.sqrt(1 - sin2T);
+  const k = nBody * cosI - cosT;
+  const Tx = nBody * dx + k * Nx, Ty = nBody * dy + k * Ny, Tz = nBody * dz + k * Nz;
+  if (Tz >= -1e-9) return null;                            // 위로 꺾이면(스침각 근처 수치오차) 무시
+
+  const s2 = (zB - ledTop) / -Tz;                          // 바닥면→LED 평면(공극, 균일 매질 직진)
+  return { x: xB + Tx * s2, y: yB + Ty * s2, cosEmit: -Tz };
+}
+
 // 시야각(휘도) 렌더링 — computeField()의 조도(illuminance)는 "각 지점에 수평으로 놓인 센서가
 // 받는 광량"이라 관측 위치와 무관하다(램버시안 확산이면 휘도도 L=E/π로 각도 무관 — 그래서
 // 단순 /π 변환은 그림이 안 바뀐다). 실제 눈으로 볼 때는 다르다: 근접 시야(예: 30cm)에서는
@@ -367,49 +403,67 @@ export function computeField(spec, opt) {
 // 조도장을 그대로 재사용한다(무의미한 계산 낭비를 막고, "확산이 있는데 패턴이 또렷이
 // 달라진다"는 틀린 인상을 주지 않기 위함).
 //
-// 확산재가 없으면 그 반대다: 산란이 없으니 표면의 한 점은 "그 점을 지나 LED 평면까지 그은
-// 직선이 실제로 어느 LED 칩 위에 떨어지는가"에 따라서만 밝기가 정해진다(footprintKernel) —
-// LED 칩(수 mm)보다 훨씬 넓은 피치(보통 10~20mm)라 대부분의 표면 점에서는 어떤 LED도 보이지
-// 않는다(어둡다). 이건 조도장(모든 각도에서 온 에너지를 적분해 LED 사이까지 매끈히 퍼짐,
-// buildKernel)과는 근본적으로 다른 물리량이라 패턴이 뚜렷이 달라야 정상이다 — 실제로
-// 확산재 없는 백라이트를 육안으로 보면 개별 LED가 점점이 보이는 "핫스팟"이 그대로 나타나는
-// 현상(그래서 확산재를 쓰는 이유)과 일치한다.
-// 화면 픽셀(px,py)마다 "눈→그 픽셀 직선을 LED 평면까지 연장한 자리(lx,ly)"를 구해(시차),
-// 거기서 footprintKernel/sample로 밝기를 구한다 — 가장자리로 갈수록 더 바깥쪽 LED 평면
-// 위치를 보게 되어(눈이 가까울수록 어긋남이 커짐) 어느 LED가 보이는지 자체가 바뀐다.
+// 확산재가 없으면 그 반대다: 산란이 없으니 표면의 한 점은 "그 점을 지나 실제 굴절 경로를 따라
+// LED 평면까지 추적했을 때(traceRefractedLedPos) 어느 LED 칩 위에 떨어지는가"에 따라서만
+// 밝기가 정해진다 — LED 칩(수 mm)보다 훨씬 넓은 피치(보통 10~20mm)라 대부분의 표면 점에서는
+// 어떤 LED도 보이지 않는다(어둡다). 이건 조도장(모든 각도에서 온 에너지를 적분해 LED 사이까지
+// 매끈히 퍼짐)과는 근본적으로 다른 물리량이라 패턴이 뚜렷이 달라야 정상이다 — 실제로 확산재
+// 없는 백라이트를 육안으로 보면 개별 LED가 점점이 보이는 "핫스팟"이 그대로 나타나는 현상
+// (그래서 확산재를 쓰는 이유)과 일치한다.
+//
+// L3/L4가 켜져 있으면(윗면은 항상 평평, 바닥면만 깎임 — l3BotZAt/l4BotZAt) 그 경사면에서
+// 실제로 굴절(또는 전반사)이 일어난다 — 경사가 크면(예: L4 angleX 45°) LED가 바로 위가 아니라
+// 옆으로 밀려 보이거나, 특정 각도에서는 전반사로 아예 안 보이기도 한다. 형상을 바꿨는데 이
+// 렌더링이 안 바뀐다면 형상 자체가 무의미해지므로, 조도장의 edgeBoost(세기만 보정하는 스칼라
+// 근사)와 달리 여기서는 실제 광선 경로를 추적해(traceRefractedLedPos) 이 효과를 직접 반영한다.
 //
 // 시야 파라미터는 "half cone angle"(반원뿔각, °) 하나다 — 패널을 정면에서 바라볼 때 중심에서
-// 가장자리(X축 절반)까지 뻗는 시선의 각도. 예전엔 "거리(mm) + 눈간격(mm)"으로 입력받아 눈을
-// 좌우 두 점(양안)으로 나눠 각각 계산·평균했는데, 이건 실제로 원했던 것(패널 가장자리가 정면
-// 대비 몇 도 각도로 보이는지)과는 다른 걸 계산한 것이었다(양안 시차는 이 각도보다 훨씬 작은
-// 별도 효과). half cone angle이 곧 "패널 X 절반이 보이는 각"이 되도록 시야 거리를 역산한다
-// (tan(coneDeg)=(X/2)/viewDist) — 각도가 클수록(더 가까이서 볼수록) 가장자리로 갈수록 시차
-// 어긋남이 커져 그림이 더 달라지고, 각도가 작을수록(멀리서 볼수록) 조도장에 가까워진다.
-// 벽 반사·L3/L4 edgeBoost는 이 렌더링에는 반영하지 않는다(범위 밖).
+// 가장자리(X축 절반)까지 뻗는 시선의 각도. half cone angle이 곧 "패널 X 절반이 보이는 각"이
+// 되도록 시야 거리를 역산한다(tan(coneDeg)=(X/2)/viewDist) — 각도가 클수록(더 가까이서
+// 볼수록) 가장자리로 갈수록 시차 어긋남이 커져 그림이 더 달라지고, 각도가 작을수록(멀리서
+// 볼수록) 조도장에 가까워진다. 벽 반사는 이 렌더링에는 반영하지 않는다(범위 밖 — 벽 반사는
+// 매끈한 벽면의 정반사 근사라 특정 벽 위치·각도에서만 보이는 좁은 하이라이트이므로, 굴절
+// 경로만큼 형상 전체 판정에 영향을 주지 않는다).
 export function computeCameraLuminance(spec, opt) {
   const X = spec.target.xLen, Y = spec.target.yLen;
-  const od = (opt.depth ?? opt.od) + 0.1;
+  const topZ = (opt.depth ?? opt.od) + 0.1;
   const leds = opt.leds ?? ledPositions(spec, opt.pitchX, opt.pitchY ?? opt.pitchX, opt.decenterX ?? 0, opt.decenterY ?? 0, opt.padX ?? 0, opt.padY ?? 0);
-  const dim = opt.dim || classifyDimension(spec, od);
+  const dim = opt.dim || classifyDimension(spec, topZ);
   const grid = makeGrid(spec, dim, opt.nx ?? 101, opt.ny);
-  const K = footprintKernelFor(spec, od, grid);
   const { NX, NY, x0, x1, y0, y1, stepX, stepY } = grid;
 
   const coneDeg = Math.min(89, Math.max(0.1, opt.coneDeg ?? 10));
   const viewDist = Math.max(1, (X / 2) / Math.tan(coneDeg * DEG));
-  const eyeZ = od + viewDist;
-  const t = eyeZ / viewDist;                      // 뒤로(LED 평면까지) 투영하는 배율 = 1+od/viewDist
-  const eye = { x: X / 2, y: Y / 2 };
+  const eye = { x: X / 2, y: Y / 2, z: topZ + viewDist };
+
+  const nBody = spec.body?.n ?? 1;
+  const shapeKind = opt.edgeBoost?.hasBoost ? opt.edgeBoost.kind : null;
+  const ledTop = spec.led.sizeZ;
+  const halfP = Math.max(1, Math.min(opt.pitchX ?? X, opt.pitchY ?? opt.pitchX ?? Y) / 2);
+
+  const model = spec.led.model;
+  const p = model === 'gaussian' ? { sigma: gaussianSigma(spec.led.beamX) } : { m: lambertianExponent(spec.led.beamX) };
+  const I0 = axialIntensityFromFlux(spec.led.fluxLm, model, p);
+  const halfX = spec.led.sizeX / 2, halfY = spec.led.sizeY / 2;
+  const marginX = Math.max(halfX, 0.25), marginY = Math.max(halfY, 0.25);
 
   const field = new Float64Array(NX * NY);
   for (let j = 0; j < NY; j++) {
     const py = NY === 1 ? Y / 2 : y0 + (y1 - y0) * (j / (NY - 1));
     for (let i = 0; i < NX; i++) {
       const px = x0 + (x1 - x0) * (i / (NX - 1));
-      // 눈→(px,py) 직선을 LED 평면(z=0)까지 연장한 위치 — 시차로 실제 보게 되는 자리.
-      const lx = eye.x + (px - eye.x) * t, ly = eye.y + (py - eye.y) * t;
+      const hit = traceRefractedLedPos(spec, topZ, nBody, shapeKind, leds, halfP, ledTop, px, py, eye);
       let E = 0;
-      for (const l of leds) E += sample(K, lx - l.x, ly - l.y);
+      if (hit) {
+        for (const l of leds) {
+          const mx = smoothEdge(hit.x - l.x, halfX, marginX);
+          if (mx <= 0) continue;
+          const my = smoothEdge(hit.y - l.y, halfY, marginY);
+          if (my <= 0) continue;
+          const theta = Math.acos(Math.min(1, Math.max(0, hit.cosEmit)));
+          E += I0 * relIntensity(model, theta, p) * mx * my;
+        }
+      }
       field[j * NX + i] = E;
     }
   }

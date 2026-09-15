@@ -107,7 +107,7 @@ function evalField(spec, eff, pX, pY, gridN = GRID, padX = 0, padY = 0) {
     ? computeCameraLuminance(spec, {
         depth: spec.space.depth, pitchX: pX, pitchY: pY, nx: g.nx, ny: g.ny,
         transmit: eff.transmit, decenterX: eff.decenterX ?? 0, decenterY: eff.decenterY ?? 0,
-        padX, padY, coneDeg: LUMIN_CONE_DEG,
+        edgeBoost: eff.edgeBoost, padX, padY, coneDeg: LUMIN_CONE_DEG,
       })
     : computeField(spec, {
         depth: spec.space.depth, pitchX: pX, pitchY: pY, nx: g.nx, ny: g.ny,
@@ -116,9 +116,9 @@ function evalField(spec, eff, pX, pY, gridN = GRID, padX = 0, padY = 0) {
         padX, padY,
       });
   // L3(균일두께 용기)가 켜져 있으면 그 보강 폭만큼 판정 마진을 줄여, 보강 효과가 실제로 반영되게 함.
-  // computeCameraLuminance 는 edgeBoost 를 반영하지 않으므로(범위 밖, directLit.js 주석 참고) 그
-  // 경로에선 마진을 깎지 않는다 — 안 그러면 실제로는 없는 보강 효과가 있다고 가정하게 된다.
-  const edge = usingCamera ? (spec.goal.edgeMargin ?? 0) : effectiveEdgeMargin(spec.goal.edgeMargin ?? 0, eff.edgeBoost);
+  // computeCameraLuminance 도 이제 L3/L4 바닥면 경사에서의 실제 굴절·전반사를 광선추적으로
+  // 반영하므로(directLit.js의 traceRefractedLedPos), 두 경로 모두 같은 마진 완화 기준을 쓴다.
+  const edge = effectiveEdgeMargin(spec.goal.edgeMargin ?? 0, eff.edgeBoost);
   const m = metrics(f.field, f.nx, f.ny, edge);
   // 중심부(타겟 면적의 중심 centerArea; 베젤 마진이 더 크면 그것) — 1차 판정 기준
   const cz = centerZoneFrac(spec.goal.centerArea ?? 0.95);
