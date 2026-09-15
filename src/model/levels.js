@@ -164,11 +164,28 @@ export function levelEffect(spec, level, depth) {
     }
 
     case 4: {
-      const rise = p.rise ?? 8;
-      // R(radiusX/Y)만큼 flat→경사 전이가 둥글게(라운드) 이어져 광량 변화가 더 매끄러워짐 → 확산 보강.
-      // (자동탐색이 각도·R 자유도로 LED수를 최소화할 때 R도 실제로 쓸 수 있는 손잡이가 되도록)
-      const f = (ang, r) => 0.35 * rise + 0.007 * (ang ?? 45) * Math.sqrt(Math.max(0, rise)) + 0.05 * d + 0.15 * (r ?? 0);
-      return { blurX: f(p.angleX, p.radiusX), blurY: f(p.angleY, p.radiusY), transmit: 0.95 };
+      // 옛 경험식(각도·R로 blur를 만드는 순수 피팅 수식)은 형상과 무관한 깊이(d) 항까지 더해
+      // rise=0이어도 blur>0 이었고, 그나마 유효한 항(rise·각도·R)도 타겟 전체에 번지는 area
+      // blur로 처리했다 — L3의 옛 bulk-blur와 같은 문제(확산재 없는 투명 소재가 벌크로
+      // 퍼뜨린다는 착시)다. L4의 실제 유효 메커니즘은 L3의 edgeBoost와 원리가 같다: flat
+      // 패드(LED 바로 위) 밖의 경사면(rise 구간)에서만 굴절로 빛이 재방향된다. 그래서 이제
+      // LED 중심 기준 반경 보정으로 대체한다 — flat 패드 안쪽은 보정 0, 다음 LED와의 중간
+      // 지점(가장 얇아지는 곳)에서 최대. 실제 픽셀별 보정은 directLit.js의
+      // applyRadialEdgeBoost()가 (LED 배치·피치를 아는 computeField 시점에) 수행한다.
+      // 세기는 L3와 동일 계수(0.03)·캡(0.06) — rise(두께 낙차, mm)가 곧 L3의 tx0-tx100에 해당.
+      const rise = Math.max(0, p.rise ?? 8);
+      const flatHalf = Math.max(0, (p.flatX ?? 4) / 2);
+      const boostMax = clamp(0.03 * rise, 0, 0.06);
+      return {
+        blurX: 0, blurY: 0, transmit: 0.95,
+        edgeBoost: {
+          kind: 'radial',
+          flatHalf,
+          boostMax,
+          hasBoost: boostMax > 0,
+          searchMag: boostMax,
+        },
+      };
     }
 
     case 5: {

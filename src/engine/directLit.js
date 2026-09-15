@@ -285,7 +285,8 @@ export function computeField(spec, opt) {
   // 밝기를 가산(위치 의존, 균일 blur 와 별개). 옆으로 향하던 빛이 테이퍼 경사면에서 정면으로
   // 꺾여 나가는 것의 1차 근사.
   if (opt.edgeBoost && opt.edgeBoost.hasBoost) {
-    applyEdgeBoost(field, NX, NY, x0, x1, y0, y1, X, Y, opt.edgeBoost);
+    const halfP = Math.max(1, Math.min(opt.pitchX ?? X, opt.pitchY ?? opt.pitchX ?? Y) / 2);
+    applyEdgeBoost(field, NX, NY, x0, x1, y0, y1, X, Y, opt.edgeBoost, leds, halfP);
   }
 
   return { field, nx: NX, ny: NY, stepX, stepY, dim, leds, depth: opt.depth ?? opt.od,
@@ -295,10 +296,12 @@ export function computeField(spec, opt) {
 // 타겟 경계까지의 거리(둥근 모서리 cornerR 반영)가 tw 안쪽이면 경계에 가까울수록
 // (1+boostMax)까지 밝기를 가산한다. 1D(ny===1)에서는 Y 경계는 고려하지 않는다(정사각 셀
 // 유도 방식과 동일한 단순화).
-// edgeBoost.kind==='axis'면 축별(X·Y 독립) 프로필 보정, 그 외(taper)는 단일 경사면 보정 —
-// 어느 레벨이 어느 모양을 만드는지는 levels.js 쪽 사정이라 여기선 모양으로만 분기한다.
-function applyEdgeBoost(f, nx, ny, x0, x1, y0, y1, X, Y, edge) {
+// edgeBoost.kind==='axis'면 축별(X·Y 독립) 프로필 보정, 'radial'이면 LED 중심 기준 반경
+// 보정, 그 외(taper)는 단일 경사면 보정 — 어느 레벨이 어느 모양을 만드는지는 levels.js 쪽
+// 사정이라 여기선 모양으로만 분기한다.
+function applyEdgeBoost(f, nx, ny, x0, x1, y0, y1, X, Y, edge, leds, halfP) {
   if (edge.kind === 'axis') applyAxisEdgeBoost(f, nx, ny, x0, x1, y0, y1, X, Y, edge);
+  else if (edge.kind === 'radial') applyRadialEdgeBoost(f, nx, ny, x0, x1, y0, y1, X, Y, edge, leds, halfP);
   else applyTaperEdgeBoost(f, nx, ny, x0, x1, y0, y1, X, Y, edge);
 }
 
@@ -368,6 +371,48 @@ function applyAxisEdgeBoost(f, nx, ny, x0, x1, y0, y1, X, Y, edge) {
       const px = nx === 1 ? X / 2 : x0 + (x1 - x0) * (i / (nx - 1));
       const dx = Math.min(px, X - px);
       const boost = Math.max(ex.boostMax * axisRamp(ex.pts, halfX, dx), ey.boostMax * axisRamp(ey.pts, halfY, dy));
+      if (boost > 0) {
+        const idx = j * nx + i;
+        f[idx] = Math.min(maxF, f[idx] + avg * boost);
+      }
+    }
+  }
+}
+
+// L4(형상·정밀)의 가장자리 보정 — LED 바로 위 flat 패드(반경 flatHalf) 밖, 다음 LED와의
+// 중간 지점(halfP, 재료가 가장 얇아지는 곳)까지 선형으로 boostMax까지 올라간다. 실제
+// l4RiseAt()의 호+직선 곡선을 그대로 재현하진 않지만(호 구간은 완만하게 시작하므로 선형은
+// 다소 보수적인 근사), "flat 패드 밖은 0, 가장 얇은 지점은 최대"라는 핵심 방향은 같다.
+// 가장 가까운 LED까지의 거리는 LED가 격자 배치라는 전제로 X·Y 각각 가장 가까운 LED
+// 좌표를 독립적으로 찾아 hypot으로 합친다 — 격자(카티전 곱)에서는 이게 실제 최근접 LED와
+// 정확히 같다(모든 X·Y 조합이 실재하므로), 그러면서도 LED 전체를 훑는 것보다 훨씬 싸다.
+function applyRadialEdgeBoost(f, nx, ny, x0, x1, y0, y1, X, Y, edge, leds, halfP) {
+  if (!leds || !leds.length) return;
+  const { flatHalf, boostMax } = edge;
+  const lxs = [...new Set(leds.map((l) => l.x))].sort((a, b) => a - b);
+  const lys = [...new Set(leds.map((l) => l.y))].sort((a, b) => a - b);
+  const hp = Math.max(flatHalf + 1e-6, halfP ?? 1);
+  const nearest = (arr, v) => {
+    let lo = 0, hi = arr.length - 1;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (arr[mid] < v) lo = mid + 1; else hi = mid;
+    }
+    const c1 = arr[lo], c0 = lo > 0 ? arr[lo - 1] : c1;
+    return Math.abs(v - c0) <= Math.abs(v - c1) ? c0 : c1;
+  };
+  let sum = 0, maxF = -Infinity;
+  for (let k = 0; k < f.length; k++) { sum += f[k]; if (f[k] > maxF) maxF = f[k]; }
+  const avg = f.length ? sum / f.length : 0;
+  for (let j = 0; j < ny; j++) {
+    const py = ny === 1 ? Y / 2 : y0 + (y1 - y0) * (j / (ny - 1));
+    const nyv = nearest(lys, py);
+    for (let i = 0; i < nx; i++) {
+      const px = nx === 1 ? X / 2 : x0 + (x1 - x0) * (i / (nx - 1));
+      const nxv = nearest(lxs, px);
+      const dist = Math.hypot(px - nxv, py - nyv);
+      const ramp = Math.min(1, Math.max(0, (dist - flatHalf) / (hp - flatHalf)));
+      const boost = boostMax * ramp;
       if (boost > 0) {
         const idx = j * nx + i;
         f[idx] = Math.min(maxF, f[idx] + avg * boost);

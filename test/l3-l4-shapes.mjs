@@ -140,19 +140,24 @@ function baseSpec() {
 
 // ---- L4(형상·정밀, 복원) ----
 
-// rise가 커질수록 blur가 커지는(단조 증가) 기존 경험식이 복원되었는지, edgeBoost를 만들지
-// 않는지(형상 캡 로직 미보유) 확인.
+// L3와 같은 원칙: 확산재 없는 투명 소재는 벌크 blur를 만들지 않는다(blurX=blurY=0) — L4도
+// 유일한 유효 보정은 LED 중심 기준 반경 edgeBoost뿐이다. rise가 커질수록(더 많이 얇아질수록)
+// 그 보정(boostMax)은 커져야 한다(단, L3와 동일 캡 0.06).
 {
   const spec = baseSpec();
-  spec.levels[4] = { on: true, gap: 2, flatX: 4, flatY: 4, angleX: 45, angleY: 45, rise: 8, radiusX: 0, radiusY: 0 };
+  spec.levels[4] = { on: true, gap: 2, flatX: 4, flatY: 4, angleX: 45, angleY: 45, rise: 1, radiusX: 0, radiusY: 0 };
   const eBase = levelEffect(spec, 4, spec.space.depth);
-  check('L4 blurX>0 (경험식 정상)', eBase.blurX > 0, `blurX=${eBase.blurX}`);
-  check('L4 edgeBoost 없음(형상 캡 로직 미보유)', eBase.edgeBoost === undefined);
+  check('L4는 벌크 blur가 없음(blurX=0)', eBase.blurX === 0, `blurX=${eBase.blurX}`);
+  check('L4는 벌크 blur가 없음(blurY=0)', eBase.blurY === 0, `blurY=${eBase.blurY}`);
+  check('L4 edgeBoost.kind === "radial"', eBase.edgeBoost.kind === 'radial');
+  check('L4 edgeBoost.hasBoost=true', eBase.edgeBoost.hasBoost === true);
 
   const spec2 = baseSpec();
-  spec2.levels[4] = { on: true, gap: 2, flatX: 4, flatY: 4, angleX: 45, angleY: 45, rise: 16, radiusX: 0, radiusY: 0 };
+  spec2.levels[4] = { on: true, gap: 2, flatX: 4, flatY: 4, angleX: 45, angleY: 45, rise: 1.5, radiusX: 0, radiusY: 0 };
   const eRise = levelEffect(spec2, 4, spec.space.depth);
-  check('rise↑ → blur↑ (단조)', eRise.blurX > eBase.blurX, `base=${eBase.blurX} rise16=${eRise.blurX}`);
+  check('rise↑ → boostMax↑ (단조, 캡 아래)',
+    eRise.edgeBoost.boostMax > eBase.edgeBoost.boostMax && eRise.edgeBoost.boostMax < 0.06,
+    `base=${eBase.edgeBoost.boostMax} rise1.5=${eRise.edgeBoost.boostMax}`);
 }
 
 // l4BotZAt 형상 — flat 반경 안쪽은 평평(gap), 밖은 각도만큼 botZ가 커짐(재료가 얇아짐).
@@ -166,6 +171,36 @@ function baseSpec() {
 
   const botZFar = l4BotZAt(spec, A, depth, 10, 10);
   check('flat 밖(dist=halfP)에서 botZ가 커짐(재료가 얇아짐)', botZFar > botZFlat, `flat=${botZFlat} far=${botZFar}`);
+}
+
+// L4 edgeBoost가 실제 필드 계산 경로(computeField)에서 크래시 없이 동작하고, LED 바로 위
+// (flat 패드 안쪽)는 보정이 없으며, 캡(필드 최댓값)을 넘지 않는지 확인.
+{
+  const spec = baseSpec();
+  spec.levels[4] = { on: true, gap: 2, flatX: 4, flatY: 4, angleX: 45, angleY: 45, rise: 8, radiusX: 0, radiusY: 0 };
+  const eff = levelEffect(spec, 4, spec.space.depth);
+  const commonOpt = {
+    depth: spec.space.depth, pitchX: 20, pitchY: 20, nx: 41, ny: 41,
+    blurMmX: eff.blurX, blurMmY: eff.blurY, transmit: eff.transmit,
+  };
+  const boosted = computeField(spec, { ...commonOpt, edgeBoost: eff.edgeBoost });
+  const unboosted = computeField(spec, { ...commonOpt, edgeBoost: undefined });
+  const boostedMax = Math.max(...boosted.field);
+  const unboostedMax = Math.max(...unboosted.field);
+  check('L4 edgeBoost 적용 후 필드가 유한하고 양수', Number.isFinite(boostedMax) && boostedMax > 0, `max=${boostedMax}`);
+  check('L4 edgeBoost가 필드 최댓값을 넘어서지 않음(캡 유지)', boostedMax <= unboostedMax + 1e-9,
+    `boostedMax=${boostedMax} unboostedMax=${unboostedMax}`);
+  // LED 위치 바로 아래(flat 패드 중심, 실제 LED 좌표 40.2/40.2 근처)는 보정이 없어야 한다 —
+  // (50,50)은 4개 LED의 정중앙(가장 먼 지점)이라 오히려 boost가 최대인 지점이므로 피한다.
+  const ledIdx = 16 * 41 + 16; // nx=41 → step=2.5mm → x=y=40.0mm, LED(40.2,40.2)에서 0.28mm(<flatHalf)
+  check('LED 바로 위(flat 패드)는 boost=0 (boosted===unboosted)',
+    Math.abs(boosted.field[ledIdx] - unboosted.field[ledIdx]) < 1e-9,
+    `boosted=${boosted.field[ledIdx]} unboosted=${unboosted.field[ledIdx]}`);
+  // (50,50)은 4개 LED의 정중앙(가장 먼 지점) — boost가 0보다 커야 한다(전면 무력화 아님).
+  const midIdx = 20 * 41 + 20;
+  check('4개 LED 정중앙은 boost>0 (전면 무력화 아님)',
+    boosted.field[midIdx] > unboosted.field[midIdx] + 1e-9,
+    `boosted=${boosted.field[midIdx]} unboosted=${unboosted.field[midIdx]}`);
 }
 
 process.exitCode = fail ? 1 : 0;
