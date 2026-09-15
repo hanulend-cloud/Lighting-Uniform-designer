@@ -20,7 +20,7 @@ export const LEVEL_SCHEMA = {
     desc: 'Milky resin 사용도. 1=투명(효과 없음), 10=최대(후방산란→기판 반사 재순환으로 확산 최대·투과율 최저). 확산은 캐비티 깊이에 비례. De-center는 LED 배열 전체를 타겟 중심에서 X·Y로 밀어 배치 공차/비대칭을 검토하는 용도(광학 확산과는 무관, 배치만 이동).',
   },
   3: {
-    label: '형상·자유(도파관)', hint: 'X·Y 독립 두께 프로필(중심·중간·가장자리) · 균일두께 도파관(TIR)',
+    label: '형상·자유(도파관)', hint: 'X·Y 독립 두께 프로필(중심·중간·가장자리) · 가장자리 경사 굴절만 유효',
     fields: [
       { key: 'tx0', label: 'X중심', unit: 'mm', min: 0.5, max: 10, step: 0.5 },
       { key: 'tx100', label: 'X가장자리', unit: 'mm', min: 0.5, max: 10, step: 0.5 },
@@ -30,7 +30,7 @@ export const LEVEL_SCHEMA = {
       { key: 'ty50', label: 'Y중간', unit: 'mm', min: 0.5, max: 10, step: 0.5, adv: true },
       { key: 'edgeR', label: '모서리R', unit: 'mm', min: 0, max: 50, step: 1, adv: true },
     ],
-    desc: '기구물 두께를 X·Y축 각각 중심→가장자리 3점(중심·중간·가장자리)으로 독립 지정하는 균일두께 도파관(TIR) 형상. LED 방출광 중 임계각 밖으로 나가는 성분은 슬래브 안에서 전반사(TIR)로 갇혀 옆으로 퍼진다 — 그 축의 중심 두께가 두꺼울수록 갇힌 빛이 그 방향으로 더 멀리 퍼져 확산이 커진다(도파관 원리). X·Y를 다르게 주면 축별로 확산 강도가 실제로 달라진다. 중간 지점은 가장자리 근처 형상(볼록/오목)을 보조적으로 다듬는다. 모서리R로 네 모서리를 둥글게 해 집광(핫스팟) 없이 고르게 퍼지도록 함.',
+    desc: '기구물 두께를 X·Y축 각각 중심→가장자리 3점(중심·중간·가장자리)으로 독립 지정하는 투명 형상. 확산재가 없는 투명 소재는 평탄한 벌크 영역 자체로는 빛을 거의 퍼뜨리지 못한다(산란원이 없어 TIR로 갇힌 빛도 각도를 바꾸지 못함) — 실질적인 효과는 경사진 가장자리(중간→가장자리 구간)에서의 굴절 재방향뿐이라, tx100/ty100(가장자리 두께)이 작을수록 그 축의 가장자리가 국소적으로 밝아진다. X·Y를 다르게 주면 축별로 그 국소 보정이 달라진다. 모서리R로 네 모서리를 둥글게 해 집광(핫스팟) 없이 고르게 퍼지도록 함. 면적 전체의 확산은 이 레벨만으로는 한계가 있으니 L2(확산소재)를 함께 켜야 한다.',
   },
   4: {
     label: '형상·정밀', hint: 'X·Y 각도/크기 개별 조정 (L3 대체)',
@@ -76,18 +76,12 @@ const iso = (b, transmit) => ({ blurX: b, blurY: b, transmit });
 // 반사시트를 가정하지 않고 보수적으로 잡음(사용자 지정). 입력 항목은 아니며 실측 시 캘리브레이션 대상.
 const BOARD_REFL = 0.5;
 
-// TIR(전반사) 도파관 물리량 — L3(X·Y 독립 두께 프로필)가 사용. 굴절률 n·LED 빔각으로 정해지는
-// 임계각 기반 갇힘비율(fracTrapped)과, 두께 1mm당 옆으로 퍼지는 거리 계수(K_RANGE, 1회 바운스
-// 보수적 상한).
-function tirParams(spec, d) {
-  const n = spec.body?.n ?? 1.59;
-  const critAngle = n > 1 ? Math.asin(1 / n) : Math.PI / 2;
-  const mLamb = lambertianExponent(spec.led?.beamX ?? 120);
-  const fracTrapped = clamp(Math.pow(Math.cos(critAngle), mLamb + 2), 0, 0.9);
+// L3 두께(tx0/tx50/tx100 등)의 물리적 상·하한 — L3(X·Y 독립 두께 프로필)와 l3BotZAt(형상)가
+// 공유. 하한은 몸체 최소 두께, 상한은 주어진 깊이 안에서 LED와 부딪히지 않는 최대 두께.
+function thicknessBounds(spec, d) {
   const minThk = Math.max(1, (spec.body?.baseThk ?? 3) * 0.5);
   const maxThk = Math.max(minThk, d - (spec.led?.sizeZ ?? 0.5) - 0.5);
-  const K_RANGE = 2 * Math.tan(critAngle);
-  return { fracTrapped, minThk, maxThk, K_RANGE };
+  return { minThk, maxThk };
 }
 
 export function levelParams(spec, level) {
@@ -128,14 +122,21 @@ export function levelEffect(spec, level, depth) {
     }
 
     case 3: {
-      // 균일두께 도파관(TIR) — X·Y축 각각의 "중심 두께"로 bulk-blur를 독립 적용한다. 캡이
-      // 없는 항이라 tx0≠ty0 이면 두 축의 확산 강도가 실제로 달라진다(핵심 개선).
-      const { fracTrapped, minThk, maxThk, K_RANGE } = tirParams(spec, d);
+      // 균일두께 도파관 — 광학적으로 유효한 산란원은 경사진 가장자리(테이퍼)에서의 굴절
+      // 재방향뿐이다(Snell 굴절: 평탄면 기준으로는 임계각 밖이라 갇히던 광선도, 그 위치가
+      // 기울어져 있으면 그 지점의 법선 기준 임계각 안에 들어 실제로 빠져나감 — edgeBoost가
+      // 이 효과를 담당). 반면 평탄한 벌크 영역은 확산재·추출 패턴이 전혀 없는 매끈한 두
+      // 평행면(TIR) 사이 공간이라, 갇힌 빛의 진행각을 바꿔줄 산란원이 없다 — 여러 번
+      // 왕복해도 같은 각도로 계속 진행할 뿐 넓게 퍼지지 않는다(project.md §9: "산란은
+      // 소재 haze·미세패턴·형상에서만 발생" — 여기서 "형상"은 경사면 굴절이지 매끈한
+      // 평행판 자체의 확산이 아니다). 이전 버전은 중심 두께에 비례하는 bulk-blur를 벌크
+      // 영역에도 적용했는데, 투명 소재만으로는 그 정도 확산이 실제로 나타나기 어렵다는
+      // 지적(실사용 피드백)에 따라 제거한다 — 투명 소재는 형상(테이퍼)만으로 확산에 거의
+      // 기여하지 못하고, 면적 전체의 확산을 원하면 L2(확산소재)가 필요하다.
+      const { minThk, maxThk } = thicknessBounds(spec, d);
       const clampThk = (v, fb) => Math.max(minThk, Math.min(v ?? fb, maxThk));
       const tx0 = clampThk(p.tx0, 3), tx50 = clampThk(p.tx50, 2), tx100 = clampThk(p.tx100, 1);
       const ty0 = clampThk(p.ty0, 3), ty50 = clampThk(p.ty50, 2), ty100 = clampThk(p.ty100, 1);
-      const bulkBlurX = K_RANGE * tx0 * fracTrapped;
-      const bulkBlurY = K_RANGE * ty0 * fracTrapped;
 
       // 보조 보정: 중심→가장자리 두께 낙차만큼 계수(0.03)·캡(0.06)으로 국소 보정 세기를
       // 정한다. 실제 픽셀별 보정은 directLit.js의 applyAxisEdgeBoost()가 이 edgeBoost.kind
@@ -150,7 +151,7 @@ export function levelEffect(spec, level, depth) {
       const boostMaxY = clamp(0.03 * (ty0 - ty100), 0, 0.06);
       const cornerR = Math.max(0, p.edgeR ?? 0);
       return {
-        blurX: bulkBlurX, blurY: bulkBlurY, transmit: 0.97,
+        blurX: 0, blurY: 0, transmit: 0.97,
         edgeBoost: {
           kind: 'axis',
           x: { pts: [tx0, tx50, tx100], boostMax: boostMaxX },
@@ -270,7 +271,7 @@ function axisThickAt(pts, halfLen, dist) {
 export function l3BotZAt(spec, depth, x, y) {
   const X = spec.target.xLen, Y = spec.target.yLen;
   const sp3 = levelParams(spec, 3);
-  const { minThk, maxThk } = tirParams(spec, depth);
+  const { minThk, maxThk } = thicknessBounds(spec, depth);
   const clampThk = (v, fb) => Math.max(minThk, Math.min(v ?? fb, maxThk));
   const tx = [clampThk(sp3.tx0, 3), clampThk(sp3.tx50, 2), clampThk(sp3.tx100, 1)];
   const ty = [clampThk(sp3.ty0, 3), clampThk(sp3.ty50, 2), clampThk(sp3.ty100, 1)];

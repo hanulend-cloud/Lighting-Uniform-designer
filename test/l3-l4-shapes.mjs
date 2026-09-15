@@ -15,24 +15,37 @@ function baseSpec() {
 
 // ---- L3(신규 축 프로필) ----
 
-// tx0>ty0 이면 X 방향 벌크 블러가 더 커야 한다 — 캡 없는 핵심 메커니즘의 존재 증명.
+// 투명 소재(확산재 없음)는 벌크 영역 자체로 빛을 퍼뜨리지 못한다 — blurX/blurY는 항상 0이어야
+// 한다(L1의 "클리어 평판=확산 없음"과 동일 원칙, project.md §9). tx0/ty0(중심 두께)가 달라도
+// 이 값은 바뀌지 않는다 — 회귀 방지(예전엔 bulk-blur가 있어 여기서 blurX≠blurY 였음).
 {
   const spec = baseSpec();
   spec.levels[3] = { on: true, tx0: 6, tx50: 4, tx100: 2, ty0: 3, ty50: 2.5, ty100: 1.5, edgeR: 0 };
   const e = levelEffect(spec, 3, spec.space.depth);
-  check('tx0>ty0 → blurX>blurY', e.blurX > e.blurY, `blurX=${e.blurX} blurY=${e.blurY}`);
-  const ratio = e.blurX / e.blurY;
-  check('블러 비율이 두께 비율(6/3=2)과 일치', Math.abs(ratio - 2) < 0.01, `ratio=${ratio}`);
+  check('L3는 벌크 blur가 없음(blurX=0)', e.blurX === 0, `blurX=${e.blurX}`);
+  check('L3는 벌크 blur가 없음(blurY=0)', e.blurY === 0, `blurY=${e.blurY}`);
   check('L3 edgeBoost.kind === "axis"', e.edgeBoost.kind === 'axis');
   check('L3 edgeBoost.hasBoost=true', e.edgeBoost.hasBoost === true);
 }
 
-// tx0===ty0 이면 대칭이어야 한다(회귀 방지).
+// 경사(중간→가장자리) 낙차가 큰 축일수록 그 축의 국소 보정(boostMax)이 커야 한다 — 형상(테이퍼)
+// 굴절만이 유효한 산란원이라는 새 모델에서, 축별 독립 효과는 이제 boostMax를 통해서만 나타난다.
+{
+  const spec = baseSpec();
+  spec.levels[3] = { on: true, tx0: 4, tx50: 3.5, tx100: 3, ty0: 4, ty50: 3.75, ty100: 3.5, edgeR: 0 };
+  const e = levelEffect(spec, 3, spec.space.depth);
+  check('X낙차(4→3=1) > Y낙차(4→3.5=0.5) → boostMaxX > boostMaxY (둘 다 캡 0.06 아래)',
+    e.edgeBoost.x.boostMax > e.edgeBoost.y.boostMax && e.edgeBoost.x.boostMax < 0.06,
+    `x=${e.edgeBoost.x.boostMax} y=${e.edgeBoost.y.boostMax}`);
+}
+
+// tx0===ty0 이고 낙차도 같으면 대칭이어야 한다(회귀 방지).
 {
   const spec = baseSpec();
   spec.levels[3] = { on: true, tx0: 4, tx50: 3, tx100: 2, ty0: 4, ty50: 3, ty100: 2, edgeR: 0 };
   const e = levelEffect(spec, 3, spec.space.depth);
-  check('tx0=ty0 → blurX=blurY', Math.abs(e.blurX - e.blurY) < 1e-9, `blurX=${e.blurX} blurY=${e.blurY}`);
+  check('blurX=blurY=0', e.blurX === 0 && e.blurY === 0, `blurX=${e.blurX} blurY=${e.blurY}`);
+  check('대칭 프로필 → boostMaxX=boostMaxY', Math.abs(e.edgeBoost.x.boostMax - e.edgeBoost.y.boostMax) < 1e-9);
 }
 
 // L3 edgeBoost가 실제 필드 계산 경로(computeField)에서 크래시 없이 동작하고, 가장자리 근처
