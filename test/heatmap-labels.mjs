@@ -66,13 +66,13 @@ const base = {
 }
 {
   const texts = [];
-  drawHeatmap(fakeCanvas(texts), { ...base, fixture: { x: 1000, y: 200 } }, 0.5, { unit: 'lux', fluxLm: 100 });
+  drawHeatmap(fakeCanvas(texts), { ...base, fixture: { x: 1000, y: 200 } }, 0.5, { unit: 'illum', fluxLm: 100 });
   const all = texts.join('\n');
   ok(/1000000\s*lux/.test(all), `조도 절대값(1,000,000 lux) 표기 (field=1 × 1e6)`);
 }
 {
   const texts = [];
-  drawHeatmap(fakeCanvas(texts), { ...base, fixture: { x: 1000, y: 200 } }, 0.5, { unit: 'cdm2', fluxLm: 100 });
+  drawHeatmap(fakeCanvas(texts), { ...base, fixture: { x: 1000, y: 200 } }, 0.5, { unit: 'lumin', fluxLm: 100 });
   const all = texts.join('\n');
   const expected = (1000000 / Math.PI).toFixed(0);
   ok(all.includes(`${expected} cd/m²`), `휘도 절대값(조도/π = ${expected} cd/m²) 표기`);

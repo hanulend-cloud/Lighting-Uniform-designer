@@ -42,9 +42,10 @@ header button:hover, .import:hover { background: #eef2fb; border-color: #b7c6ea;
 .zbadge.req { background: #ffe3e3; color: #c23a3a; }
 .zbadge.opt { background: #dfe9fb; color: #2f5fd6; }
 
-/* --- 본문: 좌 설계변경 | 우 결과 (결과 그래프를 더 크게) --- */
+/* --- 본문: 좌 설계변경 | 우 결과 — 왼쪽 입력 패널은 필요한 만큼만(고정 폭에 가깝게) 쓰고
+   나머지는 전부 그래프에 준다. 너무 좁아 줄바꿈이 심해지지 않도록 min-width로 하한만 둔다. */
 main { flex: 1 1 auto; min-height: 0; display: grid;
-  grid-template-columns: 0.82fr 1.18fr; gap: 14px; padding: 14px 20px; }
+  grid-template-columns: minmax(300px, 0.55fr) 1.45fr; gap: 14px; padding: 14px 20px; }
 
 #design-wrap { min-height: 0; display: flex; flex-direction: column; gap: 9px; overflow-y: auto;
   background: #f7f8fa; border: 1px solid #dde1e8; border-left: 4px solid #d99a20;

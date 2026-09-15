@@ -90,7 +90,11 @@ function buildForm() {
           sel.appendChild(o);
         }
         sel.value = get(spec, path) ?? options[0][0];
-        sel.addEventListener('change', () => { set(spec, path, sel.value); schedule(); });
+        sel.addEventListener('change', () => {
+          set(spec, path, sel.value);
+          if (path === 'goal.metric') { syncMetric(sel.value); forceHeatOnNextRun = true; }
+          schedule();
+        });
         row.appendChild(span);
         row.appendChild(sel);
       }
@@ -214,8 +218,9 @@ function run() {
   last = { common, m, depth, view: geom.view, edgeMargin, fixture: geomFixture, center };
   last.combo = combo; last.geom = geom; last.active = active;
   // X·Y 프로파일 그래프는 히트맵과 같은 필드(조도/휘도 단위 선택 포함)를 그대로 써서 그린다
-  // (renderHeat 안에서) — 여기선 히트맵과 함께 stale 처리만 한다.
-  if (autoHeat) renderHeat();
+  // (renderHeat 안에서) — 여기선 히트맵과 함께 stale 처리만 한다. 판정기준(조도/휘도)을 막
+  // 바꾼 직후에는 자동 렌더링이 꺼져 있어도 강제로 한 번 그려서, 방금 고른 단위가 바로 보이게 한다.
+  if (autoHeat || forceHeatOnNextRun) { renderHeat(); forceHeatOnNextRun = false; }
   else { $('#pane-heat').classList.add('stale'); $('#pane-prof').classList.add('stale'); }
 
   $('#timing').textContent =
@@ -234,25 +239,42 @@ function heatGrid(spec) {
   return { nx: Math.max(2, Math.round(X / cell) + 1), ny: Math.max(2, Math.round(Y / cell) + 1), cell };
 }
 let lastHeat = null;   // 최종 렌더링된(res.field가 화면에 실제 쓰인) 결과 — 팝업 확대 시 재계산 없이 재사용
-// 히트맵 단위. 'rel'/'lux'는 조도장(computeField) 그대로(숫자만 환산) — 색 패턴 불변(상수배).
-// 'cdm2'(휘도)는 확산재(L2/L5, blur>0)가 있으면 램버시안 근사(L=E/π, 각도 무관)라 조도장과
-// 패턴이 같아 그대로 쓰고, 확산재가 없으면(L1만 또는 L3/L4 형상만) 시야각(코원앵글)·시차를
-// 반영한 직접-시야 렌더링(computeCameraLuminance)으로 그림 자체가 달라진다 — 확산 유무에
-// 따라 "휘도가 조도와 얼마나 달라 보여야 하는가"가 실제로 다르기 때문(directLit.js 주석 참고).
+// 히트맵 단위 = spec.goal.metric('illum'|'lumin')과 항상 같은 값 — "판정기준"이 조도/휘도
+// 어느 쪽이냐에 따라 히트맵·프로파일 등 화면 전체가 일관되게 바뀌도록 단일 값으로 묶는다
+// (예전엔 상대값(%)/조도(lux)/휘도(cdm2) 3택 + 판정기준 이렇게 서로 다른 두 컨트롤이 있어
+// 헷갈렸다 — 이제 goal.metric 하나가 판정과 표시를 모두 결정한다). 'illum'이면 조도장
+// (computeField) 그대로(숫자만 lux 환산) — 색 패턴 불변(상수배). 'lumin'이면 확산재(L2/L5,
+// blur>0)가 있을 때는 램버시안 근사(L=E/π, 각도 무관)라 조도장과 패턴이 같아 그대로 쓰고,
+// 확산재가 없으면(L1만 또는 L3/L4 형상만) 시야각(코원앵글)·시차·굴절을 반영한 직접-시야
+// 렌더링(computeCameraLuminance)으로 그림 자체가 달라진다(directLit.js 주석 참고).
 // fluxLm=0(상대 모드)이면 lux/cd·m² 실단위가 무의미해 heatmap.js가 자동으로 상대값(%)으로
 // 되돌린다.
-let heatUnit = 'rel';
+let heatUnit = 'illum';
+let forceHeatOnNextRun = false;   // 판정기준(조도/휘도)을 막 바꿨을 때 자동렌더링 꺼져있어도 1회 강제로 히트맵을 그림
 let heatConeDeg = 10;   // 육안 시야각 렌더링(휘도) 파라미터 — half cone angle(°): 패널 X 절반이 이 각도로 보이는 시야 거리를 역산해서 씀
 let profilePick = null;   // 히트맵을 클릭해 고른 단면 위치({x,y}mm) — X·Y 프로파일 그래프에 그 단면을 추가로 표시
 function heatOpt() { return { unit: heatUnit, fluxLm: spec.led.fluxLm ?? 0, pick: profilePick }; }
+// goal.metric ↔ heatUnit ↔ 두 select(목표 판정기준 / 히트맵 단위)를 항상 같은 값으로 맞춘다.
+// 어느 쪽에서 바꾸든(판정기준 드롭다운, 히트맵 단위 드롭다운, JSON 불러오기) 이 함수를 거친다.
+function syncMetric(value) {
+  heatUnit = value === 'lumin' ? 'lumin' : 'illum';
+  spec.goal.metric = heatUnit;
+  const gsel = document.querySelector('select[data-path="goal.metric"]');
+  if (gsel) gsel.value = heatUnit;
+  const usel = $('#heat-unit');
+  if (usel) usel.value = heatUnit;
+  updateHeatTitle();
+}
 function updateHeatTitle() {
-  const label = { rel: '조도 히트맵', lux: '조도 히트맵 (lux)', cdm2: '휘도 히트맵 (육안 시야각, cd/m²)' }[heatUnit];
+  const label = { illum: '조도 히트맵', lumin: '휘도 히트맵 (육안 시야각, cd/m²)' }[heatUnit];
   const el = $('#heat-title');
   if (el) el.textContent = label;
+  const btn = $('#heat-render');
+  if (btn) btn.textContent = heatUnit === 'lumin' ? '휘도 렌더링' : '조도 렌더링';
   const eyeCtl = $('#heat-eye-ctl');
-  if (eyeCtl) eyeCtl.hidden = heatUnit !== 'cdm2';
+  if (eyeCtl) eyeCtl.hidden = heatUnit !== 'lumin';
   const profEl = $('#prof-title');
-  if (profEl) profEl.textContent = `X·Y축 ${heatUnit === 'cdm2' ? '휘도' : '조도'} 프로파일`;
+  if (profEl) profEl.textContent = `X·Y축 ${heatUnit === 'lumin' ? '휘도' : '조도'} 프로파일`;
 }
 function renderHeat() {
   if (!last) return;
@@ -267,7 +289,7 @@ function renderHeat() {
   // 확산재(L2 밀키·L5 미세패턴)가 있어야 표면이 램버시안에 가까워져 "보는 각도"가 의미를
   // 갖는다 — 확산재가 없으면(blur=0) 시야각 렌더링은 아래에서만 덧씌운다.
   const diffusing = (last.common.blurMmX ?? 0) > 0 || (last.common.blurMmY ?? 0) > 0;
-  if (heatUnit === 'cdm2' && !diffusing) {
+  if (heatUnit === 'lumin' && !diffusing) {
     // 판정 수치(균일도%·중심부 등)는 조도 기준 그대로 두고, 화면에 그릴 필드·격자만 시야각
     // 렌더링으로 바꿔치기한다 — "실제 판정"과 "육안으로 어떻게 보이는가"를 분리해서 보여준다.
     const cam = computeCameraLuminance(spec, {
@@ -363,7 +385,7 @@ function openZoom(cfg) {
   };
   // 히트맵·프로파일은 조도/휘도 단위에 따라 제목이 바뀌므로(heat-title 참고) 고정 문자열 대신
   // 현재 단위를 반영한 제목을 쓴다.
-  const unitLabel = { rel: '조도', lux: '조도', cdm2: '휘도' }[heatUnit];
+  const unitLabel = heatUnit === 'lumin' ? '휘도' : '조도';
   $('#zoom-title').textContent = cfg.kind === 'heat' ? ($('#heat-title')?.textContent || cfg.title)
     : cfg.kind === 'profile' ? `X·Y축 ${unitLabel} 프로파일` : cfg.title;
   if (ctl) $('#zoom-modal-ctl-slot').appendChild(ctl);
@@ -425,21 +447,17 @@ function mount() {
   const auto = $('#heat-auto');
   auto.checked = autoHeat;
   auto.onchange = () => { autoHeat = auto.checked; if (autoHeat) renderHeat(); };
+  // 히트맵 단위 select = 목표 판정기준(goal.metric) select와 항상 같은 값. 여기서 바꾸면
+  // 판정기준 자체가 바뀌므로(솔버 재탐색 필요) schedule()로 전체 재계산한다.
+  heatUnit = spec.goal.metric === 'lumin' ? 'lumin' : 'illum';
   const unitSel = $('#heat-unit');
   unitSel.value = heatUnit;
-  unitSel.onchange = () => {
-    heatUnit = unitSel.value;
-    updateHeatTitle();
-    // rel/lux는 조도장 그대로라 캐시(lastHeat)를 새 단위로 다시 그리기만 하면 된다. cdm2(휘도,
-    // 시야각 렌더링)는 완전히 다른 필드가 필요해 재계산해야 한다.
-    if (heatUnit === 'cdm2') renderHeat();
-    else if (lastHeat) drawHeatmap($('#heatmap'), lastHeat, sizeVisuals(last.view.x1 - last.view.x0, '#pane-heat'), heatOpt());
-  };
+  unitSel.onchange = () => { syncMetric(unitSel.value); forceHeatOnNextRun = true; schedule(); };
   const coneInput = $('#heat-cone');
   coneInput.value = heatConeDeg;
   coneInput.oninput = () => {
     heatConeDeg = Math.min(89, Math.max(0.1, parseFloat(coneInput.value) || 10));
-    if (heatUnit === 'cdm2') renderHeat();
+    if (heatUnit === 'lumin') renderHeat();
   };
   updateHeatTitle();
 }

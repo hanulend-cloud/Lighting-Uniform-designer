@@ -6,18 +6,19 @@
 import { fitCanvas, PAD } from './canvas-util.js';
 import { LUX_PER_FIELD_UNIT, illuminanceToLuminance } from '../engine/photometry.js';
 
-// field 값(내부 표현) → 선택한 단위의 숫자 문자열. 상대 모드(fluxLm<=0)거나 unit='rel'이면
-// null(호출측이 기존처럼 %로 표시). 색 패턴 자체는 이 선택과 무관하게 항상 값/최댓값이다 —
-// 단위 변환은 모든 픽셀에 같은 상수를 곱할 뿐이라 비율(그림)은 절대 바뀌지 않는다.
+// field 값(내부 표현) → 선택한 단위(조도=lux, 휘도=cd/m²)의 숫자 문자열. 상대 모드(fluxLm<=0)
+// 면 null(호출측이 %로 표시) — 광속을 안 정했으면 실단위 자체가 무의미하기 때문. 색 패턴 자체는
+// 이 선택과 무관하게 항상 값/최댓값이다 — 단위 변환은 모든 픽셀에 같은 상수를 곱할 뿐이라
+// 비율(그림)은 절대 바뀌지 않는다.
 function absLabel(fieldValue, unit, fluxLm) {
-  if (unit === 'rel' || !fluxLm || fluxLm <= 0) return null;
+  if (!fluxLm || fluxLm <= 0) return null;
   const lux = fieldValue * LUX_PER_FIELD_UNIT;
-  const v = unit === 'lux' ? lux : illuminanceToLuminance(lux);
-  return `${v.toFixed(v < 10 ? 2 : 0)} ${unit === 'lux' ? 'lux' : 'cd/m²'}`;
+  const v = unit === 'lumin' ? illuminanceToLuminance(lux) : lux;
+  return `${v.toFixed(v < 10 ? 2 : 0)} ${unit === 'lumin' ? 'cd/m²' : 'lux'}`;
 }
 
 export function drawHeatmap(canvas, res, pxmm, opt = {}) {
-  const unit = opt.unit === 'lux' || opt.unit === 'cdm2' ? opt.unit : 'rel';
+  const unit = opt.unit === 'lumin' ? 'lumin' : 'illum';
   const fluxLm = opt.fluxLm ?? 0;
   const { ctx, w, h } = fitCanvas(canvas);
   ctx.fillStyle = '#0f1420'; ctx.fillRect(0, 0, w, h);
@@ -182,7 +183,7 @@ export function drawHeatmap(canvas, res, pxmm, opt = {}) {
     eg > 0 ? '어둡게=판정제외 마진' : null, hasOverhang ? '회색점선=기구(오버행)' : null,
     showLedDots ? '●=LED' : 'LED점 생략(너무 촘촘함)', '⊕=판정영역 최솟값 지점',
     res.cellMm ? `격자 ${(+res.cellMm.toFixed(2))}mm` : null,
-    unit !== 'rel' && !(fluxLm > 0) ? 'LED 광속(lm)을 0보다 크게 설정해야 실제 단위가 표시됩니다(현재 상대값)' : null,
+    !(fluxLm > 0) ? 'LED 광속(lm)을 0보다 크게 설정해야 실제 단위(lux/cd·m²)가 표시됩니다(현재 상대값 %)' : null,
     '클릭=그 위치의 X·Y 단면을 아래 프로파일 그래프에 표시',
   ].filter(Boolean).join(' · ');
 
@@ -248,16 +249,20 @@ export function drawHeatmap(canvas, res, pxmm, opt = {}) {
     canvas.title += ` · 중심부 인셋 = 경계에서 X ${fmt(tX * c.fx)} / Y ${fmt(tY * c.fy)}mm 안쪽`;
   }
 
-  // 사용자가 클릭으로 고른 단면 위치 — 최솟값 마커(⊕)와 헷갈리지 않게 주황 십자로 따로 표시.
-  // X·Y축 프로파일 패널이 이 지점을 지나는 가로·세로 단면을 같이 그린다(analysis.drawProfiles).
+  // 사용자가 클릭으로 고른 단면 위치 — 어디를 지나는 단면인지 한눈에 보이도록 점선을 필드
+  // 전체 폭·높이로 가로지르게 긋는다(작은 십자만으로는 그 줄이 정확히 어디를 지나는지 판정
+  // 영역과 비교하기 어려웠음). X·Y축 프로파일 패널이 이 지점을 지나는 가로·세로 단면을 같이
+  // 그린다(analysis.drawProfiles).
   if (opt.pick) {
     const pxp = sx(opt.pick.x), pyp = sy(opt.pick.y);
-    ctx.lineWidth = 3.2; ctx.strokeStyle = 'rgba(0,0,0,0.65)';
-    ctx.beginPath(); ctx.moveTo(pxp - 9, pyp); ctx.lineTo(pxp + 9, pyp); ctx.moveTo(pxp, pyp - 9); ctx.lineTo(pxp, pyp + 9); ctx.stroke();
-    ctx.lineWidth = 1.6; ctx.strokeStyle = '#ff9d3f';
-    ctx.beginPath(); ctx.moveTo(pxp - 9, pyp); ctx.lineTo(pxp + 9, pyp); ctx.moveTo(pxp, pyp - 9); ctx.lineTo(pxp, pyp + 9); ctx.stroke();
-    ctx.beginPath(); ctx.arc(pxp, pyp, 4, 0, 7); ctx.stroke();
-    canvas.title += ' · 주황 십자=선택한 단면 위치(더블클릭으로 해제)';
+    ctx.lineWidth = 1.4; ctx.strokeStyle = 'rgba(255,157,63,0.9)'; ctx.setLineDash([6, 4]);
+    ctx.beginPath();
+    ctx.moveTo(ox, pyp); ctx.lineTo(ox + imgW, pyp);
+    ctx.moveTo(pxp, iy); ctx.lineTo(pxp, iy + imgH);
+    ctx.stroke(); ctx.setLineDash([]);
+    ctx.fillStyle = '#ff9d3f'; ctx.beginPath(); ctx.arc(pxp, pyp, 4, 0, 7); ctx.fill();
+    ctx.strokeStyle = 'rgba(0,0,0,0.65)'; ctx.lineWidth = 1; ctx.stroke();
+    canvas.title += ' · 주황 점선=선택한 단면 위치(더블클릭으로 해제)';
   }
 
   // 클릭으로 단면 위치를 고를 수 있도록, 화면(px)↔실좌표(mm) 역변환에 필요한 값을 저장해둔다

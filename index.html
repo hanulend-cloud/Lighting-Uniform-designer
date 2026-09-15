@@ -46,10 +46,9 @@
             <div class="pane-title heat-bar">
               <span id="heat-title">조도 히트맵</span>
               <span class="heat-ctl">
-                <select id="heat-unit" title="상대값(%)·조도(lux)는 조도장을 그대로 표시(숫자만 환산)합니다. 휘도(cd/m²)는 시야각(코원앵글)·시차를 반영해 실제로 다른 그림이 나옵니다.">
-                  <option value="rel">상대값(%)</option>
-                  <option value="lux">조도(lux)</option>
-                  <option value="cdm2">휘도(cd/m², 육안 시야각)</option>
+                <select id="heat-unit" title="위 '목표 · 판정기준'과 같은 값입니다 — 여기서 바꾸면 판정기준도 함께 바뀝니다. 조도는 계산된 조도장을 그대로 표시(광속을 0보다 크게 설정하면 lux). 휘도는 시야각(코원앵글)·시차를 반영해 실제로 다른 그림이 나옵니다(광속 설정 시 cd/m²).">
+                  <option value="illum">조도</option>
+                  <option value="lumin">휘도</option>
                 </select>
                 <span id="heat-eye-ctl" class="heat-eye-ctl" hidden>
                   <label title="정면에서 패널을 바라볼 때 중심→가장자리(X축 절반)까지의 시야각(반원뿔각). 클수록(가까이서 볼수록) 가장자리에서 시차 어긋남이 커진다.">half cone angle<input type="number" id="heat-cone" value="10" min="0.1" max="89" step="0.5">°</label>
