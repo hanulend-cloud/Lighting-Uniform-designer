@@ -222,7 +222,7 @@ let lastHeat = null;   // 최종 렌더링된(res.field가 화면에 실제 쓰�
 // fluxLm=0(상대 모드)이면 lux/cd·m² 실단위가 무의미해 heatmap.js가 자동으로 상대값(%)으로
 // 되돌린다.
 let heatUnit = 'rel';
-let heatViewDist = 300, heatEyeSep = 100;   // 육안 시야각 렌더링(휘도) 파라미터 — 거리·눈간격(mm)
+let heatConeDeg = 10;   // 육안 시야각 렌더링(휘도) 파라미터 — half cone angle(°): 패널 X 절반이 이 각도로 보이는 시야 거리를 역산해서 씀
 function heatOpt() { return { unit: heatUnit, fluxLm: spec.led.fluxLm ?? 0 }; }
 function updateHeatTitle() {
   const label = { rel: '조도 히트맵', lux: '조도 히트맵 (lux)', cdm2: '휘도 히트맵 (육안 시야각, cd/m²)' }[heatUnit];
@@ -248,7 +248,7 @@ function renderHeat() {
     // 판정 수치(균일도%·중심부 등)는 조도 기준 그대로 두고, 화면에 그릴 필드·격자만 시야각
     // 렌더링으로 바꿔치기한다 — "실제 판정"과 "육안으로 어떻게 보이는가"를 분리해서 보여준다.
     const cam = computeCameraLuminance(spec, {
-      ...last.common, nx: hg.nx, ny: hg.ny, viewDistanceMm: heatViewDist, eyeSpacingMm: heatEyeSep,
+      ...last.common, nx: hg.nx, ny: hg.ny, coneDeg: heatConeDeg,
     });
     res.field = cam.field; res.nx = cam.nx; res.ny = cam.ny; res.extent = cam.extent;
   }
@@ -374,15 +374,12 @@ function mount() {
     if (heatUnit === 'cdm2') renderHeat();
     else if (lastHeat) drawHeatmap($('#heatmap'), lastHeat, sizeVisuals(last.view.x1 - last.view.x0, '#pane-heat'), heatOpt());
   };
-  const viewDistInput = $('#heat-viewdist'), eyeSepInput = $('#heat-eyesep');
-  viewDistInput.value = heatViewDist; eyeSepInput.value = heatEyeSep;
-  const onEyeParamChange = () => {
-    heatViewDist = Math.max(30, parseFloat(viewDistInput.value) || 300);
-    heatEyeSep = Math.max(0, parseFloat(eyeSepInput.value) || 0);
+  const coneInput = $('#heat-cone');
+  coneInput.value = heatConeDeg;
+  coneInput.oninput = () => {
+    heatConeDeg = Math.min(89, Math.max(0.1, parseFloat(coneInput.value) || 10));
     if (heatUnit === 'cdm2') renderHeat();
   };
-  viewDistInput.oninput = onEyeParamChange;
-  eyeSepInput.oninput = onEyeParamChange;
   updateHeatTitle();
 }
 

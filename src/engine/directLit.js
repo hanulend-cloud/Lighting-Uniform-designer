@@ -377,8 +377,15 @@ export function computeField(spec, opt) {
 // 화면 픽셀(px,py)마다 "눈→그 픽셀 직선을 LED 평면까지 연장한 자리(lx,ly)"를 구해(시차),
 // 거기서 footprintKernel/sample로 밝기를 구한다 — 가장자리로 갈수록 더 바깥쪽 LED 평면
 // 위치를 보게 되어(눈이 가까울수록 어긋남이 커짐) 어느 LED가 보이는지 자체가 바뀐다.
-// 양쪽 눈(eyeSpacingMm 간격) 각각 계산해 평균 — 양안 융합의 단순화. 벽 반사·L3/L4 edgeBoost는
-// 이 렌더링에는 반영하지 않는다(범위 밖).
+//
+// 시야 파라미터는 "half cone angle"(반원뿔각, °) 하나다 — 패널을 정면에서 바라볼 때 중심에서
+// 가장자리(X축 절반)까지 뻗는 시선의 각도. 예전엔 "거리(mm) + 눈간격(mm)"으로 입력받아 눈을
+// 좌우 두 점(양안)으로 나눠 각각 계산·평균했는데, 이건 실제로 원했던 것(패널 가장자리가 정면
+// 대비 몇 도 각도로 보이는지)과는 다른 걸 계산한 것이었다(양안 시차는 이 각도보다 훨씬 작은
+// 별도 효과). half cone angle이 곧 "패널 X 절반이 보이는 각"이 되도록 시야 거리를 역산한다
+// (tan(coneDeg)=(X/2)/viewDist) — 각도가 클수록(더 가까이서 볼수록) 가장자리로 갈수록 시차
+// 어긋남이 커져 그림이 더 달라지고, 각도가 작을수록(멀리서 볼수록) 조도장에 가까워진다.
+// 벽 반사·L3/L4 edgeBoost는 이 렌더링에는 반영하지 않는다(범위 밖).
 export function computeCameraLuminance(spec, opt) {
   const X = spec.target.xLen, Y = spec.target.yLen;
   const od = (opt.depth ?? opt.od) + 0.1;
@@ -388,36 +395,31 @@ export function computeCameraLuminance(spec, opt) {
   const K = footprintKernelFor(spec, od, grid);
   const { NX, NY, x0, x1, y0, y1, stepX, stepY } = grid;
 
-  const viewDist = Math.max(1, opt.viewDistanceMm ?? 300);
-  const eyeSep = Math.max(0, opt.eyeSpacingMm ?? 100);
+  const coneDeg = Math.min(89, Math.max(0.1, opt.coneDeg ?? 10));
+  const viewDist = Math.max(1, (X / 2) / Math.tan(coneDeg * DEG));
   const eyeZ = od + viewDist;
   const t = eyeZ / viewDist;                      // 뒤로(LED 평면까지) 투영하는 배율 = 1+od/viewDist
-  const cx = X / 2, cy = Y / 2;
-  const eyes = eyeSep > 0 ? [{ x: cx - eyeSep / 2, y: cy }, { x: cx + eyeSep / 2, y: cy }] : [{ x: cx, y: cy }];
+  const eye = { x: X / 2, y: Y / 2 };
 
   const field = new Float64Array(NX * NY);
-  for (const eye of eyes) {
-    const eyeField = new Float64Array(NX * NY);
-    for (let j = 0; j < NY; j++) {
-      const py = NY === 1 ? Y / 2 : y0 + (y1 - y0) * (j / (NY - 1));
-      for (let i = 0; i < NX; i++) {
-        const px = x0 + (x1 - x0) * (i / (NX - 1));
-        // 눈→(px,py) 직선을 LED 평면(z=0)까지 연장한 위치 — 시차로 실제 보게 되는 자리.
-        const lx = eye.x + (px - eye.x) * t, ly = eye.y + (py - eye.y) * t;
-        let E = 0;
-        for (const l of leds) E += sample(K, lx - l.x, ly - l.y);
-        eyeField[j * NX + i] = E;
-      }
+  for (let j = 0; j < NY; j++) {
+    const py = NY === 1 ? Y / 2 : y0 + (y1 - y0) * (j / (NY - 1));
+    for (let i = 0; i < NX; i++) {
+      const px = x0 + (x1 - x0) * (i / (NX - 1));
+      // 눈→(px,py) 직선을 LED 평면(z=0)까지 연장한 위치 — 시차로 실제 보게 되는 자리.
+      const lx = eye.x + (px - eye.x) * t, ly = eye.y + (py - eye.y) * t;
+      let E = 0;
+      for (const l of leds) E += sample(K, lx - l.x, ly - l.y);
+      field[j * NX + i] = E;
     }
-    blurSeparable(eyeField, NX, NY, (opt.blurMmX ?? 0) / stepX, (opt.blurMmY ?? 0) / stepY);
-    for (let k = 0; k < field.length; k++) field[k] += eyeField[k] / eyes.length;
   }
+  blurSeparable(field, NX, NY, (opt.blurMmX ?? 0) / stepX, (opt.blurMmY ?? 0) / stepY);
 
   const T = fresnelT(spec.body?.n ?? 1) * (opt.transmit ?? 1);
   if (T !== 1) for (let k = 0; k < field.length; k++) field[k] *= T;
 
   return { field, nx: NX, ny: NY, stepX, stepY, leds, depth: opt.depth ?? opt.od,
-           extent: { x0, x1, y0, y1 }, viewDistanceMm: viewDist, eyeSpacingMm: eyeSep };
+           extent: { x0, x1, y0, y1 }, coneDeg, viewDistanceMm: viewDist };
 }
 
 // 타겟 경계까지의 거리(둥근 모서리 cornerR 반영)가 tw 안쪽이면 경계에 가까울수록
