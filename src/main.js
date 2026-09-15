@@ -1,7 +1,7 @@
 // UI 배선 + 실시간 재계산 — 프로젝트.md §3 출력6
 import { DEFAULT_SPEC, LEVEL_DEFAULTS } from './model/defaults.js';
 import { buildGeometry, combinedEffect, activeLevels, effectiveEdgeMargin } from './model/geometry.js';
-import { computeField, evalGrid } from './engine/directLit.js';
+import { computeField, computeCameraLuminance, evalGrid } from './engine/directLit.js';
 import { metrics, centerZoneFrac } from './engine/uniformity.js';
 import { solveCombo, solvePerLevel, GRID } from './engine/solver.js';
 import { PAD } from './ui/canvas-util.js';
@@ -213,15 +213,20 @@ function heatGrid(spec) {
   cell = Math.max(cell, Math.sqrt((X * Y) / HEAT_MAX_CELLS));
   return { nx: Math.max(2, Math.round(X / cell) + 1), ny: Math.max(2, Math.round(Y / cell) + 1), cell };
 }
-let lastHeat = null;   // 조도 렌더링 결과 — 히트맵 팝업 확대 시 재계산 없이 재사용
-// 히트맵 단위 — 색 패턴(값/최댓값)은 어느 단위든 동일하다(상수배라 비율이 안 바뀜). fluxLm=0
-// (상대 모드)이면 lux/cd·m² 실단위가 무의미해 heatmap.js가 자동으로 상대값(%)으로 되돌린다.
+let lastHeat = null;   // 최종 렌더링된(res.field가 화면에 실제 쓰인) 결과 — 팝업 확대 시 재계산 없이 재사용
+// 히트맵 단위. 'rel'/'lux'는 조도장(computeField) 그대로(숫자만 환산) — 색 패턴 불변(상수배).
+// 'cdm2'(휘도)는 시야각(코원앵글)·시차를 반영한 별도 렌더링(computeCameraLuminance)이라 그림
+// 자체가 달라진다. fluxLm=0(상대 모드)이면 lux/cd·m² 실단위가 무의미해 heatmap.js가 자동으로
+// 상대값(%)으로 되돌린다(색은 cdm2 선택 시 여전히 시야각 렌더링을 쓴다 — 그게 이 모드의 핵심).
 let heatUnit = 'rel';
+let heatViewDist = 300, heatEyeSep = 100;   // 육안 시야각 렌더링(휘도) 파라미터 — 거리·눈간격(mm)
 function heatOpt() { return { unit: heatUnit, fluxLm: spec.led.fluxLm ?? 0 }; }
 function updateHeatTitle() {
-  const label = { rel: '조도 히트맵', lux: '조도 히트맵 (lux)', cdm2: '휘도 히트맵 (cd/m²)' }[heatUnit];
+  const label = { rel: '조도 히트맵', lux: '조도 히트맵 (lux)', cdm2: '휘도 히트맵 (육안 시야각, cd/m²)' }[heatUnit];
   const el = $('#heat-title');
   if (el) el.textContent = label;
+  const eyeCtl = $('#heat-eye-ctl');
+  if (eyeCtl) eyeCtl.hidden = heatUnit !== 'cdm2';
 }
 function renderHeat() {
   if (!last) return;
@@ -233,6 +238,14 @@ function renderHeat() {
   res.fixture = last.fixture;
   res.center = last.center;
   res.cellMm = hg.cell;
+  if (heatUnit === 'cdm2') {
+    // 판정 수치(균일도%·중심부 등)는 조도 기준 그대로 두고, 화면에 그릴 필드·격자만 시야각
+    // 렌더링으로 바꿔치기한다 — "실제 판정"과 "육안으로 어떻게 보이는가"를 분리해서 보여준다.
+    const cam = computeCameraLuminance(spec, {
+      ...last.common, nx: hg.nx, ny: hg.ny, viewDistanceMm: heatViewDist, eyeSpacingMm: heatEyeSep,
+    });
+    res.field = cam.field; res.nx = cam.nx; res.ny = cam.ny; res.extent = cam.extent;
+  }
   lastHeat = res;
   drawHeatmap($('#heatmap'), res, sizeVisuals(last.view.x1 - last.view.x0, '#pane-heat'), heatOpt());
   $('#pane-heat').classList.remove('stale');
@@ -341,9 +354,20 @@ function mount() {
   unitSel.onchange = () => {
     heatUnit = unitSel.value;
     updateHeatTitle();
-    // 필드 재계산 없이 캐시된 lastHeat를 새 단위로 다시 그리기만 하면 된다(색 패턴은 불변).
-    if (lastHeat) drawHeatmap($('#heatmap'), lastHeat, sizeVisuals(last.view.x1 - last.view.x0, '#pane-heat'), heatOpt());
+    // rel/lux는 조도장 그대로라 캐시(lastHeat)를 새 단위로 다시 그리기만 하면 된다. cdm2(휘도,
+    // 시야각 렌더링)는 완전히 다른 필드가 필요해 재계산해야 한다.
+    if (heatUnit === 'cdm2') renderHeat();
+    else if (lastHeat) drawHeatmap($('#heatmap'), lastHeat, sizeVisuals(last.view.x1 - last.view.x0, '#pane-heat'), heatOpt());
   };
+  const viewDistInput = $('#heat-viewdist'), eyeSepInput = $('#heat-eyesep');
+  viewDistInput.value = heatViewDist; eyeSepInput.value = heatEyeSep;
+  const onEyeParamChange = () => {
+    heatViewDist = Math.max(30, parseFloat(viewDistInput.value) || 300);
+    heatEyeSep = Math.max(0, parseFloat(eyeSepInput.value) || 0);
+    if (heatUnit === 'cdm2') renderHeat();
+  };
+  viewDistInput.oninput = onEyeParamChange;
+  eyeSepInput.oninput = onEyeParamChange;
   updateHeatTitle();
 }
 

@@ -46,11 +46,15 @@
             <div class="pane-title heat-bar">
               <span id="heat-title">조도 히트맵</span>
               <span class="heat-ctl">
-                <select id="heat-unit" title="색 패턴은 항상 상대값(값/최댓값)이라 단위를 바꿔도 그림은 그대로입니다 — 최소·최대 지점의 숫자만 바뀝니다.">
+                <select id="heat-unit" title="상대값(%)·조도(lux)는 조도장을 그대로 표시(숫자만 환산)합니다. 휘도(cd/m²)는 시야각(코원앵글)·시차를 반영해 실제로 다른 그림이 나옵니다.">
                   <option value="rel">상대값(%)</option>
                   <option value="lux">조도(lux)</option>
-                  <option value="cdm2">휘도(cd/m²)</option>
+                  <option value="cdm2">휘도(cd/m², 육안 시야각)</option>
                 </select>
+                <span id="heat-eye-ctl" class="heat-eye-ctl" hidden>
+                  <label>거리<input type="number" id="heat-viewdist" value="300" min="30" max="5000" step="10">mm</label>
+                  <label>눈간격<input type="number" id="heat-eyesep" value="100" min="0" max="200" step="1">mm</label>
+                </span>
                 <label><input type="checkbox" id="heat-auto"> 자동</label>
                 <button id="heat-render">조도 렌더링</button>
               </span>

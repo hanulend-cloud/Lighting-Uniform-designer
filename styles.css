@@ -192,6 +192,10 @@ main { flex: 1 1 auto; min-height: 0; display: grid;
 .heat-bar > span:first-child { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .heat-ctl { display: flex; align-items: center; gap: 6px; font-weight: 400; flex: 0 0 auto; }
 .heat-ctl label { display: flex; align-items: center; gap: 3px; font-size: 12px; color: #6b7690; cursor: pointer; white-space: nowrap; }
+.heat-eye-ctl { display: flex; align-items: center; gap: 6px; }
+.heat-eye-ctl[hidden] { display: none; }
+.heat-eye-ctl input[type="number"] { width: 46px; padding: 2px 4px; font-size: 11px;
+  border: 1px solid #2a3346; border-radius: 4px; background: #10151f; color: #d7deea; }
 #heat-render { background: #3a6bd6; color: #fff; border: 1px solid #2f5fd6; border-radius: 5px;
   padding: 3px 10px; font-size: 12px; font-weight: 600; cursor: pointer; white-space: nowrap; }
 #heat-render:hover { background: #2f5fd6; }
