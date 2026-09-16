@@ -243,15 +243,15 @@ let lastHeat = null;   // 최종 렌더링된(res.field가 화면에 실제 쓰�
 // 어느 쪽이냐에 따라 히트맵·프로파일 등 화면 전체가 일관되게 바뀌도록 단일 값으로 묶는다
 // (예전엔 상대값(%)/조도(lux)/휘도(cdm2) 3택 + 판정기준 이렇게 서로 다른 두 컨트롤이 있어
 // 헷갈렸다 — 이제 goal.metric 하나가 판정과 표시를 모두 결정한다). 'illum'이면 조도장
-// (computeField) 그대로(숫자만 lux 환산) — 색 패턴 불변(상수배). 'lumin'이면 확산재(L2/L5,
-// blur>0)가 있을 때는 램버시안 근사(L=E/π, 각도 무관)라 조도장과 패턴이 같아 그대로 쓰고,
-// 확산재가 없으면(L1만 또는 L3/L4 형상만) 시야각(코원앵글)·시차·굴절을 반영한 직접-시야
-// 렌더링(computeCameraLuminance)으로 그림 자체가 달라진다(directLit.js 주석 참고).
+// (computeField) 그대로(숫자만 lux 환산) — 색 패턴 불변(상수배). 'lumin'이면 항상
+// computeCameraLuminance로 그림을 다시 그린다 — half cone angle(원뿔 반각)만큼 "핫스팟(단일
+// 광선 직시)"과 "조도장(반구 적분,/π)"을 섞은 값이라, 확산재(L2/L5, blur>0) 유무와 무관하게
+// coneDeg를 바꾸면 그림이 바뀐다(directLit.js 주석 참고).
 // fluxLm=0(상대 모드)이면 lux/cd·m² 실단위가 무의미해 heatmap.js가 자동으로 상대값(%)으로
 // 되돌린다.
 let heatUnit = 'illum';
 let forceHeatOnNextRun = false;   // 판정기준(조도/휘도)을 막 바꿨을 때 자동렌더링 꺼져있어도 1회 강제로 히트맵을 그림
-let heatConeDeg = 10;   // 육안 시야각 렌더링(휘도) 파라미터 — half cone angle(°): 패널 X 절반이 이 각도로 보이는 시야 거리를 역산해서 씀
+let heatConeDeg = 10;   // 육안 시야각 렌더링(휘도) 파라미터 — half cone angle(°): 관측 원뿔 반각(0=핫스팟 직시, 90=조도장과 동일)
 let profilePick = null;   // 히트맵을 클릭해 고른 단면 위치({x,y}mm) — X·Y 프로파일 그래프에 그 단면을 추가로 표시
 function heatOpt() { return { unit: heatUnit, fluxLm: spec.led.fluxLm ?? 0, pick: profilePick }; }
 // goal.metric ↔ heatUnit ↔ 두 select(목표 판정기준 / 히트맵 단위)를 항상 같은 값으로 맞춘다.
@@ -286,14 +286,14 @@ function renderHeat() {
   res.fixture = last.fixture;
   res.center = last.center;
   res.cellMm = hg.cell;
-  // 확산재(L2 밀키·L5 미세패턴)가 있어야 표면이 램버시안에 가까워져 "보는 각도"가 의미를
-  // 갖는다 — 확산재가 없으면(blur=0) 시야각 렌더링은 아래에서만 덧씌운다.
-  const diffusing = (last.common.blurMmX ?? 0) > 0 || (last.common.blurMmY ?? 0) > 0;
-  if (heatUnit === 'lumin' && !diffusing) {
+  if (heatUnit === 'lumin') {
     // 판정 수치(균일도%·중심부 등)는 조도 기준 그대로 두고, 화면에 그릴 필드·격자만 시야각
-    // 렌더링으로 바꿔치기한다 — "실제 판정"과 "육안으로 어떻게 보이는가"를 분리해서 보여준다.
+    // (원뿔 혼합) 렌더링으로 바꿔치기한다 — "실제 판정"과 "육안으로 어떻게 보이는가"를 분리해서
+    // 보여준다. 확산재(blur>0) 여부와 무관하게 항상 호출한다 — 조도장(res.field)을 illumField로
+    // 넘겨 half cone angle에 따라 핫스팟↔조도장 사이를 혼합하므로, 확산재가 있어도 coneDeg가
+    // 그림에 그대로 반영된다(directLit.computeCameraLuminance 주석 참고).
     const cam = computeCameraLuminance(spec, {
-      ...last.common, nx: hg.nx, ny: hg.ny, coneDeg: heatConeDeg,
+      ...last.common, nx: hg.nx, ny: hg.ny, coneDeg: heatConeDeg, illumField: res.field,
     });
     res.field = cam.field; res.nx = cam.nx; res.ny = cam.ny; res.extent = cam.extent;
   }
@@ -456,7 +456,7 @@ function mount() {
   const coneInput = $('#heat-cone');
   coneInput.value = heatConeDeg;
   coneInput.oninput = () => {
-    heatConeDeg = Math.min(89, Math.max(0.1, parseFloat(coneInput.value) || 10));
+    heatConeDeg = Math.min(90, Math.max(0, parseFloat(coneInput.value) || 10));
     if (heatUnit === 'lumin') renderHeat();
   };
   updateHeatTitle();

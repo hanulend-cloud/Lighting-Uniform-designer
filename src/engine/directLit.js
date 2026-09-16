@@ -390,26 +390,27 @@ function traceRefractedLedPos(spec, topZ, nBody, shapeKind, leds, halfP, ledTop,
   return { x: xB + Tx * s2, y: yB + Ty * s2, cosEmit: -Tz };
 }
 
-// 시야각(휘도) 렌더링 — computeField()의 조도(illuminance)는 "각 지점에 수평으로 놓인 센서가
-// 받는 광량"이라 관측 위치와 무관하다(램버시안 확산이면 휘도도 L=E/π로 각도 무관 — 그래서
-// 단순 /π 변환은 그림이 안 바뀐다). 실제 눈으로 볼 때는 다르다: 근접 시야(예: 30cm)에서는
-// 시차(parallax) — 같은 화면 위치라도 눈이 어디 있느냐에 따라, 그 눈-화면 직선을 LED 평면까지
-// 연장했을 때 실제로 "보게 되는" 자리가 달라진다.
+// 시야각(휘도) 렌더링 — computeField()의 조도(illuminance)는 "그 지점을 지나는 모든 방향에서
+// 온 에너지를 반구 전체에 대해 적분한 값"이라 보는 각도와 무관하다. 실제 육안은 그 반대 극단이다:
+// 표면의 한 점은 "그 점을 지나 실제 굴절 경로를 따라 LED 평면까지 추적했을 때(traceRefractedLedPos)
+// 어느 LED 칩 위에 떨어지는가"라는 단일 광선(입체각 0)에만 반응한다 — LED 칩(수 mm)보다 훨씬 넓은
+// 피치(보통 10~20mm)라 대부분의 표면 점에서는 어떤 LED도 보이지 않는다(어둡다). 이건 조도장(반구
+// 전체를 적분해 LED 사이까지 매끈히 퍼짐)과는 근본적으로 다른 물리량이라 패턴이 뚜렷이 달라야
+// 정상이다 — 실제로 확산재 없는 백라이트를 육안으로 보면 개별 LED가 점점이 보이는 "핫스팟"이
+// 그대로 나타나는 현상(그래서 확산재를 쓰는 이유)과 일치한다. 이 "단일 광선 샘플"은 항상 그
+// 지점의 국소 법선(윗면은 항상 평평하므로 정면 직시, 즉 진짜 눈의 위치·시차와 무관)을 따라
+// 계산한다 — half cone angle의 역할은 아래 문단에서 이 값을 얼마나 반영할지를 정하는 것뿐이다.
 //
-// 이 함수는 "확산재가 전혀 없는(L1만, 또는 L3/L4처럼 형상만 있는) 투명한 출광면"을 직접
-// 육안으로 봤을 때의 그림이다. 확산재가 있는 경우(L2 밀키·L5 미세패턴, blur>0)는 산란이
-// 빛의 방향을 뒤섞어 램버시안 면에 가까워지므로 어느 각도에서 봐도 휘도 ∝ 조도(L=E/π)이고
-// "패턴"은 조도장과 똑같다 — 그래서 그 경우엔 호출부(main.js)가 이 함수를 아예 쓰지 않고
-// 조도장을 그대로 재사용한다(무의미한 계산 낭비를 막고, "확산이 있는데 패턴이 또렷이
-// 달라진다"는 틀린 인상을 주지 않기 위함).
-//
-// 확산재가 없으면 그 반대다: 산란이 없으니 표면의 한 점은 "그 점을 지나 실제 굴절 경로를 따라
-// LED 평면까지 추적했을 때(traceRefractedLedPos) 어느 LED 칩 위에 떨어지는가"에 따라서만
-// 밝기가 정해진다 — LED 칩(수 mm)보다 훨씬 넓은 피치(보통 10~20mm)라 대부분의 표면 점에서는
-// 어떤 LED도 보이지 않는다(어둡다). 이건 조도장(모든 각도에서 온 에너지를 적분해 LED 사이까지
-// 매끈히 퍼짐)과는 근본적으로 다른 물리량이라 패턴이 뚜렷이 달라야 정상이다 — 실제로 확산재
-// 없는 백라이트를 육안으로 보면 개별 LED가 점점이 보이는 "핫스팟"이 그대로 나타나는 현상
-// (그래서 확산재를 쓰는 이유)과 일치한다.
+// "half cone angle"(θ, °)은 그 단일 광선 샘플을 눈으로 볼 때의 관측 시야(acceptance cone) 반각
+// 이다. θ=0°는 정확히 그 광선 하나만 보는 것(위 문단의 순수 핫스팟 패턴). θ가 커질수록 그 점을
+// 중심으로 한 반각 θ 원뿔 안의 모든 방향에서 온 빛까지 함께 받아들이는 셈이 되고, θ=90°에서는
+// 원뿔이 반구 전체를 덮어 정확히 조도장과 같은 값(L=E/π, 램버시안 환산)이 된다 — 즉 이 함수의
+// 결과는 "θ=0의 핫스팟 필드"와 "θ=90의 조도장(/π)"을 원뿔의 반구 대비 입체각 비율
+// w=1-cos(θ)로 섞은 값이다: θ가 작을수록(좁게, 멀리서 보듯) 핫스팟이 그대로 드러나 균일도가
+// 나빠지고, θ가 클수록(넓게 받아들일수록) 조도장에 가까워져 균일도가 좋아진다. 확산재(L2 밀키·
+// L5 미세패턴, blur>0)가 있으면 그 산란 폭(blurMmX/Y)만큼 핫스팟 성분 자체가 먼저 부드러워진
+// 뒤에 이 원뿔 혼합이 적용된다 — 확산재가 있다고 원뿔 혼합을 건너뛰면(예전 구현) half cone angle을
+// 바꿔도 화면이 전혀 안 바뀌는 문제가 생긴다.
 //
 // L3/L4가 켜져 있으면(윗면은 항상 평평, 바닥면만 깎임 — l3BotZAt/l4BotZAt) 그 경사면에서
 // 실제로 굴절(또는 전반사)이 일어난다 — 경사가 크면(예: L4 angleX 45°) LED가 바로 위가 아니라
@@ -417,13 +418,11 @@ function traceRefractedLedPos(spec, topZ, nBody, shapeKind, leds, halfP, ledTop,
 // 렌더링이 안 바뀐다면 형상 자체가 무의미해지므로, 조도장의 edgeBoost(세기만 보정하는 스칼라
 // 근사)와 달리 여기서는 실제 광선 경로를 추적해(traceRefractedLedPos) 이 효과를 직접 반영한다.
 //
-// 시야 파라미터는 "half cone angle"(반원뿔각, °) 하나다 — 패널을 정면에서 바라볼 때 중심에서
-// 가장자리(X축 절반)까지 뻗는 시선의 각도. half cone angle이 곧 "패널 X 절반이 보이는 각"이
-// 되도록 시야 거리를 역산한다(tan(coneDeg)=(X/2)/viewDist) — 각도가 클수록(더 가까이서
-// 볼수록) 가장자리로 갈수록 시차 어긋남이 커져 그림이 더 달라지고, 각도가 작을수록(멀리서
-// 볼수록) 조도장에 가까워진다. 벽 반사는 이 렌더링에는 반영하지 않는다(범위 밖 — 벽 반사는
-// 매끈한 벽면의 정반사 근사라 특정 벽 위치·각도에서만 보이는 좁은 하이라이트이므로, 굴절
-// 경로만큼 형상 전체 판정에 영향을 주지 않는다).
+// opt.illumField: 같은 격자(nx·ny)로 미리 계산해둔 computeField() 결과(T 반영 완료) — 있으면
+// 원뿔 혼합에 쓴다. 없으면(예: solver.js처럼 저비용 판정용으로 θ=0 근처만 필요한 호출) w>0이어도
+// 혼합을 건너뛰고 순수 핫스팟 필드만 반환한다. 벽 반사는 이 렌더링에는 반영하지 않는다(범위 밖
+// — 벽 반사는 매끈한 벽면의 정반사 근사라 특정 벽 위치·각도에서만 보이는 좁은 하이라이트이므로,
+// 굴절 경로만큼 형상 전체 판정에 영향을 주지 않는다).
 export function computeCameraLuminance(spec, opt) {
   const X = spec.target.xLen, Y = spec.target.yLen;
   const topZ = (opt.depth ?? opt.od) + 0.1;
@@ -432,9 +431,8 @@ export function computeCameraLuminance(spec, opt) {
   const grid = makeGrid(spec, dim, opt.nx ?? 101, opt.ny);
   const { NX, NY, x0, x1, y0, y1, stepX, stepY } = grid;
 
-  const coneDeg = Math.min(89, Math.max(0.1, opt.coneDeg ?? 10));
-  const viewDist = Math.max(1, (X / 2) / Math.tan(coneDeg * DEG));
-  const eye = { x: X / 2, y: Y / 2, z: topZ + viewDist };
+  const coneDeg = Math.min(90, Math.max(0, opt.coneDeg ?? 10));
+  const hemiFrac = 1 - Math.cos(coneDeg * DEG);   // 원뿔(반각 θ)이 반구에서 차지하는 입체각 비율
 
   const nBody = spec.body?.n ?? 1;
   const shapeKind = opt.edgeBoost?.hasBoost ? opt.edgeBoost.kind : null;
@@ -452,7 +450,9 @@ export function computeCameraLuminance(spec, opt) {
     const py = NY === 1 ? Y / 2 : y0 + (y1 - y0) * (j / (NY - 1));
     for (let i = 0; i < NX; i++) {
       const px = x0 + (x1 - x0) * (i / (NX - 1));
-      const hit = traceRefractedLedPos(spec, topZ, nBody, shapeKind, leds, halfP, ledTop, px, py, eye);
+      // 국소 법선(정면 직시) 하나만 본다 — eye.z는 topZ와만 달라도 되고 x·y는 그 지점과 같아야
+      // hx0=hy0=0 → 수평 성분 0인 순수 수직 광선이 나온다(traceRefractedLedPos 참고).
+      const hit = traceRefractedLedPos(spec, topZ, nBody, shapeKind, leds, halfP, ledTop, px, py, { x: px, y: py, z: topZ + 1 });
       let E = 0;
       if (hit) {
         for (const l of leds) {
@@ -472,8 +472,17 @@ export function computeCameraLuminance(spec, opt) {
   const T = fresnelT(spec.body?.n ?? 1) * (opt.transmit ?? 1);
   if (T !== 1) for (let k = 0; k < field.length; k++) field[k] *= T;
 
+  // 원뿔(반각 coneDeg) 혼합 — hemiFrac=0(θ=0)이면 순수 핫스팟, hemiFrac=1(θ=90°)이면 정확히
+  // 조도장(/π). illumField가 없는 호출(예: solver.js의 저비용 판정)은 혼합 없이 핫스팟만 반환한다.
+  if (opt.illumField && hemiFrac > 0) {
+    const illum = opt.illumField;
+    for (let k = 0; k < field.length; k++) {
+      field[k] = field[k] * (1 - hemiFrac) + (illum[k] / Math.PI) * hemiFrac;
+    }
+  }
+
   return { field, nx: NX, ny: NY, stepX, stepY, dim, leds, depth: opt.depth ?? opt.od,
-           extent: { x0, x1, y0, y1 }, coneDeg, viewDistanceMm: viewDist };
+           extent: { x0, x1, y0, y1 }, coneDeg, hemiFrac };
 }
 
 // 타겟 경계까지의 거리(둥근 모서리 cornerR 반영)가 tw 안쪽이면 경계에 가까울수록
