@@ -1,6 +1,6 @@
-# L2 확산소재 Solver 재설계 — 설계 문서 (rev.2)
+# L2 확산소재 Solver 재설계 — 설계 문서 (rev.3)
 
-- 날짜: 2026-10-07 (rev.2: 설계·평가 agent 리뷰 반영)
+- 날짜: 2026-10-07 (rev.2: agent 리뷰 반영 / rev.3: Milky=소재 물성, Milky↔Mie↔BSDF 연결·실측 DB·고급메뉴)
 - 대상: `src/model/levels.js` L2 분기, `src/engine/directLit.js`, `src/engine/solver.js` 외 연동부
 - 후속: 동일 패턴(전용 solver + 기준 + 자체검증)을 L3·L4 에 적용(별도 spec)
 
@@ -48,10 +48,17 @@ src/engine/l2/
   milky.js          Milky ↔ τ' 변환, HPA
   fft.js            radix-2 2D FFT (실수 컨볼루션용)
   cavity-solver.js  캐비티 재순환 solver
-  validator.js      V1~V8 자체검증 + 상태 객체
+  validator.js      V1~V10 자체검증 + 상태 객체
+  fit.js            실측 BTDF/BRDF → μs·g·μa 피팅 (§6.1)
+  mie.js            Mie 계산(BHMIE) — σ_s, g, 위상함수, 농도 환산 (§6.2)
+  profile.js        Milky/입자 → 예상 BTDF/BRDF 프로파일 생성·CSV (§6.2)
   ref-ad.json       iadpython 기준값 (오프라인 생성, 커밋)
-src/model/materials.js  등록 소재 목록 + 피팅
-tools/gen-ref-ad.py     ref-ad.json 생성 스크립트
+  ref-mie.json      miepython 기준값 (오프라인 생성, 커밋)
+src/model/materials-db.js  실측소재 DB 로드·병합·저장 (§6.3)
+src/ui/l2-advanced.js      상세 property 고급메뉴 (§6.4)
+data/materials-db.json     공용 기준 DB
+tools/gen-ref-ad.py        ref-ad.json 생성 (iadpython)
+tools/gen-ref-mie.py       ref-mie.json 생성 (miepython)
 ```
 
 ### 5.1 슬래브 MC (`mc-slab.js`)
@@ -113,6 +120,8 @@ tools/gen-ref-ad.py     ref-ad.json 생성 스크립트
 | V5 | 문헌 벤치마크 van de Hulst 슬래브(a=0.9, τ=2, g=0.75, n=1) R_d·T_t (iadpython 재확인값) | \|Δ\| ≤ 0.005 | 테스트 |
 | V6 | 등록 소재 피팅 재현: HPA ±2°, T_total ±2%p, CSV 곡선 RMS ≤ 5% | 위반 시 "보정 불일치" | 등록 시 |
 | V7 | 결과 건전성: NaN/음수 없음, 균일도 ∈ [0,1], 출사 ≤ 입력 | 위반 0 | 매 평가 |
+| V9 | 교차두께 예측: 두께 t₁ 측정으로 피팅한 계수로 t₂ 측정(T·R·HPA) 예측 — 2두께 데이터가 있는 DB 소재 | T·R ±3%p, HPA ±3° | 등록 시 + 테스트 |
+| V10 | Mie 모듈 vs `ref-mie.json`(miepython, 크기변수 x 0.1~100, 상대굴절률 1.05~1.3 + 흡수 1수준) Q_sca·g | 상대오차 ≤ 1e-4 | 테스트 |
 | V8 | 재순환 해석해: 무한 균일 Lambertian 조사 시 이득 = T_diff/(1−ρ_b·R_diff) 와 solver 결과(대형 균일 배열 중심부) | ≤ 1% | 테스트 |
 
 - 상태 `{ ok, checks:[{id, ok, value, limit}] }` → UI. 실패 시 ❌ + 판정 카드 "신뢰 불가", 수치 회색.
@@ -121,18 +130,54 @@ tools/gen-ref-ad.py     ref-ad.json 생성 스크립트
 - 상태: **미보정**(기본) / **소재 보정됨**(V6 통과 소재 사용) / **시스템 검증 ±x%p**(SV1 데이터 존재 시).
 - 툴팁: "계산 정합성 ✅ 는 물리식대로 계산됐다는 뜻이며 실제 제품 일치를 보장하지 않습니다."
 
-## 6. 실소재 등록 (`materials.js`)
-- 입력 A(데이터시트): 측정 두께 t_s, T_total, HPA (Haze 선택 — 있으면 피팅 목적에 포함).
-- 입력 B(CSV): `theta_deg, intensity` + T_total, t_s. 예제 파일 `docs/validation/sample-btdf.csv` 포함.
-- 피팅: (τ', g, κ) 탐색 — 목적 = HPA·T(·Haze·곡선) 오차. 결과 μs = τ'/((1−g)·t_s).
-- 저장: spec 최상위 `materials[]` (JSON 저장/불러오기 포함).
-- 표시: 소재 고유 Milky 마커(▼ 소재A 2.5) — 두께와 무관하게 고정. 현재 두께에서의 투과율·τ' 는 보조 표시.
-- 내장 예시 프리셋 3종(HPA 19/43/56° 계열) — **"예시값·벤더 확인 필요"** 라벨, 실물 보정 배지에 반영하지 않음.
+## 6. Milky ↔ 소재 물성 연결 구조 (표면 = Milky, 내부 = BSDF)
+
+```
+              ┌──────────── 설계 방향 (Milky → 샘플 제작) ────────────┐
+ Milky ─▶ μs'(§4) ─▶ μs, g, μa ─Mie─▶ 산란제 농도 wt% ─MC─▶ 예상 BTDF/BRDF 프로파일
+              └──────────── 분석 방향 (실측 → Milky, DB 추가) ◀───────┘
+ 실측 BTDF/BRDF ─피팅─▶ μs, g, μa ─Mie 역산─▶ (입자 정보 있으면) 농도 ─▶ Milky
+```
+
+- 사용자 화면(기본)에는 **Milky 만** 노출. 연결된 물성은 **상세 property 고급메뉴**에서만 확인·편집.
+- 실측 소재가 쌓일수록 Milky 축 위에 **실측소재 DB** 가 채워져, 설계 Milky 값이 어떤 실소재/레시피에 해당하는지 대응.
+
+### 6.1 분석 방향 — 실측 → 계수 → Milky (`l2/fit.js`)
+- 입력: 측정 두께 t_s, 파장(기본 550nm), 법선 입사 **BTDF + BRDF 각도 테이블**(CSV `theta_deg, value`),
+  전광선투과율 T, 전반사율 R (Haze·HPA 선택). 두께 다른 샘플 2종 입력 지원(식별성 향상).
+- 피팅: MC 슬래브(테이블) 순방향을 반복해 (μs', g, μa) 탐색 — 목적 = T·R·각도 프로파일 오차.
+  고 Milky(τ' > 10)에서는 μs' 만 식별 가능 → g 는 "식별 불가(기본값 사용)" 표시.
+- 결과: μs, g, μa, μs' → Milky 자동 계산. 입자 정보가 있으면 Mie 역산으로 농도 추정.
+- 데이터시트 수치만 있는 경우(T·HPA·두께)도 동일 경로로 피팅(정밀도 낮음 표시).
+
+### 6.2 설계 방향 — Milky → 레시피 → 예상 BSDF (`l2/mie.js`, `l2/profile.js`)
+- Milky → μs' (§4). 기준 입자(고급메뉴 선택, 기본: PMMA 비드 d=2µm, n_p=1.49, 모재 PC 1.586) 의
+  **Mie 계산**(BHMIE 알고리즘, 단일 파장)으로 산란단면적 σ_s·g_Mie·위상함수 산출.
+- 농도: 수밀도 N = μs / σ_s → 체적분율 φ = N·(πd³/6) → wt% = φ·ρ_p / (φ·ρ_p + (1−φ)·ρ_host).
+  φ > 10 vol% 면 "의존 산란 영역 — 오차 증가" 경고.
+- 예상 프로파일: 입자 위상함수(Mie 표)로 MC 슬래브를 1회 실행 → 지정 두께의 BTDF/BRDF 각도 테이블 + T·R·HPA.
+  **CSV 내보내기**(샘플 제작 의뢰·광학 SW 입력용). 시스템 solver 는 g_Mie 를 쓰는 HG 근사(가정 패널 표기).
+
+### 6.3 실측소재 DB (`src/model/materials-db.js`, `data/materials-db.json`)
+- 항목: `{ id, name, vendor/grade, host{resin, n}, particle{type, d_um, n_p, rho, wt%}, measured{t_s[], λ, T, R, haze, hpa, btdf[], brdf[]},
+  fitted{mus, g, mua, musR}, milky, validation{V6, V9}, source, date, status: 'measured'|'example' }`.
+- 공용 기준 DB = 저장소 `data/materials-db.json`(git 으로 공유). 사용자 추가분 = 브라우저 저장 + JSON 내보내기/불러오기
+  (팀 공유 시 기준 DB 로 병합 커밋).
+- 내장 예시 3종(HPA 19/43/56° 계열)은 `status:'example'` — "예시값·벤더 확인 필요" 라벨, 실물 보정 배지 미반영.
+- Milky 슬라이더 위 마커: DB 소재별 고유 Milky(▼ 소재A 2.5), 두께 무관 고정. 슬라이더 값에 가장 가까운 실측소재 표시.
+
+### 6.4 상세 property 고급메뉴 (L2 카드 "상세 property ▸")
+- **보기**: 현재 Milky 의 μs, μs', g, μa, 현재 두께 τ'·T·R·HPA, 기준 입자·농도(wt%), 예상 BTDF/BRDF 그래프,
+  가까운 DB 소재와의 비교, 검증 상태(V1~V9).
+- **편집**: 기준 입자(종류·크기·굴절률·밀도), 모재, 파장. 기본 화면에는 영향 없음(Milky 유지, 내부 계수만 갱신).
+- **DB 추가 입력**: 측정 데이터 입력(CSV 업로드·수치 입력) → 피팅 → V6·V9 결과 확인 → 저장.
+- **내보내기**: 예상 프로파일 CSV, DB JSON.
 
 ## 7. UI 변경 (최소)
 - L2 Milky 0~10, 기본 0, 툴팁 "소재 산란 성능(산란제 양·밀도): 0 투명 ~ 10 완전 차폐(투과 0, 두께 무관)".
 - 결과 줄: Milky·HPA·전광선투과율. 투과율 < 50% 면 판정 카드에 밝기 경고(균일도와 같은 크기).
-- 소재 드롭다운 + "소재 등록" 모달, PCB 색 선택.
+- Milky 슬라이더 위 DB 소재 마커 + 가장 가까운 실측소재명. PCB 색 선택.
+- L2 카드 "상세 property ▸" 고급메뉴(§6.4) — 기본 접힘.
 - 배지 2종(§5.5, §5.6) + **가정 패널**(L2 카드 접이식): ρ_b, μa, g 기본, R_w,eff, 시프트 Δ 무시, 정반사 Lambertian 근사,
   평균 두께 근사, 미모델(파장 의존·옐로링, 편광, 열).
 - 자동탐색 Milky 범위 0~10.
@@ -141,7 +186,10 @@ tools/gen-ref-ad.py     ref-ad.json 생성 스크립트
 - `l2-mc.mjs`: V2·V3·V5 (소수 광자 + 허용오차).
 - `l2-table.mjs`: V1·V4.
 - `l2-cavity.mjs`: V2(시스템)·V8, Milky 0 기대값, Milky↑ → 투과율 감소·등가 blur 증가.
-- `l2-material.mjs`: 합성 소재(알려진 τ',g,κ) → 데이터시트·CSV 생성 → 피팅 복원(V6).
+- `l2-material.mjs`: 합성 소재(알려진 μs',g,μa) → BTDF/BRDF 생성 → 피팅 복원(V6), 2두께 교차예측(V9).
+- `l2-mie.mjs`: V10, 농도 환산 왕복(wt% → μs → wt%), 의존산란 경고 경계.
+- `l2-profile.mjs`: Milky → 프로파일 → 피팅 → 동일 Milky 복원(±0.1) 왕복 일관성.
+- `l2-db.mjs`: DB 스키마 검증, 사용자 추가분 병합·내보내기, example 상태 소재가 실물 보정 배지에 반영 안 됨.
 - `l2-integration.mjs`: 연동 8곳 — 휘도 경로, autoTune 이 Milky 를 탐색하는지, 마이그레이션.
 - 기존 테스트 전부 통과. 성능: 기준선(현 computeField 1회·autoTune 총시간)을 먼저 측정해 기록,
   목표 L2 평가 1회 ≤ 기준선 ×2, autoTune 총시간 ≤ 기준선 ×1.5.
@@ -156,7 +204,9 @@ tools/gen-ref-ad.py     ref-ad.json 생성 스크립트
 | SV5 | 구 버전 JSON 불러오기 | 모델 변경 고지 + 전/후 균일도 |
 | SV6 | Milky 0 vs L1 단독 / 두께 변경 / Milky 10 | V3 식 일치(±1%); 두께 변경 시 마커 불변·투과율만 변화; Milky 10 → "완전 차폐" 표시 |
 | SV7 | 성능 | §8 목표 충족, 화면 반영 ≤ 2초 |
-| SV8 | 예제 CSV 등록 | 등록 → 피팅 → 마커 표시 재현, V6 통과 |
+| SV8 | 예제 CSV 등록(고급메뉴) | 등록 → 피팅 → V6·V9 표시 → DB 저장 → 슬라이더 마커 표시 |
+| SV9 | 기본 화면 단순성 | 고급메뉴를 열지 않으면 L2 는 Milky·투과율·배지만 노출 |
+| SV10 | 설계 방향 출력 | Milky 입력 → 고급메뉴에 농도 wt%·예상 BTDF/BRDF 그래프, CSV 내보내기 파일 열림 |
 
 ## 10. 설계 agent 지침 반영
 `.claude/agents/uds-tool-designer.md` 에 "난이도별 Solver 규약": 각 L2/L3/L4 solver 는
@@ -165,4 +215,12 @@ tools/gen-ref-ad.py     ref-ad.json 생성 스크립트
 평가 agent 체크리스트 A 에 두 배지·가정 패널 항목, §9 SV 를 평가 시나리오에 추가.
 
 ## 11. 범위 밖
-- L3·L4 전용 solver(후속 spec), BSDF 파일 파서, 실측 데이터 확보 자체, 파장 의존 산란(옐로링)
+- L3·L4 전용 solver(후속 spec), Speos/LightTools 전용 BSDF 파일 파서, 실측 데이터 확보 자체,
+  파장 의존 산란(옐로링)·다분산 입자 분포(단일 크기만), 비법선 입사 BSDF 측정 입력
+
+## 12. 구현 단계 (plan 분할)
+| 단계 | 내용 | 완료 기준 |
+|---|---|---|
+| A | MC 슬래브·테이블·AD 기준·캐비티 solver·Milky 사상·연동 8곳·배지·가정 패널 | V1~V5, V7, V8 통과, SV3~SV7 |
+| B | 피팅(분석 방향)·실측소재 DB·고급메뉴·마커 | V6, V9 통과, SV2, SV8, SV9 |
+| C | Mie 모듈·농도 환산·예상 BSDF 프로파일·CSV 내보내기 | V10 통과, SV10 |
