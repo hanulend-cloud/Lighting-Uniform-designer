@@ -1,6 +1,6 @@
-# L2 확산소재 Solver 재설계 — 설계 문서 (rev.3)
+# L2 확산소재 Solver 재설계 — 설계 문서 (rev.4)
 
-- 날짜: 2026-10-07 (rev.2: agent 리뷰 반영 / rev.3: Milky=소재 물성, Milky↔Mie↔BSDF 연결·실측 DB·고급메뉴)
+- 날짜: 2026-10-07 (rev.2: agent 리뷰 반영 / rev.3: Milky=소재 물성, Mie↔BSDF 연결·DB·고급메뉴 / rev.4: 기준두께 차폐율 눈금, 휘도 3성분, 경계·전이·제약 보완, 단계 A1/A2)
 - 대상: `src/model/levels.js` L2 분기, `src/engine/directLit.js`, `src/engine/solver.js` 외 연동부
 - 후속: 동일 패턴(전용 solver + 기준 + 자체검증)을 L3·L4 에 적용(별도 spec)
 
@@ -24,19 +24,22 @@
 - 실소재 등록: 각도-강도 CSV + 데이터시트 수치. BSDF 파일 파서는 후속.
 - **검증 배지 2종 분리**: "계산 정합성"(V 계열) ≠ "실물 보정"(SV1·V6). 기본 = 미보정.
 
-## 4. Milky 정의 — 소재 고유의 산란 성능(두께 무관)
-- Milky 는 **소재 물성**: 산란제 양·밀도로 정해지는 환산 산란계수 **μs' = μs·(1−g) [1/mm]** 의 지표.
-  두께는 결과(투과율·균일도)에 영향을 주지만 Milky 값 자체는 바꾸지 않는다.
-- 사상: **μs'(m) = μ₀ · [ (10/(10−m))^p − 1 ]**, m ∈ [0,10]
-  - m=0 → μs'=0 (투명), **m=10 → μs'=∞ = 완전 차폐**: 어떤 두께에서도 투과 0, 출사 분포 완전 균일(균일도 → 100%).
-  - 단조·연속, 10 에서 발산하므로 "10 에 가까울수록 차폐력이 끝없이 커짐"을 그대로 표현.
-  - 상수 μ₀·p 는 테이블 생성 후 앵커에 맞춰 확정(임시 앵커, 두께 2mm·n 1.59·g 0.9):
-    Milky 5 ≈ T_total 50%, Milky 8 ≈ T_total ≤ 5%. 초기 추정 μ₀=0.05/mm, p=4.
-- m=10 은 해석적 극한으로 처리: T=0, 출력 "완전 차폐 — 투과광 없음" (균일도 수치 대신 표시).
-- 보조 표시: 현재 두께에서의 τ'=μs'·t, 전광선투과율, HPA.
-- 소재 선택 시 μs'·g 고정 → Milky 고정(두께 바뀌어도 마커 불변). 추상 슬라이더 시 g=0.9 기본으로 μs' 산출.
-- 마이그레이션(ver 13): 구 1~10 값은 정의가 달라 정확 변환 불가 → 구 m → 신 (m−1)/9×10 로 옮기되,
-  불러오기 시 "L2 모델 변경: 결과가 이전과 다를 수 있음(전/후 균일도)" 고지.
+## 4. Milky 정의 — 소재 고유의 차폐 성능(두께 무관)
+- Milky 는 **소재 물성 지표**: 산란제 양·밀도로 정해지는 환산 산란계수 μs' = μs·(1−g) 를 사람이 읽는 눈금으로 바꾼 값.
+  **정본 저장값은 μs'(+g, μa)**, Milky 는 항상 파생값(사상 버전 `milkyMapVer` 와 함께 표기).
+- 사상 = **기준두께 차폐율**:
+  **Milky = 10 × (1 − T_s(μs') / T_s(0))**
+  - T_s = 기준 슬래브(두께 **2mm**, n 1.59, g 0.9, **흡수 0**, 확산(Lambertian) 입사)의 전광선투과율 — 산란만의 효과.
+  - 예: Milky 5 = 2mm 기준에서 산란으로 빛 절반 차폐, Milky 7 = 70% 차폐. 흡수를 빼서 "산란 성능"만 나타냄.
+  - μs'=0 → 0(투명), μs'→∞ → 10(투과 0). 단조·연속(V4), 테이블로 정·역 변환.
+  - 기준 조건은 눈금 정의용일 뿐 — 실제 계산은 현재 두께·n·g·μa 로 수행. 두께가 바뀌어도 Milky(소재값) 불변.
+- Milky 10 은 극한(투과 0): 슬라이더 상한 9.9, 10 은 "완전 차폐 — 투과광 없음" 표시용.
+  Milky↑ 에 따라 투과광 각분포는 Lambertian 에 수렴하고 균일도는 개선되지만, 측방 확산 폭이 두께 수준·재순환 횟수로
+  제한되므로 균일도가 100% 가 되는 것은 아님(가정 패널 표기).
+- 보조 표시: 현재 두께의 τ'=μs'·t, 전광선투과율(흡수 포함), HPA.
+- 소재 선택 시 μs'·g·μa 고정 → Milky 고정. 추상 슬라이더 시 Milky → μs'(역변환), g=0.9·μa 기본.
+- 마이그레이션(ver 13): 구 모델 투과율 T_old(m_old)=(1−R_d)/(1−ρ) 와 같은 차폐율이 되도록 신 Milky 로 변환,
+  상한 9.0 clamp. 불러오기 시 "L2 모델 변경: 결과가 이전과 다를 수 있음(전/후 균일도)" 고지.
 
 ## 5. 구성 요소
 
@@ -45,10 +48,10 @@ src/engine/l2/
   mc-slab.js        슬래브 MC (HG, Fresnel/TIR, 경로길이 기록) — Node·브라우저 공용 순수 함수
   build-table.mjs   오프라인 테이블 생성 (node, worker_threads) → slab-table.bin + slab-meta.json
   slab-table.js     테이블 로드·보간 → T, R(흡수 반영), 측방 커널, 각분포, 등가 blur
-  milky.js          Milky ↔ τ' 변환, HPA
+  milky.js          Milky ↔ μs' 변환(기준두께 차폐율), HPA
   fft.js            radix-2 2D FFT (실수 컨볼루션용)
   cavity-solver.js  캐비티 재순환 solver
-  validator.js      V1~V10 자체검증 + 상태 객체
+  validator.js      V1~V12 자체검증 + 상태 객체
   fit.js            실측 BTDF/BRDF → μs·g·μa 피팅 (§6.1)
   mie.js            Mie 계산(BHMIE) — σ_s, g, 위상함수, 농도 환산 (§6.2)
   profile.js        Milky/입자 → 예상 BTDF/BRDF 프로파일 생성·CSV (§6.2)
@@ -67,19 +70,27 @@ tools/gen-ref-mie.py       ref-mie.json 생성 (miepython)
   - 채널(T/R), 입사점 기준 측방 반경(시프트 Δ 별도), 출사각, **슬래브 내 경로길이 L(t 단위)**.
 - **흡수는 런타임 적용**: 채널별 경로길이 히스토그램(로그 24 bin)으로 T(μa) = Σ w·exp(−μa·t·L).
   μa = μa_resin + κ·μs (기본 μa_resin=0.0005/mm, κ=1e-4; 소재 등록 시 피팅 대상). → 알베도 고정의 인공물 제거.
+  - **한계(단계 A)**: 흡수가 측방 커널을 좁히는 상관(긴 경로 = 먼 출사)을 무시 — μa·t·L̄ > 0.3 이면 경고.
+    단계 B 에서 (L, r) 2D 히스토그램으로 개선.
 - 광자 예산: N = clamp(2e5 / (1+τ'), 1e4, 2e5). 고 τ' 셀 사건 수를 제한.
 
 ### 5.2 테이블
-- 격자: τ' 30점(0 + log 0.01~10) MC, g {0.6, 0.8, 0.9, 0.95}, n {1.49, 1.59, 1.70}, θ_in 9점(cos 균등 0~85°).
-- **τ' > 10 (고 Milky)**: 확산근사(경계 외삽거리 포함, T ∝ 1/τ' 거동) 해석식 사용 — MC 와 τ'=5~10 겹침 구간에서
-  연속성 확인, V1 을 τ' 1000 까지 AD 와 대조. τ'→∞ 에서 T→0 (Milky 10 극한과 일치).
+- 격자: τ' 32점(0 + log 0.01~20) MC, g {0.6, 0.8, 0.9, 0.95}, n {1.49, 1.59, 1.70}, θ_in 9점(cos 균등 0~85°).
+- **τ' > 10 (고 Milky) — 확산근사 단일식**(Kubelka-Munk 미사용):
+  - T·R: 슬래브 확산방정식 + 외삽경계(내부 Fresnel 반사 계수 A(n)), 흡수는 μ_eff = √(3μa(μa+μs')).
+  - 측방 커널: 같은 확산방정식의 슬래브 Green 함수(이미지 소스 급수)로 출사면 반경 분포.
+  - 출사각: 내부 등방 방사휘도의 Fresnel 투과 분포(입사각 무관).
+  - MC 를 τ' 20 까지 계산해 **겹침 구간 5~20** 에서 두 방식 비교 → 경계 τ'=10 에서 혼합(가중 전이).
+  - V1 을 τ' 1000 까지 AD 와 대조. τ'→∞ 에서 T→0 (Milky 10 극한과 일치).
 - 셀당 저장: T·R 경로길이 히스토그램(각 24), 투과 측방 반경 히스토그램(40 bin, r/t ≤ 20), 평균 시프트 Δ,
-  투과 출사각 분포(0~10° 1° bin + 10~90° 5° bin = 26 bin).
-- 생성 시간 목표 ≤ 30분(8 스레드). 초과 시 τ'>8 구간은 확산근사(Kubelka-Munk 형) 로 대체하고 AD 대조로 검증.
+  투과 출사각 분포(0~10° 1° bin + 10~90° 5° bin = 26 bin) — **산란 성분만**(비산란 직진 성분은 해석식 exp(−τ/cosθ_r)로 별도),
+  확산 입사(cos 가중 평균) 행 별도 저장.
+- 생성 시간 목표 ≤ 30분(8 스레드). 초과 시 광자 예산만 축소(최소 1e4, V1 허용오차 내 유지).
 - 보간: τ' 로그-선형, g·n·θ 선형. **격자 밖 n·g·τ'**: 가장자리로 clamp + "범위 밖" 경고(SV4).
 
 ### 5.3 캐비티 재순환 solver (`cavity-solver.js`)
 - 기하: LED 기판 z=0, 공기 갭 h = depth − t, 슬래브 두께 t, 관찰면 = 상면 +0.1mm.
+  - h < 0.2mm: 갭 무시(밀착) — P_h = δ, 재순환은 슬래브↔기판 직접 반사로 계산. h < 0 은 기존 입력 검증 오류.
 - ① **입사 조도 밴드 분리**: LED(+기존 측벽 1-bounce 이미지 소스)별로 슬래브 하면 각 셀의 입사각 θ 를 구해
   9 밴드 중 하나에 누적 — LED 루프 1회, 비용 ≈ 기존 직접광 1회.
 - ② **1차 투과**: M₁ = Σ_band K_T(band) ⊛ (T_band·E_band). 경사 입사 시프트 Δ(≤0.8t)는 방사 방향이 LED 마다
@@ -87,13 +98,18 @@ tools/gen-ref-mie.py       ref-mie.json 생성 (miepython)
 - ③ **반사·재순환**: 하면 반사 R_band·E_band 를 하나의 하향 Lambertian 소스로 합산(정반사 성분 포함 근사, 가정 표기),
   반사 측방 퍼짐(≤ t ≪ h) 무시. 전달 커널 P_h(r)=h²/(π(r²+h²)²) → 기판 반사 ρ_b → P_h → 확산 입사
   (T_diff·K_Td, R_diff 는 θ cos 가중 평균). **반복 계산**(측벽 처리 때문에 닫힌 해 대신), 잔차 < 1e-4 에서 종료.
-  재순환 필드는 매끄러우므로 **간격 ≥ h/4 의 저해상 격자**에서 계산 후 보간.
+  재순환 필드는 매끄러우므로 저해상 격자(간격 = max(h/4, 기본 격자 간격), 최대 = 기본 격자 간격×4)에서 계산 후 보간.
 - ④ **측벽·경계**: 계산 영역 = 기구 외곽(타겟+오버행). 2× zero-padding FFT(랩어라운드 없음).
   매 반복 후 외곽 밖으로 나간 성분을 벽에서 한 번 접어 넣음(fold-back) × R_w,eff,
-  나머지 (1−R_w,eff) 는 **누설 항** 으로 집계. R_w,eff = 공기→n 계면 Fresnel 반사의 반구 평균(n 1.59 ≈ 0.09).
+  나머지 (1−R_w,eff) 는 **누설 항** 으로 집계. 측벽도 같은 Milky 수지이므로
+  R_w,eff = 해당 소재 슬래브의 확산 입사 반사율 R_diff(μs', g, μa, t) (Milky 0 이면 Fresnel 슬래브 값 ≈ 0.09~0.17).
   직접광 측벽 이미지는 기존 방식(각도 의존) 그대로 ①에 포함.
-- ⑤ **출력**: 상면 출사도 M(x,y) → 조도. 휘도는 테이블 출사각 분포로 카메라 cone 내 평균 방사휘도 계수를
-  구해 M 에 곱함(Lambertian 이면 1/π).
+- ⑤ **출력·휘도 3성분 분리**:
+  - (a) **비산란 직진 성분** = 직접광 × exp(−τ/cosθ_r) × Fresnel → 기존 카메라 경로(핫스팟·cone) 그대로.
+    Milky 0 이면 전부 이 성분 → L1 단독 휘도와 일치(+재순환분).
+  - (b) **직접광의 산란 성분** → 밴드별 출사각 분포로 cone 내 방사휘도 계수.
+  - (c) **재순환 성분** → 확산 입사 행의 출사각 분포로 계수.
+  - 조도 = (a)+(b)+(c) 출사도 합.
 - ⑥ **L3/L4 동시 사용**: 슬래브 두께 t = 타겟 면적 가중 평균 두께. 두께 변동 > 30% 면 "근사 정확도 저하" 경고.
   L5 등 나머지 blur 는 M 에 기존대로 후처리.
 - ⑦ **ρ_b 입력화**: PCB 색 선택 — 백색 0.80 / 혼재(기본) 0.50 / 녹색 0.30 / 흑색 0.05 (임시값, 가정 패널 표기).
@@ -101,12 +117,12 @@ tools/gen-ref-mie.py       ref-mie.json 생성 (miepython)
 ### 5.4 기존 코드 연동 (8곳)
 | 위치 | 변경 |
 |---|---|
-| `levels.js` L2 `levelEffect` | `{blurX:0, blurY:0, transmit:1, l2:{tauR, g, n, mua, rhoB}, decenter…}` 반환 |
+| `levels.js` L2 `levelEffect` | `{blurX:0, blurY:0, transmit:1, l2:{musR, g, mua, n, t, rhoB}, decenter…}` 반환 |
 | `levels.js` `combinedEffect` | `l2` 필드 전달 |
 | `levels.js:16,66` 스키마/기본값 | milky min 0, 기본 0 |
-| `levels.js` `extremeDiffusionParams` · `solver.js` autoTune | 확산 크기 지표 = blur ⊕ **L2 등가 blur**(테이블의 시스템 PSF RMS 폭) |
+| `levels.js` `extremeDiffusionParams` · `solver.js` autoTune | 확산 크기 지표 = blur ⊕ **L2 등가 blur**: 현재 (μs', g, μa, t, h, ρ_b) 로 중앙 LED 1개 cavity-solver 실행 → 출사 RMS 반경 r_L2, 같은 조건 L1 단독 r_L1 → b_eq = √max(0, r_L2² − r_L1²) (키별 캐시). **제약**: 시스템 투과율 ≥ `goal.tMin`(신규, 기본 0.5) — 미달 후보 제외. Milky 탐색 범위 0~9.5 |
 | `directLit.js` `computeField` | `eff.l2` 있으면 직접광 계산 후 cavity-solver 로 대체 경로, 상면 `fresnelT(n)` 곱 생략(MC 에 포함) |
-| `directLit.js` `computeCameraLuminance` · `solver.js:105` | `usingCamera = lumin && !eff.l2 && blur==0`; L2 휘도는 ⑤ 경로 |
+| `directLit.js` `computeCameraLuminance` · `solver.js:105` | L2 on 이면 ⑤(a) 비산란 성분은 기존 카메라 경로, (b)(c) 는 L2 계수 경로 — `usingCamera` 분기는 (a) 성분에 대해 유지 |
 | `analysis.js:134` · `optimizer.js:22` · `geometry.js:30` | 확산 배지·scatterMm 은 L2 등가 blur, 틴트 판정 `milky > 0.5` |
 | `main.js` migrate | `s.ver < 13` 블록(ver 갱신 앞): milky 변환 + 고지 플래그. `materials[]` 는 최상위 필드 |
 
@@ -122,6 +138,8 @@ tools/gen-ref-mie.py       ref-mie.json 생성 (miepython)
 | V7 | 결과 건전성: NaN/음수 없음, 균일도 ∈ [0,1], 출사 ≤ 입력 | 위반 0 | 매 평가 |
 | V9 | 교차두께 예측: 두께 t₁ 측정으로 피팅한 계수로 t₂ 측정(T·R·HPA) 예측 — 2두께 데이터가 있는 DB 소재 | T·R ±3%p, HPA ±3° | 등록 시 + 테스트 |
 | V10 | Mie 모듈 vs `ref-mie.json`(miepython, 크기변수 x 0.1~100, 상대굴절률 1.05~1.3 + 흡수 1수준) Q_sca·g | 상대오차 ≤ 1e-4 | 테스트 |
+| V11 | 고 τ' 전이 연속성: 겹침 구간 5~20 에서 MC vs 확산근사 T·R·커널 RMS·HPA | 차이 ≤ 2% (HPA ≤ 2°) | 테스트 |
+| V12 | Mie→HG 근사 오차: 기준 입자에서 Mie 위상함수 MC vs HG(g_Mie) MC 의 HPA·T | HPA ≤ 3°, T ≤ 2%p, 초과 시 "HG 근사 오차" 표시 | 단계 C 테스트 |
 | V8 | 재순환 해석해: 무한 균일 Lambertian 조사 시 이득 = T_diff/(1−ρ_b·R_diff) 와 solver 결과(대형 균일 배열 중심부) | ≤ 1% | 테스트 |
 
 - 상태 `{ ok, checks:[{id, ok, value, limit}] }` → UI. 실패 시 ❌ + 판정 카드 "신뢰 불가", 수치 회색.
@@ -148,7 +166,8 @@ tools/gen-ref-mie.py       ref-mie.json 생성 (miepython)
 - 피팅: MC 슬래브(테이블) 순방향을 반복해 (μs', g, μa) 탐색 — 목적 = T·R·각도 프로파일 오차.
   고 Milky(τ' > 10)에서는 μs' 만 식별 가능 → g 는 "식별 불가(기본값 사용)" 표시.
 - 결과: μs, g, μa, μs' → Milky 자동 계산. 입자 정보가 있으면 Mie 역산으로 농도 추정.
-- 데이터시트 수치만 있는 경우(T·HPA·두께)도 동일 경로로 피팅(정밀도 낮음 표시).
+- 식별성 규칙: 데이터시트만(T·HPA 2개) → μa 를 기본값 고정, (μs', g) 만 피팅 + "정밀도 낮음".
+  R 미측정 → μa 고정. T·R·각도 프로파일 + 2두께 → (μs', g, μa) 전부 피팅.
 
 ### 6.2 설계 방향 — Milky → 레시피 → 예상 BSDF (`l2/mie.js`, `l2/profile.js`)
 - Milky → μs' (§4). 기준 입자(고급메뉴 선택, 기본: PMMA 비드 d=2µm, n_p=1.49, 모재 PC 1.586) 의
@@ -160,7 +179,7 @@ tools/gen-ref-mie.py       ref-mie.json 생성 (miepython)
 
 ### 6.3 실측소재 DB (`src/model/materials-db.js`, `data/materials-db.json`)
 - 항목: `{ id, name, vendor/grade, host{resin, n}, particle{type, d_um, n_p, rho, wt%}, measured{t_s[], λ, T, R, haze, hpa, btdf[], brdf[]},
-  fitted{mus, g, mua, musR}, milky, validation{V6, V9}, source, date, status: 'measured'|'example' }`.
+  fitted{mus, g, mua, musR}, validation{V6, V9}, source, date, status: 'measured'|'example' }` — **Milky 는 저장하지 않고 musR 로부터 파생**(사상 변경에도 일관).
 - 공용 기준 DB = 저장소 `data/materials-db.json`(git 으로 공유). 사용자 추가분 = 브라우저 저장 + JSON 내보내기/불러오기
   (팀 공유 시 기준 DB 로 병합 커밋).
 - 내장 예시 3종(HPA 19/43/56° 계열)은 `status:'example'` — "예시값·벤더 확인 필요" 라벨, 실물 보정 배지 미반영.
@@ -184,7 +203,7 @@ tools/gen-ref-mie.py       ref-mie.json 생성 (miepython)
 
 ## 8. 테스트 (`node test/*.mjs`)
 - `l2-mc.mjs`: V2·V3·V5 (소수 광자 + 허용오차).
-- `l2-table.mjs`: V1·V4.
+- `l2-table.mjs`: V1·V4·V11, Milky 사상 단조·정역 왕복(±0.01).
 - `l2-cavity.mjs`: V2(시스템)·V8, Milky 0 기대값, Milky↑ → 투과율 감소·등가 blur 증가.
 - `l2-material.mjs`: 합성 소재(알려진 μs',g,μa) → BTDF/BRDF 생성 → 피팅 복원(V6), 2두께 교차예측(V9).
 - `l2-mie.mjs`: V10, 농도 환산 왕복(wt% → μs → wt%), 의존산란 경고 경계.
@@ -221,6 +240,7 @@ tools/gen-ref-mie.py       ref-mie.json 생성 (miepython)
 ## 12. 구현 단계 (plan 분할)
 | 단계 | 내용 | 완료 기준 |
 |---|---|---|
-| A | MC 슬래브·테이블·AD 기준·캐비티 solver·Milky 사상·연동 8곳·배지·가정 패널 | V1~V5, V7, V8 통과, SV3~SV7 |
-| B | 피팅(분석 방향)·실측소재 DB·고급메뉴·마커 | V6, V9 통과, SV2, SV8, SV9 |
-| C | Mie 모듈·농도 환산·예상 BSDF 프로파일·CSV 내보내기 | V10 통과, SV10 |
+| A1 | 오프라인 엔진: MC 슬래브·확산근사·테이블 생성·AD 기준(iadpython)·Milky 사상·FFT·캐비티 solver·validator — UI 없음 | V1~V5, V7, V8, V11 통과(node 테스트) |
+| A2 | 연동 8곳·휘도 3성분·autoTune 제약(tMin)·배지 2종·가정 패널·PCB 색·마이그레이션 | 기존 테스트 + l2-integration 통과, SV3~SV7 |
+| B | 피팅(분석 방향)·식별성 규칙·(L,r) 흡수 상관 개선·실측소재 DB·고급메뉴·마커 | V6, V9 통과, SV2, SV8, SV9 |
+| C | Mie 모듈·농도 환산·Mie 위상함수 프로파일·CSV 내보내기 | V10, V12 통과, SV10 |
