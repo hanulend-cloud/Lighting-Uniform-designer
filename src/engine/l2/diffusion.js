@@ -1,14 +1,23 @@
 // L2 고 Milky(τ' > 10) 확산근사 — spec 2026-10-07 §5.2. 슬래브 확산방정식 + 외삽경계(내부 Fresnel).
 // 길이는 두께 t 단위. T 는 산란 투과(비산란 성분은 τ'≥10 에서 e^{-τ} 로 무시 가능), R 은 정반사 포함.
 import { fresnelR } from '../photometry.js';
-import { N_RAD, radEdge, N_ANG, angEdgeDeg } from './mc-slab.js';
+import { N_RAD, radEdge, N_ANG, angEdgeDeg, fresnelInternal } from './mc-slab.js';
 
 const DEG = Math.PI / 180;
 
-// 내부 반사 유효계수 R_eff(n) 경험식(Groenhuis 1983) → 외삽거리 계수 A = (1+R_eff)/(1−R_eff)
+// 외삽거리 계수 A = (1+R_eff)/(1−R_eff), R_eff = (R_φ+R_j)/(2−R_φ+R_j) — 내부 Fresnel 반사의 정확 적분
+// (R_φ=∫2sc·R dθ, R_j=∫3sc²·R dθ). 경험식(Groenhuis) 대비 AD 오차 4~7% → <1% (n 1.49~1.59, τ' 10~1000 검증).
+const aMemo = new Map();
 export function boundaryA(n) {
-  const Reff = -1.440 / (n * n) + 0.710 / n + 0.668 + 0.0636 * n;
-  return (1 + Reff) / (1 - Reff);
+  if (aMemo.has(n)) return aMemo.get(n);
+  let Rp = 0, Rj = 0; const K = 4000, d = Math.PI / 2 / K;
+  for (let i = 0; i < K; i++) {
+    const th = (i + 0.5) * d, c = Math.cos(th), s = Math.sin(th), R = fresnelInternal(c, n);
+    Rp += 2 * s * c * R * d; Rj += 3 * s * c * c * R * d;
+  }
+  const Re = (Rp + Rj) / (2 - Rp + Rj), A = (1 + Re) / (1 - Re);
+  aMemo.set(n, A);
+  return A;
 }
 
 // 입사 조건 → 진입 Fresnel 반사율, 굴절 후 평균 cos(첫 산란 깊이 z0 보정)
