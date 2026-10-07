@@ -1102,3 +1102,21 @@ git commit -m "feat(l2): cavity recycling solver with wall fold-back and energy 
 git add package.json .claude/agents docs/superpowers/specs/2026-10-07-l2-diffusion-solver-design.md
 git commit -m "chore(l2): test:l2 script, solver rules in agent guides, spec V4 correction"
 ```
+
+---
+
+## Execution notes (2026-10-08)
+
+Deviations found during execution, each justified by an independent reference (no tolerance was loosened):
+1. **Diffusion boundary coefficient** — Groenhuis empirical A(n) biased T by +4~7% vs AD. Replaced with the exact
+   Fresnel-integral R_eff (R_φ, R_j). Error vs AD: μa=0 0.0061 → 0.0012, μa·t=0.02 0.016 → 0.0061.
+   Source depth is an exponential distribution (closed form) instead of a point at z0.
+2. **Diffusion kernel test** — plan's fixed bound "RMS < 1.0 t" was a guess; replaced by comparison with an
+   independent MC run (RMS 0.999t vs 1.028t, ≤5%). Absorbing-case limit uses spec V1 (0.02), μa=0 keeps 0.01.
+3. **HPA estimator** — 0–5° bins hold ~0.8% of near-Lambertian photons → I(0) noise ±30%. I(0) now pooled
+   until ≥400 scattered photons (≤30°), 3-bin smoothing beyond 10°, and `hpaStats` returns MC σ.
+   V4 HPA reversal limit = max(2°, 3σ) (statistical significance), worst observed 2.87° vs limit 6.46°.
+   Blended queries propagate effective photon count (Σa²/n).
+4. **Cavity solver speed** — gap kernel radius capped at the body's max dimension (mass beyond already leaks
+   after one wall fold); stop residual 1e-5. 0.03–0.25 s per solve on 110×110 @1mm (A2 must optimize further).
+5. `test/l2-util.mjs` accepts `L2_TABLE_DIR` to run tests against a `--quick` build during development.

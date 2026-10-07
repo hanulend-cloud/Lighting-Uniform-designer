@@ -7,7 +7,8 @@
     "dev": "npx --yes serve -l 5173 .",
     "start": "npx --yes serve -l 5173 .",
     "test": "node test/smoke.mjs && node test/heatmap-labels.mjs && node test/overhang.mjs && node test/layout.mjs && node test/center.mjs && node test/profile-labels.mjs && node test/l3-l4-shapes.mjs",
-    "test:step": "node test/smoke-step.mjs"
+    "test:step": "node test/smoke-step.mjs",
+    "test:l2": "node test/l2-mc.mjs && node test/l2-diffusion.mjs && node test/l2-table.mjs && node test/l2-milky.mjs && node test/l2-fft.mjs && node test/l2-cavity.mjs"
   },
   "keywords": ["lighting", "optics", "uniformity", "led", "dfm", "simulator"],
   "license": "MIT",
