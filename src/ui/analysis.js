@@ -42,6 +42,7 @@ export function buildLevels(el, spec, onToggle, onParam) {
       ${advList.length ? `<span class="lv-adv-toggle" data-adv-toggle="${l}">고급 ▾</span>
       <div class="lv-f lv-f-adv" data-adv="${l}" hidden>${adv}</div>` : ''}
       <div class="lv-auto-wrap" data-auto="${l}"></div>
+      ${l === 2 ? '<div class="lv-l2" data-l2></div>' : ''}
     </div>`;
   }).join('');
 
@@ -118,8 +119,9 @@ export function updateLevels(el, solo, activeSet, target, onApply) {
 // 조합(활성) 결과 판정 — 달성/미달은 '균일도 = min/max (최대·최소 광량비)' 목표로 판정.
 export function renderVerdict(el, combo, tags, goalSpec) {
   const met = combo.feasible;                       // 중심부(경계에서 깊이만큼 안쪽) 목표 충족
-  el.className = met ? 'ok' : 'ng';
-  const statusText = !met ? '목표 미달'
+  const untrusted = combo.l2 && combo.l2ok === false;   // L2 solver 자체검증 실패 → 결과를 정상처럼 보이지 않게
+  el.className = untrusted ? 'ng untrusted' : met ? 'ok' : 'ng';
+  const statusText = untrusted ? '신뢰 불가 (L2 계산 정합성 실패)' : !met ? '목표 미달'
     : (combo.belowMinLeds ? '목표 달성 (LED 수 하한 미만)' : (combo.fullPass === false ? '중심부 달성 · 전체 미달(참고)' : '목표 달성'));
   const name = tags.length ? tags.join(' + ') : '기본 평판';
   const pitchVal = combo.pitchY == null
@@ -131,7 +133,7 @@ export function renderVerdict(el, combo, tags, goalSpec) {
   // 판정기준 배지 — '휘도' 선택 시에도 확산재(blur>0)가 있으면 램버시안 근사로 휘도=조도(패턴
   // 동일)라 조도 계산을 그대로 재사용한다(directLit.computeCameraLuminance 주석 참고). 확산재가
   // 없는데 '휘도'를 선택하면 실제로 LED 이미지(직접 시야) 기준으로 판정한 것이므로 구분해 보여준다.
-  const diffusing = (combo.blurX ?? 0) > 0 || (combo.blurY ?? 0) > 0;
+  const diffusing = (combo.blurX ?? 0) > 0 || (combo.blurY ?? 0) > 0 || combo.l2;
   const metricNote = goalSpec.metric === 'lumin'
     ? (diffusing ? ' <span class="mut">(휘도 기준 · 확산재로 조도=휘도 패턴)</span>' : ' <span class="mut">(휘도 기준 · 직접 시야)</span>')
     : '';
@@ -151,7 +153,8 @@ export function renderVerdict(el, combo, tags, goalSpec) {
       <div class="v-stat-box"><span class="lbl">Pitch X·Y</span><span class="val">${pitchVal}</span></div>
       <div class="v-stat-box ${met ? 'ok' : 'ng'}"><span class="lbl">균일도(중심부)</span><span class="val">${((combo.U0c ?? combo.U0) * 100).toFixed(1)}<i>%</i></span><span class="mut">전체 ${(combo.U0 * 100).toFixed(1)}%</span></div>
     </div>
-    <div class="v-sub">투과율 ${T}%</div>
+    <div class="v-sub">투과율 ${T}%${combo.l2 ? ' <span class="mut">(L2 시스템 투과율: Fresnel·흡수·재순환 포함)</span>' : ''}</div>
+    ${combo.l2 && combo.transmit < (goalSpec.tMin ?? 0.5) ? `<div class="v-sub warn">⚠ 밝기 경고: 투과율 ${T}% &lt; 최소 ${((goalSpec.tMin ?? 0.5) * 100).toFixed(0)}% — Milky 를 낮추거나 LED 광속을 늘리세요</div>` : ''}
     ${overhangLine}${insetNote}
     ${met ? '' : '<div class="v-sub hint">→ 오버행↑ · 확산 적용(L2 Milky·L3~5) · 깊이 조정</div>'}
     <div class="v-sub">참고 — min/avg ${(combo.minAvg * 100).toFixed(0)}% · CV ${(combo.cv * 100).toFixed(1)}%${cvW} · 인접변화율 ${(combo.grad * 100).toFixed(1)}%${gW}</div>`;

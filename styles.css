@@ -223,3 +223,18 @@ main { flex: 1 1 auto; min-height: 0; display: grid;
   font-size: 15px; z-index: 999;
 }
 .step-overlay[hidden] { display: none; }
+
+/* L2 solver 패널 (spec 2026-10-07 §5.5~5.6, §7) */
+.lv-l2 { margin-top: 6px; font-size: 12px; color: #5a6478; }
+.l2-badges { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 4px; }
+.l2-badge { font-size: 11.5px; font-weight: 800; padding: 2px 8px; border-radius: 9px; cursor: help; }
+.l2-badge.ok { background: #e7f7ee; color: #1c9a5b; }
+.l2-badge.ng { background: #fde3e3; color: #c0392b; }
+.l2-badge.warn { background: #fff4dc; color: #a06b00; }
+.l2-prop b.ng { color: #c96a26; }
+.l2-warn { color: #b5790f; margin-top: 2px; }
+.l2-assume { margin-top: 4px; }
+.l2-assume summary { cursor: pointer; color: #6b7487; }
+.l2-assume ul { margin: 4px 0 0 16px; padding: 0; }
+#verdict .v-sub.warn { color: #c96a26; font-weight: 700; }
+#verdict.untrusted .val, #verdict.untrusted .v-sub { color: #9aa1ad !important; }

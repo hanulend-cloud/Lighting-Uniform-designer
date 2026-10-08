@@ -1,7 +1,10 @@
 // UI 배선 + 실시간 재계산 — 프로젝트.md §3 출력6
 import { DEFAULT_SPEC, LEVEL_DEFAULTS } from './model/defaults.js';
 import { buildGeometry, combinedEffect, activeLevels, effectiveEdgeMargin } from './model/geometry.js';
-import { computeField, computeCameraLuminance, evalGrid } from './engine/directLit.js';
+import { computeField, computeCameraLuminance, evalGrid, l2Describe } from './engine/directLit.js';
+import { initL2, browserLoader } from './engine/l2/runtime.js';
+import { renderL2Panel } from './ui/l2-panel.js';
+import { migrateMilkyV13 } from './engine/l2/material.js';
 import { metrics, centerZoneFrac } from './engine/uniformity.js';
 import { solveCombo, solvePerLevel, GRID } from './engine/solver.js';
 import { PAD } from './ui/canvas-util.js';
@@ -34,6 +37,7 @@ const CONTROL_GROUPS = [
     ['goal.centerArea', '중심부 면적비', '', 0.50, 1.00, 0.01],
     ['goal.edgeMargin', '판정제외 마진', '', 0, 0.30, 0.01],
     { path: 'goal.metric', label: '판정기준', options: [['illum', '조도'], ['lumin', '휘도']] },
+    ['goal.tMin', '최소 투과율(L2)', '', 0, 1, 0.05],
   ] },
   { name: '기구', items: [
     ['levels.1.thk', '몸체두께', 'mm', 0.5, 20, 0.5],
@@ -179,7 +183,7 @@ function run() {
   const common = {
     depth, pitchX, pitchY, blurMmX: eff.blurX, blurMmY: eff.blurY, transmit: eff.transmit,
     decenterX: eff.decenterX, decenterY: eff.decenterY, edgeBoost: eff.edgeBoost,
-    padX: combo.padX, padY: combo.padY,
+    padX: combo.padX, padY: combo.padY, l2: eff.l2,
   };
 
   // solveCombo 와 완전히 동일한 격자 → 표시 균일도 = 판정 균일도
@@ -213,6 +217,9 @@ function run() {
 
   const solo = [2, 3, 4, 5].map((l) => soloRow(l));
   updateLevels($('#levels'), solo, activeSet, spec.goal.U0, onApplyAuto);
+  // L2 카드: 현재 Milky 슬라이더 값의 물성·검증(활성 여부와 무관하게 보여 줌 — 소재 판단용)
+  const l2eff = { milky: spec.levels[2].milky ?? 0, pcb: spec.levels[2].pcb ?? '혼재' };
+  renderL2Panel(document.querySelector('[data-l2]'), l2Describe(spec, depth, l2eff, activeSet.has(2) ? eff.edgeBoost : null, combo.padX ?? 0, combo.padY ?? 0), spec.goal.tMin ?? 0.5);
   renderVerdict($('#verdict'), combo, tags, spec.goal);
 
   last = { common, m, depth, view: geom.view, edgeMargin, fixture: geomFixture, center };
@@ -224,7 +231,9 @@ function run() {
   else { $('#pane-heat').classList.add('stale'); $('#pane-prof').classList.add('stale'); }
 
   $('#timing').textContent =
-    `연산 ${(performance.now() - t0).toFixed(0)} ms · 목표 균일도 ${(spec.goal.U0 * 100).toFixed(0)}% · 깊이 ${depth}mm`;
+    `연산 ${(performance.now() - t0).toFixed(0)} ms · 목표 균일도 ${(spec.goal.U0 * 100).toFixed(0)}% · 깊이 ${depth}mm`
+    + (spec._l2MigrationNote ? ' · ⚠ L2 모델 변경: 저장된 설계의 Milky 를 새 눈금으로 변환했습니다(결과가 이전과 다를 수 있음)' : '');
+  delete spec._l2MigrationNote;   // 1회성 고지 — 다음 저장부터 빠짐
 }
 
 // 조도 히트맵 렌더 — 버튼 / 자동. 격자는 X·Y 정사각 셀이며 셀 크기는 최대 0.5mm(타겟이 작아
@@ -480,6 +489,14 @@ function migrate(s) {
     if (s.opt) { delete s.opt.maxOverhang; delete s.opt.maxOverhangMm; }
     if (s.goal) delete s.goal.edgeMargin;
   }
+  // ver<13: L2 Milky 정의 변경(1~10 휴리스틱 → 0~10 소재 산란 성능, spec §4). 구 모델의 투과율과 같은
+  // 차폐율이 되도록 변환하고 9.0 으로 상한(구 milky 10 이 신 눈금에서 완전 차폐로 바뀌지 않게).
+  if (!(s.ver >= 13) && s.levels?.[2]) {
+    const m = s.levels[2].milky ?? 1;
+    s.levels[2].milky = migrateMilkyV13(m);
+    s.levels[2].pcb ??= '혼재';
+    if (m > 1) s._l2MigrationNote = true;
+  }
   s.ver = DEFAULT_SPEC.ver;
   // opt.pitchMin은 UI로 편집하지 않는 내부 보조 하한값 — 구버전 저장값(예: 6mm 고정)이
   // LED 크기 기반 최소 피치를 덮어쓰지 않도록 항상 현재 기본값으로 갱신
@@ -488,6 +505,9 @@ function migrate(s) {
 }
 
 // ---- 시작 ----
+// L2 산란 응답표(≈4MB) 로드·자체검증 — 실패해도 앱은 뜨고 L2 결과만 "신뢰 불가"로 표시된다.
+$('#timing').textContent = 'L2 산란 응답표 로드 중…';
+await initL2(browserLoader());
 spec = load() || structuredClone(DEFAULT_SPEC);
 migrate(spec);
 mount();
