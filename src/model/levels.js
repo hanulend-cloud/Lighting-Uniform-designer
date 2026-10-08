@@ -11,13 +11,14 @@ export const LEVEL_SCHEMA = {
     desc: '기구물 몸체 두께. 다른 난이도의 형상 위에도 함께 적용.',
   },
   2: {
-    label: '확산소재', hint: 'Milky resin · 1=투명 ~ 10=최대확산',
+    label: '확산소재', hint: 'Milky = 소재 산란 성능 · 0=투명 ~ 10=완전 차폐(두께 무관)',
     fields: [
-      { key: 'milky', label: 'Milky', unit: '1~10', min: 1, max: 10, step: 0.5 },
+      { key: 'milky', label: 'Milky(0~10)', unit: '', min: 0, max: 9.9, step: 0.1, searchMax: 9.5 },
+      { key: 'pcb', label: 'PCB 색', type: 'select', options: ['혼재', '백색', '녹색', '흑색'], adv: true, fixed: true },
       { key: 'decenterX', label: 'De-centerX', unit: 'mm', min: -30, max: 30, step: 1, adv: true },
       { key: 'decenterY', label: 'De-centerY', unit: 'mm', min: -30, max: 30, step: 1, adv: true },
     ],
-    desc: 'Milky resin 사용도. 1=투명(효과 없음), 10=최대(후방산란→기판 반사 재순환으로 확산 최대·투과율 최저). 확산은 캐비티 깊이에 비례. De-center는 LED 배열 전체를 타겟 중심에서 X·Y로 밀어 배치 공차/비대칭을 검토하는 용도(광학 확산과는 무관, 배치만 이동).',
+    desc: 'Milky = 산란제 양·밀도로 정해지는 소재 고유의 산란 성능(두께와 무관). 눈금 = 기준두께 2mm 에서 산란으로 차폐되는 빛의 비율 × 10 (예: 5 = 절반 차폐). 계산은 체적 산란 Monte Carlo 응답표 + LED 기판(PCB 색) 재순환 solver 로 수행하고, 결과는 adding-doubling 기준해로 자동 검증된다(계산 정합성 배지). 실물 일치는 별도(실물 보정 배지). De-center 는 LED 배열 전체를 X·Y 로 평행이동(배치 공차 검토용).',
   },
   3: {
     label: '형상·자유(도파관)', hint: 'X·Y 독립 두께 프로필(중심·중간·가장자리) · 가장자리 경사 굴절만 유효',
@@ -63,7 +64,7 @@ export const LEVEL_SCHEMA = {
 
 export const LEVEL_DEFAULTS = {
   1: { on: true, thk: 3 },
-  2: { on: false, milky: 1, decenterX: 0, decenterY: 0 },
+  2: { on: false, milky: 0, pcb: '혼재', decenterX: 0, decenterY: 0 },
   3: { on: true, tx0: 3, tx50: 2, tx100: 1, ty0: 3, ty50: 2, ty100: 1, edgeR: 5 },
   4: { on: false, gap: 2, flatX: 4, flatY: 4, angleX: 45, angleY: 45, rise: 8, radiusX: 0, radiusY: 0 },
   5: { on: false, ptype: 'pyramid', sizeX: 0.3, sizeY: 0.3, angleX: 40, angleY: 40, dir: '돌출', depth: 0.2 },
@@ -71,10 +72,6 @@ export const LEVEL_DEFAULTS = {
 
 const clamp = (v, lo, hi) => (v < lo ? lo : v > hi ? hi : v);
 const iso = (b, transmit) => ({ blurX: b, blurY: b, transmit });
-
-// LED 기판 면(솔더마스크·부품·패턴 혼재)의 확산 반사율 — L2 재순환 확산의 기준값. 백색
-// 반사시트를 가정하지 않고 보수적으로 잡음(사용자 지정). 입력 항목은 아니며 실측 시 캘리브레이션 대상.
-const BOARD_REFL = 0.5;
 
 // L3 두께(tx0/tx50/tx100 등)의 물리적 상·하한 — L3(X·Y 독립 두께 프로필)와 l3BotZAt(형상)가
 // 공유. 하한은 몸체 최소 두께, 상한은 주어진 깊이 안에서 LED와 부딪히지 않는 최대 두께.
@@ -122,23 +119,10 @@ export function levelEffect(spec, level, depth) {
       // 클리어 평판: 광학적 확산 없음 (얇은 슬래브의 TIR 혼합은 무시 가능)
       return iso(0, 1);
 
-    case 2: {
-      // Milky resin = 부피 산란 확산재. 지배 메커니즘은 "후방산란 재순환": 확산재에 닿은 빛 중
-      // R_d(=0.9t) 만큼이 캐비티로 되돌아가 LED 기판(BOARD_REFL)에 반사돼 다시 올라온다. 한 번
-      // 왕복마다 Lambertian 2회 홉(↓d, ↑d) 만큼 옆으로 번지고(cos⁴ 조도의 HWHM=0.643h → σ≈0.546h,
-      // 2홉 합산 σ₁≈0.77d), 왕복 횟수는 비율 ρ=R_d·BOARD_REFL 의 기하분포이므로 분산 합
-      // σ²=σ₁²·ρ/(1-ρ) 를 단일 Gaussian 으로 근사한다. 출사광도 재순환만큼 회복: (1-R_d)/(1-ρ).
-      // 판 두께 안의 전방산란(≈두께 수준, 1~3mm)은 이보다 훨씬 작아 생략.
-      // 예전 공식(blur = milky·depth·11)은 blur 를 타겟보다 훨씬 크게 잡아 배열 전체가 하나의
-      // 거대한 봉우리로 뭉개졌고, 그 결과 (a) 균일도가 피치에 무관해져 LED 수 결정이 무의미해지고
-      // (b) 측벽 반사의 영향이 완전히 가려졌다 — 100×20mm 스트립 실측 비교로 확인.
-      const t = clamp(((p.milky ?? 1) - 1) / 9, 0, 1);
-      const Rd = 0.9 * t;
-      const rho = Rd * BOARD_REFL;
-      const b = 0.77 * d * Math.sqrt(rho / (1 - rho));
-      // De-center: 광학(확산)과는 무관 — LED 배열 전체를 타겟 중심에서 X·Y로 평행이동만.
-      return { blurX: b, blurY: b, transmit: (1 - Rd) / (1 - rho), decenterX: p.decenterX ?? 0, decenterY: p.decenterY ?? 0 };
-    }
+    case 2:
+      // Milky 체적 산란 — 물리 solver(directLit computeFieldL2: MC 응답표 + 캐비티 재순환)가 처리한다.
+      // 여기서는 소재 입력만 넘긴다(blur·투과율 근사 없음). De-center 는 배치만 평행이동.
+      return { blurX: 0, blurY: 0, transmit: 1, l2: { milky: p.milky ?? 0, pcb: p.pcb ?? '혼재' }, decenterX: p.decenterX ?? 0, decenterY: p.decenterY ?? 0 };
 
     case 3: {
       // 균일두께 도파관 — 광학적으로 유효한 산란원은 경사진 가장자리(테이퍼)에서의 굴절
@@ -245,7 +229,7 @@ export function extremeDiffusionParams(level, depth, mode = 'max') {
   const mag = (p) => {
     const e = levelEffect({ levels: { [level]: p } }, level, depth);
     const edgeMag = e.edgeBoost ? e.edgeBoost.searchMag : 0;
-    return Math.hypot(e.blurX, e.blurY) + edgeMag;
+    return Math.hypot(e.blurX, e.blurY) + edgeMag + (e.l2 ? e.l2.milky : 0);   // L2: Milky 가 곧 확산 크기(단조)
   };
 
   let best = { ...LEVEL_DEFAULTS[level] };
@@ -255,7 +239,7 @@ export function extremeDiffusionParams(level, depth, mode = 'max') {
       if (f.fixed) continue;   // 정책상 고정 필드(예: L5 기본 패턴=pyramid) — 기본값 그대로 유지
       const candidates = f.type === 'select'
         ? f.options
-        : [f.min, f.max, ...Array.from({ length: 7 }, (_, i) => f.min + (f.max - f.min) * (i + 1) / 8)];
+        : [f.min, f.searchMax ?? f.max, ...Array.from({ length: 7 }, (_, i) => f.min + ((f.searchMax ?? f.max) - f.min) * (i + 1) / 8)];
       for (const v of candidates) {
         const cand = { ...best, [f.key]: v };
         const m = mag(cand);
@@ -279,7 +263,7 @@ export function lerpParams(level, a, b, t) {
 // 활성 난이도들의 조합 효과: blur 는 제곱합(√Σb²), 투과율은 곱
 export function combinedEffect(spec, depth, active) {
   const A = new Set(active ?? activeLevels(spec));
-  let bx2 = 0, by2 = 0, T = 1, decenterX = 0, decenterY = 0, edgeBoost = null;
+  let bx2 = 0, by2 = 0, T = 1, decenterX = 0, decenterY = 0, edgeBoost = null, l2 = null;
   for (const l of [1, 2, 3, 4, 5]) {
     if (!A.has(l)) continue;
     if (l === 3 && A.has(4)) continue;          // L4 가 L3 대체
@@ -290,8 +274,9 @@ export function combinedEffect(spec, depth, active) {
     decenterX += e.decenterX ?? 0;
     decenterY += e.decenterY ?? 0;
     if (e.edgeBoost) edgeBoost = e.edgeBoost;   // L3 또는 L4(둘 중 켜진 쪽) — 위치 의존 가장자리 보정
+    if (e.l2) l2 = e.l2;                         // L2 물리 solver 입력
   }
-  return { blurX: Math.sqrt(bx2), blurY: Math.sqrt(by2), transmit: T, decenterX, decenterY, edgeBoost, active: [...A] };
+  return { blurX: Math.sqrt(bx2), blurY: Math.sqrt(by2), transmit: T, decenterX, decenterY, edgeBoost, l2, active: [...A] };
 }
 
 // 판정용 가장자리 마진 — L3·L4 중 켜진 쪽이 실제로 가장자리를 보강한다는 근거(hasBoost)가

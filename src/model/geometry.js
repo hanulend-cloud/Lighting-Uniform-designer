@@ -27,7 +27,7 @@ export function buildGeometry(spec, opt = {}) {
 
   const p2 = levelParams(spec, 2);
   const p5 = levelParams(spec, 5);
-  const diffuseVisual = (active.has(2) && (p2.milky ?? 1) > 1.5) || active.has(4);
+  const diffuseVisual = (active.has(2) && (p2.milky ?? 0) > 0.5) || active.has(4);
   const patternVisual = active.has(5)
     ? { type: p5.ptype || 'pyramid',
         sizeX: p5.sizeX ?? 0.3, sizeY: p5.sizeY ?? 0.3,

@@ -5,7 +5,7 @@
 // solveSolo : 저해상 — 난이도별 행 미리보기용 (5개를 매번 재계산해도 빠르게)
 // solveCombo: 고해상 — 실제 적용될 최종안
 
-import { computeField, computeCameraLuminance, evalGrid, ledCounts } from './directLit.js';
+import { computeField, computeCameraLuminance, evalGrid, ledCounts, l2TransFast } from './directLit.js';
 import { metrics, localGradient, centerMetrics, centerZoneFrac, RIM_TOL } from './uniformity.js';
 import { combinedEffect, levelEffect, levelParams, LEVEL_SCHEMA, extremeDiffusionParams, lerpParams, effectiveEdgeMargin } from '../model/levels.js';
 
@@ -107,13 +107,13 @@ function evalField(spec, eff, pX, pY, gridN = GRID, padX = 0, padY = 0) {
     ? computeCameraLuminance(spec, {
         depth: spec.space.depth, pitchX: pX, pitchY: pY, nx: g.nx, ny: g.ny,
         transmit: eff.transmit, decenterX: eff.decenterX ?? 0, decenterY: eff.decenterY ?? 0,
-        edgeBoost: eff.edgeBoost, padX, padY, coneDeg: LUMIN_CONE_DEG,
+        edgeBoost: eff.edgeBoost, padX, padY, coneDeg: LUMIN_CONE_DEG, l2: eff.l2,
       })
     : computeField(spec, {
         depth: spec.space.depth, pitchX: pX, pitchY: pY, nx: g.nx, ny: g.ny,
         blurMmX: eff.blurX, blurMmY: eff.blurY, transmit: eff.transmit,
         decenterX: eff.decenterX ?? 0, decenterY: eff.decenterY ?? 0, edgeBoost: eff.edgeBoost,
-        padX, padY,
+        padX, padY, l2: eff.l2,
       });
   // L3(균일두께 용기)가 켜져 있으면 그 보강 폭만큼 판정 마진을 줄여, 보강 효과가 실제로 반영되게 함.
   // computeCameraLuminance 도 이제 L3/L4 바닥면 경사에서의 실제 굴절·전반사를 광선추적으로
@@ -129,6 +129,8 @@ function evalField(spec, eff, pX, pY, gridN = GRID, padX = 0, padY = 0) {
     minAvg: m.U0, cv: m.cv,
     grad: localGradient(f.field, f.nx, f.ny, edge),
     leds: f.leds.length, dim: f.dim,
+    trans: f.l2 ? f.l2.trans : undefined,             // L2: 시스템 투과율(solver)
+    l2ok: f.l2 ? f.l2.check.ok : undefined,           // L2: 계산 정합성(V 검사)
   };
 }
 
@@ -344,6 +346,11 @@ function autoTuneLevel(spec, level) {
   const maxEx = extremeDiffusionParams(level, depth, 'max');
   const minEx = extremeDiffusionParams(level, depth, 'min');
   let maxParams = maxEx.params, maxEffect = maxEx.effect;
+  // L2: 확산만 키우면 투과율 0(불투명) 쪽으로 수렴한다 — 시스템 투과율 ≥ goal.tMin 인 최대 Milky 로 상한(spec §5.4)
+  if (level === 2) {
+    maxParams = { ...maxParams, milky: l2MaxMilkyForTmin(spec, depth, maxParams, spec.goal.tMin ?? 0.5) };
+    maxEffect = levelEffect({ levels: { 2: maxParams } }, 2, depth);
+  }
 
   // 1단계: "확산을 최대로 밀수록 LED가 가장 적게 든다"는 가정이 실측(L2 milky, L3 도파관 모두)
   // 으로 깨지는 경우가 확인됨 — 과도한 확산은 (경계 밖으로 새는 빛이 늘어) 오히려 균일도를
@@ -430,7 +437,10 @@ function autoTuneLevel(spec, level) {
   let lo = 0, hi = 1;
   if (unifAt(0) >= b.target) hi = 0;
   else {
+    // L2: Milky 분해능 0.05 면 충분(소재 공차보다 훨씬 작음) — 조기 종료로 PSF 재계산 수를 줄인다
+    const span = level === 2 ? Math.abs(maxParams.milky - minEx.params.milky) : 0;
     for (let i = 0; i < 10; i++) {
+      if (span > 0 && (hi - lo) * span < 0.05) break;
       const m = (lo + hi) / 2;
       if (unifAt(m) >= b.target) hi = m; else lo = m;
     }
@@ -445,6 +455,17 @@ function autoTuneLevel(spec, level) {
     params: finalParams, transmit: packed.transmit, overhang: packed.overhang,
     fixtureX: packed.fixtureX, fixtureY: packed.fixtureY,
   };
+}
+
+// 시스템 투과율(PSF, 기하·소재만의 함수 — 피치 무관)이 tMin 이상인 최대 Milky (이분 탐색, 상한 searchMax)
+function l2MaxMilkyForTmin(spec, depth, params, tMin) {
+  const hi0 = Math.min(params.milky, LEVEL_SCHEMA[2].fields.find((f) => f.key === 'milky').searchMax);
+  const trans = (m) => l2TransFast(spec, depth, { milky: m, pcb: params.pcb });
+  if (trans(hi0) >= tMin) return hi0;
+  let lo = 0, hi = hi0;
+  if (trans(0) < tMin) return 0;
+  for (let i = 0; i < 12; i++) { const m = (lo + hi) / 2; if (trans(m) >= tMin) lo = m; else hi = m; }
+  return lo;
 }
 
 function effectAt(level, depth, minParams, maxParams, t) {
@@ -462,7 +483,8 @@ function pack(spec, pX, pY, r, X, Y, target, eff, depth, padX = 0, padY = 0) {
     fullPass: r.unif >= target,                       // 참고: 타겟 전체 min/max 목표 충족
     U0: r.unif, U0c: r.unifC, rimBright: r.rimBright, // U0 = 전체 min/max, U0c = 중심부 min/max
     minAvg: r.minAvg, cv: r.cv, grad: r.grad,
-    blurX: eff.blurX, blurY: eff.blurY, transmit: eff.transmit,
+    blurX: eff.blurX, blurY: eff.blurY, transmit: r.trans ?? eff.transmit,
+    l2: !!eff.l2, l2ok: r.l2ok,
     padX, padY,                                        // 음수 = 최외곽 LED 열을 타겟 안쪽으로 들임(기구는 그대로)
     fixtureX: X + 2 * Math.max(0, padX), fixtureY: Y + 2 * Math.max(0, padY),
     overhang: X > 0 ? (2 * Math.max(0, padX)) / X : 0,

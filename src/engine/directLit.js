@@ -6,6 +6,11 @@ import {
   lambertianExponent, gaussianSigma, relIntensity, axialIntensityFromFlux, fresnelT, fresnelR,
 } from './photometry.js';
 import { l3BotZAt, l4BotZAt } from '../model/levels.js';
+import { l2State } from './l2/runtime.js';
+import { l2Material, pcbReflectance } from './l2/material.js';
+import { systemPsf, systemTransFast } from './l2/psf.js';
+import { hpaDeg } from './l2/slab-table.js';
+import { nextPow2, kernelSpectrumPair, convolvePair } from './l2/fft.js';
 
 const DEG = Math.PI / 180;
 
@@ -192,6 +197,138 @@ function sample(K, dx, dy) {
        + d[b1 * w + a0] * (1 - ta) * tb + d[b1 * w + a1] * ta * tb;
 }
 
+// ---- L2 (Milky 체적 산란) — spec 2026-10-07 §5.3, A2 PSF 방식 ----
+function ledIntensity(spec) {
+  const model = spec.led.model;
+  const p = model === 'gaussian' ? { sigma: gaussianSigma(spec.led.beamX) } : { m: lambertianExponent(spec.led.beamX) };
+  return {
+    intensity: (c) => relIntensity(model, Math.acos(Math.min(1, Math.max(0, c))), p),
+    key: `${model}|${spec.led.beamX}`, I0: axialIntensityFromFlux(spec.led.fluxLm, model, p),
+  };
+}
+
+// 현재 사양의 L2 물성·기하·PSF. 테이블이 없으면 { error }.
+export function l2Setup(spec, depth, l2, edgeBoost, step, padX = 0, padY = 0) {
+  const st = l2State();
+  if (!st.table) return { error: st.error ?? 'L2 테이블 없음' };
+  const warnings = [];
+  const mat = l2Material(st.table, l2.milky, spec.body?.n ?? 1.59);
+  let t = spec.levels?.[1]?.thk ?? spec.body?.baseThk ?? 3;
+  if (edgeBoost?.kind === 'axis') {
+    // L3 동시 사용: 면적 평균 두께(l3BotZAt 정본 형상) — 변동 30% 초과면 경고
+    const X = spec.target.xLen, Y = spec.target.yLen, N = 16, th = [];
+    for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) th.push(depth - l3BotZAt(spec, depth, ((i + 0.5) / N) * X, ((j + 0.5) / N) * Y));
+    t = th.reduce((a, v) => a + v, 0) / th.length;
+    if ((Math.max(...th) - Math.min(...th)) / t > 0.3) warnings.push('L3 두께 변동 >30% — 평균 두께 근사 정확도 저하');
+  } else if (edgeBoost?.kind === 'radial') warnings.push('L4 동시 사용 — 슬래브 두께를 L1 두께로 근사');
+  t = Math.max(0.1, Math.min(t, depth));
+  const h = Math.max(0, depth - t), rhoB = pcbReflectance(l2.pcb);
+  const li = ledIntensity(spec);
+  const BX = spec.target.xLen + 2 * Math.max(0, padX), BY = spec.target.yLen + 2 * Math.max(0, padY);
+  const psf = systemPsf({ table: st.table, mat, t, h, rhoB, intensity: li.intensity, intensityKey: li.key, I0: li.I0, extentX: 2 * BX, extentY: 2 * BY, step });
+  if (psf.qn.outOfRange) warnings.push('굴절률·g 가 테이블 격자 밖 — 가장자리 값으로 근사');
+  const tableOk = !!st.check?.ok;
+  const check = {
+    ok: tableOk && psf.check.ok && !psf.qn.outOfRange,
+    checks: [...(st.check?.checks ?? []), ...psf.check.checks],
+  };
+  const info = {
+    milky: mat.milky, musR: mat.musR, mus: mat.musR / (1 - mat.g), g: mat.g, mua: mat.mua, n: mat.n,
+    t, h, tauR: mat.musR * t, rhoB, rW: psf.rW, trans: psf.trans, hpa: hpaDeg(psf.qn), Tb0: psf.qn.Tb,
+  };
+  return { mat, t, h, rhoB, psf, warnings, check, info, BX, BY };
+}
+
+// PSF(셀 중심 격자) → 판정 격자(노드 간격 stepX·stepY) 오프셋 커널로 재표본화하고 FFT 스펙트럼을 캐시.
+// 선형 컨볼루션이 순환 랩어라운드 없이 타겟 노드를 덮도록 W ≥ NX + 2kx.
+const _l2conv = new Map();
+function l2GridConv(psf, NX, NY, stepX, stepY) {
+  const key = `${psf.key}|${NX}|${NY}|${stepX.toFixed(4)}|${stepY.toFixed(4)}`;
+  let c = _l2conv.get(key);
+  if (c) return c;
+  const halfX = ((psf.K.kNx - 1) / 2) * psf.K.stepX, halfY = ((psf.K.kNy - 1) / 2) * psf.K.stepY;
+  const kx = Math.ceil(halfX / stepX), ky = NY === 1 ? 0 : Math.ceil(halfY / stepY);
+  const W = nextPow2(NX + 2 * kx + 1), H = NY === 1 ? 1 : nextPow2(NY + 2 * ky + 1);
+  const Kw = 2 * kx + 1, Kh = 2 * ky + 1, kA = new Float64Array(Kw * Kh), kB = new Float64Array(Kw * Kh);
+  for (let b = 0; b < Kh; b++) for (let a = 0; a < Kw; a++) {
+    const dx = (a - kx) * stepX, dy = (b - ky) * stepY;
+    const inside = Math.abs(dx) <= halfX && Math.abs(dy) <= halfY;
+    kA[b * Kw + a] = inside ? sample(psf.K, dx, dy) : 0;
+    kB[b * Kw + a] = inside ? sample(psf.Kball, dx, dy) : 0;
+  }
+  // kernelSpectrumPair 는 정사각 커널((2kr+1)²)을 가정 — 직사각 커널을 정사각으로 패딩
+  const kr = Math.max(kx, ky), KK = 2 * kr + 1, pA = new Float64Array(KK * KK), pB = new Float64Array(KK * KK);
+  for (let b = 0; b < Kh; b++) for (let a = 0; a < Kw; a++) {
+    const o = (b - ky + kr) * KK + (a - kx + kr);
+    pA[o] = kA[b * Kw + a]; pB[o] = kB[b * Kw + a];
+  }
+  const [sK, sKb] = kernelSpectrumPair(pA, kr, pB, kr, W, H);
+  c = { kx, ky, W, H, sK, sKb };
+  if (_l2conv.size > 32) _l2conv.clear();
+  _l2conv.set(key, c);
+  return c;
+}
+
+function computeFieldL2(spec, opt, g) {
+  const { leds, dim, NX, NY, x0, x1, y0, y1, stepX, stepY, X, Y, wx0, wx1, wy0, wy1 } = g;
+  const depth = opt.depth ?? opt.od;
+  const step = Math.min(stepX, NY > 1 ? stepY : stepX);
+  const set = l2Setup(spec, depth, opt.l2, opt.edgeBoost, step, opt.padX ?? 0, opt.padY ?? 0);
+  const field = new Float64Array(NX * NY), fieldBall = new Float64Array(NX * NY);
+  const base = { field, nx: NX, ny: NY, stepX, stepY, dim, leds, depth, extent: { x0, x1, y0, y1 } };
+  if (set.error) return { ...base, l2: { error: set.error, trans: 0, fieldBall, fScat: 1 / Math.PI, warnings: [set.error], check: { ok: false, checks: [{ id: 'L2', ok: false, value: 0, limit: '-', note: set.error }] } } };
+
+  // 광원(LED + 밀키 측벽 거울 LED, 반사율 rW) 을 확장 격자에 쌍선형으로 뿌린 뒤 PSF·직진 PSF 와 FFT 컨볼루션 —
+  // 비용이 LED 수와 무관하고, 거울 LED 를 거리로 자르지 않아도 된다.
+  const { psf } = set, rW = psf.rW;
+  const conv = l2GridConv(psf, NX, NY, stepX, stepY);
+  const { kx, ky, W, H } = conv, S = new Float64Array(W * H);
+  const ex0 = x0 - kx * stepX, ey0 = NY === 1 ? Y / 2 : y0 - ky * stepY;
+  const splat = (x, y, w) => {
+    const fa = (x - ex0) / stepX, fb = NY === 1 ? 0 : (y - ey0) / stepY;
+    const a0 = Math.floor(fa), b0 = Math.floor(fb), ta = fa - a0, tb = fb - b0;
+    for (const [a, b, ww] of [[a0, b0, (1 - ta) * (1 - tb)], [a0 + 1, b0, ta * (1 - tb)], [a0, b0 + 1, (1 - ta) * tb], [a0 + 1, b0 + 1, ta * tb]]) {
+      if (ww > 0 && a >= 0 && a < W && b >= 0 && b < H) S[b * W + a] += w * ww;
+    }
+  };
+  for (const l of leds) {
+    splat(l.x, l.y, 1);
+    splat(2 * wx0 - l.x, l.y, rW); splat(2 * wx1 - l.x, l.y, rW);
+    splat(l.x, 2 * wy0 - l.y, rW); splat(l.x, 2 * wy1 - l.y, rW);
+  }
+  const [cA, cB] = convolvePair(S, S, conv.sK, conv.sKb);
+  const tailU = (psf.tailFlux * leds.length) / Math.max(1e-9, (wx1 - wx0) * (wy1 - wy0));
+  for (let j = 0; j < NY; j++) for (let i = 0; i < NX; i++) {
+    const o = (j + ky) * W + i + kx;
+    field[j * NX + i] = Math.max(0, cA[o]) + tailU;
+    fieldBall[j * NX + i] = Math.max(0, cB[o]);
+  }
+  const bX = opt.blurMmX ?? opt.blurMm ?? 0, bY = opt.blurMmY ?? opt.blurMm ?? 0;   // L2 외 레벨(L5 등)의 산란
+  blurSeparable(field, NX, NY, bX / stepX, bY / stepY);
+  blurSeparable(fieldBall, NX, NY, bX / stepX, bY / stepY);
+  const T = opt.transmit ?? 1;                                    // 다른 레벨 투과율 (Fresnel 은 MC 에 포함)
+  if (T !== 1) for (let k = 0; k < field.length; k++) { field[k] *= T; fieldBall[k] *= T; }
+  if (opt.edgeBoost && opt.edgeBoost.hasBoost) {
+    const halfP = Math.max(1, Math.min(opt.pitchX ?? X, opt.pitchY ?? opt.pitchX ?? Y) / 2);
+    applyEdgeBoost(field, NX, NY, x0, x1, y0, y1, X, Y, opt.edgeBoost, leds, halfP);
+  }
+  return { ...base, l2: { trans: psf.trans * T, fieldBall, fScat: psf.fScat, warnings: set.warnings, check: set.check, info: set.info } };
+}
+
+// 무한 평면 시스템 투과율(닫힌 해, 2D 계산 없음) — 자동탐색의 tMin 제약용
+export function l2TransFast(spec, depth, l2) {
+  const st = l2State();
+  if (!st.table) return 0;
+  const mat = l2Material(st.table, l2.milky, spec.body?.n ?? 1.59);
+  const t = Math.max(0.1, Math.min(spec.levels?.[1]?.thk ?? 3, depth));
+  return systemTransFast({ table: st.table, mat, t, rhoB: pcbReflectance(l2.pcb), intensity: ledIntensity(spec).intensity });
+}
+
+// UI 용 — 현재 사양의 L2 물성·검증 요약(PSF 캐시 재사용)
+export function l2Describe(spec, depth, l2, edgeBoost, padX = 0, padY = 0) {
+  return l2Setup(spec, depth, l2, edgeBoost, 1.5, padX, padY);
+}
+
 export function computeField(spec, opt) {
   const od = (opt.depth ?? opt.od) + 0.1;  // LED → 관찰면 = 기구물 상면 +0.1mm
   const dim = opt.dim || classifyDimension(spec, od);
@@ -218,6 +355,9 @@ export function computeField(spec, opt) {
   const fpX = Math.max(0, opt.padX ?? 0), fpY = Math.max(0, opt.padY ?? 0);
   const wx0 = -fpX, wx1 = X + fpX;
   const wy0 = -fpY, wy1 = Y + fpY;
+
+  // L2(Milky 체적 산란) — 물리 solver(PSF 중첩) 경로. 옛 blur·프레넬 벽 이미지·fresnelT 근사를 쓰지 않는다.
+  if (opt.l2) return computeFieldL2(spec, opt, { leds, dim, NX, NY, x0, x1, y0, y1, stepX, stepY, X, Y, wx0, wx1, wy0, wy1 });
 
   // 직접광 소스(LED)와 벽 이미지(1=X벽, 2=Y벽)를 분리해서 담는다 — 벽 이미지는 아래에서 blur
   // 전이 아니라 후에 따로 더한다(이유는 벽 이미지 합산부 주석 참고). 벽에서 3·od 보다 먼 LED 의
@@ -468,6 +608,20 @@ export function computeCameraLuminance(spec, opt) {
     }
   }
   blurSeparable(field, NX, NY, (opt.blurMmX ?? 0) / stepX, (opt.blurMmY ?? 0) / stepY);
+
+  // L2: 휘도 3성분(spec §5.3-⑤) — (a) 비산란 직진 = 핫스팟 × Tb(법선) [+ 원뿔 혼합은 직진 조도/π],
+  // (b)+(c) 산란·재순환 = (출사도 − 직진분) × 법선 방사휘도 계수 fScat. Milky 0 이면 (a)만 → L1 과 일치.
+  if (opt.l2) {
+    const fr = computeField(spec, { ...opt, nx: NX, ny: NY });
+    const L = fr.l2;
+    const Tb = (L.info?.Tb0 ?? 0) * (opt.transmit ?? 1);
+    for (let k = 0; k < field.length; k++) {
+      const ball = L.fieldBall[k], scat = fr.field[k] - ball;
+      field[k] = field[k] * Tb * (1 - hemiFrac) + (ball / Math.PI) * hemiFrac + Math.max(0, scat) * L.fScat;
+    }
+    return { field, nx: NX, ny: NY, stepX, stepY, dim, leds, depth: opt.depth ?? opt.od,
+             extent: { x0, x1, y0, y1 }, coneDeg, hemiFrac, l2: L };
+  }
 
   const T = fresnelT(spec.body?.n ?? 1) * (opt.transmit ?? 1);
   if (T !== 1) for (let k = 0; k < field.length; k++) field[k] *= T;
