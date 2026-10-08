@@ -107,6 +107,7 @@ export function updateLevels(el, solo, activeSet, target, onApply) {
 
     const autoWrap = row.querySelector('.lv-auto-wrap');
     if (!r.auto) { autoWrap.innerHTML = ''; continue; }
+    if (r.level === 2 && r.auto.params) r.auto.params = { ...r.auto.params, material: '' };   // 자동탐색은 추상 Milky
     const a = r.auto;
     const aTag = a.feasible ? (a.belowMinLeds ? '최소가능(자동, LED 하한 미만)' : '최소가능(자동)') : '최대확산으로도 미달';
     autoWrap.innerHTML = `<span class="mut">${aTag} <b>${a.leds}</b>개 · 중심 ${((a.U0c ?? a.U0) * 100).toFixed(0)}% / 전체 ${(a.U0 * 100).toFixed(0)}%

@@ -6,7 +6,8 @@ import {
   lambertianExponent, gaussianSigma, relIntensity, axialIntensityFromFlux, fresnelT, fresnelR,
 } from './photometry.js';
 import { l3BotZAt, l4BotZAt } from '../model/levels.js';
-import { l2State } from './l2/runtime.js';
+import { l2State, materialDb } from './l2/runtime.js';
+import { milkyFromMusR } from './l2/milky.js';
 import { l2Material, pcbReflectance } from './l2/material.js';
 import { systemPsf, systemTransFast } from './l2/psf.js';
 import { hpaDeg } from './l2/slab-table.js';
@@ -212,7 +213,12 @@ export function l2Setup(spec, depth, l2, edgeBoost, step, padX = 0, padY = 0) {
   const st = l2State();
   if (!st.table) return { error: st.error ?? 'L2 테이블 없음' };
   const warnings = [];
-  const mat = l2Material(st.table, l2.milky, spec.body?.n ?? 1.59);
+  // 실측소재가 선택돼 있으면 그 피팅 계수(μs'·g·μa·n)를 그대로 쓴다 — Milky 는 μs' 에서 파생(spec §6.3)
+  const ent = l2.material ? materialDb()?.get(l2.material) : null;
+  if (l2.material && !ent) warnings.push(`선택 소재(${l2.material})를 DB 에서 찾을 수 없음 — 추상 Milky 사용`);
+  const mat = ent
+    ? { milky: milkyFromMusR(st.table, ent.fitted.musR), musR: ent.fitted.musR, g: ent.fitted.g, mua: ent.fitted.mua, n: ent.n }
+    : l2Material(st.table, l2.milky, spec.body?.n ?? 1.59);
   let t = spec.levels?.[1]?.thk ?? spec.body?.baseThk ?? 3;
   if (edgeBoost?.kind === 'axis') {
     // L3 동시 사용: 면적 평균 두께(l3BotZAt 정본 형상) — 변동 30% 초과면 경고
@@ -235,6 +241,7 @@ export function l2Setup(spec, depth, l2, edgeBoost, step, padX = 0, padY = 0) {
   const info = {
     milky: mat.milky, musR: mat.musR, mus: mat.musR / (1 - mat.g), g: mat.g, mua: mat.mua, n: mat.n,
     t, h, tauR: mat.musR * t, rhoB, rW: psf.rW, trans: psf.trans, hpa: hpaDeg(psf.qn), Tb0: psf.qn.Tb,
+    material: ent ? { id: ent.id, name: ent.name, status: ent.status, V6: ent.validation?.V6, V9: ent.validation?.V9 } : null,
   };
   return { mat, t, h, rhoB, psf, warnings, check, info, BX, BY };
 }

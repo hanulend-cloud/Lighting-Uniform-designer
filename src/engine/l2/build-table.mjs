@@ -12,7 +12,7 @@ import { packRecord, REC, SW_HI } from './slab-table.js';
 const COS85 = Math.cos(85 * Math.PI / 180);
 export const GRIDS = {
   tauR: [0, ...Array.from({ length: 31 }, (_, i) => 0.01 * Math.pow(SW_HI / 0.01, i / 30))],
-  g: [0.6, 0.8, 0.9, 0.95],
+  g: [0.6, 0.8, 0.9, 0.95, 0.98, 0.99],   // 0.98~0.99: 비드 확산 PC(Makrolon DQ 등)는 전방 산란이 매우 강함
   n: [1.49, 1.59, 1.70],
   rows: [...Array.from({ length: 9 }, (_, k) => 1 - k * (1 - COS85) / 8), 'diffuse'],
 };

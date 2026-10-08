@@ -4,10 +4,11 @@
 import { N_PATH, N_RAD, N_ANG, attenuate, radEdge, angEdgeDeg } from './mc-slab.js';
 import { diffusionTR, diffusionKernel, diffusionAngles } from './diffusion.js';
 
-export const REC = 6 * N_PATH + N_RAD + N_ANG + 2;
+export const REC = 7 * N_PATH + N_RAD + N_ANG + 2;
 const O = {
   Tb: 0, TbL: N_PATH, Ts: 2 * N_PATH, TsL: 3 * N_PATH, R: 4 * N_PATH, RL: 5 * N_PATH,
-  rad: 6 * N_PATH, ang: 6 * N_PATH + N_RAD, shift: 6 * N_PATH + N_RAD + N_ANG, photons: 6 * N_PATH + N_RAD + N_ANG + 1,
+  rad: 6 * N_PATH, ang: 6 * N_PATH + N_RAD, TsR2: 6 * N_PATH + N_RAD + N_ANG,
+  shift: 7 * N_PATH + N_RAD + N_ANG, photons: 7 * N_PATH + N_RAD + N_ANG + 1,
 };
 export const SW_LO = 10, SW_HI = 20;      // MC → 확산근사 전이 구간(τ')
 const DEG = Math.PI / 180;
@@ -15,7 +16,7 @@ const DEG = Math.PI / 180;
 // MC 레코드 → Float32 (광자 수로 정규화)
 export function packRecord(rec) {
   const out = new Float32Array(REC), N = rec.photons;
-  for (const k of ['Tb', 'TbL', 'Ts', 'TsL', 'R', 'RL', 'rad', 'ang']) {
+  for (const k of ['Tb', 'TbL', 'Ts', 'TsL', 'R', 'RL', 'rad', 'ang', 'TsR2']) {
     const a = rec[k]; for (let i = 0; i < a.length; i++) out[O[k] + i] = a[i] / N;
   }
   out[O.shift] = rec.shift / N; out[O.photons] = N;
@@ -23,7 +24,7 @@ export function packRecord(rec) {
 }
 
 function blend(parts) {
-  const q = { Tb: 0, Ts: 0, R: 0, rad: new Float64Array(N_RAD), ang: new Float64Array(N_ANG), radTail: 0, shift: 0, nScat: 0 };
+  const q = { Tb: 0, Ts: 0, R: 0, rad: new Float64Array(N_RAD), ang: new Float64Array(N_ANG), radTail: 0, shift: 0, nScat: 0, radScale: 0 };
   let ws = 0;
   const inv = [];                                  // 분포 혼합의 유효 광자 수: 가중평균 분산 Σa²/n
   for (const [w, c] of parts) {
@@ -33,17 +34,29 @@ function blend(parts) {
       ws += v;
       for (let k = 0; k < N_RAD; k++) q.rad[k] += v * c.rad[k];
       for (let k = 0; k < N_ANG; k++) q.ang[k] += v * c.ang[k];
-      q.radTail += v * c.radTail; q.shift += v * c.shift; inv.push([v, c.nScat]);
+      q.radTail += v * c.radTail; q.shift += v * c.shift; q.radScale += v * (c.radScale ?? 1); inv.push([v, c.nScat]);
     }
   }
   if (ws > 0) {
     for (let k = 0; k < N_RAD; k++) q.rad[k] /= ws;
     for (let k = 0; k < N_ANG; k++) q.ang[k] /= ws;
-    q.radTail /= ws; q.shift /= ws;
+    q.radTail /= ws; q.shift /= ws; q.radScale /= ws;
     let iv = 0; for (const [v, n] of inv) iv += (v / ws) ** 2 / n;
     q.nScat = iv > 0 ? 1 / iv : Infinity;
   }
   return q;
+}
+
+// 흡수에 의한 측방 확산 폭 비율 = RMS 반경(흡수 가중) / RMS 반경(무흡수). 경로 bin 별 Σw·r² 로 정확히 계산.
+function radScaleOf(w, wL, wR2, muaT) {
+  if (!muaT) return 1;
+  let a0 = 0, b0 = 0, a1 = 0, b1 = 0;
+  for (let k = 0; k < w.length; k++) {
+    if (!(w[k] > 0)) continue;
+    const f = Math.exp(-muaT * wL[k] / w[k]);
+    a0 += wR2[k]; b0 += w[k]; a1 += wR2[k] * f; b1 += w[k] * f;
+  }
+  return a0 > 0 && b1 > 0 ? Math.sqrt((a1 / b1) / (a0 / b0)) : 1;
 }
 
 function linBracket(grid, v) {
@@ -74,6 +87,7 @@ export function createTable(meta, data) {
       radTail: TsRaw > 0 ? Math.max(0, 1 - sR / TsRaw) : 0,
       ang: sA > 0 ? Float64Array.from(angRaw, (v) => v / sA) : new Float64Array(N_ANG),
       shift: TsRaw > 0 ? data[o + O.shift] / TsRaw : 0,
+      radScale: radScaleOf(sl('Ts', N_PATH), sl('TsL', N_PATH), sl('TsR2', N_PATH), muaT),
       nScat: TsRaw * data[o + O.photons],          // 산란 투과 광자(가중치) 수 — 각분포 통계 신뢰도
     };
   }
@@ -106,7 +120,7 @@ export function createTable(meta, data) {
     if (!kMemo.has(kk)) kMemo.set(kk, diffusionKernel(tauR, n, inc));
     if (!aMemo.has(n)) aMemo.set(n, diffusionAngles(n));
     return {
-      Tb: 0, Ts: T, R, rad: kMemo.get(kk), radTail: 0, ang: aMemo.get(n), shift: 0, nScat: Infinity,
+      Tb: 0, Ts: T, R, rad: kMemo.get(kk), radTail: 0, ang: aMemo.get(n), shift: 0, nScat: Infinity, radScale: 1,   // τ'>20: 흡수 측방 축소 미반영(가정 패널)
       outOfRange: g < G.g[0] - 1e-9 || g > G.g[NG - 1] + 1e-9 || n < G.n[0] - 1e-9 || n > G.n[NN - 1] + 1e-9,
     };
   }

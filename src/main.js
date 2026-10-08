@@ -2,7 +2,8 @@
 import { DEFAULT_SPEC, LEVEL_DEFAULTS } from './model/defaults.js';
 import { buildGeometry, combinedEffect, activeLevels, effectiveEdgeMargin } from './model/geometry.js';
 import { computeField, computeCameraLuminance, evalGrid, l2Describe } from './engine/directLit.js';
-import { initL2, browserLoader } from './engine/l2/runtime.js';
+import { initL2, browserLoader, l2State, setMaterialDb, materialDb } from './engine/l2/runtime.js';
+import { createDb } from './model/materials-db.js';
 import { renderL2Panel } from './ui/l2-panel.js';
 import { migrateMilkyV13 } from './engine/l2/material.js';
 import { metrics, centerZoneFrac } from './engine/uniformity.js';
@@ -117,6 +118,7 @@ function buildForm() {
 
 function onLevelParam(level, field, value) {
   spec.levels[level][field] = value;
+  if (level === 2 && field === 'milky') spec.levels[2].material = '';   // Milky 를 직접 바꾸면 추상 소재로
   schedule();
 }
 function onToggleLevel(level, checked) {
@@ -135,6 +137,19 @@ function soloRow(level) {
   const r = solvePerLevel(spec, { levels: [level] })[0];
   soloCache[level] = { sig, r };
   return r;
+}
+
+// 실측소재 선택 — 소재의 μs'·g·μa 를 쓰고, Milky 입력칸에는 그 소재의 Milky(파생값)를 보여 준다
+function onSelectMaterial(id) {
+  spec.levels[2].material = id;
+  const ent = id ? materialDb()?.get(id) : null;
+  if (ent) {
+    const d = l2Describe(spec, spec.space.depth, { milky: 0, pcb: spec.levels[2].pcb, material: id });
+    if (!d.error) spec.levels[2].milky = Math.round(d.info.milky * 100) / 100;
+    const inp = document.querySelector('.lv[data-lv="2"] input[data-f="milky"]');
+    if (inp) inp.value = spec.levels[2].milky;
+  }
+  schedule();
 }
 
 // '적용' — 그 레벨의 자동탐색 참고값을 실제 슬라이더(spec.levels)에 복사
@@ -219,7 +234,10 @@ function run() {
   updateLevels($('#levels'), solo, activeSet, spec.goal.U0, onApplyAuto);
   // L2 카드: 현재 Milky 슬라이더 값의 물성·검증(활성 여부와 무관하게 보여 줌 — 소재 판단용)
   const l2eff = { milky: spec.levels[2].milky ?? 0, pcb: spec.levels[2].pcb ?? '혼재' };
-  renderL2Panel(document.querySelector('[data-l2]'), l2Describe(spec, depth, l2eff, activeSet.has(2) ? eff.edgeBoost : null, combo.padX ?? 0, combo.padY ?? 0), spec.goal.tMin ?? 0.5);
+  renderL2Panel(document.querySelector('[data-l2]'), l2Describe(spec, depth, { ...l2eff, material: spec.levels[2].material ?? '' }, activeSet.has(2) ? eff.edgeBoost : null, combo.padX ?? 0, combo.padY ?? 0), spec.goal.tMin ?? 0.5, {
+    table: l2State().table, db: materialDb(), materialId: spec.levels[2].material ?? '',
+    onSelectMaterial: onSelectMaterial, onDbChanged: () => { soloCache = {}; schedule(); },
+  });
   renderVerdict($('#verdict'), combo, tags, spec.goal);
 
   last = { common, m, depth, view: geom.view, edgeMargin, fixture: geomFixture, center };
@@ -508,6 +526,14 @@ function migrate(s) {
 // L2 산란 응답표(≈4MB) 로드·자체검증 — 실패해도 앱은 뜨고 L2 결과만 "신뢰 불가"로 표시된다.
 $('#timing').textContent = 'L2 산란 응답표 로드 중…';
 await initL2(browserLoader());
+// 실측소재 DB: 공용(data/materials-db.json, git 공유) + 사용자(브라우저 저장)
+{
+  const MAT_KEY = 'uds.materials.v1';
+  let base = [], user = [];
+  try { base = (await (await fetch('./data/materials-db.json')).json()).entries ?? []; } catch { base = []; }
+  try { user = JSON.parse(localStorage.getItem(MAT_KEY) || '[]'); } catch { user = []; }
+  setMaterialDb(createDb(base, user, (list) => { try { localStorage.setItem(MAT_KEY, JSON.stringify(list)); } catch {} }));
+}
 spec = load() || structuredClone(DEFAULT_SPEC);
 migrate(spec);
 mount();

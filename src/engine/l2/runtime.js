@@ -31,3 +31,8 @@ export function browserLoader(base = './src/engine/l2/data/') {
     return { meta, data: new Float32Array(bin), refAD };
   };
 }
+
+// 실측소재 DB(src/model/materials-db.js createDb 결과) — main.js 가 시작 시 주입. L2 소재 선택이 여기서 조회된다.
+let materialDbRef = null;
+export function setMaterialDb(db) { materialDbRef = db; }
+export function materialDb() { return materialDbRef; }

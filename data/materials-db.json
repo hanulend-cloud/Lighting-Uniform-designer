@@ -1,0 +1,128 @@
+{
+ "version": 1,
+ "entries": [
+  {
+   "id": "covestro-dq5122",
+   "name": "Makrolon DQ5122",
+   "vendor": "Covestro",
+   "status": "datasheet",
+   "n": 1.586,
+   "source": "Covestro 'Makrolon® polycarbonate for LED lighting' 브로셔, Makrolon DQ 표 (HPA·Transmission @2mm)",
+   "samples": [
+    {
+     "t": 2,
+     "T": 0.85,
+     "hpa": 19
+    }
+   ],
+   "fitted": {
+    "musR": 0.0811610527762973,
+    "g": 0.99,
+    "mua": 0.0013116105277629724,
+    "free": {
+     "g": true,
+     "mua": false
+    }
+   },
+   "validation": {
+    "V6": {
+     "id": "V6",
+     "ok": false,
+     "value": 0.03489258083493163,
+     "limit": "T·R ±2%p, HPA ±2°, 곡선 RMS ≤5%",
+     "note": "T 3.5%p, R 0.0%p, HPA 8.3°, 곡선 RMS 0.0%"
+    },
+    "V9": null
+   },
+   "notes": [
+    "R 미측정·단일 두께 — μa 를 기본값(투명 PC + 산란제 흡수 임시값)으로 고정"
+   ],
+   "fittedWith": {
+    "table": "2026-10-08T07:08:12.810Z",
+    "date": "2026-10-08"
+   }
+  },
+  {
+   "id": "covestro-dq5142",
+   "name": "Makrolon DQ5142",
+   "vendor": "Covestro",
+   "status": "datasheet",
+   "n": 1.586,
+   "source": "Covestro 'Makrolon® polycarbonate for LED lighting' 브로셔, Makrolon DQ 표 (HPA·Transmission @2mm)",
+   "samples": [
+    {
+     "t": 2,
+     "T": 0.65,
+     "hpa": 43
+    }
+   ],
+   "fitted": {
+    "musR": 0.2920427218312035,
+    "g": 0.9800000007854717,
+    "mua": 0.001960213666503841,
+    "free": {
+     "g": true,
+     "mua": false
+    }
+   },
+   "validation": {
+    "V6": {
+     "id": "V6",
+     "ok": true,
+     "value": 0.011550517425227946,
+     "limit": "T·R ±2%p, HPA ±2°, 곡선 RMS ≤5%",
+     "note": "T 1.2%p, R 0.0%p, HPA 1.6°, 곡선 RMS 0.0%"
+    },
+    "V9": null
+   },
+   "notes": [
+    "R 미측정·단일 두께 — μa 를 기본값(투명 PC + 산란제 흡수 임시값)으로 고정"
+   ],
+   "fittedWith": {
+    "table": "2026-10-08T07:08:12.810Z",
+    "date": "2026-10-08"
+   }
+  },
+  {
+   "id": "covestro-dq5162",
+   "name": "Makrolon DQ5162",
+   "vendor": "Covestro",
+   "status": "datasheet",
+   "n": 1.586,
+   "source": "Covestro 'Makrolon® polycarbonate for LED lighting' 브로셔, Makrolon DQ 표 (HPA·Transmission @2mm)",
+   "samples": [
+    {
+     "t": 2,
+     "T": 0.57,
+     "hpa": 56
+    }
+   ],
+   "fitted": {
+    "musR": 0.47817624983512386,
+    "g": 0.9799999994938434,
+    "mua": 0.0028908811886676072,
+    "free": {
+     "g": true,
+     "mua": false
+    }
+   },
+   "validation": {
+    "V6": {
+     "id": "V6",
+     "ok": true,
+     "value": 0.007865095052331794,
+     "limit": "T·R ±2%p, HPA ±2°, 곡선 RMS ≤5%",
+     "note": "T 0.8%p, R 0.0%p, HPA 1.7°, 곡선 RMS 0.0%"
+    },
+    "V9": null
+   },
+   "notes": [
+    "R 미측정·단일 두께 — μa 를 기본값(투명 PC + 산란제 흡수 임시값)으로 고정"
+   ],
+   "fittedWith": {
+    "table": "2026-10-08T07:08:12.810Z",
+    "date": "2026-10-08"
+   }
+  }
+ ]
+}

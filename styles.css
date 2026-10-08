@@ -238,3 +238,19 @@ main { flex: 1 1 auto; min-height: 0; display: grid;
 .l2-assume ul { margin: 4px 0 0 16px; padding: 0; }
 #verdict .v-sub.warn { color: #c96a26; font-weight: 700; }
 #verdict.untrusted .val, #verdict.untrusted .v-sub { color: #9aa1ad !important; }
+.l2-matrow { margin: 3px 0; }
+.l2-matrow select { max-width: 270px; font-size: 12px; }
+.l2-scale { display: block; margin: 2px 0 2px; }
+.l2-adv { margin-top: 4px; }
+.l2-adv > summary { cursor: pointer; color: #2f6fd6; font-weight: 700; }
+.l2-adv h4 { margin: 8px 0 4px; font-size: 12.5px; }
+.adv-props, .adv-db, .adv-samples { border-collapse: collapse; font-size: 11.5px; margin: 4px 0; }
+.adv-props th { text-align: left; color: #6b7487; font-weight: 600; padding: 2px 8px 2px 0; white-space: nowrap; vertical-align: top; }
+.adv-props td, .adv-db td, .adv-db th, .adv-samples td, .adv-samples th { padding: 2px 5px; border-bottom: 1px solid #eef0f4; }
+.adv-samples input { width: 62px; font-size: 11px; }
+.adv-samples input[type=file] { width: 150px; }
+.adv-chart { width: 100%; max-width: 420px; height: auto; background: #fafbfd; border: 1px solid #eef0f4; border-radius: 4px; }
+.adv-btns { display: flex; gap: 6px; flex-wrap: wrap; margin: 6px 0; }
+.adv-btns button, .adv-file { font-size: 11.5px; padding: 3px 8px; border: 1px solid #c9cfdb; border-radius: 5px; background: #fff; cursor: pointer; }
+.adv-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 4px 10px; margin: 6px 0; font-size: 11.5px; }
+.adv-grid input, .adv-grid select { width: 100%; font-size: 11.5px; }

@@ -138,7 +138,7 @@ export function solveCavity({ E, nx, ny, step, table, mat, t, h, rhoB, rW, unifo
     for (let i = 0; i < N; i++) src[i] = q.Ts * near * e[i];
     const tm = q.Ts * q.radTail * se;                    // 슬래브 도광(원거리) 성분 — 균일 근사
     if (!uniformTail) tail += tm;
-    return { src, kern: radialKernel(q.rad, t, step), u: uniformTail ? tm / N : 0 };
+    return { src, kern: radialKernel(q.rad, t * (q.radScale || 1), step), u: uniformTail ? tm / N : 0 };   // 흡수 측방 축소 반영
   }
   function runJobs(list, target) {
     for (let k = 0; k < list.length; k += 2) {

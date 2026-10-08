@@ -1,19 +1,20 @@
 """L2 기준해 생성 — Prahl adding-doubling(iadpython)으로 슬래브 R/T 산출 → src/engine/l2/data/ref-ad.json
 사용: pip install iadpython ; python tools/gen-ref-ad.py
-조건: n 1.49/1.59, g 0.8/0.9/0.95, τ' 0.05~1000, μa·t 0/0.02, 상·하 공기. (spec §5.5 V1)
+조건: n 1.49/1.59, g 0.8/0.9/0.95/0.98/0.99, τ' 0.05~1000, μa·t 0/0.02, 상·하 공기. (spec §5.5 V1)
 """
 import json, pathlib, datetime
 import iadpython as iad
 
 cases = []
 for n in (1.49, 1.59):
-    for g in (0.8, 0.9, 0.95):
+    for g in (0.8, 0.9, 0.95, 0.98, 0.99):
         for tauR in (0.05, 0.2, 0.5, 1, 2, 5, 10, 20, 50, 200, 1000):
             for muaT in (0.0, 0.02):
                 mus_t = tauR / (1 - g)
                 b = mus_t + muaT
                 a = mus_t / b
-                s = iad.Sample(a=a, b=b, g=g, n=n, n_above=1.0, n_below=1.0, quad_pts=16)
+                # g≥0.98 은 전방 피크가 날카로워 구적점 32 (16 과 0.002 이내 일치 확인, 64 는 수치 불안정)
+                s = iad.Sample(a=a, b=b, g=g, n=n, n_above=1.0, n_below=1.0, quad_pts=32 if g >= 0.98 else 16)
                 ur1, ut1, uru, utu = (float(v) for v in s.rt())
                 cases.append(dict(n=n, g=g, tauR=tauR, muaT=muaT, UR1=ur1, UT1=ut1, URU=uru, UTU=utu))
 out = dict(source='iadpython %s (Prahl adding-doubling), quad_pts=16' % iad.__version__,

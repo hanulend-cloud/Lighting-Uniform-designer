@@ -23,10 +23,12 @@ export function validateTable(table, refAD) {
     checks.push({ id: 'V3', ok: d <= 0.005, value: d, limit: 0.005, note: `해석해 ${Tc.toFixed(4)}` });
   }
 
-  // V4: τ' 증가 → T 비증가(MC 잡음 허용 0.003), HPA 비감소 — 역전이 max(2°, 3σ) 를 넘으면 실패
+  // V4: τ' 증가 → T 비증가(MC 잡음 허용 0.003), HPA 비감소 — 역전이 max(2°, z·σ) 를 넘으면 실패
   //     (σ = 두 추정치 MC 통계 불확도 합성. 근-Lambertian 평탄부에서 ±1~1.5° 요동은 통계 잡음)
+  //     z = 다중비교 Bonferroni 임계(α=0.05 / 비교 수) — 비교가 수백 개라 3σ 로는 우연 초과가 기대값 ~0.3건.
   {
     const taus = [...G.tauR, 30, 50, 100, 300, 1000];
+    const nCmp = G.g.length * taus.length, z = zCrit(0.05 / nCmp);
     let worstT = 0, worst = { ratio: 0, rev: 0, lim: 2, sig: 0 };
     for (const g of G.g) for (const row of [0, D]) {
       let pT = Infinity, pH = null;
@@ -36,14 +38,14 @@ export function validateTable(table, refAD) {
         if (row === 0) {
           const h = hpaStats(q);
           if (pH && pH.hpa > h.hpa) {
-            const sig = Math.hypot(h.sigma, pH.sigma), lim = Math.max(2, 3 * sig), rev = pH.hpa - h.hpa;
+            const sig = Math.hypot(h.sigma, pH.sigma), lim = Math.max(2, z * sig), rev = pH.hpa - h.hpa;
             if (rev / lim > worst.ratio) worst = { ratio: rev / lim, rev, lim, sig };
           }
           if (!pH || h.hpa > pH.hpa) pH = h;
         }
       }
     }
-    checks.push({ id: 'V4', ok: worstT <= 0.003 && worst.ratio <= 1, value: worstT, limit: 'ΔT≤0.003, ΔHPA≤max(2°,3σ)',
+    checks.push({ id: 'V4', ok: worstT <= 0.003 && worst.ratio <= 1, value: worstT, limit: `ΔT≤0.003, ΔHPA≤max(2°,${z.toFixed(2)}σ)`,
       note: `T 역전 ${worstT.toFixed(4)}, HPA 최대 역전 ${worst.rev.toFixed(2)}° (σ ${worst.sig.toFixed(2)}°, 한도 ${worst.lim.toFixed(2)}°)` });
   }
 
@@ -59,6 +61,12 @@ export function validateTable(table, refAD) {
     checks.push({ id: 'V11', ok: w10 <= 0.02 && w20 <= 0.01, value: w20, limit: '≤0.02@10, ≤0.01@20', note: `τ'10 ${w10.toFixed(4)} / τ'20 ${w20.toFixed(4)}` });
   }
   return { ok: checks.every((c) => c.ok), checks };
+}
+
+// 단측 정규 임계값 z: P(Z > z) = p (Abramowitz–Stegun 26.2.23, 오차 < 4.5e-4)
+function zCrit(p) {
+  const t = Math.sqrt(-2 * Math.log(p));
+  return t - (2.515517 + 0.802853 * t + 0.010328 * t * t) / (1 + 1.432788 * t + 0.189269 * t * t + 0.001308 * t * t * t);
 }
 
 // cavity-solver 결과 검사: V2 에너지 수지 ≤ 1%, V7 건전성(유한·비음수·출사 ≤ 입력)

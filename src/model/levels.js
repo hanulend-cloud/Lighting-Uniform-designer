@@ -64,7 +64,7 @@ export const LEVEL_SCHEMA = {
 
 export const LEVEL_DEFAULTS = {
   1: { on: true, thk: 3 },
-  2: { on: false, milky: 0, pcb: '혼재', decenterX: 0, decenterY: 0 },
+  2: { on: false, milky: 0, pcb: '혼재', material: '', decenterX: 0, decenterY: 0 },   // material: 실측소재 DB id ('' = 추상 Milky)
   3: { on: true, tx0: 3, tx50: 2, tx100: 1, ty0: 3, ty50: 2, ty100: 1, edgeR: 5 },
   4: { on: false, gap: 2, flatX: 4, flatY: 4, angleX: 45, angleY: 45, rise: 8, radiusX: 0, radiusY: 0 },
   5: { on: false, ptype: 'pyramid', sizeX: 0.3, sizeY: 0.3, angleX: 40, angleY: 40, dir: '돌출', depth: 0.2 },
@@ -122,7 +122,7 @@ export function levelEffect(spec, level, depth) {
     case 2:
       // Milky 체적 산란 — 물리 solver(directLit computeFieldL2: MC 응답표 + 캐비티 재순환)가 처리한다.
       // 여기서는 소재 입력만 넘긴다(blur·투과율 근사 없음). De-center 는 배치만 평행이동.
-      return { blurX: 0, blurY: 0, transmit: 1, l2: { milky: p.milky ?? 0, pcb: p.pcb ?? '혼재' }, decenterX: p.decenterX ?? 0, decenterY: p.decenterY ?? 0 };
+      return { blurX: 0, blurY: 0, transmit: 1, l2: { milky: p.milky ?? 0, pcb: p.pcb ?? '혼재', material: p.material ?? '' }, decenterX: p.decenterX ?? 0, decenterY: p.decenterY ?? 0 };
 
     case 3: {
       // 균일두께 도파관 — 광학적으로 유효한 산란원은 경사진 가장자리(테이퍼)에서의 굴절

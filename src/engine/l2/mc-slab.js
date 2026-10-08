@@ -68,6 +68,7 @@ export function emptyRecord() {
     TbL: new Float64Array(N_PATH),  // 위 세 채널의 bin 별 Σw·L — bin 평균 경로길이로 흡수 적용(bin 폭 오차 제거)
     TsL: new Float64Array(N_PATH),
     RL: new Float64Array(N_PATH),
+    TsR2: new Float64Array(N_PATH), // 산란 투과의 bin 별 Σw·r² — 흡수가 측방 확산 폭을 줄이는 효과(긴 경로 = 먼 출사) 보정용
     rad: new Float64Array(N_RAD),   // 산란 투과의 측방 반경 분포(가중치)
     ang: new Float64Array(N_ANG),   // 산란 투과의 공기 중 출사각 분포(가중치)
     shift: 0,                       // 산란 투과 가중 평균 x 시프트(입사 방위 방향) — 합계, 정규화 전
@@ -79,7 +80,8 @@ export function emptyRecord() {
 //   tau: 산란 광학두께 μs·t,  g: HG 비대칭,  n: 굴절률
 //   inc: 입사각(공기 중) 코사인 μ ∈ (0,1] 또는 'diffuse'(Lambertian 입사)
 //   N: 광자 수,  seed: 난수 시드
-export function runSlab({ tau, g, n, inc, N, seed = 1 }) {
+// onEscape(ch, x, y, L, w, scattered): 선택 — 탈출 광자마다 호출(분석·검증용, 기본 없음)
+export function runSlab({ tau, g, n, inc, N, seed = 1, onEscape }) {
   const rec = emptyRecord();
   const rnd = rng(seed);
   const W_MIN = 1e-4, ROULETTE = 10;
@@ -104,10 +106,11 @@ export function runSlab({ tau, g, n, inc, N, seed = 1 }) {
         const Ri = fresnelInternal(cosIn, n);
         const wEsc = w * (1 - Ri);
         if (wEsc > 0) {
+          if (onEscape) onEscape(z === 1 ? 'T' : 'R', x, y, L, wEsc, scattered);
           const k = pathBin(L);
           if (z === 1) {
             if (scattered) {
-              rec.Ts[k] += wEsc; rec.TsL[k] += wEsc * L;
+              rec.Ts[k] += wEsc; rec.TsL[k] += wEsc * L; rec.TsR2[k] += wEsc * (x * x + y * y);
               const r = Math.hypot(x, y), kr = radBin(r);
               if (kr >= 0) rec.rad[kr] += wEsc;
               rec.shift += wEsc * x;
