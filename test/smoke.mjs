@@ -4,6 +4,9 @@ import { computeField } from '../src/engine/directLit.js';
 import { metrics, localGradient } from '../src/engine/uniformity.js';
 import { optimize } from '../src/engine/optimizer.js';
 import { solvePerLevel, solveSolo } from '../src/engine/solver.js';
+import { initL2 } from '../src/engine/l2/runtime.js';
+import { nodeLoader } from './l2-util.mjs';
+await initL2(nodeLoader());   // L2 물리 solver 응답표 (spec 2026-10-07)
 
 let fail = 0;
 const ok = (cond, msg) => { console.log((cond ? 'PASS ' : 'FAIL ') + msg); if (!cond) fail++; };
@@ -61,7 +64,8 @@ ok(sv.filter((r) => r.level !== 1).every((r) => r.auto), 'L2~L5 는 .auto 참고
   strip.target.xLen = 100; strip.target.yLen = 20; strip.goal.U0 = 0.85;
   strip.goal.edgeMargin = 0.05;   // 위 60x60 과 같은 이유(Y 캡 1mm) — 추세 검증은 베젤 마진 판정으로
   strip.led.sizeX = 1; strip.led.sizeY = 1;
-  strip.levels[2] = { on: true, milky: 10, decenterX: 0, decenterY: 0 };
+  // L2 물리 solver 재기준: 구 milky 10 → 새 눈금 등가 8.2 (새 눈금의 10 은 완전 차폐 = 투과 0)
+  strip.levels[2] = { on: true, milky: 8.2, pcb: '혼재', decenterX: 0, decenterY: 0 };
   const byDepth = [4, 6, 8].map((d) => { const s = structuredClone(strip); s.space.depth = d; return solveSolo(s, [2]); });
   console.log('  L2 스트립 깊이 4/6/8mm:', byDepth.map((r) => `${r.leds}ea/${(r.U0 * 100).toFixed(0)}%${r.feasible ? '' : '(미달)'}`).join('  '));
   ok(byDepth.every((r) => r.pitch > 2.5), 'L2 스트립: 어느 깊이에서도 최소 피치(2mm, 605개)로 튀지 않음');

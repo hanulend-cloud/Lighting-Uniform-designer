@@ -5,6 +5,9 @@
 import { DEFAULT_SPEC } from '../src/model/defaults.js';
 import { metrics, centerZoneFrac } from '../src/engine/uniformity.js';
 import { solveCombo } from '../src/engine/solver.js';
+import { initL2 } from '../src/engine/l2/runtime.js';
+import { nodeLoader } from './l2-util.mjs';
+await initL2(nodeLoader());   // L2 물리 solver 응답표 (spec 2026-10-07)
 
 let fail = 0;
 const ok = (cond, msg) => { console.log((cond ? 'PASS ' : 'FAIL ') + msg); if (!cond) fail++; };
@@ -32,11 +35,15 @@ const ok = (cond, msg) => { console.log((cond ? 'PASS ' : 'FAIL ') + msg); if (!
   const spec = structuredClone(DEFAULT_SPEC);
   spec.target = { xLen: 100, yLen: 20, shape: 'flat' }; spec.goal.U0 = 0.85; spec.goal.edgeMargin = 0;
   spec.led.sizeX = 1; spec.led.sizeY = 1; spec.space.depth = 7; spec.levels[1].thk = 1;
-  spec.levels[2] = { on: true, milky: 9.9560546875, decenterX: 0, decenterY: 0 };
+  // L2 물리 solver(2026-10-08) 재기준: 구 milky 9.96 → 새 눈금 등가 8.2(main.migrate 와 같은 차폐율 변환).
+  // 구 휴리스틱(blur ∝ 깊이)은 36개로 달성했지만, 1mm 밀키 판의 측방 확산은 두께 수준이고 재순환도 갭(6mm)
+  // 척도라 피치≈깊이가 필요하다(직하형 OD/pitch≈1 경험칙과 일치) — 실측 75개(15×5, 피치 7×6).
+  spec.levels[2] = { on: true, milky: 8.2, pcb: '혼재', decenterX: 0, decenterY: 0 };
   const r = solveCombo(spec, [1, 2]);
   ok(r.feasible && r.U0c >= 0.85, `중심부 목표 달성 (중심부 ${(r.U0c * 100).toFixed(1)}%, 전체 ${(r.U0 * 100).toFixed(1)}%)`);
   console.log(`  배치 ${r.nx}×${r.ny}, 피치 ${r.pitchX.toFixed(1)}×${(r.pitchY ?? r.pitchX).toFixed(1)}, LED ${r.leds}, 테두리 초과밝기 +${(r.rimBright * 100).toFixed(1)}%`);
-  ok(r.leds <= 36, `중심부 목표를 만족하는 최소 LED (${r.leds} ≤ 36)`);
+  ok(r.leds <= 80, `중심부 목표를 만족하는 최소 LED (${r.leds} ≤ 80, 물리 solver 기준)`);
+  ok(r.l2ok === true, 'L2 계산 정합성 통과');
   ok(typeof r.fullPass === 'boolean', `타겟 전체 판정 참고값 보고 (fullPass=${r.fullPass})`);
 }
 
