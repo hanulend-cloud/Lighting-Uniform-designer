@@ -3,7 +3,7 @@
 //  (a) 비산란 직진 Tb·E  (b) 산란 투과 K_T ⊛ (Ts·E) + 원거리 tail 균일  (c) 재순환:
 //  하면 반사 R·E → 갭 전달 P_h → 기판 ρ_b → P_h → 확산 입사 → (Td·K_Td) 투과, R_d 반사 반복.
 // 벽: 외곽 밖 성분을 한 번 접어 넣음 × rW, 나머지는 누설. 에너지는 독립 집계해 V2 로 검사.
-import { nextPow2, kernelSpectrum, convolve } from './fft.js';
+import { nextPow2, kernelSpectrum, convolve, fft2d, kernelSpectrumPair, convolvePair } from './fft.js';
 import { radEdge, N_RAD } from './mc-slab.js';
 
 export const H_MIN = 0.2;
@@ -55,12 +55,14 @@ function makeConv(dx, dy, kern) {
   return { dx, dy, kr, W, H, spec: kernelSpectrum(k, kr, W, H), ksum: sum(k) };
 }
 
-// 도메인 입력 ⊛ 커널 → 벽 접어넣기(rW). { out, lost } — lost = 벽 투과·다중반사 밖·커널 절단분.
-function foldConv(c, inp, rW) {
-  const { dx, dy, kr, W, H } = c, pad = new Float64Array(W * H);
+function padIn(inp, dx, dy, kr, W, H) {
+  const pad = new Float64Array(W * H);
   for (let j = 0; j < dy; j++) for (let i = 0; i < dx; i++) pad[(j + kr) * W + i + kr] = inp[j * dx + i];
-  const conv = convolve(pad, c.spec), out = new Float64Array(dx * dy);
-  let lost = (1 - c.ksum) * sum(inp);
+  return pad;
+}
+// 패딩 영역의 컨볼루션 결과 → 도메인으로 벽 접어넣기(rW). 반환 lost(벽 투과·접기 밖).
+function foldInto(conv, W, H, kr, dx, dy, rW, out) {
+  let lost = 0;
   for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
     const v = conv[y * W + x];
     if (v === 0) continue;
@@ -71,7 +73,26 @@ function foldConv(c, inp, rW) {
     if (mi >= 0 && mi < dx && mj >= 0 && mj < dy) { out[mj * dx + mi] += rW * v; lost += (1 - rW) * v; }
     else lost += v;
   }
+  return lost;
+}
+
+// 도메인 입력 ⊛ 커널 → 벽 접어넣기(rW). { out, lost } — lost = 벽 투과·다중반사 밖·커널 절단분.
+function foldConv(c, inp, rW) {
+  const { dx, dy, kr, W, H } = c, out = new Float64Array(dx * dy);
+  const conv = convolve(padIn(inp, dx, dy, kr, W, H), c.spec);
+  const lost = (1 - c.ksum) * sum(inp) + foldInto(conv, W, H, kr, dx, dy, rW, out);
   return { out, lost };
+}
+
+// 서로 다른 커널 두 개를 복소 FFT 한 번으로(정확) — 밴드별 산란 투과용
+function foldConvPair(dx, dy, ka, kb, inA, inB, rW) {
+  const kr = Math.max(ka.kr, kb.kr), W = nextPow2(dx + 2 * kr + 1), H = nextPow2(dy + 2 * kr + 1);
+  const [sa, sb] = kernelSpectrumPair(ka.k, ka.kr, kb.k, kb.kr, W, H);
+  const [ca, cb] = convolvePair(padIn(inA, dx, dy, kr, W, H), padIn(inB, dx, dy, kr, W, H), sa, sb);
+  const outA = new Float64Array(dx * dy), outB = new Float64Array(dx * dy);
+  const lost = (1 - sum(ka.k)) * sum(inA) + (1 - sum(kb.k)) * sum(inB)
+    + foldInto(ca, W, H, kr, dx, dy, rW, outA) + foldInto(cb, W, H, kr, dx, dy, rW, outB);
+  return { outA, outB, lost };
 }
 
 function down(f, nx, ny, k) {
@@ -93,28 +114,45 @@ function up(c, cx, cy, k, nx, ny) {
 }
 
 // mat = { musR(1/mm), g, mua(1/mm), n }, t = 슬래브 두께 mm, h = 공기 갭 mm, rhoB = 기판 반사율, rW = 벽 유효 반사율
-export function solveCavity({ E, nx, ny, step, table, mat, t, h, rhoB, rW }) {
+// uniformTail=false: 원거리 도광 성분을 퍼뜨리지 않고 res.tail(질량)로 돌려준다(PSF 용 — 호출측이 기구 면적에 분배).
+// gapRmax: 갭 전달 커널 절단 반경(mm) — 기본 = 도메인 최대 치수.
+export function solveCavity({ E, nx, ny, step, table, mat, t, h, rhoB, rW, uniformTail = true, gapRmax }) {
   const N = nx * ny, tauR = mat.musR * t, muaT = mat.mua * t;
   const qb = E.map((_, b) => table.query(tauR, mat.g, mat.n, b, muaT));
   const qd = table.query(tauR, mat.g, mat.n, table.diffuseRow, muaT);
   const Mball = new Float64Array(N), Mscat = new Float64Array(N), Mrec = new Float64Array(N), D0 = new Float64Array(N);
-  let input = 0, slabAbs = 0, leak = 0, boardAbs = 0, iterations = 0;
+  let input = 0, slabAbs = 0, leak = 0, boardAbs = 0, iterations = 0, tail = 0;
 
-  // (a) 직진 + 하면 반사, (b) 산란 투과
+  // (a) 직진 + 하면 반사, (b) 산란 투과 (밴드 2개씩 복소 FFT 한 번으로)
+  const jobs = [];
   for (let b = 0; b < E.length; b++) {
     const e = E[b], q = qb[b], se = sum(e);
     if (!(se > 0)) continue;
     input += se; slabAbs += (1 - q.Tb - q.Ts - q.R) * se;
     for (let i = 0; i < N; i++) { Mball[i] += q.Tb * e[i]; D0[i] += q.R * e[i]; }
-    if (q.Ts > 0) addScattered(Mscat, e, q, se);
+    if (q.Ts > 0) jobs.push(scatJob(e, q, se));
   }
-  function addScattered(target, e, q, se) {
+  runJobs(jobs, Mscat);
+  function scatJob(e, q, se) {
     const near = 1 - q.radTail, src = new Float64Array(N);
     for (let i = 0; i < N; i++) src[i] = q.Ts * near * e[i];
-    const { out, lost } = foldConv(makeConv(nx, ny, radialKernel(q.rad, t, step)), src, rW);
-    leak += lost;
-    const u = (q.Ts * q.radTail * se) / N;               // 슬래브 도광(원거리) 성분 — 균일 근사
-    for (let i = 0; i < N; i++) target[i] += out[i] + u;
+    const tm = q.Ts * q.radTail * se;                    // 슬래브 도광(원거리) 성분 — 균일 근사
+    if (!uniformTail) tail += tm;
+    return { src, kern: radialKernel(q.rad, t, step), u: uniformTail ? tm / N : 0 };
+  }
+  function runJobs(list, target) {
+    for (let k = 0; k < list.length; k += 2) {
+      const a = list[k], b = list[k + 1];
+      if (b) {
+        const r = foldConvPair(nx, ny, a.kern, b.kern, a.src, b.src, rW);
+        leak += r.lost;
+        for (let i = 0; i < N; i++) target[i] += r.outA[i] + r.outB[i] + a.u + b.u;
+      } else {
+        const r = foldConv(makeConv(nx, ny, a.kern), a.src, rW);
+        leak += r.lost;
+        for (let i = 0; i < N; i++) target[i] += r.out[i] + a.u;
+      }
+    }
   }
 
   // (c) 재순환
@@ -130,8 +168,34 @@ export function solveCavity({ E, nx, ny, step, table, mat, t, h, rhoB, rW }) {
       let { o: Dc, cx, cy } = down(D0, nx, ny, f);
       // 갭 커널 반경: 99.9% 반경(31.6h) 과 기구 최대 치수 중 작은 값 — 그 밖은 벽을 여러 번 지나야 해
       // (벽 1회 접기 밖) 어차피 누설로 집계되므로 커널을 키워도 결과가 같고 FFT 만 커진다.
-      const conv = makeConv(cx, cy, gapKernel(h, sc, Math.min(31.6 * h, Math.max(nx, ny) * step)));
+      const gk = gapKernel(h, sc, Math.min(31.6 * h, gapRmax ?? Math.max(nx, ny) * step));
       const Ic = new Float64Array(cx * cy);
+      if (rW === 0) {
+        // 벽 없는 열린 영역(PSF): 주파수 영역 닫힌 해 I = rho P^2 D / (1 - rho R_d P^2), B = P D + R_d P I.
+        // 에너지는 독립 집계: 보드 흡수 (1-rho) sum B, 영역 밖 I 의 (1-R_d) 는 누설, 커널 절단은 공식으로.
+        const kr = gk.kr, W = nextPow2(cx + 2 * kr + 1), H = nextPow2(cy + 2 * kr + 1), sp = kernelSpectrum(gk.k, kr, W, H);
+        const ksum = sum(gk.k), dRe = padIn(Dc, cx, cy, kr, W, H), dIm = new Float64Array(W * H);
+        fft2d(dRe, dIm, W, H, false);
+        const iRe = new Float64Array(W * H), iIm = new Float64Array(W * H), bRe = new Float64Array(W * H), bIm = new Float64Array(W * H);
+        for (let k = 0; k < W * H; k++) {
+          const pr = sp.re[k], pi = sp.im[k], p2r = pr * pr - pi * pi, p2i = 2 * pr * pi;
+          const dr = 1 - rhoB * qd.R * p2r, di = -rhoB * qd.R * p2i, dd = dr * dr + di * di;
+          const nr = rhoB * (p2r * dRe[k] - p2i * dIm[k]), ni = rhoB * (p2r * dIm[k] + p2i * dRe[k]);
+          const ir = (nr * dr + ni * di) / dd, ii = (ni * dr - nr * di) / dd;
+          iRe[k] = ir; iIm[k] = ii;
+          const pdr = pr * dRe[k] - pi * dIm[k], pdi = pr * dIm[k] + pi * dRe[k];
+          const pir = pr * ir - pi * ii, pii = pr * ii + pi * ir;
+          bRe[k] = pdr + qd.R * pir; bIm[k] = pdi + qd.R * pii;
+        }
+        fft2d(iRe, iIm, W, H, true); fft2d(bRe, bIm, W, H, true);
+        const sB = sum(bRe), sIall = sum(iRe);
+        let sIin = 0;
+        for (let j = 0; j < cy; j++) for (let i = 0; i < cx; i++) { const v = iRe[(j + kr) * W + i + kr]; Ic[j * cx + i] = v; sIin += v; }
+        boardAbs += (1 - rhoB) * sB;
+        leak += (1 - qd.R) * (sIall - sIin) + (1 - ksum) * (sD0 + qd.R * sIall + rhoB * sB);
+        Itot = up(Ic, cx, cy, f, nx, ny);
+      } else {
+      const conv = makeConv(cx, cy, gk);
       for (iterations = 1; iterations <= 200; iterations++) {
         const B = foldConv(conv, Dc, rW); leak += B.lost;
         const sB = sum(B.out); boardAbs += (1 - rhoB) * sB;
@@ -143,15 +207,16 @@ export function solveCavity({ E, nx, ny, step, table, mat, t, h, rhoB, rW }) {
       }
       leak += sum(Dc);                                   // 미전파 잔여(≤1e-5, 누설로 집계)
       Itot = up(Ic, cx, cy, f, nx, ny);
+      }
     }
     const sI = sum(Itot);
     slabAbs += (1 - qd.Tb - qd.Ts - qd.R) * sI;
     for (let i = 0; i < N; i++) Mrec[i] += qd.Tb * Itot[i];
-    if (qd.Ts > 0) addScattered(Mrec, Itot, qd, sI);
+    if (qd.Ts > 0) runJobs([scatJob(Itot, qd, sI)], Mrec);
   }
 
   const M = new Float64Array(N);
   for (let i = 0; i < N; i++) M[i] = Mball[i] + Mscat[i] + Mrec[i];
-  const top = sum(M), err = input > 0 ? Math.abs(input - (top + boardAbs + slabAbs + leak)) / input : 0;
-  return { M, Mball, Mscat, Mrec, iterations, energy: { input, top, boardAbs, slabAbs, leak, err } };
+  const top = sum(M), err = input > 0 ? Math.abs(input - (top + tail + boardAbs + slabAbs + leak)) / input : 0;
+  return { M, Mball, Mscat, Mrec, tail, iterations, energy: { input, top, tail, boardAbs, slabAbs, leak, err } };
 }

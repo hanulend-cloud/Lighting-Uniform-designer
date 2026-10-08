@@ -12,3 +12,11 @@ export function loadTable() {
   return createTable(meta, new Float32Array(buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength)));
 }
 export function loadRefAD() { return JSON.parse(fs.readFileSync(new URL('../src/engine/l2/data/ref-ad.json', import.meta.url))); }
+// runtime.initL2 용 Node 로더
+export function nodeLoader() {
+  return async () => {
+    const meta = JSON.parse(fs.readFileSync(new URL('slab-meta.json', dir)));
+    const buf = fs.readFileSync(new URL('slab-table.bin', dir));
+    return { meta, data: new Float32Array(buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength)), refAD: loadRefAD() };
+  };
+}

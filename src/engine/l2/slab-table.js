@@ -169,3 +169,14 @@ export function hpaStats(q) {
   return { hpa: 90, sigma: 0 };
 }
 export function hpaDeg(q) { return hpaStats(q).hpa; }
+
+// 산란광의 법선 방향 방사휘도 계수: L(0°) = M·f (M = 출사도). ang 은 출사각 파워 분율(합 1),
+// 0~5° 를 풀링한 평균 광도(/sr). Lambertian 이면 1/π.
+export function normalRadianceFactor(ang) {
+  let p = 0, o = 0;
+  for (let k = 0; k < 5; k++) {
+    p += ang[k];
+    o += 2 * Math.PI * (Math.cos(angEdgeDeg(k) * DEG) - Math.cos(angEdgeDeg(k + 1) * DEG));
+  }
+  return o > 0 ? p / o : 1 / Math.PI;
+}

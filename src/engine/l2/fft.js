@@ -64,3 +64,44 @@ export function convolve(img, spec) {
   fft2d(re, im, W, H, true);
   return re;
 }
+
+// 실수 두 장을 복소 FFT 한 번으로: Z = FFT(a + i·b) → A[k] = (Z[k] + Z*[−k])/2, B[k] = (Z[k] − Z*[−k])/(2i).
+function splitPair(re, im, W, H) {
+  const N = W * H, Ar = new Float64Array(N), Ai = new Float64Array(N), Br = new Float64Array(N), Bi = new Float64Array(N);
+  for (let y = 0; y < H; y++) {
+    const yn = (H - y) % H;
+    for (let x = 0; x < W; x++) {
+      const k = y * W + x, kn = yn * W + ((W - x) % W);
+      const zr = re[k], zi = im[k], cr = re[kn], ci = -im[kn];       // conj(Z[−k])
+      Ar[k] = 0.5 * (zr + cr); Ai[k] = 0.5 * (zi + ci);
+      Br[k] = 0.5 * (zi - ci); Bi[k] = -0.5 * (zr - cr);              // (Z − conj)/(2i)
+    }
+  }
+  return [{ re: Ar, im: Ai, W, H }, { re: Br, im: Bi, W, H }];
+}
+
+// 두 커널의 스펙트럼을 FFT 한 번으로
+export function kernelSpectrumPair(kA, krA, kB, krB, W, H) {
+  const re = new Float64Array(W * H), im = new Float64Array(W * H);
+  const place = (k, kr, arr) => {
+    const K = 2 * kr + 1;
+    for (let j = 0; j < K; j++) for (let i = 0; i < K; i++) arr[((j - kr + H) % H) * W + ((i - kr + W) % W)] += k[j * K + i];
+  };
+  place(kA, krA, re); place(kB, krB, im);
+  fft2d(re, im, W, H, false);
+  return splitPair(re, im, W, H);
+}
+
+// (a ⊛ kA, b ⊛ kB) 를 FFT 2회(정·역)로 — 결과는 역변환의 실수부·허수부
+export function convolvePair(a, b, sA, sB) {
+  const { W, H } = sA, N = W * H, re = Float64Array.from(a), im = Float64Array.from(b);
+  fft2d(re, im, W, H, false);
+  const [A, B] = splitPair(re, im, W, H);
+  for (let k = 0; k < N; k++) {
+    const pr = A.re[k] * sA.re[k] - A.im[k] * sA.im[k], pi = A.re[k] * sA.im[k] + A.im[k] * sA.re[k];
+    const qr = B.re[k] * sB.re[k] - B.im[k] * sB.im[k], qi = B.re[k] * sB.im[k] + B.im[k] * sB.re[k];
+    re[k] = pr - qi; im[k] = pi + qr;                                 // P + i·Q
+  }
+  fft2d(re, im, W, H, true);
+  return [re, im];
+}
