@@ -81,7 +81,8 @@ export function emptyRecord() {
 //   inc: 입사각(공기 중) 코사인 μ ∈ (0,1] 또는 'diffuse'(Lambertian 입사)
 //   N: 광자 수,  seed: 난수 시드
 // onEscape(ch, x, y, L, w, scattered): 선택 — 탈출 광자마다 호출(분석·검증용, 기본 없음)
-export function runSlab({ tau, g, n, inc, N, seed = 1, onEscape }) {
+// phase: 선택 — { sample(u) → cosθ } 임의 위상함수(예: Mie 표). 없으면 HG(g).
+export function runSlab({ tau, g, n, inc, N, seed = 1, onEscape, phase }) {
   const rec = emptyRecord();
   const rnd = rng(seed);
   const W_MIN = 1e-4, ROULETTE = 10;
@@ -126,7 +127,7 @@ export function runSlab({ tau, g, n, inc, N, seed = 1, onEscape }) {
       }
       // 산란
       x += s * ux; y += s * uy; z = zNext; L += s; scattered = true;
-      const ct = sampleHG(g, rnd()), st = Math.sqrt(Math.max(0, 1 - ct * ct));
+      const ct = phase ? phase.sample(rnd()) : sampleHG(g, rnd()), st = Math.sqrt(Math.max(0, 1 - ct * ct));
       const phi = 2 * Math.PI * rnd(), cp = Math.cos(phi), sp = Math.sin(phi);
       if (Math.abs(uz) > 0.99999) {
         ux = st * cp; uy = st * sp; uz = Math.sign(uz) * ct;
