@@ -245,7 +245,11 @@ function run() {
   const l2eff = { milky: spec.levels[2].milky ?? 0, pcb: spec.levels[2].pcb ?? '혼재' };
   renderL2Panel(document.querySelector('[data-l2]'), l2Describe(spec, depth, { ...l2eff, material: spec.levels[2].material ?? '' }, activeSet.has(2) ? eff.edgeBoost : null, combo.padX ?? 0, combo.padY ?? 0), spec.goal.tMin ?? 0.5, {
     table: l2State().table, db: materialDb(), materialId: spec.levels[2].material ?? '',
-    onSelectMaterial: onSelectMaterial, onDbChanged: () => { soloCache = {}; schedule(); },
+    onSelectMaterial: onSelectMaterial,
+    onDbChanged: () => {   // 선택 중이던 소재가 삭제되면 추상 Milky 로 되돌림(“찾을 수 없음” 경고 대신)
+      if (spec.levels[2].material && !materialDb()?.get(spec.levels[2].material)) spec.levels[2].material = '';
+      soloCache = {}; schedule();
+    },
   });
   renderVerdict($('#verdict'), combo, tags, spec.goal);
 
