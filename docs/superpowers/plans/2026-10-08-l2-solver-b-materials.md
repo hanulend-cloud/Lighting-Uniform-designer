@@ -63,4 +63,4 @@ Selecting a material makes L2 use its μs', g, μa instead of the abstract (g=0.
   (similarity law); at HPA 19° the model reaches only T ≈ 75% (vendor 85%). A narrow forward lobe with low loss needs a
   Mie (large-bead) phase function → phase C. The UI shows it as "보정 불일치".
 - Synthetic recovery (direct MC, no table): μs' within 1.5%, g within 0.04, μa exact; V6/V9 pass.
-- Browser check pending: pane not drawing (requestAnimationFrame paused) in this session.
+- Browser verified (2026-10-09): material select → Milky 2.99 · "소재 보정됨"; advanced menu props·V6·DB list; add form fit → save → delete; L2 panel moved out of the clipped 2×2 card into its own block (#l2-solver). main.js afterPaint(): falls back to a 150 ms timer when requestAnimationFrame is paused (background/hidden tab) — previously calculation never started there.

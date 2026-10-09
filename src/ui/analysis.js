@@ -42,7 +42,6 @@ export function buildLevels(el, spec, onToggle, onParam) {
       ${advList.length ? `<span class="lv-adv-toggle" data-adv-toggle="${l}">고급 ▾</span>
       <div class="lv-f lv-f-adv" data-adv="${l}" hidden>${adv}</div>` : ''}
       <div class="lv-auto-wrap" data-auto="${l}"></div>
-      ${l === 2 ? '<div class="lv-l2" data-l2></div>' : ''}
     </div>`;
   }).join('');
 

@@ -171,9 +171,18 @@ function schedule() {
 
 // 판정 격자가 정확도 우선(1.5mm)이라 run() 이 수 초 걸릴 수 있다 — run() 자체는 동기라 그 사이
 // 브라우저가 완전히 멈춘 것처럼 보이므로, 먼저 '계산 중' 을 그리고 페인트를 기다린 뒤 시작한다.
+// 페인트(‘계산 중’ 표시) 뒤 실행 — 백그라운드·숨김 탭에서는 requestAnimationFrame 이 멈춰 계산이 영영 시작되지
+// 않으므로, 150ms 안에 프레임이 오지 않으면 타이머로 실행한다(둘 중 먼저 온 쪽 1회만).
+function afterPaint(fn) {
+  let done = false;
+  const go = () => { if (!done) { done = true; fn(); } };
+  requestAnimationFrame(() => requestAnimationFrame(go));
+  setTimeout(go, 150);
+}
+
 function runAsync() {
   $('#timing').textContent = '계산 중… (해상도 우선 설정이라 수 초 소요될 수 있음)';
-  requestAnimationFrame(() => requestAnimationFrame(run));
+  afterPaint(run);
 }
 
 function run() {
@@ -543,5 +552,5 @@ window.addEventListener('resize', schedule);
 schedule();
 // 레이아웃이 안정된 뒤 한 번 더 그리고 히트맵 초기 1회 렌더
 if (typeof requestAnimationFrame === 'function') {
-  requestAnimationFrame(() => requestAnimationFrame(() => { clearTimeout(timer); run(); renderHeat(); }));
+  afterPaint(() => { clearTimeout(timer); run(); renderHeat(); });
 }
