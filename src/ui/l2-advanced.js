@@ -51,7 +51,7 @@ function build(el, ctx) {
 
 function renderView(v, ctx, desc) {
   if (!desc || desc.error) { v.innerHTML = '<div class="mut">L2 solver 없음</div>'; return; }
-  const { info } = desc, { table, db } = ctx;
+  const { info } = desc, { db } = ctx, table = desc.table ?? ctx.table;   // Mie 소재는 소재별 합성 응답표
   const mat = { musR: info.musR, g: info.g, mua: info.mua, n: info.n };
   const p = predictSample(table, mat, info.t);
   const ent = info.material ? db.get(info.material.id) : null;

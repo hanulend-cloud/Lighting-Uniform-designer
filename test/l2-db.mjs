@@ -55,8 +55,18 @@ ok(near.entry.id === 'mid', `가까운 소재 = mid (Milky 차 ${near.diff.toFix
 {
   const base = JSON.parse(fs.readFileSync(new URL('../data/materials-db.json', import.meta.url))).entries;
   ok(base.length >= 3 && base.every((e) => validateEntry(e).length === 0), `공용 DB ${base.length}건 형식 유효`);
-  // DQ5122 는 HG 한계로 V6 불일치가 정답(test/l2-fit 참조) — UI 에 "보정 불일치" 로 표시돼야 한다
-  for (const e of base) ok(!!e.validation?.V6?.ok === (e.id !== 'covestro-dq5122'), `  ${e.name}: Milky ${milkyOf(table, e).toFixed(2)} · V6 ${e.validation?.V6?.ok ? '통과' : '불일치'} (${e.validation?.V6?.note})`);
+  // 모델 선택(spec §13): HG 로 재현되면 HG, 아니면 입자(Mie) — DQ5122 는 HG 불일치 → Mie(PMMA 가정) 로 통과
+  for (const e of base) ok(e.validation?.V6?.ok, `  ${e.name}: [${e.model}] Milky ${milkyOf(table, e).toFixed(2)} · V6 ${e.validation?.V6?.note}`);
+  const d5122 = base.find((e) => e.id === 'covestro-dq5122');
+  ok(d5122.model === 'mie' && d5122.particle.d_um > 0 && d5122.particle.wt > 0 && d5122.validation.V13 && d5122.notes.some((n) => n.includes('식별 불가') || n.includes('Mie')),
+    `  DQ5122 Mie: PMMA ${d5122.particle.d_um.toFixed(2)}µm (${d5122.particle.dRange.map((v) => v.toFixed(1)).join('~')}) ${(d5122.particle.wt * 100).toFixed(2)} wt%`);
+  // Mie 소재로 시스템 계산 — 소재별 합성 응답표 사용, 정합성 통과
+  setMaterialDb(createDb(base, [], () => {}));
+  const s = structuredClone(DEFAULT_SPEC); s.levels[2].on = true;
+  const dm = l2Describe(s, 12, { milky: 0, pcb: '혼재', material: 'covestro-dq5122' });
+  const dh = l2Describe(s, 12, { milky: 0, pcb: '혼재', material: 'covestro-dq5142' });
+  ok(dm.table.phaseKey === 'mie:covestro-dq5122' && dm.check.ok && dm.info.trans > dh.info.trans && dm.info.trans < 0.95,
+    `  DQ5122(Mie) 시스템 투과율 ${(dm.info.trans * 100).toFixed(0)}% > DQ5142(HG) ${(dh.info.trans * 100).toFixed(0)}%, 정합성 ${dm.check.ok ? '✅' : '❌'}`);
 }
 
 if (fail) { console.log(`\n${fail} FAIL`); process.exit(1); }

@@ -130,10 +130,11 @@ function nelderMead(f, x0, step, iters = 300) {
 const clamp = (v, lo, hi) => (v < lo ? lo : v > hi ? hi : v);
 
 // free: { g: bool, mua: bool }. 반환 mat = { musR, g, mua, n }
-function fitCore(table, samples, n, free) {
+// gFix: g 를 고정할 값(입자 소재 = Mie 의 g). 없으면 L2_G.
+function fitCore(table, samples, n, free, gFix = L2_G) {
   const make = (x) => {
     const musR = Math.exp(x[0]);
-    const g = free.g ? clamp(x[1], 0.6, 0.99) : L2_G;
+    const g = free.g ? clamp(x[1], 0.6, 0.99) : gFix;
     const mua = free.mua ? Math.exp(clamp(x[free.g ? 2 : 1], Math.log(1e-5), Math.log(1))) : MUA_RESIN + KAPPA * musR / (1 - g);
     return { musR, g, mua, n };
   };
@@ -153,7 +154,8 @@ function fitCore(table, samples, n, free) {
 }
 
 // entry = { name, n?, samples: [...] }  →  { mat, milky, free, notes, predictions, V6, V9 }
-export function fitMaterial(table, entry) {
+// opts.gFix: g 고정(입자 소재 피팅 — 위상함수가 응답표에 이미 들어 있음)
+export function fitMaterial(table, entry, opts = {}) {
   const n = entry.n ?? 1.586;
   const samples = entry.samples.map((s) => {
     const o = { ...s };
@@ -163,16 +165,17 @@ export function fitMaterial(table, entry) {
   });
   const hasAng = samples.some((s) => s._shape || s.hpa != null);
   const thick = new Set(samples.map((s) => s.t)).size;
-  const free = { g: hasAng, mua: samples.some((s) => s.R != null) || thick >= 2 };
+  const free = { g: hasAng && opts.gFix == null, mua: samples.some((s) => s.R != null) || thick >= 2 };
+  const gFix = opts.gFix ?? L2_G;
   const notes = [];
-  let r = fitCore(table, samples, n, free);
+  let r = fitCore(table, samples, n, free, gFix);
   const tauMax = Math.max(...samples.map((s) => r.mat.musR * s.t));
   if (free.g && tauMax >= 8) {
     free.g = false;
     notes.push(`g 식별 불가 — 확산 영역(τ'=${tauMax.toFixed(1)} ≥ 8)에서는 결과가 μs' 에만 의존, g=${L2_G} 고정`);
-    r = fitCore(table, samples, n, free);
+    r = fitCore(table, samples, n, free, gFix);
   }
-  if (!hasAng) notes.push(`각도 정보(곡선·HPA) 없음 — g=${L2_G} 고정`);
+  if (!hasAng && opts.gFix == null) notes.push(`각도 정보(곡선·HPA) 없음 — g=${L2_G} 고정`);
   if (samples.some((s) => s.hpa != null && !hpaUsable(s))) notes.push(`HPA < ${HPA_MIN}° 시료는 정투과 피크 지배 — HPA 비교 제외`);
   if (!free.mua) notes.push('R 미측정·단일 두께 — μa 를 기본값(투명 PC + 산란제 흡수 임시값)으로 고정');
   if (!samples.some((s) => s._shape) && samples.some((s) => s.curve)) notes.push('곡선이 짧거나(75° 미만) 점이 부족해 모양 비교 제외');
@@ -198,7 +201,7 @@ export function fitMaterial(table, entry) {
     let wT = 0, wR = 0, wH = 0;
     for (const tj of new Set(samples.map((s) => s.t))) {
       const train = samples.filter((s) => s.t !== tj), test = samples.filter((s) => s.t === tj);
-      const fr = fitCore(table, train, n, { g: free.g, mua: train.some((s) => s.R != null) || new Set(train.map((s) => s.t)).size >= 2 });
+      const fr = fitCore(table, train, n, { g: free.g, mua: train.some((s) => s.R != null) || new Set(train.map((s) => s.t)).size >= 2 }, gFix);
       for (const s of test) {
         const p = predictSample(table, fr.mat, s.t);
         if (s.T != null) wT = Math.max(wT, Math.abs(s.T - p.T));

@@ -1,15 +1,69 @@
 {
-  "version": 1,
-  "note": "공용 실측소재 DB 원자료. tools/fit-db.mjs 가 피팅해 data/materials-db.json 을 만든다. 측정 원자료(samples)를 정본으로 유지할 것.",
-  "entries": [
-    { "id": "covestro-dq5122", "name": "Makrolon DQ5122", "vendor": "Covestro", "status": "datasheet", "n": 1.586,
-      "source": "Covestro 'Makrolon® polycarbonate for LED lighting' 브로셔, Makrolon DQ 표 (HPA·Transmission @2mm)",
-      "samples": [{ "t": 2, "T": 0.85, "hpa": 19 }] },
-    { "id": "covestro-dq5142", "name": "Makrolon DQ5142", "vendor": "Covestro", "status": "datasheet", "n": 1.586,
-      "source": "Covestro 'Makrolon® polycarbonate for LED lighting' 브로셔, Makrolon DQ 표 (HPA·Transmission @2mm)",
-      "samples": [{ "t": 2, "T": 0.65, "hpa": 43 }] },
-    { "id": "covestro-dq5162", "name": "Makrolon DQ5162", "vendor": "Covestro", "status": "datasheet", "n": 1.586,
-      "source": "Covestro 'Makrolon® polycarbonate for LED lighting' 브로셔, Makrolon DQ 표 (HPA·Transmission @2mm)",
-      "samples": [{ "t": 2, "T": 0.57, "hpa": 56 }] }
-  ]
+ "version": 1,
+ "note": "공용 실측소재 DB 원자료. tools/fit-db.mjs 가 피팅해 data/materials-db.json 을 만든다. 측정 원자료(samples)를 정본으로 유지할 것.",
+ "entries": [
+  {
+   "id": "covestro-dq5122",
+   "name": "Makrolon DQ5122",
+   "vendor": "Covestro",
+   "status": "datasheet",
+   "n": 1.586,
+   "source": "Covestro 'Makrolon® polycarbonate for LED lighting' 브로셔, Makrolon DQ 표 (HPA·Transmission @2mm)",
+   "samples": [
+    {
+     "t": 2,
+     "T": 0.85,
+     "hpa": 19
+    }
+   ],
+   "particle": {
+    "type": "PMMA",
+    "host": "PC",
+    "assumed": true,
+    "note": "벤더 미공개 — PMMA 비드 가정(확산 PC 의 대표 비드). 실제 비드가 다르면 결과도 달라짐"
+   }
+  },
+  {
+   "id": "covestro-dq5142",
+   "name": "Makrolon DQ5142",
+   "vendor": "Covestro",
+   "status": "datasheet",
+   "n": 1.586,
+   "source": "Covestro 'Makrolon® polycarbonate for LED lighting' 브로셔, Makrolon DQ 표 (HPA·Transmission @2mm)",
+   "samples": [
+    {
+     "t": 2,
+     "T": 0.65,
+     "hpa": 43
+    }
+   ],
+   "particle": {
+    "type": "PMMA",
+    "host": "PC",
+    "assumed": true,
+    "note": "벤더 미공개 — PMMA 비드 가정(확산 PC 의 대표 비드). 실제 비드가 다르면 결과도 달라짐"
+   }
+  },
+  {
+   "id": "covestro-dq5162",
+   "name": "Makrolon DQ5162",
+   "vendor": "Covestro",
+   "status": "datasheet",
+   "n": 1.586,
+   "source": "Covestro 'Makrolon® polycarbonate for LED lighting' 브로셔, Makrolon DQ 표 (HPA·Transmission @2mm)",
+   "samples": [
+    {
+     "t": 2,
+     "T": 0.57,
+     "hpa": 56
+    }
+   ],
+   "particle": {
+    "type": "PMMA",
+    "host": "PC",
+    "assumed": true,
+    "note": "벤더 미공개 — PMMA 비드 가정(확산 PC 의 대표 비드). 실제 비드가 다르면 결과도 달라짐"
+   }
+  }
+ ]
 }

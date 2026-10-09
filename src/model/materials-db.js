@@ -22,6 +22,7 @@ export function validateEntry(e) {
   });
   const f = e.fitted;
   if (!f || !(f.musR >= 0) || !(f.g >= -1 && f.g < 1) || !(f.mua >= 0)) err.push('피팅 계수(fitted) 없음');
+  if (e.model === 'mie' && !(e.sysTable?.meta && typeof e.sysTable.b64 === 'string' && e.particle?.d_um > 0)) err.push('Mie 소재는 입자 사양·소재별 응답표 필요');
   return err;
 }
 
@@ -74,4 +75,19 @@ const strip = ({ origin, ...e }) => e;
 
 export function newId(name) {
   return `${String(name || 'mat').trim().replace(/[^\w가-힣-]+/g, '_').slice(0, 24)}_${Date.now().toString(36)}`;
+}
+
+// Float32 ↔ base64 (입자 소재의 소재별 응답표 저장용 — 브라우저·Node 공용)
+export function f32ToB64(arr) {
+  const u8 = new Uint8Array(arr.buffer, arr.byteOffset, arr.byteLength);
+  if (typeof Buffer !== 'undefined') return Buffer.from(u8).toString('base64');
+  let s = '';
+  for (let i = 0; i < u8.length; i += 0x8000) s += String.fromCharCode(...u8.subarray(i, i + 0x8000));
+  return btoa(s);
+}
+export function b64ToF32(b64) {
+  if (typeof Buffer !== 'undefined') { const b = Buffer.from(b64, 'base64'); return new Float32Array(b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength)); }
+  const s = atob(b64), u8 = new Uint8Array(s.length);
+  for (let i = 0; i < s.length; i++) u8[i] = s.charCodeAt(i);
+  return new Float32Array(u8.buffer);
 }

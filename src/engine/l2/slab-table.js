@@ -23,7 +23,7 @@ export function packRecord(rec) {
   return out;
 }
 
-function blend(parts) {
+export function blend(parts) {
   const q = { Tb: 0, Ts: 0, R: 0, rad: new Float64Array(N_RAD), ang: new Float64Array(N_ANG), radTail: 0, shift: 0, nScat: 0, radScale: 0 };
   let ws = 0;
   const inv = [];                                  // 분포 혼합의 유효 광자 수: 가중평균 분산 Σa²/n

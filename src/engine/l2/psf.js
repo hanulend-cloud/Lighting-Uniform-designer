@@ -14,7 +14,7 @@ export function systemPsf({ table, mat, t, h, rhoB, intensity, intensityKey, I0,
   const s = Math.max(step, extentX / MAX_CELLS, extentY / MAX_CELLS);
   const odd = (v) => { const k = Math.max(3, Math.ceil(v)); return k % 2 ? k : k + 1; };
   const nx = odd(extentX / s), ny = odd(extentY / s);
-  const key = [mat.musR, mat.g, mat.mua, mat.n, t, h, rhoB, intensityKey, I0, nx, ny, s].map((v) => (typeof v === 'number' ? v.toPrecision(6) : v)).join('|');
+  const key = [table.phaseKey ?? 'HG', mat.musR, mat.g, mat.mua, mat.n, t, h, rhoB, intensityKey, I0, nx, ny, s].map((v) => (typeof v === 'number' ? v.toPrecision(6) : v)).join('|');
   const hit = cache.get(key);
   if (hit) return hit;
 

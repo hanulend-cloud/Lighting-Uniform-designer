@@ -8,6 +8,22 @@ import {
 import { l3BotZAt, l4BotZAt } from '../model/levels.js';
 import { l2State, materialDb } from './l2/runtime.js';
 import { milkyFromMusR } from './l2/milky.js';
+import { compositeTable } from './l2/mie-material.js';
+import { createTable } from './l2/slab-table.js';
+import { b64ToF32 } from '../model/materials-db.js';
+
+// Mie 소재의 합성 응답표(소재표 + 주 응답표) — DB 항목별 1회 디코드
+const _mieTables = new Map();
+function tableFor(ent, main) {
+  if (ent?.model !== 'mie' || !ent.sysTable) return main;
+  let t = _mieTables.get(ent.id);
+  if (!t || t.main !== main) {
+    const mie = createTable(ent.sysTable.meta, b64ToF32(ent.sysTable.b64));
+    t = { main, table: compositeTable(mie, main, `mie:${ent.id}`) };
+    _mieTables.set(ent.id, t);
+  }
+  return t.table;
+}
 import { l2Material, pcbReflectance } from './l2/material.js';
 import { systemPsf, systemTransFast } from './l2/psf.js';
 import { hpaDeg } from './l2/slab-table.js';
@@ -231,8 +247,10 @@ export function l2Setup(spec, depth, l2, edgeBoost, step, padX = 0, padY = 0) {
   const h = Math.max(0, depth - t), rhoB = pcbReflectance(l2.pcb);
   const li = ledIntensity(spec);
   const BX = spec.target.xLen + 2 * Math.max(0, padX), BY = spec.target.yLen + 2 * Math.max(0, padY);
-  const psf = systemPsf({ table: st.table, mat, t, h, rhoB, intensity: li.intensity, intensityKey: li.key, I0: li.I0, extentX: 2 * BX, extentY: 2 * BY, step });
+  const tbl = tableFor(ent, st.table);
+  const psf = systemPsf({ table: tbl, mat, t, h, rhoB, intensity: li.intensity, intensityKey: li.key, I0: li.I0, extentX: 2 * BX, extentY: 2 * BY, step });
   if (psf.qn.outOfRange) warnings.push('굴절률·g 가 테이블 격자 밖 — 가장자리 값으로 근사');
+  if (psf.qn.beyondMaterial) warnings.push('두께가 입자 소재표 범위를 넘음 — HG(g≤0.99) 근사');
   const tableOk = !!st.check?.ok;
   const check = {
     ok: tableOk && psf.check.ok && !psf.qn.outOfRange,
@@ -241,9 +259,9 @@ export function l2Setup(spec, depth, l2, edgeBoost, step, padX = 0, padY = 0) {
   const info = {
     milky: mat.milky, musR: mat.musR, mus: mat.musR / (1 - mat.g), g: mat.g, mua: mat.mua, n: mat.n,
     t, h, tauR: mat.musR * t, rhoB, rW: psf.rW, trans: psf.trans, hpa: hpaDeg(psf.qn), Tb0: psf.qn.Tb,
-    material: ent ? { id: ent.id, name: ent.name, status: ent.status, V6: ent.validation?.V6, V9: ent.validation?.V9 } : null,
+    material: ent ? { id: ent.id, name: ent.name, status: ent.status, model: ent.model ?? 'HG', particle: ent.particle ?? null, V6: ent.validation?.V6, V9: ent.validation?.V9 } : null,
   };
-  return { mat, t, h, rhoB, psf, warnings, check, info, BX, BY };
+  return { mat, t, h, rhoB, psf, warnings, check, info, BX, BY, table: tbl };
 }
 
 // PSF(셀 중심 격자) → 판정 격자(노드 간격 stepX·stepY) 오프셋 커널로 재표본화하고 FFT 스펙트럼을 캐시.
