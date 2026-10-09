@@ -25,6 +25,20 @@ export function drawPlan(canvas, g) {
   const pxmm = s;                              // 패드·치수도 동일 스케일
   const bw = X * s, bh = Y * s;
 
+  // 불러온 STEP 몸체(L3) — 외곽 안쪽을 두께로 음영(얇을수록 밝게), 외곽선 표시
+  if (g.bodyMap) {
+    const { hf, cx, cy } = g.bodyMap, step = Math.max(1, Math.round(Math.max(hf.nx, hf.ny) / 180));
+    const span = Math.max(1e-6, hf.stats.thkMax - hf.stats.thkMin), cs = hf.cell * step * s;
+    for (let j = 0; j < hf.ny; j += step) for (let i = 0; i < hf.nx; i += step) {
+      const k = j * hf.nx + i; if (!hf.mask[k]) continue;
+      const t = (hf.zt[k] - hf.zb[k] - hf.stats.thkMin) / span;
+      ctx.fillStyle = `rgba(150,190,255,${(0.12 + 0.38 * (1 - t)).toFixed(3)})`;
+      ctx.fillRect(px(cx + hf.x0 + i * hf.cell), py(cy + hf.y0 + (j + step) * hf.cell), cs + 0.5, cs + 0.5);
+    }
+    ctx.fillStyle = C.dim; ctx.font = '11px system-ui'; ctx.textAlign = 'left';
+    ctx.fillText(`불러온 몸체 · 두께 ${hf.stats.thkMin.toFixed(1)}~${hf.stats.thkMax.toFixed(1)}mm (밝을수록 얇음)`, PAD.L, h - 6);
+  }
+
   // L2 Milky 틴트 (전체)
   if (g.diffuseVisual) { ctx.fillStyle = C.milky; ctx.fillRect(px(0), py(Y), bw, bh); }
 

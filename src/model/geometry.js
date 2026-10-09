@@ -3,6 +3,7 @@
 // 난이도별 물리/형상은 levels.js 에 위임. 활성 난이도 조합을 반영.
 
 import { classifyDimension, ledPositions } from '../engine/directLit.js';
+import { importedBodyActive, getBody } from '../engine/shape/runtime.js';
 import { LEVEL_SCHEMA, levelParams, levelEffect, combinedEffect, activeLevels, bodyProfile, effectiveEdgeMargin, l4BotZAt } from './levels.js';
 
 export { levelEffect, combinedEffect, activeLevels, LEVEL_SCHEMA, effectiveEdgeMargin };
@@ -63,5 +64,6 @@ export function buildGeometry(spec, opt = {}) {
     diffuseVisual, patternVisual, planShape, l4Height, l4HalfP: halfPShape,
     ledTop: spec.led.sizeZ,
     bodyProfile: (nx = 160) => bodyProfile(spec, [...active], leds, depth, pitchX, nx),
+    bodyMap: importedBodyActive(spec, [...active]) ? { hf: getBody().hf, cx: X / 2, cy: Y / 2 } : null,   // 평면도: 불러온 몸체 두께 지도
   };
 }

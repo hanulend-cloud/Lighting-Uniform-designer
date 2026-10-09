@@ -6,6 +6,8 @@ import { initL2, browserLoader, l2State, setMaterialDb, materialDb } from './eng
 import { createDb } from './model/materials-db.js';
 import { renderL2Panel } from './ui/l2-panel.js';
 import { migrateMilkyV13 } from './engine/l2/material.js';
+import { setBodyMesh, reorientBody, clearBody, bodyInfo, saveBodyIDB, loadBodyIDB, importedBodyActive } from './engine/shape/runtime.js';
+import { mountShapeControls, setShapeStatus, renderShapeInfo } from './ui/shape-panel.js';
 import { metrics, centerZoneFrac } from './engine/uniformity.js';
 import { solveCombo, solvePerLevel, GRID } from './engine/solver.js';
 import { PAD } from './ui/canvas-util.js';
@@ -105,6 +107,11 @@ function buildForm() {
       }
       grp.appendChild(row);
     }
+    if (name === '기구') {   // L3 몸체 출처(생성 평판 / 불러온 STEP)
+      const sh = document.createElement('div'); sh.className = 'ctl-shape'; sh.id = 'shape-ctl';
+      grp.appendChild(sh);
+      mountShapeControls(sh, { onFile: importStep, onFlip: () => reorient({ flipZ: !spec.body.shape.flipZ }), onRot: () => reorient({ rot: (spec.body.shape.rot + 1) % 4 }), onClear: clearShape });
+    }
     form.appendChild(grp);
   }
   $('#btn-reset').onclick = () => { spec = structuredClone(DEFAULT_SPEC); soloCache = {}; mount(); schedule(); };
@@ -137,6 +144,39 @@ function soloRow(level) {
   const r = solvePerLevel(spec, { levels: [level] })[0];
   soloCache[level] = { sig, r };
   return r;
+}
+
+// ---- L3 몸체: STEP 불러오기 (형상 몸체 spec §3.1) ----
+function importStep(file) {
+  const el = $('#shape-ctl');
+  setShapeStatus(el, `${file.name} 읽는 중…`, 'busy');
+  file.text().then((text) => {
+    const w = new Worker(new URL('./engine/shape/shape-worker.js', import.meta.url), { type: 'module' });
+    w.onmessage = (m) => {
+      if (m.data.stage) { setShapeStatus(el, m.data.stage, 'busy'); return; }
+      w.terminate();
+      if (m.data.error) { setShapeStatus(el, `불러오기 실패: ${m.data.error}`, 'err'); return; }
+      const r = m.data.result;
+      spec.body.shape = { source: 'step', name: file.name, flipZ: false, rot: 0 };
+      setBodyMesh(file.name, { positions: r.positions, triangles: r.triangles }, spec.body.shape);
+      saveBodyIDB().catch(() => {});
+      const note = r.solidCount > 1 ? ` (솔리드 ${r.solidCount}개 중 가장 큰 1개 사용)` : '';
+      if (!spec.levels[3].on) { spec.levels[3].on = true; buildLevels($('#levels'), spec, onToggleLevel, onLevelParam); }
+      setShapeStatus(el, `불러옴: ${file.name}${note}`);
+      soloCache = {}; schedule();
+    };
+    w.onerror = (e) => { w.terminate(); setShapeStatus(el, `불러오기 실패: ${e.message ?? e}`, 'err'); };
+    w.postMessage({ name: file.name, text });
+  });
+}
+function reorient(change) {
+  spec.body.shape = { ...spec.body.shape, ...change };
+  reorientBody({ flipZ: spec.body.shape.flipZ, rot: spec.body.shape.rot });
+  soloCache = {}; schedule();
+}
+function clearShape() {
+  spec.body.shape = { source: 'plate', name: '', flipZ: false, rot: 0 };
+  clearBody(); soloCache = {}; schedule();
 }
 
 // 실측소재 선택 — 소재의 μs'·g·μa 를 쓰고, Milky 입력칸에는 그 소재의 Milky(파생값)를 보여 준다
@@ -252,6 +292,7 @@ function run() {
     },
   });
   renderVerdict($('#verdict'), combo, tags, spec.goal);
+  renderShapeInfo($('#shape-ctl'), spec.body.shape?.source === 'step' ? bodyInfo(spec) : null, spec.body.shape ?? {}, activeSet.has(3));
 
   last = { common, m, depth, view: geom.view, edgeMargin, fixture: geomFixture, center };
   last.combo = combo; last.geom = geom; last.active = active;
@@ -514,6 +555,7 @@ function migrate(s) {
   s.preview ??= structuredClone(DEFAULT_SPEC.preview);
   if (s.preview.level == null) s.preview.level = 3;
   s.body ??= structuredClone(DEFAULT_SPEC.body);
+  s.body.shape ??= structuredClone(DEFAULT_SPEC.body.shape);
   // ver<10 저장값은 판정제외 마진 5% 를 품고 있어 새 기본(0 = 타겟 전체 판정)을 덮어쓴다 —
   // 마진과 오버행 설정을 버리고 현재 기본값으로 시작한다. ver 10 에서 사용자가 직접 넣은 값은 유지.
   if (!(s.ver >= 10)) {
@@ -549,6 +591,10 @@ await initL2(browserLoader());
 }
 spec = load() || structuredClone(DEFAULT_SPEC);
 migrate(spec);
+// 불러온 L3 몸체 복원(IndexedDB) — 없으면 평판으로 되돌림
+if (spec.body.shape.source === 'step' && !(await loadBodyIDB({ flipZ: spec.body.shape.flipZ, rot: spec.body.shape.rot }))) {
+  spec.body.shape = structuredClone(DEFAULT_SPEC.body.shape);
+}
 mount();
 setupZoom();
 setupHeatPick();

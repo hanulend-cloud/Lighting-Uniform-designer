@@ -256,3 +256,10 @@ main { flex: 1 1 auto; min-height: 0; display: grid;
 .adv-btns button, .adv-file { font-size: 11.5px; padding: 3px 8px; border: 1px solid #c9cfdb; border-radius: 5px; background: #fff; cursor: pointer; }
 .adv-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 4px 10px; margin: 6px 0; font-size: 11.5px; }
 .adv-grid input, .adv-grid select { width: 100%; font-size: 11.5px; }
+/* L3 몸체 출처(STEP) 제어 */
+.ctl-shape { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-left: 6px; font-size: 12px; }
+.shape-btn { font-size: 11.5px; padding: 3px 8px; border: 1px solid #c9cfdb; border-radius: 5px; background: #fff; cursor: pointer; }
+.shape-btn:disabled { opacity: .45; cursor: default; }
+.shape-info { color: #5a6478; }
+.shape-info.busy { color: #2f6fd6; }
+.shape-info.err, .shape-info .warn { color: #c96a26; }

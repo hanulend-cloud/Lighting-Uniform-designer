@@ -3,6 +3,7 @@
 // 프로젝트.md §Stage1. 계수는 캘리브레이션 대상.
 
 import { lambertianExponent } from '../engine/photometry.js';
+import { importedBodyActive, bodyHeightsAt, getBody } from '../engine/shape/runtime.js';
 
 export const LEVEL_SCHEMA = {
   1: {
@@ -358,6 +359,15 @@ export function bodyProfile(spec, active, leds, depth, pitch, nx = 160) {
   const near = useL4 ? (lxs.length ? (x) => Math.min(...lxs.map((v) => Math.abs(x - v))) : () => 1e9) : null;
   const halfP = useL4 ? Math.max(1, pitch / 2) : null;
 
+  // L3 = 불러온 STEP 몸체(형상 몸체 spec §3): 높이맵 단면(y = 타겟 중앙). 몸체 외곽 범위만 — 밖은 점 없음.
+  if (importedBodyActive(spec, [...A])) {
+    const hf = getBody().hf, xs0 = X / 2 + hf.x0, xs1 = X / 2 + hf.x0 + hf.nx * hf.cell, pts = [];
+    for (let i = 0; i < nx; i++) {
+      const x = xs0 + ((i + 0.5) / nx) * (xs1 - xs0), h = bodyHeightsAt(spec, depth, x, Y / 2);
+      if (h) pts.push({ x, botZ: h.bot, topZ: h.top });
+    }
+    return pts;
+  }
   const pts = [];
   for (let i = 0; i < nx; i++) {
     const x = (i / (nx - 1)) * X;
