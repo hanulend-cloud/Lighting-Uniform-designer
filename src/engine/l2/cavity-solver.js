@@ -116,7 +116,43 @@ function up(c, cx, cy, k, nx, ny) {
 // mat = { musR(1/mm), g, mua(1/mm), n }, t = 슬래브 두께 mm, h = 공기 갭 mm, rhoB = 기판 반사율, rW = 벽 유효 반사율
 // uniformTail=false: 원거리 도광 성분을 퍼뜨리지 않고 res.tail(질량)로 돌려준다(PSF 용 — 호출측이 기구 면적에 분배).
 // gapRmax: 갭 전달 커널 절단 반경(mm) — 기본 = 도메인 최대 치수.
-export function solveCavity({ E, nx, ny, step, table, mat, t, h, rhoB, rW, uniformTail = true, gapRmax }) {
+// 경사 입사 측방 시프트(단일 광원 PSF 전용, center = 광원 위치 mm): 출사 중심이 입사점보다 바깥(r → R = r + sh(r)).
+// 밀도 역매핑: out(R) = in(r)·(r/R)·(dr/dR) — 셀 질량 밀어내기(splat)는 중심 셀이 이웃을 받지 못해 축소가 안 되므로 쓰지 않는다.
+// 격자 밖으로 나간 질량·보간 오차는 lost(= 입력합 − 출력합)로 장부에 넣는다. (형상 MC VS6 로 확인된 PSF 결함 수정)
+function radialShift(f, nx, ny, step, center, sh) {
+  const out = new Float64Array(f.length), d = 1e-3;
+  let sIn = 0, sOut = 0;
+  for (let k = 0; k < f.length; k++) sIn += f[k];
+  const at = (x, y) => {   // 셀 중심 격자 쌍선형
+    const fa = x / step - 0.5, fb = y / step - 0.5, a0 = Math.floor(fa), b0 = Math.floor(fb), ta = fa - a0, tb = fb - b0;
+    let v = 0;
+    for (const [a, b, w] of [[a0, b0, (1 - ta) * (1 - tb)], [a0 + 1, b0, ta * (1 - tb)], [a0, b0 + 1, (1 - ta) * tb], [a0 + 1, b0 + 1, ta * tb]]) {
+      if (w > 0 && a >= 0 && b >= 0 && a < nx && b < ny) v += w * f[b * nx + a];
+    }
+    return v;
+  };
+  for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) {
+    const X = (i + 0.5) * step - center.x, Y = (j + 0.5) * step - center.y, R = Math.hypot(X, Y);
+    let r = R, J;
+    if (R < 1e-9) { const g = 1 + (sh(d) - sh(0)) / d; J = 1 / (g * g); r = 0; }
+    else {
+      for (let it = 0; it < 30; it++) {   // r + sh(r) = R (단조) — 뉴턴
+        const F = r + sh(r) - R, dF = 1 + (sh(r + d) - sh(Math.max(0, r - d))) / (r + d - Math.max(0, r - d));
+        const nr = Math.max(0, r - F / dF);
+        if (Math.abs(nr - r) < 1e-9) { r = nr; break; }
+        r = nr;
+      }
+      const dRdr = 1 + (sh(r + d) - sh(Math.max(0, r - d))) / (r + d - Math.max(0, r - d));
+      J = (r / R) / dRdr;
+    }
+    const k = R > 1e-9 ? r / R : 0;
+    const v = at(center.x + X * k, center.y + Y * k) * J;
+    out[j * nx + i] = v; sOut += v;
+  }
+  return { out, lost: sIn - sOut };
+}
+
+export function solveCavity({ E, nx, ny, step, table, mat, t, h, rhoB, rW, uniformTail = true, gapRmax, center = null }) {
   const N = nx * ny, tauR = mat.musR * t, muaT = mat.mua * t;
   const qb = E.map((_, b) => table.query(tauR, mat.g, mat.n, b, muaT));
   const qd = table.query(tauR, mat.g, mat.n, table.diffuseRow, muaT);
@@ -130,15 +166,39 @@ export function solveCavity({ E, nx, ny, step, table, mat, t, h, rhoB, rW, unifo
     if (!(se > 0)) continue;
     input += se; slabAbs += (1 - q.Tb - q.Ts - q.R) * se;
     for (let i = 0; i < N; i++) { Mball[i] += q.Tb * e[i]; D0[i] += q.R * e[i]; }
-    if (q.Ts > 0) jobs.push(scatJob(e, q, se));
+    if (q.Ts > 0) jobs.push(scatJob(e, q, se, center ? b : -1));
+  }
+  if (center) {   // 직진 성분: 기하 시프트 t·tanθ' (입사각 = 광원 기하에서 정확)
+    const n = mat.n, r = radialShift(Mball, nx, ny, step, center, (rr) => {
+      const s1 = rr / Math.hypot(rr, Math.max(h, 1e-3)) / n; return t * s1 / Math.sqrt(1 - s1 * s1);
+    });
+    Mball.set(r.out); leak += r.lost;
   }
   runJobs(jobs, Mscat);
-  function scatJob(e, q, se) {
-    const near = 1 - q.radTail, src = new Float64Array(N);
+  // 행 b 의 산란 투과 평균 시프트 / 직진 시프트(t·tanθ') 비 — 행 0(수직)은 0/0 이라 행 1 값 사용
+  function fwdRatio(b) {
+    const bb = Math.max(1, b), c = table.grids.rows[bb], s1 = Math.sqrt(1 - c * c) / mat.n, q = qb[bb] ?? table.query(tauR, mat.g, mat.n, bb, muaT);
+    return q.shift / (s1 / Math.sqrt(1 - s1 * s1));
+  }
+  function scatJob(e, q, se, b = -1) {
+    const near = 1 - q.radTail;
+    let src = new Float64Array(N);
     for (let i = 0; i < N; i++) src[i] = q.Ts * near * e[i];
+    let scale = 1;
+    if (b >= 0) {
+      // 출사 중심을 바깥으로 옮김: 셀 입사각(광원 기하)의 직진 시프트 t·tanθ' × 행의 전방 비(MC 평균 시프트 / 직진 시프트).
+      // 작은 입사각도 r·(1 + t/(n·h)) 확대가 생기므로 행 상수 시프트(0° 행 = 0)로는 중심이 과집중된다(VS6).
+      // 반경 분포(입사점 기준 |Δr|)는 2차 모멘트 보존 축소: <ρ²> = <r²> − shift_b² → 축척 √(<ρ²>/<r²>)
+      const f = fwdRatio(b), shift = q.shift * t, hh = Math.max(h, 1e-3);
+      const r = radialShift(src, nx, ny, step, center, (rr) => { const s1 = rr / Math.hypot(rr, hh) / mat.n; return f * t * s1 / Math.sqrt(1 - s1 * s1); });
+      src = r.out; leak += r.lost;
+      let m2 = 0, m0 = 0;
+      for (let k = 0; k < N_RAD; k++) { const rr = 0.5 * (radEdge(k) + radEdge(k + 1)) * t * (q.radScale || 1); m2 += q.rad[k] * rr * rr; m0 += q.rad[k]; }
+      if (m2 > 0) scale = Math.sqrt(Math.max(0.05, 1 - (shift * shift) / (m2 / m0)));
+    }
     const tm = q.Ts * q.radTail * se;                    // 슬래브 도광(원거리) 성분 — 균일 근사
     if (!uniformTail) tail += tm;
-    return { src, kern: radialKernel(q.rad, t * (q.radScale || 1), step), u: uniformTail ? tm / N : 0 };   // 흡수 측방 축소 반영
+    return { src, kern: radialKernel(q.rad, t * (q.radScale || 1) * scale, step), u: uniformTail ? tm / N : 0 };   // 흡수 측방 축소 반영
   }
   function runJobs(list, target) {
     for (let k = 0; k < list.length; k += 2) {

@@ -6,6 +6,8 @@ export function bandIrradiance({ sources, m = 1, intensity, I0 = 1, h, nx, ny, s
   const Ifn = intensity ?? ((c) => Math.pow(c, m));
   const E = Array.from({ length: table.angleRows }, () => new Float64Array(nx * ny));
   const fine = h < 2 * step, near2 = (4 * step) ** 2, SS = 8;
+  // 인접 두 입사각 행에 선형 분배(table.bandSplit) — 행 사이 입사각의 응답을 보간
+  const add = (c, k, v) => { const [b0, b1, w1] = table.bandSplit(c); E[b0][k] += v * (1 - w1); if (w1) E[b1][k] += v * w1; };
   for (const s of sources) {
     const I = s.I0 ?? I0;
     for (let j = 0; j < ny; j++) {
@@ -17,11 +19,11 @@ export function bandIrradiance({ sources, m = 1, intensity, I0 = 1, h, nx, ny, s
           for (let b = 0; b < SS; b++) for (let a = 0; a < SS; a++) {
             const dx = ddx + ((a + 0.5) / SS - 0.5) * step, dy = ddy + ((b + 0.5) / SS - 0.5) * step;
             const r2 = dx * dx + dy * dy + h * h, c = h / Math.sqrt(r2);
-            E[table.bandOf(c)][j * nx + i] += I * Ifn(c) * c / r2 / (SS * SS);
+            add(c, j * nx + i, I * Ifn(c) * c / r2 / (SS * SS));
           }
         } else {
           const r2 = ddx * ddx + ddy * ddy + h * h, c = h / Math.sqrt(r2);
-          E[table.bandOf(c)][j * nx + i] += I * Ifn(c) * c / r2;
+          add(c, j * nx + i, I * Ifn(c) * c / r2);
         }
       }
     }

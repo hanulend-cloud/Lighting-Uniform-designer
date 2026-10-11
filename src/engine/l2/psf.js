@@ -8,18 +8,22 @@ import { normalRadianceFactor } from './slab-table.js';
 
 const cache = new Map();
 const MAX_CELLS = 255;
+// 경사 입사 측방 시프트(셀별 기하 + 행별 전방 비) — 형상 MC(VS6)로 확인된 물리. 끄기는 검증용
+// (다광원 전체 캐비티 solve 와의 중첩 동등성 검사: 그 solve 에는 단일 광원 중심이 없어 시프트를 적용할 수 없다).
+let lateralShift = true;
+export function setLateralShift(on) { lateralShift = !!on; }
 
 // intensity(cos): LED 상대 광도(정면 1), I0: 정면 광도. extentX/Y: PSF 영역 크기(mm). step: 목표 격자(mm).
 export function systemPsf({ table, mat, t, h, rhoB, intensity, intensityKey, I0, extentX, extentY, step }) {
   const s = Math.max(step, extentX / MAX_CELLS, extentY / MAX_CELLS);
   const odd = (v) => { const k = Math.max(3, Math.ceil(v)); return k % 2 ? k : k + 1; };
   const nx = odd(extentX / s), ny = odd(extentY / s);
-  const key = [table.phaseKey ?? 'HG', mat.musR, mat.g, mat.mua, mat.n, t, h, rhoB, intensityKey, I0, nx, ny, s].map((v) => (typeof v === 'number' ? v.toPrecision(6) : v)).join('|');
+  const key = [lateralShift ? 'S' : 'N', table.phaseKey ?? 'HG', mat.musR, mat.g, mat.mua, mat.n, t, h, rhoB, intensityKey, I0, nx, ny, s].map((v) => (typeof v === 'number' ? v.toPrecision(6) : v)).join('|');
   const hit = cache.get(key);
   if (hit) return hit;
 
   const E = bandIrradiance({ sources: [{ x: (nx * s) / 2, y: (ny * s) / 2, I0 }], intensity, h: Math.max(h, 1e-3), nx, ny, step: s, table });
-  const res = solveCavity({ E, nx, ny, step: s, table, mat, t, h, rhoB, rW: 0, uniformTail: false, gapRmax: Math.max(extentX, extentY) / 2 });
+  const res = solveCavity({ E, nx, ny, step: s, table, mat, t, h, rhoB, rW: 0, uniformTail: false, gapRmax: Math.max(extentX, extentY) / 2, center: lateralShift ? { x: (nx * s) / 2, y: (ny * s) / 2 } : null });
   const tauR = mat.musR * t, muaT = mat.mua * t;
   const qn = table.query(tauR, mat.g, mat.n, 0, muaT), qd = table.query(tauR, mat.g, mat.n, table.diffuseRow, muaT);
   const sum = (a) => a.reduce((p, v) => p + v, 0);
@@ -50,7 +54,8 @@ export function systemTransFast({ table, mat, t, rhoB, intensity }) {
   const K = 900;
   for (let i = 0; i < K; i++) {
     const th = ((i + 0.5) / K) * (Math.PI / 2), c = Math.cos(th);
-    f[table.bandOf(c)] += intensity(c) * Math.sin(th);      // ∝ ∫ I(θ) dΩ (조도 입사각 = 방출각)
+    const [b0, b1, w1] = table.bandSplit(c), v = intensity(c) * Math.sin(th);   // ∝ ∫ I(θ) dΩ (조도 입사각 = 방출각)
+    f[b0] += v * (1 - w1); f[b1] += v * w1;
   }
   const tot = f.reduce((a, v) => a + v, 0);
   let T = 0, R = 0;

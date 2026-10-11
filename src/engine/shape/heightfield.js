@@ -83,6 +83,22 @@ function edgeOwns(x1, y1, x2, y2, area2) {
   return (ey === 0 && ex < 0) || ey > 0;
 }
 
+// 해석 형상 → 높이맵(Float64, 검증·생성 평판용). W×H 외곽(중심 원점), ztFn/zbFn(x,y) = 윗면·바닥 z.
+export function heightfieldFromFn(W, H, cell, ztFn, zbFn) {
+  const nx = Math.max(2, Math.round(W / cell)), ny = Math.max(2, Math.round(H / cell)), cx = W / nx, cy = H / ny;
+  if (Math.abs(cx - cy) > 1e-9) throw new Error('heightfieldFromFn: W/cell, H/cell 은 같은 셀 크기여야 함');
+  const N = nx * ny, zt = new Float64Array(N), zb = new Float64Array(N), mask = new Uint8Array(N).fill(1), x0 = -W / 2, y0 = -H / 2;
+  let tmin = Infinity, tmax = -Infinity, zbMin = Infinity, ztMax = -Infinity;
+  for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) {
+    const x = x0 + (i + 0.5) * cx, y = y0 + (j + 0.5) * cx, k = j * nx + i;
+    zt[k] = ztFn(x, y); zb[k] = zbFn(x, y);
+    const th = zt[k] - zb[k]; if (th < tmin) tmin = th; if (th > tmax) tmax = th;
+    if (zb[k] < zbMin) zbMin = zb[k]; if (zt[k] > ztMax) ztMax = zt[k];
+  }
+  return { nx, ny, cell: cx, x0, y0, zt, zb, cnt: new Uint8Array(N).fill(2), mask, size: { x: W, y: H, z: ztMax - zbMin },
+    stats: { area: W * H, non25DFrac: 0, oddFrac: 0, thkMin: tmin, thkMax: tmax } };
+}
+
 // 이중선형 표본: 셀 중심 격자. 밖이면 null
 export function sampleHeightfield(hf, x, y) {
   const fx = (x - hf.x0) / hf.cell - 0.5, fy = (y - hf.y0) / hf.cell - 0.5;

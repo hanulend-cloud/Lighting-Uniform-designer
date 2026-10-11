@@ -140,7 +140,18 @@ export function createTable(meta, data) {
     for (let k = 0; k < angleRows; k++) { const e = Math.abs(G.rows[k] - mu); if (e < d) { d = e; best = k; } }
     return best;
   }
-  return { meta, grids: G, angleRows, diffuseRow, query, bandOf, _data: data, _off: off };
+  // 입사 cos → 인접 두 행 선형 보간 가중 [b0, b1, w1] (행은 cos 내림차순). 최근접 행 통째 배정은 밴드 경계에서
+  // 커널이 계단식으로 바뀌어 PSF 에 고리·과집중을 만든다(형상 MC VS6 에서 확인).
+  const _split = [0, 0, 0];
+  function bandSplit(mu) {
+    const R = G.rows;
+    if (mu >= R[0]) { _split[0] = 0; _split[1] = 0; _split[2] = 0; return _split; }
+    for (let k = 0; k < angleRows - 1; k++) {
+      if (mu >= R[k + 1]) { _split[0] = k; _split[1] = k + 1; _split[2] = (R[k] - mu) / (R[k] - R[k + 1]); return _split; }
+    }
+    _split[0] = angleRows - 1; _split[1] = angleRows - 1; _split[2] = 0; return _split;
+  }
+  return { meta, grids: G, angleRows, diffuseRow, query, bandOf, bandSplit, _data: data, _off: off };
 }
 
 // 반경 분포의 RMS 반경(두께 단위)

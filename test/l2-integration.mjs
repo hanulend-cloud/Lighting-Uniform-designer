@@ -11,6 +11,7 @@ import { fresnelT } from '../src/engine/photometry.js';
 import { solveCavity } from '../src/engine/l2/cavity-solver.js';
 import { bandIrradiance } from '../src/engine/l2/incident.js';
 import { migrateMilkyV13 } from '../src/engine/l2/material.js';
+import { setLateralShift } from '../src/engine/l2/psf.js';
 
 let fail = 0;
 const ok = (cond, msg) => { console.log((cond ? 'PASS ' : 'FAIL ') + msg); if (!cond) fail++; };
@@ -24,10 +25,13 @@ const field = (s, extra = {}) => {
   return computeField(s, { depth: s.space.depth, pitchX: 25, pitchY: 25, nx: g.nx, ny: g.ny, transmit: eff.transmit, l2: eff.l2, ...extra });
 };
 
-// 1) PSF 중첩 vs 기구 전체 캐비티 solve(같은 물성, 벽 접기 rW) — 중심부 평균·리플 일치
+// 1) PSF 중첩 vs 기구 전체 캐비티 solve(같은 물성, 벽 접기 rW) — 중심부 평균·리플 일치.
+//    중첩 기계장치의 동등성 검사라 PSF 의 측방 시프트(단일 광원 전용, 물리 검증은 test/shape-mc VS6)는 끄고 비교.
 {
   const s = base(); s.levels[2].milky = 5;
+  setLateralShift(false);
   const f = field(s);
+  setLateralShift(true);
   const d = l2Describe(s, s.space.depth, s.levels[2]);
   const leds = ledPositions(s, 25, 25), step = 1, nx = 100, ny = 100;
   // 기준에도 직접광의 측벽 반사(거울 LED × rW)를 넣어 같은 물리를 비교 — 산란·재순환 성분의 벽은 solver 의 접기(rW)
