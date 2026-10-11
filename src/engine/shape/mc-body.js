@@ -27,8 +27,29 @@ export function makeScene({ hf, ox, oy, depth, n, medium = null, phase = null, r
     const k = j * NX + i;
     if (w) { ct[k] = depth + st / w; cb[k] = depth + sb / w; if (cb[k] < zMinBot) zMinBot = cb[k]; if (ct[k] > zMaxTop) zMaxTop = ct[k]; }
   }
+  // 셀별 높이 범위(꼭짓점 4개): 선분의 z 범위가 몸체 안(바닥 최대 < z < 윗면 최소) 또는 밖(바닥 최소 아래·윗면 최대 위)이면
+  // 평면 교차 검사 생략 — 평탄·완만한 영역에서 교차 비용 대부분 제거(결과 동일)
+  const cTmin = new Float64Array(nx * ny), cTmax = new Float64Array(nx * ny), cBmin = new Float64Array(nx * ny), cBmax = new Float64Array(nx * ny);
+  for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) {
+    const k = j * NX + i, q = j * nx + i, a = ct[k], b = ct[k + 1], c2 = ct[k + NX], d = ct[k + NX + 1], e = cb[k], f = cb[k + 1], g2 = cb[k + NX], h = cb[k + NX + 1];
+    cTmin[q] = Math.min(a, b, c2, d); cTmax[q] = Math.max(a, b, c2, d); cBmin[q] = Math.min(e, f, g2, h); cBmax[q] = Math.max(e, f, g2, h);
+  }
+  // 8×8 셀 블록 범위(2단 DDA): 마스크 균일 블록에서 선분 z 범위가 몸체 안/밖이면 블록 전체를 한 번에 건너뜀
+  const BS = 8, nbx = Math.ceil(nx / BS), nby = Math.ceil(ny / BS), NB = nbx * nby;
+  const bTmin = new Float64Array(NB).fill(Infinity), bTmax = new Float64Array(NB).fill(-Infinity), bBmin = new Float64Array(NB).fill(Infinity), bBmax = new Float64Array(NB).fill(-Infinity), bMask = new Uint8Array(NB);
+  const cntM = new Int32Array(NB), cntA = new Int32Array(NB);
+  for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) {
+    const q = j * nx + i, b = ((j / BS) | 0) * nbx + ((i / BS) | 0);
+    cntA[b]++;
+    if (!mask[q]) continue;
+    cntM[b]++;
+    if (cTmin[q] < bTmin[b]) bTmin[b] = cTmin[q]; if (cTmax[q] > bTmax[b]) bTmax[b] = cTmax[q];
+    if (cBmin[q] < bBmin[b]) bBmin[b] = cBmin[q]; if (cBmax[q] > bBmax[b]) bBmax[b] = cBmax[q];
+  }
+  for (let b = 0; b < NB; b++) bMask[b] = cntM[b] === 0 ? 0 : cntM[b] === cntA[b] ? 1 : 2;
   return {
-    nx, ny, NX, c, gx0: ox + hf.x0, gy0: oy + hf.y0, mask, ct, cb, zMinBot, zMaxTop, depth, n,
+    BS, nbx, bTmin, bTmax, bBmin, bBmax, bMask,
+    nx, ny, NX, c, gx0: ox + hf.x0, gy0: oy + hf.y0, mask, ct, cb, cTmin, cTmax, cBmin, cBmax, zMinBot, zMaxTop, depth, n,
     mus: medium?.mus ?? 0, g: medium?.g ?? 0, mua: medium?.mua ?? 0, phase, rhoB, walls,
   };
 }
@@ -87,12 +108,37 @@ function bodyHits(S, px, py, pz, dx, dy, dz, inBody, tLim) {
   const tdx = dx !== 0 ? c / Math.abs(dx) : Infinity, tdy = dy !== 0 ? c / Math.abs(dy) : Infinity;
   let tmx = dx !== 0 ? (gx0 + (i + (dx > 0 ? 1 : 0)) * c - px) / dx : Infinity;
   let tmy = dy !== 0 ? (gy0 + (j + (dy > 0 ? 1 : 0)) * c - py) / dy : Infinity;
-  let ta = t0;
+  let ta = t0, lastBlk = -1;
   for (let guard = 0; guard < 1e6; guard++) {
+    // 블록 건너뛰기: 마스크 균일 블록에서 블록 출구까지 선분 z 범위가 몸체 안(몸체 광선)/밖(공기 광선)이면 출구 셀로 점프
+    const BS = S.BS, bi = (i / BS) | 0, bj = (j / BS) | 0, bk = bj * S.nbx + bi, bm = S.bMask[bk];
+    if (bk !== lastBlk && bm !== 2 && !(inBody && bm === 0)) {
+      lastBlk = bk;
+      const bx0 = gx0 + bi * BS * c, bx1 = Math.min(gx1, gx0 + (bi + 1) * BS * c), by0 = gy0 + bj * BS * c, by1 = Math.min(gy1, gy0 + (bj + 1) * BS * c);
+      const txb = dx > 0 ? (bx1 - px) / dx : dx < 0 ? (bx0 - px) / dx : Infinity, tyb = dy > 0 ? (by1 - py) / dy : dy < 0 ? (by0 - py) / dy : Infinity;
+      const tbe = Math.min(txb, tyb, t1), za = pz + ta * dz, zb2 = pz + tbe * dz, zlo = Math.min(za, zb2) - 1e-9, zhi = Math.max(za, zb2) + 1e-9;
+      const skip = bm === 0 || (inBody ? (zlo > S.bBmax[bk] && zhi < S.bTmin[bk]) : (zhi < S.bBmin[bk] || zlo > S.bTmax[bk]));
+      if (skip) {
+        if (tbe >= t1 && !inBody) return;   // 몸체 광선은 격자 경계(외곽 측면) 전이 검사가 필요 — 마지막 셀로 점프
+        const qx = px + (tbe - 1e-9) * dx, qy = py + (tbe - 1e-9) * dy;
+        const ni = Math.min(Math.min(nx, (bi + 1) * BS) - 1, Math.max(bi * BS, Math.floor((qx - gx0) / c))), nj = Math.min(Math.min(ny, (bj + 1) * BS) - 1, Math.max(bj * BS, Math.floor((qy - gy0) / c)));
+        if (ni !== i || nj !== j) {
+          i = ni; j = nj;
+          tmx = dx !== 0 ? (gx0 + (i + (dx > 0 ? 1 : 0)) * c - px) / dx : Infinity;
+          tmy = dy !== 0 ? (gy0 + (j + (dy > 0 ? 1 : 0)) * c - py) / dy : Infinity;
+          ta = Math.max(ta, Math.min(tmx, tmy, t1));   // 블록 안 평면 검사는 이미 불필요(건너뜀 조건)
+        }
+      }
+    }
     const tb = Math.min(tmx, tmy, t1);
-    const cur = S.mask[j * nx + i];
-    if (cur) cellPlanes(S, i, j, px, py, pz, dx, dy, dz, ta, tb);
-    if (ev.t <= tb + 1e-12 || tb >= t1) return;
+    const q = j * nx + i, cur = S.mask[q];
+    if (cur) {
+      const za = pz + ta * dz, zb = pz + tb * dz, zlo = (za < zb ? za : zb) - 1e-9, zhi = (za < zb ? zb : za) + 1e-9;
+      const skip = inBody ? (zlo > S.cBmax[q] && zhi < S.cTmin[q]) : (zhi < S.cBmin[q] || zlo > S.cTmax[q]);
+      if (!skip) cellPlanes(S, i, j, px, py, pz, dx, dy, dz, ta, tb);
+    }
+    // 셀 경계 교차가 t1(격자 끝 = 몸체 외곽)과 겹쳐도 전이(측면) 검사는 해야 한다 — 부동소수 등호에 기대지 않음
+    if (ev.t <= tb + 1e-12 || Math.min(tmx, tmy) > t1 + 1e-9) return;
     // 다음 셀로 — 측벽 판정
     const stepX = tmx <= tmy, ni = stepX ? i + sx : i, nj = stepX ? j : j + sy;
     const qx = px + tb * dx, qy = py + tb * dy, qz = pz + tb * dz;
@@ -134,7 +180,8 @@ function nextEvent(S, px, py, pz, dx, dy, dz, inBody, tMax) {
     // 빠른 경로(몸체 내부 짧은 자유행로): 끝점이 같은 셀이면 그 셀 패치만 검사 — 측벽은 셀 경계에서만 생기므로 정확
     const c = S.c, fi = (px - S.gx0) / c, fj = (py - S.gy0) / c, i = Math.floor(fi), j = Math.floor(fj);
     if (i >= 0 && j >= 0 && i < S.nx && j < S.ny && Math.floor(fi + tMax * dx / c) === i && Math.floor(fj + tMax * dy / c) === j && S.mask[j * S.nx + i]) {
-      cellPlanes(S, i, j, px, py, pz, dx, dy, dz, 0, tMax);
+      const q = j * S.nx + i, za = pz, zb = pz + tMax * dz, zlo = (za < zb ? za : zb) - 1e-9, zhi = (za < zb ? zb : za) + 1e-9;
+      if (!(zlo > S.cBmax[q] && zhi < S.cTmin[q])) cellPlanes(S, i, j, px, py, pz, dx, dy, dz, 0, tMax);
       return ev;
     }
   }
@@ -194,6 +241,7 @@ function ledModel(led) {
     const tot = cdf[K];
     return {
       solid: 2 * Math.PI * tot,
+      uOf(theta) { const f = Math.min(K, Math.max(0, (theta / (Math.PI / 2)) * K)), i = Math.min(K - 1, Math.floor(f)); return (cdf[i] + (cdf[i + 1] - cdf[i]) * (f - i)) / tot; },
       cosTheta(u) {   // 역 CDF(구간 선형)
         const v = u * tot; let lo = 0, hi = K;
         while (hi - lo > 1) { const mid = (lo + hi) >> 1; if (cdf[mid] <= v) lo = mid; else hi = mid; }
@@ -203,7 +251,7 @@ function ledModel(led) {
     };
   }
   const m = lambertianExponent(led.beamX);
-  return { solid: (2 * Math.PI) / (m + 1), cosTheta: (u) => Math.pow(1 - u, 1 / (m + 1)) };
+  return { solid: (2 * Math.PI) / (m + 1), cosTheta: (u) => Math.pow(1 - u, 1 / (m + 1)), uOf: (theta) => 1 - Math.pow(Math.max(0, Math.cos(theta)), m + 1) };
 }
 // LED 1개 광속(I0 단위 × sr) — 장부 기준
 export function ledFlux(led) { return (led.I0 ?? 1) * ledModel(led).solid; }
@@ -316,3 +364,7 @@ export function runBodyMC(S, { leds = [null], led = { I0: 1 }, emit = null, N, s
   const t1 = typeof performance !== 'undefined' ? performance.now() : Date.now();
   return { ledger, maps, ang, ms: t1 - t0 };
 }
+
+// ---- 빠른 solver(fast-body.js) 공용 내부 — 같은 기하·계면 코드를 써서 두 solver 가 기하에서 어긋나지 않게 ----
+export const _K = { NONE, TOP, BOT, SIDE, PCB, WALL, ESC_SIDE, ESC_UP };
+export { nextEvent as _nextEvent, interface_ as _interface, ledModel as _ledModel };

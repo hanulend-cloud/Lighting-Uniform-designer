@@ -55,6 +55,17 @@ if (run('VS3')) {
   const err = Math.max(Math.abs(e.p[0] - 5), Math.abs(e.p[1] - (9 + 3 * Math.tan(th))), Math.abs(e.N[0] + 1), Math.abs(e.R - fresnelIndep(Math.cos(th), 1, n)),
     Math.abs(e.dOut[0] - cosT), Math.abs(e.dOut[1] - sinT), Math.abs(e.dOut[2]));
   ok(e.kind === 'side' && err <= 1e-9, `VS3 측벽(공기→몸체 30°): 교점·법선·R·굴절 오차 ${err.toExponential(1)} (≤1e-9)`);
+  // 회귀(2026-10-12): 몸체 안 광선이 격자 끝(외곽 측면)에 닿을 때 셀 경계 = 격자 끝 부동소수 등호로 측면을 놓쳐
+  // 산란 매질에서 광자가 기하 밖에서 계속 산란하던 버그 — 바닥으로 들어온 광선은 반드시 다음 사건(윗면·측면)이 있어야 한다.
+  const hf2 = heightfieldFromFn(56, 46, 0.25, (x, y) => -((x * x + y * y) / 800), () => -2.5), sc2 = makeScene({ hf: hf2, ox: 30, oy: 25, depth: 9, n: 1.59 });
+  let lostIn = 0, M = 20000;
+  for (let k = 0; k < M; k++) {
+    const u = (k + 0.5) / M, o = [2 + 56 * ((u * 7919) % 1), 2 + 46 * ((u * 104729) % 1), 1e-6], th = Math.acos(Math.sqrt(1 - ((u * 15485863) % 1))), ph = 2 * Math.PI * ((u * 32452843) % 1);
+    const ev = traceRay(sc2, o, [Math.sin(th) * Math.cos(ph), Math.sin(th) * Math.sin(ph), Math.cos(th)], 16);
+    const last = ev.at(-1);
+    if (ev.length < 16 && last && last.R !== undefined && !(last.kind === 'top' && last.inBody) && (last.inBody ? last.R >= 1 : last.R < 1)) lostIn++;   // 마지막 계면 뒤 몸체 안인데 사건 없음
+  }
+  ok(lostIn === 0, `VS3 외곽 측면 놓침 회귀: 몸체 안에서 사건 없이 끝난 광선 ${lostIn}/${M} (=0)`);
 }
 if (run('VS2')) {
   const n = 1.59, depth = 9, X = 60, Y = 50;

@@ -100,7 +100,13 @@ function searchSparsest(evalAt, target, pMin, pMax, seed, need = 2, iters = 8) {
 // 스케일까지 촘촘해지지 않는 한) 탐색이 정직하게 보여준다(= 확산재가 필요하다는 결론).
 // coneDeg 는 히트맵 기본값과 맞춘 고정값 — 판정용이라 과도한 자유도를 늘리지 않는다.
 const LUMIN_CONE_DEG = 10;
-function evalField(spec, eff, pX, pY, gridN = GRID, padX = 0, padY = 0) {
+// fidelity: 형상 solver 정밀도 — 탐색 반복은 'search', 최종안 재검증은 'full'(형상 몸체 spec §4.2, S2a).
+// SHAPE_PROXY: 레벨별 참고표(단독 행·자동 제안)의 파라미터·피치 탐색은 수백 회 평가라 광선관 대신 경량 대리 모델
+// (edgeBoost 스칼라)로 훑고, 최종안만 'full' 광선관으로 재검증한다(표시 수치는 광선관 — 정직).
+let SHAPE_PROXY = false;
+function withShapeProxy(fn) { const prev = SHAPE_PROXY; SHAPE_PROXY = true; try { return fn(); } finally { SHAPE_PROXY = prev; } }
+function evalField(spec, eff, pX, pY, gridN = GRID, padX = 0, padY = 0, fidelity = 'search') {
+  const proxy = SHAPE_PROXY && fidelity !== 'full';
   const g = evalGrid(spec, gridN);
   const usingCamera = spec.goal.metric === 'lumin' && !((eff.blurX ?? 0) > 0 || (eff.blurY ?? 0) > 0);
   const f = usingCamera
@@ -112,7 +118,7 @@ function evalField(spec, eff, pX, pY, gridN = GRID, padX = 0, padY = 0) {
     : computeField(spec, {
         depth: spec.space.depth, pitchX: pX, pitchY: pY, nx: g.nx, ny: g.ny,
         blurMmX: eff.blurX, blurMmY: eff.blurY, transmit: eff.transmit,
-        decenterX: eff.decenterX ?? 0, decenterY: eff.decenterY ?? 0, edgeBoost: eff.edgeBoost,
+        decenterX: eff.decenterX ?? 0, decenterY: eff.decenterY ?? 0, edgeBoost: eff.edgeBoost, active: proxy ? undefined : eff.active, shape: proxy ? undefined : eff.shape, shapeFidelity: fidelity,
         padX, padY, l2: eff.l2,
       });
   // L3(균일두께 용기)가 켜져 있으면 그 보강 폭만큼 판정 마진을 줄여, 보강 효과가 실제로 반영되게 함.
@@ -135,18 +141,19 @@ function evalField(spec, eff, pX, pY, gridN = GRID, padX = 0, padY = 0) {
 }
 
 // 한 번의 solve 안에서 동일 (pX,pY) 재평가 방지
-function memoEval(spec, eff, gridN, padX = 0, padY = 0) {
+function memoEval(spec, eff, gridN, padX = 0, padY = 0, fidelity = 'search') {
   const cache = new Map();
   return (pX, pY) => {
     const k = `${pX.toFixed(2)}|${pY == null ? '-' : pY.toFixed(2)}`;
     let v = cache.get(k);
-    if (!v) { v = evalField(spec, eff, pX, pY ?? pX, gridN, padX, padY); cache.set(k, v); }
+    if (!v) { v = evalField(spec, eff, pX, pY ?? pX, gridN, padX, padY, fidelity); cache.set(k, v); }
     return v;
   };
 }
 
 export function solveSolo(spec, active) {
-  const r = solveXY(spec, active, GRID_SOLO);
+  const shapeLv = active.length === 1 && (active[0] === 3 || active[0] === 4);
+  const r = shapeLv ? finalizeShape(spec, active, GRID_SOLO, null, withShapeProxy(() => solveXY(spec, active, GRID_SOLO))) : solveXY(spec, active, GRID_SOLO);
   return preferReasonableInfeasible(spec, combinedEffect(spec, spec.space.depth, active), r, GRID_SOLO);
 }
 
@@ -257,7 +264,21 @@ function solveXY(spec, active, gridN, effOverride, pMaxOverride) {
   }
   // LED 수 하한(N_MIN_LEDS)은 rankOf 에서 판정 조건으로 직접 다룬다(성긴 쪽부터 훑는 탐색이
   // 6개 미만 배치를 자연히 건너뛰고 그다음 성긴 배치를 고른다).
-  return best;
+  return finalizeShape(spec, active, gridN, effOverride, best);
+}
+
+// 형상 solver(투명 L3·L4·불러온 몸체): 탐색은 'search' 정밀도 → 최종안을 'full' 로 재평가해 판정·수치를 확정.
+// 탐색에서 달성이었는데 full 에서 미달이면 피치를 1mm 씩(최대 4회) 줄여 full 달성점을 찾는다(정밀도 차 ~1%p 흡수).
+function finalizeShape(spec, active, gridN, effOverride, best) {
+  const { maxD, target, pMin, X, Y } = bounds(spec);
+  const eff = effOverride ?? combinedEffect(spec, maxD, active);
+  if (!eff.shape || eff.l2 || !best || SHAPE_PROXY) return best;   // 대리 탐색 중엔 바깥에서 1회만 재검증
+  // 피치 축소 단계는 'search'(빠름), 확정 수치는 'full' 1회 — full 이 그래도 미달이면 그대로 보고(정직)
+  const atS = memoEval(spec, eff, gridN, best.padX ?? 0, best.padY ?? 0, 'search');
+  let pX = best.pitchX, pY = best.pitchY ?? best.pitchX;
+  for (let g = 0; best.feasible && rankOf(atS(pX, pY), target) < 2 && g < 4 && (pX > pMin || pY > pMin); g++) { pX = Math.max(pMin, pX - 1); pY = Math.max(pMin, pY - 1); }
+  const r = evalField(spec, eff, pX, pY, gridN, best.padX ?? 0, best.padY ?? 0, 'full');
+  return { ...pack(spec, pX, pY, r, X, Y, target, eff, maxD, best.padX ?? 0, best.padY ?? 0), fidelity: 'full' };
 }
 
 // effOverride 를 주면 combinedEffect(spec, active) 대신 그 확산 효과를 그대로 사용
@@ -341,6 +362,21 @@ export function solvePerLevel(spec, opt = {}) {
 
 // 그 레벨 고유 파라미터의 자유도 안에서 목표를 만족하는 최소 LED 해 — 참고치.
 function autoTuneLevel(spec, level) {
+  if (level !== 3 && level !== 4) return autoTuneLevelCore(spec, level);
+  const res = withShapeProxy(() => autoTuneLevelCore(spec, level));
+  // 최종안 광선관(full) 재검증 — 대리 모델 달성이 full 에서 미달이면 피치를 1mm 씩(최대 4회) 줄인다
+  const b = bounds(spec), depth = spec.space.depth, eff = levelEffect({ levels: { [level]: res.params } }, level, depth);
+  let pX = res.pitch, pY = res.pitchY ?? res.pitch;
+  const padX = res.padX ?? 0, padY = res.padY ?? 0;
+  for (let g = 0; res.feasible && rankOf(evalField(spec, eff, pX, pY, GRID_SOLO, padX, padY, 'search'), b.target) < 2 && g < 4 && (pX > b.pMin || pY > b.pMin); g++) {
+    pX = Math.max(b.pMin, pX - 1); pY = Math.max(b.pMin, pY - 1);
+  }
+  const r = evalField(spec, eff, pX, pY, GRID_SOLO, padX, padY, 'full');
+  const pk = pack(spec, pX, pY, r, b.X, b.Y, b.target, eff, depth, padX, padY);
+  return { ...res, feasible: pk.feasible, belowMinLeds: pk.belowMinLeds, pitch: pk.pitch, pitchY: pk.pitchY, nx: pk.nx, ny: pk.ny, leds: pk.leds, U0: pk.U0, U0c: pk.U0c, fidelity: 'full' };
+}
+
+function autoTuneLevelCore(spec, level) {
   const b = bounds(spec);
   const depth = spec.space.depth;
   const maxEx = extremeDiffusionParams(level, depth, 'max');
@@ -423,7 +459,7 @@ function autoTuneLevel(spec, level) {
     const rr = preferReasonableInfeasible(spec, maxEffect, rMax, GRID_SOLO);
     return {
       feasible: false, pitch: rr.pitch, pitchY: rr.pitchY, nx: rr.nx, ny: rr.ny, leds: rr.leds, U0: rr.U0, U0c: rr.U0c, params: maxParams,
-      transmit: maxEffect.transmit, overhang: rr.overhang, fixtureX: rr.fixtureX, fixtureY: rr.fixtureY,
+      transmit: maxEffect.transmit, overhang: rr.overhang, fixtureX: rr.fixtureX, fixtureY: rr.fixtureY, padX: rr.padX, padY: rr.padY,
     };
   }
 
@@ -453,7 +489,7 @@ function autoTuneLevel(spec, level) {
   return {
     feasible: packed.feasible, belowMinLeds: packed.belowMinLeds, pitch: packed.pitch, pitchY: packed.pitchY, nx: packed.nx, ny: packed.ny, leds: packed.leds, U0: packed.U0, U0c: packed.U0c,
     params: finalParams, transmit: packed.transmit, overhang: packed.overhang,
-    fixtureX: packed.fixtureX, fixtureY: packed.fixtureY,
+    fixtureX: packed.fixtureX, fixtureY: packed.fixtureY, padX, padY,
   };
 }
 

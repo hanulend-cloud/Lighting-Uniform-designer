@@ -11,6 +11,10 @@ import { milkyFromMusR } from './l2/milky.js';
 import { compositeTable } from './l2/mie-material.js';
 import { createTable } from './l2/slab-table.js';
 import { b64ToF32 } from '../model/materials-db.js';
+import { importedBodyActive } from './shape/runtime.js';
+import { buildBodyGeometry } from './shape/body-geom.js';
+import { shapeField } from './shape/fast-body.js';
+import { MUA_RESIN } from './l2/material.js';
 
 // Mie 소재의 합성 응답표(소재표 + 주 응답표) — DB 항목별 1회 디코드
 const _mieTables = new Map();
@@ -340,6 +344,49 @@ function computeFieldL2(spec, opt, g) {
   return { ...base, l2: { trans: psf.trans * T, fieldBall, fScat: psf.fScat, warnings: set.warnings, check: set.check, info: set.info } };
 }
 
+// ---- S2a 투명 형상 몸체: 높이맵(생성 평판 L3/L4 정본 수식 또는 불러온 STEP) + 광선관 앵커 PSF 중첩 ----
+// 형상 레벨이 없으면 null(기존 L1 경로). 투과율: L3·L4 의 경험 투과율(0.97·0.95)은 solver 가 Fresnel 로 직접 계산하므로 뺀다.
+const _geomCache = new Map();
+function computeFieldShape(spec, opt, g) {
+  // 형상 파라미터: 효과 객체(opt.shape = { level, params }) 우선 — 레벨 자동튜닝은 spec 이 아닌 합성 파라미터로 평가한다
+  // 활성 레벨은 호출측이 명시(opt.active / opt.shape) — spec.levels 의 on 을 몰래 읽지 않는다(기존 계약: 옵션이 물리를 결정)
+  const A = new Set(opt.active ?? (opt.shape ? [opt.shape.level] : []));
+  if (opt.shape) { A.add(opt.shape.level); spec = { ...spec, levels: { ...spec.levels, [opt.shape.level]: { ...opt.shape.params, on: true } } }; }
+  const imported = importedBodyActive(spec, [...A]);
+  if (!(A.has(3) || A.has(4)) && !imported) return null;
+  const depth = opt.depth ?? opt.od;
+  const pitchX = opt.pitchX, pitchY = opt.pitchY ?? opt.pitchX;
+  const fidelity = opt.shapeFidelity ?? 'full';
+  const gkey = [fidelity, depth, pitchX, pitchY, opt.padX ?? 0, opt.padY ?? 0, g.leds.length, g.leds[0]?.x, g.leds[0]?.y, JSON.stringify(spec.levels), spec.body?.n, spec.target.xLen, spec.target.yLen, spec.led.sizeZ, imported].join('|');
+  let geom = _geomCache.get(gkey);
+  if (!geom) {
+    // 탐색 정밀도: L4 국부 형상 셀을 0.4mm 로(교차 비용 ~½) — 최종안은 full(0.2~0.5mm) 형상으로 재검증
+    geom = buildBodyGeometry(spec, A, depth, { leds: g.leds, pitchX, pitchY, padX: opt.padX ?? 0, padY: opt.padY ?? 0, cell: fidelity === 'search' && A.has(4) ? 0.4 : undefined });
+    if (fidelity === 'search') geom.key += '|search';
+    if (_geomCache.size > 8) _geomCache.clear();
+    _geomCache.set(gkey, geom);
+  }
+  const model = spec.led.model;
+  const p = model === 'gaussian' ? { sigma: gaussianSigma(spec.led.beamX) } : { m: lambertianExponent(spec.led.beamX) };
+  const I0 = axialIntensityFromFlux(spec.led.fluxLm, model, p);
+  const useL4 = A.has(4), uniform = !imported && !(A.has(3) && !useL4);
+  // 거울 재사용: 생성 형상(대칭 수식) + 중심 대칭 배치(디센터 없음) + 대칭 벽(±pad)
+  const symmetric = !imported && Math.abs(opt.decenterX ?? 0) < 1e-9 && Math.abs(opt.decenterY ?? 0) < 1e-9;
+  const res = shapeField(geom, depth, g.leds, { model, beamX: spec.led.beamX, I0 }, { NX: g.NX, NY: g.NY, x0: g.x0, y0: g.y0, stepX: g.stepX, stepY: g.stepY },
+    { n: spec.body?.n ?? 1.59, mua: MUA_RESIN, rhoB: pcbReflectance(spec.levels?.[2]?.pcb), uniform, symmetric, Nt: opt.shapeNt,
+      exact: !!opt.shapeExact || imported, fidelity });
+  const field = res.field;
+  const shapeT = useL4 ? 0.95 : A.has(3) ? 0.97 : 1;
+  const T = (opt.transmit ?? 1) / shapeT;                         // 다른 레벨(L5 등) 투과율만
+  const bX = opt.blurMmX ?? opt.blurMm ?? 0, bY = opt.blurMmY ?? opt.blurMm ?? 0;
+  blurSeparable(field, g.NX, g.NY, bX / g.stepX, bY / g.stepY);
+  if (T !== 1) for (let k = 0; k < field.length; k++) field[k] *= T;
+  return {
+    field, nx: g.NX, ny: g.NY, stepX: g.stepX, stepY: g.stepY, dim: g.dim, leds: g.leds, depth, extent: { x0: g.x0, x1: g.x1, y0: g.y0, y1: g.y1 },
+    shape: { warnings: geom.warnings, traced: res.traced, ms: res.ms, rec: res.rec, ledger: res.ledger, solver: 'ray-tube' },
+  };
+}
+
 // 무한 평면 시스템 투과율(닫힌 해, 2D 계산 없음) — 자동탐색의 tMin 제약용
 export function l2TransFast(spec, depth, l2) {
   const st = l2State();
@@ -383,6 +430,11 @@ export function computeField(spec, opt) {
 
   // L2(Milky 체적 산란) — 물리 solver(PSF 중첩) 경로. 옛 blur·프레넬 벽 이미지·fresnelT 근사를 쓰지 않는다.
   if (opt.l2) return computeFieldL2(spec, opt, { leds, dim, NX, NY, x0, x1, y0, y1, stepX, stepY, X, Y, wx0, wx1, wy0, wy1 });
+  // 투명 형상 몸체(L3·L4·불러온 STEP) — 광선관 solver(형상 몸체 spec §4.2 S2a). edgeBoost 스칼라 보정 대체.
+  if (opt.shapeSolver !== false) {
+    const sf = computeFieldShape(spec, opt, { leds, dim, NX, NY, x0, x1, y0, y1, stepX, stepY });
+    if (sf) return sf;
+  }
 
   // 직접광 소스(LED)와 벽 이미지(1=X벽, 2=Y벽)를 분리해서 담는다 — 벽 이미지는 아래에서 blur
   // 전이 아니라 후에 따로 더한다(이유는 벽 이미지 합산부 주석 참고). 벽에서 3·od 보다 먼 LED 의

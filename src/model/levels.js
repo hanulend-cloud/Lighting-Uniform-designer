@@ -154,6 +154,7 @@ export function levelEffect(spec, level, depth) {
       const cornerR = Math.max(0, p.edgeR ?? 0);
       return {
         blurX: 0, blurY: 0, transmit: 0.97,
+        shape: { level: 3, params: p },                 // 형상 solver(S2a) 입력 — 합성 파라미터(자동튜닝)도 그대로 전달
         edgeBoost: {
           kind: 'axis',
           x: { pts: [tx0, tx50, tx100], boostMax: boostMaxX },
@@ -181,6 +182,7 @@ export function levelEffect(spec, level, depth) {
       const boostMax = rise > 0 ? edgeEscapeBoost(spec, angleXRad) : 0;
       return {
         blurX: 0, blurY: 0, transmit: 0.95,
+        shape: { level: 4, params: p },
         edgeBoost: {
           kind: 'radial',
           flatHalf,
@@ -264,7 +266,7 @@ export function lerpParams(level, a, b, t) {
 // 활성 난이도들의 조합 효과: blur 는 제곱합(√Σb²), 투과율은 곱
 export function combinedEffect(spec, depth, active) {
   const A = new Set(active ?? activeLevels(spec));
-  let bx2 = 0, by2 = 0, T = 1, decenterX = 0, decenterY = 0, edgeBoost = null, l2 = null;
+  let bx2 = 0, by2 = 0, T = 1, decenterX = 0, decenterY = 0, edgeBoost = null, l2 = null, shape = null;
   for (const l of [1, 2, 3, 4, 5]) {
     if (!A.has(l)) continue;
     if (l === 3 && A.has(4)) continue;          // L4 가 L3 대체
@@ -276,8 +278,9 @@ export function combinedEffect(spec, depth, active) {
     decenterY += e.decenterY ?? 0;
     if (e.edgeBoost) edgeBoost = e.edgeBoost;   // L3 또는 L4(둘 중 켜진 쪽) — 위치 의존 가장자리 보정
     if (e.l2) l2 = e.l2;                         // L2 물리 solver 입력
+    if (e.shape) shape = e.shape;                // 형상 solver 입력(L4 가 L3 대체)
   }
-  return { blurX: Math.sqrt(bx2), blurY: Math.sqrt(by2), transmit: T, decenterX, decenterY, edgeBoost, l2, active: [...A] };
+  return { blurX: Math.sqrt(bx2), blurY: Math.sqrt(by2), transmit: T, decenterX, decenterY, edgeBoost, l2, shape, active: [...A] };
 }
 
 // 판정용 가장자리 마진 — L3·L4 중 켜진 쪽이 실제로 가장자리를 보강한다는 근거(hasBoost)가

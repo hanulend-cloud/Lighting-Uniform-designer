@@ -246,7 +246,7 @@ function run() {
   const eff = combinedEffect(spec, depth, active);
   const common = {
     depth, pitchX, pitchY, blurMmX: eff.blurX, blurMmY: eff.blurY, transmit: eff.transmit,
-    decenterX: eff.decenterX, decenterY: eff.decenterY, edgeBoost: eff.edgeBoost,
+    decenterX: eff.decenterX, decenterY: eff.decenterY, edgeBoost: eff.edgeBoost, active: eff.active, shape: eff.shape,
     padX: combo.padX, padY: combo.padY, l2: eff.l2,
   };
 
