@@ -6,10 +6,10 @@ import { initL2, browserLoader, l2State, setMaterialDb, materialDb } from './eng
 import { createDb } from './model/materials-db.js';
 import { renderL2Panel } from './ui/l2-panel.js';
 import { migrateMilkyV13 } from './engine/l2/material.js';
-import { setBodyMesh, reorientBody, clearBody, bodyInfo, saveBodyIDB, loadBodyIDB, importedBodyActive } from './engine/shape/runtime.js';
+import { setBodyMesh, reorientBody, clearBody, bodyInfo, saveBodyIDB, loadBodyIDB, importedBodyActive, getBody } from './engine/shape/runtime.js';
 import { mountShapeControls, setShapeStatus, renderShapeInfo } from './ui/shape-panel.js';
 import { metrics, centerZoneFrac } from './engine/uniformity.js';
-import { solveCombo, solvePerLevel, GRID } from './engine/solver.js';
+import { GRID } from './engine/solver.js';
 import { PAD } from './ui/canvas-util.js';
 import { drawSection } from './ui/section.js';
 import { drawIso } from './ui/iso.js';
@@ -114,7 +114,7 @@ function buildForm() {
     }
     form.appendChild(grp);
   }
-  $('#btn-reset').onclick = () => { spec = structuredClone(DEFAULT_SPEC); soloCache = {}; mount(); schedule(); };
+  $('#btn-reset').onclick = () => { spec = structuredClone(DEFAULT_SPEC); markSoloReset(); mount(); schedule(); };
   $('#btn-step').onclick = () => {
     if (!last) return;
     exportStep(spec, last.combo, last.geom, last.active);
@@ -133,17 +133,15 @@ function onToggleLevel(level, checked) {
   schedule();
 }
 
-// ---- 단독 행 캐시 (해당 레벨/공통 조건 미변경 시 재사용) ----
-let soloCache = {};
-function soloRow(level) {
-  const sig = JSON.stringify([
-    spec.goal.U0, spec.target.xLen, spec.target.yLen, spec.space.depth,
-    spec.led.beamX, spec.led.beamY, spec.led.sizeX, spec.led.sizeY, spec.body, spec.levels[level],
-  ]);
-  if (soloCache[level]?.sig === sig) return soloCache[level].r;
-  const r = solvePerLevel(spec, { levels: [level] })[0];
-  soloCache[level] = { sig, r };
-  return r;
+// ---- 계산 Worker (형상 몸체 spec §4 S2: 광선관 solver 는 탐색 1회 수 초 — 메인 스레드 밖에서) ----
+// 단독 행 캐시는 Worker 가 보관(해당 레벨/공통 조건 미변경 시 재사용). soloReset 이면 다음 요청에서 비운다.
+let soloReset = false;
+function markSoloReset() { soloReset = true; }
+let solver = null;
+const dbLists = () => { const l = materialDb()?.list() ?? []; return { base: l.filter((e) => e.origin === 'base'), user: l.filter((e) => e.origin !== 'base') }; };
+function syncBody() {
+  const b = getBody();
+  solver?.postMessage({ type: 'body', body: b ? { name: b.name, positions: b.mesh.positions, triangles: b.mesh.triangles, orient: b.orient } : null });
 }
 
 // ---- L3 몸체: STEP 불러오기 (형상 몸체 spec §3.1) ----
@@ -163,7 +161,7 @@ function importStep(file) {
       const note = r.solidCount > 1 ? ` (솔리드 ${r.solidCount}개 중 가장 큰 1개 사용)` : '';
       if (!spec.levels[3].on) { spec.levels[3].on = true; buildLevels($('#levels'), spec, onToggleLevel, onLevelParam); }
       setShapeStatus(el, `불러옴: ${file.name}${note}`);
-      soloCache = {}; schedule();
+      syncBody(); markSoloReset(); schedule();
     };
     w.onerror = (e) => { w.terminate(); setShapeStatus(el, `불러오기 실패: ${e.message ?? e}`, 'err'); };
     w.postMessage({ name: file.name, text });
@@ -172,11 +170,11 @@ function importStep(file) {
 function reorient(change) {
   spec.body.shape = { ...spec.body.shape, ...change };
   reorientBody({ flipZ: spec.body.shape.flipZ, rot: spec.body.shape.rot });
-  soloCache = {}; schedule();
+  syncBody(); markSoloReset(); schedule();
 }
 function clearShape() {
   spec.body.shape = { source: 'plate', name: '', flipZ: false, rot: 0 };
-  clearBody(); soloCache = {}; schedule();
+  clearBody(); syncBody(); markSoloReset(); schedule();
 }
 
 // 실측소재 선택 — 소재의 μs'·g·μa 를 쓰고, Milky 입력칸에는 그 소재의 Milky(파생값)를 보여 준다
@@ -220,20 +218,50 @@ function afterPaint(fn) {
   setTimeout(go, 150);
 }
 
-function runAsync() {
-  $('#timing').textContent = '계산 중… (해상도 우선 설정이라 수 초 소요될 수 있음)';
-  afterPaint(run);
-}
+// 계산은 Worker 에서(화면 멈춤 없음). 진행 중 새 입력이 오면 최신 요청 1개만 남겨 끝난 뒤 이어서 보낸다.
+let jobId = 0, busy = false, pending = false, jobT0 = 0, lastSolo = null, lastActiveSet = null, resultText = '';
+function runAsync() { run(); }
 
 function run() {
   persist();
-  const t0 = performance.now();
+  if (!solver) return;
+  if (busy) { pending = true; return; }
+  busy = true; pending = false; jobT0 = performance.now();
+  const active = activeLevels(spec), eg = evalGrid(spec, GRID);
+  solver.postMessage({
+    type: 'run', id: ++jobId, spec: JSON.parse(JSON.stringify(spec)), active, evalGrid: { nx: eg.nx, ny: eg.ny },
+    soloLevels: [2, 3, 4, 5], resetSolo: soloReset, heat: (autoHeat || forceHeatOnNextRun) ? heatReq() : null,
+  });
+  soloReset = false; resultText = '';
+  $('#timing').textContent = '계산 중…';
+}
 
-  const active = activeLevels(spec);
+function onSolverMessage(e) {
+  const m = e.data;
+  if (m.type === 'progress') {
+    if (m.id !== jobId || !busy) return;
+    const tail = `${m.phase} · 평가 ${m.evals}회 · ${((performance.now() - jobT0) / 1000).toFixed(1)}s${pending ? ' (입력 변경 대기)' : ''}`;
+    $('#timing').textContent = resultText ? `${resultText} · ⏳ ${tail}` : `계산 중… ${tail}`;
+    return;
+  }
+  if (m.type === 'result') { applyResult({ ...m, solo: lastSolo }, pending); return; }   // 설계안 먼저 — 레벨별 표는 이전 값 유지
+  if (m.type === 'solo') {
+    busy = false;
+    lastSolo = m.solo;
+    if (lastActiveSet) updateLevels($('#levels'), m.solo, lastActiveSet, spec.goal.U0, onApplyAuto);
+    if (!pending) $('#timing').textContent = `${resultText} · 레벨별 표 포함 총 ${((performance.now() - jobT0) / 1000).toFixed(1)}s`;
+    if (pending) run();
+    return;
+  }
+  if (m.type === 'heat') { if (m.id === heatId) drawHeatResult(m.res); return; }
+  if (m.type === 'error') { busy = false; $('#timing').textContent = `계산 오류: ${m.message.split(String.fromCharCode(10))[0]}`; console.error(m.message); if (pending) run(); }
+}
+
+function applyResult({ combo, common, resEval, solo, heat, evals }, stale) {
+  const t0 = jobT0;
+  const active = common.active ?? activeLevels(spec);
   const activeSet = new Set(active);
   const tags = active.map((l) => `L${l}`);
-
-  const combo = solveCombo(spec, active);
   const depth = combo.depth;
   const pitchX = combo.pitchX;
   // pitchY == null → 1행(1D)이 최적이라는 뜻. combo.pitchX로 대체하면 안 됨(엉뚱한 촘촘한 Y 피치로
@@ -244,15 +272,7 @@ function run() {
   // Infinity는 항상 조건을 만족시켜 타겟 크기와 무관하게 1행을 확실히 강제한다.
   const pitchY = combo.pitchY ?? Infinity;
   const eff = combinedEffect(spec, depth, active);
-  const common = {
-    depth, pitchX, pitchY, blurMmX: eff.blurX, blurMmY: eff.blurY, transmit: eff.transmit,
-    decenterX: eff.decenterX, decenterY: eff.decenterY, edgeBoost: eff.edgeBoost, active: eff.active, shape: eff.shape,
-    padX: combo.padX, padY: combo.padY, l2: eff.l2,
-  };
-
-  // solveCombo 와 완전히 동일한 격자 → 표시 균일도 = 판정 균일도
-  const eg = evalGrid(spec, GRID);
-  const resEval = computeField(spec, { ...common, nx: eg.nx, ny: eg.ny });
+  // common·resEval 은 Worker 가 계산(solveCombo 와 완전히 동일한 격자 → 표시 균일도 = 판정 균일도)
   const edgeMargin = effectiveEdgeMargin(spec.goal.edgeMargin ?? 0, eff.edgeBoost);
   const m = metrics(resEval.field, resEval.nx, resEval.ny, edgeMargin);
   m.U0 = combo.U0;                    // 판정값과 완전 일치 보장
@@ -279,8 +299,8 @@ function run() {
   drawPlan($('#plan'), geom);
   drawSection($('#section-mini'), geom, sizeVisuals(geom.view.x1 - geom.view.x0, '#section-mini'));
 
-  const solo = [2, 3, 4, 5].map((l) => soloRow(l));
-  updateLevels($('#levels'), solo, activeSet, spec.goal.U0, onApplyAuto);
+  lastActiveSet = activeSet;
+  if (solo) updateLevels($('#levels'), solo, activeSet, spec.goal.U0, onApplyAuto);
   // L2 카드: 현재 Milky 슬라이더 값의 물성·검증(활성 여부와 무관하게 보여 줌 — 소재 판단용)
   const l2eff = { milky: spec.levels[2].milky ?? 0, pcb: spec.levels[2].pcb ?? '혼재' };
   renderL2Panel(document.querySelector('[data-l2]'), l2Describe(spec, depth, { ...l2eff, material: spec.levels[2].material ?? '' }, activeSet.has(2) ? eff.edgeBoost : null, combo.padX ?? 0, combo.padY ?? 0), spec.goal.tMin ?? 0.5, {
@@ -288,7 +308,7 @@ function run() {
     onSelectMaterial: onSelectMaterial,
     onDbChanged: () => {   // 선택 중이던 소재가 삭제되면 추상 Milky 로 되돌림(“찾을 수 없음” 경고 대신)
       if (spec.levels[2].material && !materialDb()?.get(spec.levels[2].material)) spec.levels[2].material = '';
-      soloCache = {}; schedule();
+      solver?.postMessage({ type: 'db', db: dbLists() }); markSoloReset(); schedule();
     },
   });
   renderVerdict($('#verdict'), combo, tags, spec.goal);
@@ -299,12 +319,14 @@ function run() {
   // X·Y 프로파일 그래프는 히트맵과 같은 필드(조도/휘도 단위 선택 포함)를 그대로 써서 그린다
   // (renderHeat 안에서) — 여기선 히트맵과 함께 stale 처리만 한다. 판정기준(조도/휘도)을 막
   // 바꾼 직후에는 자동 렌더링이 꺼져 있어도 강제로 한 번 그려서, 방금 고른 단위가 바로 보이게 한다.
-  if (autoHeat || forceHeatOnNextRun) { renderHeat(); forceHeatOnNextRun = false; }
+  if (heat) { drawHeatResult(heat); forceHeatOnNextRun = false; }
+  else if (autoHeat || forceHeatOnNextRun) { renderHeat(); forceHeatOnNextRun = false; }
   else { $('#pane-heat').classList.add('stale'); $('#pane-prof').classList.add('stale'); }
 
-  $('#timing').textContent =
-    `연산 ${(performance.now() - t0).toFixed(0)} ms · 목표 균일도 ${(spec.goal.U0 * 100).toFixed(0)}% · 깊이 ${depth}mm`
+  resultText =
+    `연산 ${(performance.now() - t0).toFixed(0)} ms (평가 ${evals}회, 백그라운드)${stale ? ' · 입력 변경 반영 중…' : ''} · 목표 균일도 ${(spec.goal.U0 * 100).toFixed(0)}% · 깊이 ${depth}mm`
     + (spec._l2MigrationNote ? ' · ⚠ L2 모델 변경: 저장된 설계의 Milky 를 새 눈금으로 변환했습니다(결과가 이전과 다를 수 있음)' : '');
+  $('#timing').textContent = resultText;
   delete spec._l2MigrationNote;   // 1회성 고지 — 다음 저장부터 빠짐
 }
 
@@ -357,27 +379,26 @@ function updateHeatTitle() {
   const profEl = $('#prof-title');
   if (profEl) profEl.textContent = `X·Y축 ${heatUnit === 'lumin' ? '휘도' : '조도'} 프로파일`;
 }
-function renderHeat() {
-  if (!last) return;
+function heatReq() {
   const hg = heatGrid(spec);
-  const res = computeField(spec, { ...last.common, nx: hg.nx, ny: hg.ny });
+  return { nx: hg.nx, ny: hg.ny, cell: hg.cell, unit: heatUnit, cone: heatConeDeg };
+}
+// 히트맵: Worker 에 요청하고 결과로 그린다(판정 수치는 조도 기준 그대로 — 휘도 단위면 시야각 렌더링으로 바꿔 그림)
+let heatId = 0;
+function renderHeat() {
+  if (!last || !solver) return;
+  heatId++;
+  solver.postMessage({ type: 'heat', id: heatId, spec: JSON.parse(JSON.stringify(spec)), common: last.common, heat: heatReq() });
+  $('#pane-heat').classList.add('stale');
+}
+function drawHeatResult(res) {
+  if (!last) return;
   res.metrics = last.m;
   res.edgeMargin = last.edgeMargin;
   res.view = last.view;
   res.fixture = last.fixture;
   res.center = last.center;
-  res.cellMm = hg.cell;
-  if (heatUnit === 'lumin') {
-    // 판정 수치(균일도%·중심부 등)는 조도 기준 그대로 두고, 화면에 그릴 필드·격자만 시야각
-    // (원뿔 혼합) 렌더링으로 바꿔치기한다 — "실제 판정"과 "육안으로 어떻게 보이는가"를 분리해서
-    // 보여준다. 확산재(blur>0) 여부와 무관하게 항상 호출한다 — 조도장(res.field)을 illumField로
-    // 넘겨 half cone angle에 따라 핫스팟↔조도장 사이를 혼합하므로, 확산재가 있어도 coneDeg가
-    // 그림에 그대로 반영된다(directLit.computeCameraLuminance 주석 참고).
-    const cam = computeCameraLuminance(spec, {
-      ...last.common, nx: hg.nx, ny: hg.ny, coneDeg: heatConeDeg, illumField: res.field,
-    });
-    res.field = cam.field; res.nx = cam.nx; res.ny = cam.ny; res.extent = cam.extent;
-  }
+  res.cellMm = heatGrid(spec).cell;
   lastHeat = res;
   drawHeatmap($('#heatmap'), res, sizeVisuals(last.view.x1 - last.view.x0, '#pane-heat'), heatOpt());
   drawProfiles($('#anprofile'), res, spec.goal.U0, profilePick);
@@ -595,12 +616,15 @@ migrate(spec);
 if (spec.body.shape.source === 'step' && !(await loadBodyIDB({ flipZ: spec.body.shape.flipZ, rot: spec.body.shape.rot }))) {
   spec.body.shape = structuredClone(DEFAULT_SPEC.body.shape);
 }
+// 계산 Worker 시작 — L2 응답표·소재 DB·불러온 몸체를 Worker 쪽에도 싣는다(메인은 L2 카드 표시용으로 따로 보유)
+solver = new Worker(new URL('./engine/solve-worker.js', import.meta.url), { type: 'module' });
+solver.onmessage = onSolverMessage;
+solver.onerror = (e) => { $('#timing').textContent = `계산 Worker 오류: ${e.message ?? e}`; };
+solver.postMessage({ type: 'init', l2Base: new URL('./engine/l2/data/', import.meta.url).href, db: dbLists() });
+syncBody();
 mount();
 setupZoom();
 setupHeatPick();
 window.addEventListener('resize', schedule);
+forceHeatOnNextRun = true;   // 첫 계산에 히트맵 포함
 schedule();
-// 레이아웃이 안정된 뒤 한 번 더 그리고 히트맵 초기 1회 렌더
-if (typeof requestAnimationFrame === 'function') {
-  afterPaint(() => { clearTimeout(timer); run(); renderHeat(); });
-}

@@ -348,6 +348,24 @@ function computeFieldL2(spec, opt, g) {
 // 형상 레벨이 없으면 null(기존 L1 경로). 투과율: L3·L4 의 경험 투과율(0.97·0.95)은 solver 가 Fresnel 로 직접 계산하므로 뺀다.
 const _geomCache = new Map();
 function computeFieldShape(spec, opt, g) {
+  // 고해상 요청(히트맵 0.5mm 등): 형상 PSF 를 ~1mm 격자로 계산하고 쌍선형으로 올린다(PSF 크기·래스터 비용 ∝ 1/간격²).
+  // 출사도는 평가 텐트(간격) 평균이라 1mm 아래 구조는 판정에 쓰이지 않는다.
+  const SMIN = 1.0;
+  if (g.NY > 1 && (g.stepX < SMIN * 0.9 || g.stepY < SMIN * 0.9) && !opt._shapeCoarse) {
+    const X = g.x1 - g.x0, Y = g.y1 - g.y0, cNX = Math.max(2, Math.round(X / SMIN) + 1), cNY = Math.max(2, Math.round(Y / SMIN) + 1);
+    const cg = { ...g, NX: cNX, NY: cNY, stepX: X / (cNX - 1), stepY: Y / (cNY - 1) };
+    const c = computeFieldShape(spec, { ...opt, _shapeCoarse: true }, cg);
+    if (!c) return null;
+    const field = new Float64Array(g.NX * g.NY);
+    for (let j = 0; j < g.NY; j++) {
+      const fb = (j * g.stepY) / cg.stepY, b0 = Math.min(cNY - 2, Math.floor(fb)), tb = fb - b0;
+      for (let i = 0; i < g.NX; i++) {
+        const fa = (i * g.stepX) / cg.stepX, a0 = Math.min(cNX - 2, Math.floor(fa)), ta = fa - a0, F = c.field;
+        field[j * g.NX + i] = (F[b0 * cNX + a0] * (1 - ta) + F[b0 * cNX + a0 + 1] * ta) * (1 - tb) + (F[(b0 + 1) * cNX + a0] * (1 - ta) + F[(b0 + 1) * cNX + a0 + 1] * ta) * tb;
+      }
+    }
+    return { ...c, field, nx: g.NX, ny: g.NY, stepX: g.stepX, stepY: g.stepY };
+  }
   // 형상 파라미터: 효과 객체(opt.shape = { level, params }) 우선 — 레벨 자동튜닝은 spec 이 아닌 합성 파라미터로 평가한다
   // 활성 레벨은 호출측이 명시(opt.active / opt.shape) — spec.levels 의 on 을 몰래 읽지 않는다(기존 계약: 옵션이 물리를 결정)
   const A = new Set(opt.active ?? (opt.shape ? [opt.shape.level] : []));

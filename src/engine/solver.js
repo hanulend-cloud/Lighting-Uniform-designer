@@ -107,6 +107,7 @@ let SHAPE_PROXY = false;
 function withShapeProxy(fn) { const prev = SHAPE_PROXY; SHAPE_PROXY = true; try { return fn(); } finally { SHAPE_PROXY = prev; } }
 function evalField(spec, eff, pX, pY, gridN = GRID, padX = 0, padY = 0, fidelity = 'search') {
   const proxy = SHAPE_PROXY && fidelity !== 'full';
+  globalThis.__progress?.();   // 계산 Worker 진행 표시(없으면 무시)
   const g = evalGrid(spec, gridN);
   const usingCamera = spec.goal.metric === 'lumin' && !((eff.blurX ?? 0) > 0 || (eff.blurY ?? 0) > 0);
   const f = usingCamera
