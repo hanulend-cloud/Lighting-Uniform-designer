@@ -2,8 +2,8 @@
 import { parentPort, workerData } from 'node:worker_threads';
 import { makeScene, runBodyMC } from '../src/engine/shape/mc-body.js';
 
-const { hf, ox, oy, depth, n, mua, rhoB, walls, leds, led, N, seed, grid } = workerData;
-const sc = makeScene({ hf, ox, oy, depth, n, medium: { mus: 0, g: 0, mua }, rhoB, walls });
+const { hf, ox, oy, depth, n, mua, rhoB, walls, leds, led, N, seed, grid, medium } = workerData;
+const sc = makeScene({ hf, ox, oy, depth, n, medium: medium ?? { mus: 0, g: 0, mua }, rhoB, walls });
 const { NX, NY, x0, y0, stepX, stepY } = grid, map = new Float64Array(NX * NY), A = stepX * stepY;
 const res = runBodyMC(sc, { leds, led, N, seed, onExit: (x, y, w) => {
   const fa = (x - x0) / stepX, fb = (y - y0) / stepY, a0 = Math.floor(fa), b0 = Math.floor(fb), ta = fa - a0, tb = fb - b0;

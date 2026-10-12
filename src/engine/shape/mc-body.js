@@ -12,7 +12,7 @@ export const F_SCAT = 1, F_REFL = 2;   // 가지 이력: 산란 / 반사(계면�
 
 // 높이맵 → 장면. hf: heightfield.js 형식(셀 중심 값), ox·oy: 높이맵 원점의 툴 좌표, depth: 윗면 기준 높이.
 // medium: { mus, g, mua } (없으면 투명·무흡수), phase: { sample(u)→cosθ } (없으면 HG(g)),
-// walls: { x0,x1,y0,y1, mode:'absorb'|'fresnel'|'diffuse', R?, n? } 또는 null(열린 영역 — 격자 밖 = 측면 탈출).
+// walls: { x0,x1,y0,y1, mode:'absorb'|'fresnel'|'diffuse'|'mirror', R?, n? } 또는 null(열린 영역 — 격자 밖 = 측면 탈출).
 export function makeScene({ hf, ox, oy, depth, n, medium = null, phase = null, rhoB = 0, walls = null }) {
   const { nx, ny, cell: c, mask } = hf, NX = nx + 1;
   const ct = new Float64Array(NX * (ny + 1)), cb = new Float64Array(NX * (ny + 1));
@@ -327,8 +327,8 @@ export function runBodyMC(S, { leds = [null], led = { I0: 1 }, emit = null, N, s
           if (walls.mode === 'diffuse') {
             const R = walls.R ?? 0; ledger.wall += w * (1 - R); w *= R; if (w <= 0) break;
             [dx, dy, dz] = lamb(Nx, Ny, 0);
-          } else {   // fresnel: 정반사(공기 → 측벽 수지), 투과분은 측벽 누설
-            const R = fresnelR(Math.abs(dx * Nx + dy * Ny), walls.n ?? n);
+          } else {   // fresnel: 정반사(공기 → 측벽 수지), 투과분은 측벽 누설 / mirror: 고정 반사율 R 정반사(모델 비교용)
+            const R = walls.mode === 'mirror' ? (walls.R ?? 0) : fresnelR(Math.abs(dx * Nx + dy * Ny), walls.n ?? n);
             ledger.wall += w * (1 - R); w *= R;
             const dn = dx * Nx + dy * Ny; dx -= 2 * dn * Nx; dy -= 2 * dn * Ny;
           }

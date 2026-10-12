@@ -14,6 +14,7 @@ import { b64ToF32 } from '../model/materials-db.js';
 import { importedBodyActive } from './shape/runtime.js';
 import { buildBodyGeometry } from './shape/body-geom.js';
 import { shapeField } from './shape/fast-body.js';
+import { milkyShapeField, milkyPsf } from './shape/milky-body.js';
 import { MUA_RESIN } from './l2/material.js';
 
 // Mie 소재의 합성 응답표(소재표 + 주 응답표) — DB 항목별 1회 디코드
@@ -307,9 +308,36 @@ function computeFieldL2(spec, opt, g) {
   const base = { field, nx: NX, ny: NY, stepX, stepY, dim, leds, depth, extent: { x0, x1, y0, y1 } };
   if (set.error) return { ...base, l2: { error: set.error, trans: 0, fieldBall, fScat: 1 / Math.PI, warnings: [set.error], check: { ok: false, checks: [{ id: 'L2', ok: false, value: 0, limit: '-', note: set.error }] } } };
 
+  // 밀키 + 형상(L3·L4·불러온 몸체): 로컬 슬래브 PSF(S2b) — 평균 두께·edgeBoost 근사 대신 국소 두께·경사 바닥 입사·갭
+  // S2b 로컬 슬래브는 VS7M(S1 MC 대비)을 아직 통과하지 못해 기본 꺼짐(opt.milkyShape === true 일 때만) — 기존 평균 두께 근사 유지.
+  // 검증 기록: docs/superpowers/plans/2026-10-12-shape-s2-fast-solver.md (S2b).
+  const sh = opt.milkyShape === true && opt.shapeSolver !== false ? resolveShape(spec, opt, leds) : null;
+  let shapePsf = null;
+  if (sh && (sh.uniform || sh.geom.periodic)) {
+    // 주기·균일 형상: PSF 1개(중심 LED — 주기라 평행이동 정확)를 로컬 슬래브로 계산해 기존 FFT 중첩 경로에 그대로 넣는다
+    const li = ledIntensity(sh.spec), W = sh.geom.walls, wcx = (W.x0 + W.x1) / 2, wcy = (W.y0 + W.y1) / 2;
+    const a = sh.geom.periodic && leds.length ? leds.reduce((b, l) => (Math.hypot(l.x - wcx, l.y - wcy) < Math.hypot(b.x - wcx, b.y - wcy) ? l : b)) : { x: wcx, y: wcy };
+    shapePsf = milkyPsf(sh.geom, depth, a, { table: set.table, mat: set.mat, rhoB: set.rhoB, intensity: li.intensity, intensityKey: li.key, I0: li.I0,
+      extentX: 2 * set.BX, extentY: 2 * set.BY, step, maxLevels: sh.fidelity === 'search' ? 3 : 5 });
+  } else if (sh) {
+    const li = ledIntensity(sh.spec);
+    const res = milkyShapeField(sh.geom, depth, leds, { NX, NY, x0, y0, stepX, stepY }, {
+      table: set.table, mat: set.mat, rhoB: set.rhoB, intensity: li.intensity, intensityKey: li.key, I0: li.I0, uniform: sh.uniform, symmetric: sh.symmetric,
+      maxLevels: sh.fidelity === 'search' ? 3 : 5,
+    });
+    field.set(res.field); fieldBall.set(res.fieldBall);
+    const bX = opt.blurMmX ?? opt.blurMm ?? 0, bY = opt.blurMmY ?? opt.blurMm ?? 0;
+    blurSeparable(field, NX, NY, bX / stepX, bY / stepY); blurSeparable(fieldBall, NX, NY, bX / stepX, bY / stepY);
+    const T = (opt.transmit ?? 1) / (sh.useL4 ? 0.95 : sh.A.has(3) ? 0.97 : 1);   // L3·L4 경험 투과율 제외(solver 가 직접 계산)
+    if (T !== 1) for (let k = 0; k < field.length; k++) { field[k] *= T; fieldBall[k] *= T; }
+    const warnings = set.warnings.filter((w) => !/L3 두께 변동|L4 동시 사용/.test(w)).concat(['형상 + Milky: 로컬 슬래브 근사(입사 위치의 국소 두께·경사 바닥 입사각) — 경사가 두께 대비 급하면 오차 증가']);
+    return { ...base, shape: { warnings: sh.geom.warnings, ms: res.ms, solver: 'local-slab' },
+      l2: { trans: res.trans * T, fieldBall, fScat: res.fScat, warnings, check: { ok: set.check.ok && res.check.ok, checks: [...set.check.checks, ...res.check.checks] }, info: { ...set.info, trans: res.trans, solver: 'local-slab' } } };
+  }
+
   // 광원(LED + 밀키 측벽 거울 LED, 반사율 rW) 을 확장 격자에 쌍선형으로 뿌린 뒤 PSF·직진 PSF 와 FFT 컨볼루션 —
   // 비용이 LED 수와 무관하고, 거울 LED 를 거리로 자르지 않아도 된다.
-  const { psf } = set, rW = psf.rW;
+  const psf = shapePsf ?? set.psf, rW = psf.rW;
   const conv = l2GridConv(psf, NX, NY, stepX, stepY);
   const { kx, ky, W, H } = conv, S = new Float64Array(W * H);
   const ex0 = x0 - kx * stepX, ey0 = NY === 1 ? Y / 2 : y0 - ky * stepY;
@@ -335,13 +363,42 @@ function computeFieldL2(spec, opt, g) {
   const bX = opt.blurMmX ?? opt.blurMm ?? 0, bY = opt.blurMmY ?? opt.blurMm ?? 0;   // L2 외 레벨(L5 등)의 산란
   blurSeparable(field, NX, NY, bX / stepX, bY / stepY);
   blurSeparable(fieldBall, NX, NY, bX / stepX, bY / stepY);
-  const T = opt.transmit ?? 1;                                    // 다른 레벨 투과율 (Fresnel 은 MC 에 포함)
+  const T = (opt.transmit ?? 1) / (shapePsf ? (sh.useL4 ? 0.95 : sh.A.has(3) ? 0.97 : 1) : 1);   // 다른 레벨 투과율 (Fresnel 은 MC 에 포함)
   if (T !== 1) for (let k = 0; k < field.length; k++) { field[k] *= T; fieldBall[k] *= T; }
-  if (opt.edgeBoost && opt.edgeBoost.hasBoost) {
+  if (!shapePsf && opt.edgeBoost && opt.edgeBoost.hasBoost) {
     const halfP = Math.max(1, Math.min(opt.pitchX ?? X, opt.pitchY ?? opt.pitchX ?? Y) / 2);
     applyEdgeBoost(field, NX, NY, x0, x1, y0, y1, X, Y, opt.edgeBoost, leds, halfP);
   }
+  if (shapePsf) {
+    const warnings = set.warnings.filter((w) => !/L3 두께 변동|L4 동시 사용/.test(w)).concat(['형상 + Milky: 로컬 슬래브 근사(입사 위치의 국소 두께·경사 바닥 입사각) — 경사가 두께 대비 급하면 오차 증가']);
+    return { ...base, shape: { warnings: sh.geom.warnings, solver: 'local-slab' },
+      l2: { trans: psf.trans * T, fieldBall, fScat: psf.fScat, warnings, check: { ok: set.check.ok && psf.check.ok, checks: [...set.check.checks, ...psf.check.checks] }, info: { ...set.info, trans: psf.trans, solver: 'local-slab' } } };
+  }
   return { ...base, l2: { trans: psf.trans * T, fieldBall, fScat: psf.fScat, warnings: set.warnings, check: set.check, info: set.info } };
+}
+
+// 형상 해석(투명 S2a·밀키 S2b 공용): 활성 형상 레벨·불러온 몸체 → 툴 좌표 높이맵(캐시). 형상이 없으면 null.
+// 형상 파라미터는 효과 객체(opt.shape = { level, params }) 우선 — 레벨 자동튜닝은 spec 이 아닌 합성 파라미터로 평가한다.
+// 활성 레벨은 호출측이 명시(opt.active / opt.shape) — spec.levels 의 on 을 몰래 읽지 않는다(기존 계약: 옵션이 물리를 결정).
+function resolveShape(spec, opt, leds) {
+  const A = new Set(opt.active ?? (opt.shape ? [opt.shape.level] : []));
+  if (opt.shape) { A.add(opt.shape.level); spec = { ...spec, levels: { ...spec.levels, [opt.shape.level]: { ...opt.shape.params, on: true } } }; }
+  const imported = importedBodyActive(spec, [...A]);
+  if (!(A.has(3) || A.has(4)) && !imported) return null;
+  const depth = opt.depth ?? opt.od;
+  const pitchX = opt.pitchX, pitchY = opt.pitchY ?? opt.pitchX;
+  const fidelity = opt.shapeFidelity ?? 'full';
+  const gkey = [fidelity, depth, pitchX, pitchY, opt.padX ?? 0, opt.padY ?? 0, leds.length, leds[0]?.x, leds[0]?.y, JSON.stringify(spec.levels), spec.body?.n, spec.target.xLen, spec.target.yLen, spec.led.sizeZ, imported].join('|');
+  let geom = _geomCache.get(gkey);
+  if (!geom) {
+    // 탐색 정밀도: L4 국부 형상 셀을 0.4mm 로(교차 비용 ~½) — 최종안은 full(0.2~0.5mm) 형상으로 재검증
+    geom = buildBodyGeometry(spec, A, depth, { leds, pitchX, pitchY, padX: opt.padX ?? 0, padY: opt.padY ?? 0, cell: fidelity === 'search' && A.has(4) ? 0.4 : undefined });
+    if (fidelity === 'search') geom.key += '|search';
+    if (_geomCache.size > 8) _geomCache.clear();
+    _geomCache.set(gkey, geom);
+  }
+  const useL4 = A.has(4);
+  return { A, spec, imported, geom, depth, fidelity, useL4, uniform: !imported && !(A.has(3) && !useL4), symmetric: !imported && Math.abs(opt.decenterX ?? 0) < 1e-9 && Math.abs(opt.decenterY ?? 0) < 1e-9 };
 }
 
 // ---- S2a 투명 형상 몸체: 높이맵(생성 평판 L3/L4 정본 수식 또는 불러온 STEP) + 광선관 앵커 PSF 중첩 ----
@@ -366,24 +423,10 @@ function computeFieldShape(spec, opt, g) {
     }
     return { ...c, field, nx: g.NX, ny: g.NY, stepX: g.stepX, stepY: g.stepY };
   }
-  // 형상 파라미터: 효과 객체(opt.shape = { level, params }) 우선 — 레벨 자동튜닝은 spec 이 아닌 합성 파라미터로 평가한다
-  // 활성 레벨은 호출측이 명시(opt.active / opt.shape) — spec.levels 의 on 을 몰래 읽지 않는다(기존 계약: 옵션이 물리를 결정)
-  const A = new Set(opt.active ?? (opt.shape ? [opt.shape.level] : []));
-  if (opt.shape) { A.add(opt.shape.level); spec = { ...spec, levels: { ...spec.levels, [opt.shape.level]: { ...opt.shape.params, on: true } } }; }
-  const imported = importedBodyActive(spec, [...A]);
-  if (!(A.has(3) || A.has(4)) && !imported) return null;
-  const depth = opt.depth ?? opt.od;
-  const pitchX = opt.pitchX, pitchY = opt.pitchY ?? opt.pitchX;
-  const fidelity = opt.shapeFidelity ?? 'full';
-  const gkey = [fidelity, depth, pitchX, pitchY, opt.padX ?? 0, opt.padY ?? 0, g.leds.length, g.leds[0]?.x, g.leds[0]?.y, JSON.stringify(spec.levels), spec.body?.n, spec.target.xLen, spec.target.yLen, spec.led.sizeZ, imported].join('|');
-  let geom = _geomCache.get(gkey);
-  if (!geom) {
-    // 탐색 정밀도: L4 국부 형상 셀을 0.4mm 로(교차 비용 ~½) — 최종안은 full(0.2~0.5mm) 형상으로 재검증
-    geom = buildBodyGeometry(spec, A, depth, { leds: g.leds, pitchX, pitchY, padX: opt.padX ?? 0, padY: opt.padY ?? 0, cell: fidelity === 'search' && A.has(4) ? 0.4 : undefined });
-    if (fidelity === 'search') geom.key += '|search';
-    if (_geomCache.size > 8) _geomCache.clear();
-    _geomCache.set(gkey, geom);
-  }
+  const sh = resolveShape(spec, opt, g.leds);
+  if (!sh) return null;
+  const { A, imported, geom, depth, fidelity } = sh;
+  spec = sh.spec;
   const model = spec.led.model;
   const p = model === 'gaussian' ? { sigma: gaussianSigma(spec.led.beamX) } : { m: lambertianExponent(spec.led.beamX) };
   const I0 = axialIntensityFromFlux(spec.led.fluxLm, model, p);

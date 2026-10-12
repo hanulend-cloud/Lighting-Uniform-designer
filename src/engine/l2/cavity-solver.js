@@ -121,66 +121,104 @@ function up(c, cx, cy, k, nx, ny) {
 // 격자 밖으로 나간 질량·보간 오차는 lost(= 입력합 − 출력합)로 장부에 넣는다. (형상 MC VS6 로 확인된 PSF 결함 수정)
 function radialShift(f, nx, ny, step, center, sh) {
   const out = new Float64Array(f.length), d = 1e-3;
-  let sIn = 0, sOut = 0;
+  let sIn = 0, sOut = 0, Rmax = 0;
   for (let k = 0; k < f.length; k++) sIn += f[k];
   const at = (x, y) => {   // 셀 중심 격자 쌍선형
     const fa = x / step - 0.5, fb = y / step - 0.5, a0 = Math.floor(fa), b0 = Math.floor(fb), ta = fa - a0, tb = fb - b0;
     let v = 0;
-    for (const [a, b, w] of [[a0, b0, (1 - ta) * (1 - tb)], [a0 + 1, b0, ta * (1 - tb)], [a0, b0 + 1, (1 - ta) * tb], [a0 + 1, b0 + 1, ta * tb]]) {
-      if (w > 0 && a >= 0 && b >= 0 && a < nx && b < ny) v += w * f[b * nx + a];
-    }
+    if (a0 >= 0 && b0 >= 0 && a0 < nx && b0 < ny) v += (1 - ta) * (1 - tb) * f[b0 * nx + a0];
+    if (a0 + 1 >= 0 && b0 >= 0 && a0 + 1 < nx && b0 < ny) v += ta * (1 - tb) * f[b0 * nx + a0 + 1];
+    if (a0 >= 0 && b0 + 1 >= 0 && a0 < nx && b0 + 1 < ny) v += (1 - ta) * tb * f[(b0 + 1) * nx + a0];
+    if (a0 + 1 >= 0 && b0 + 1 >= 0 && a0 + 1 < nx && b0 + 1 < ny) v += ta * tb * f[(b0 + 1) * nx + a0 + 1];
     return v;
   };
+  for (const [x, y] of [[0, 0], [nx * step, 0], [0, ny * step], [nx * step, ny * step]]) Rmax = Math.max(Rmax, Math.hypot(x - center.x, y - center.y));
+  // 이동량은 반경 R 만의 함수 → 1차원 표로 역사상 r(R)·야코비안 J(R) 을 한 번 풀고 셀은 선형 보간(셀마다 뉴턴 반복 제거)
+  const M = Math.max(256, Math.ceil(Rmax / (step * 0.25))), dR = Rmax / M, rT = new Float64Array(M + 1), JT = new Float64Array(M + 1);
+  const g0 = 1 + (sh(d) - sh(0)) / d; JT[0] = 1 / (g0 * g0); rT[0] = 0;
+  let r = 0;
+  for (let i = 1; i <= M; i++) {
+    const R = i * dR;
+    for (let it = 0; it < 30; it++) {   // r + sh(r) = R (단조) — 뉴턴(직전 해에서 시작)
+      const F = r + sh(r) - R, lo = Math.max(0, r - d), dF = 1 + (sh(r + d) - sh(lo)) / (r + d - lo);
+      const nr = Math.max(0, r - F / dF);
+      if (Math.abs(nr - r) < 1e-10) { r = nr; break; }
+      r = nr;
+    }
+    const lo = Math.max(0, r - d), dRdr = 1 + (sh(r + d) - sh(lo)) / (r + d - lo);
+    rT[i] = r; JT[i] = (r / R) / dRdr;
+  }
   for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) {
     const X = (i + 0.5) * step - center.x, Y = (j + 0.5) * step - center.y, R = Math.hypot(X, Y);
-    let r = R, J;
-    if (R < 1e-9) { const g = 1 + (sh(d) - sh(0)) / d; J = 1 / (g * g); r = 0; }
-    else {
-      for (let it = 0; it < 30; it++) {   // r + sh(r) = R (단조) — 뉴턴
-        const F = r + sh(r) - R, dF = 1 + (sh(r + d) - sh(Math.max(0, r - d))) / (r + d - Math.max(0, r - d));
-        const nr = Math.max(0, r - F / dF);
-        if (Math.abs(nr - r) < 1e-9) { r = nr; break; }
-        r = nr;
-      }
-      const dRdr = 1 + (sh(r + d) - sh(Math.max(0, r - d))) / (r + d - Math.max(0, r - d));
-      J = (r / R) / dRdr;
-    }
-    const k = R > 1e-9 ? r / R : 0;
+    const fi = Math.min(M - 1e-9, R / dR), i0 = Math.floor(fi), u = fi - i0;
+    const rr = rT[i0] * (1 - u) + rT[i0 + 1] * u, J = JT[i0] * (1 - u) + JT[i0 + 1] * u;
+    const k = R > 1e-9 ? rr / R : 0;
     const v = at(center.x + X * k, center.y + Y * k) * J;
     out[j * nx + i] = v; sOut += v;
   }
   return { out, lost: sIn - sOut };
 }
 
-export function solveCavity({ E, nx, ny, step, table, mat, t, h, rhoB, rW, uniformTail = true, gapRmax, center = null }) {
-  const N = nx * ny, tauR = mat.musR * t, muaT = mat.mua * t;
-  const qb = E.map((_, b) => table.query(tauR, mat.g, mat.n, b, muaT));
+// 두께 단계(로컬 슬래브, 형상 몸체 S2b): tMap(셀별 두께)이 있으면 입사 광속 가중 범위를 K 단계로 나누고 셀 가중을 선형(모자) 보간 —
+// 단계별 응답(Tb·Ts·R·커널)을 입사 위치의 국소 두께로 합성한다. 범위가 평균의 2% 이내면 단일(평균) 단계.
+function thicknessLevels(tMap, E, N, maxLevels = 5) {
+  let sw = 0, st = 0, tmin = Infinity, tmax = -Infinity;
+  for (let i = 0; i < N; i++) {
+    let e = 0; for (const b of E) e += b[i];
+    if (!(e > 0)) continue;
+    sw += e; st += e * tMap[i];
+    if (tMap[i] < tmin) tmin = tMap[i]; if (tMap[i] > tmax) tmax = tMap[i];
+  }
+  const tm = sw > 0 ? st / sw : tMap[0];
+  if (!(tmax - tmin > 0.02 * tm)) return [{ t: tm, w: null }];
+  const K = Math.max(2, Math.min(maxLevels, Math.ceil((tmax - tmin) / (0.1 * tm)) + 1)), T = Array.from({ length: K }, (_, k) => tmin + ((tmax - tmin) * k) / (K - 1));
+  return T.map((tk, k) => {
+    const w = new Float64Array(N);
+    for (let i = 0; i < N; i++) {
+      const f = ((tMap[i] - tmin) / (tmax - tmin)) * (K - 1), d = Math.abs(f - k);
+      w[i] = d < 1 ? 1 - d : 0;
+    }
+    return { t: tk, w };
+  });
+}
+
+export function solveCavity({ E, nx, ny, step, table, mat, t, h, rhoB, rW, uniformTail = true, gapRmax, center = null, tMap = null, maxLevels = 5 }) {
+  const N = nx * ny;
+  const levels = tMap ? thicknessLevels(tMap, E, N, maxLevels) : [{ t, w: null }];
+  if (tMap) t = levels.length === 1 ? levels[0].t : t ?? levels[Math.floor(levels.length / 2)].t;   // 재순환 대표 두께(호출측 t = 입사 가중 평균 권장)
+  const tauR = mat.musR * t, muaT = mat.mua * t;
   const qd = table.query(tauR, mat.g, mat.n, table.diffuseRow, muaT);
   const Mball = new Float64Array(N), Mscat = new Float64Array(N), Mrec = new Float64Array(N), D0 = new Float64Array(N);
   let input = 0, slabAbs = 0, leak = 0, boardAbs = 0, iterations = 0, tail = 0;
 
-  // (a) 직진 + 하면 반사, (b) 산란 투과 (밴드 2개씩 복소 FFT 한 번으로)
-  const jobs = [];
-  for (let b = 0; b < E.length; b++) {
-    const e = E[b], q = qb[b], se = sum(e);
-    if (!(se > 0)) continue;
-    input += se; slabAbs += (1 - q.Tb - q.Ts - q.R) * se;
-    for (let i = 0; i < N; i++) { Mball[i] += q.Tb * e[i]; D0[i] += q.R * e[i]; }
-    if (q.Ts > 0) jobs.push(scatJob(e, q, se, center ? b : -1));
+  // (a) 직진 + 하면 반사, (b) 산란 투과 (밴드 2개씩 복소 FFT 한 번으로) — 두께 단계마다
+  for (const L of levels) {
+    const tk = L.t, qb = E.map((_, b) => table.query(mat.musR * tk, mat.g, mat.n, b, mat.mua * tk));
+    const jobs = [], MbL = new Float64Array(N);
+    for (let b = 0; b < E.length; b++) {
+      let e = E[b];
+      if (L.w) { const ew = new Float64Array(N); for (let i = 0; i < N; i++) ew[i] = e[i] * L.w[i]; e = ew; }
+      const q = qb[b], se = sum(e);
+      if (!(se > 0)) continue;
+      input += se; slabAbs += (1 - q.Tb - q.Ts - q.R) * se;
+      for (let i = 0; i < N; i++) { MbL[i] += q.Tb * e[i]; D0[i] += q.R * e[i]; }
+      if (q.Ts > 0) jobs.push(scatJob(e, q, se, center ? b : -1, tk, qb));
+    }
+    if (center) {   // 직진 성분: 기하 시프트 t·tanθ' (입사각 = 광원 기하에서 정확)
+      const n = mat.n, r = radialShift(MbL, nx, ny, step, center, (rr) => {
+        const s1 = rr / Math.hypot(rr, Math.max(h, 1e-3)) / n; return tk * s1 / Math.sqrt(1 - s1 * s1);
+      });
+      MbL.set(r.out); leak += r.lost;
+    }
+    for (let i = 0; i < N; i++) Mball[i] += MbL[i];
+    runJobs(jobs, Mscat);
   }
-  if (center) {   // 직진 성분: 기하 시프트 t·tanθ' (입사각 = 광원 기하에서 정확)
-    const n = mat.n, r = radialShift(Mball, nx, ny, step, center, (rr) => {
-      const s1 = rr / Math.hypot(rr, Math.max(h, 1e-3)) / n; return t * s1 / Math.sqrt(1 - s1 * s1);
-    });
-    Mball.set(r.out); leak += r.lost;
-  }
-  runJobs(jobs, Mscat);
   // 행 b 의 산란 투과 평균 시프트 / 직진 시프트(t·tanθ') 비 — 행 0(수직)은 0/0 이라 행 1 값 사용
-  function fwdRatio(b) {
-    const bb = Math.max(1, b), c = table.grids.rows[bb], s1 = Math.sqrt(1 - c * c) / mat.n, q = qb[bb] ?? table.query(tauR, mat.g, mat.n, bb, muaT);
+  function fwdRatio(b, tk, qb) {
+    const bb = Math.max(1, b), c = table.grids.rows[bb], s1 = Math.sqrt(1 - c * c) / mat.n, q = qb?.[bb] ?? table.query(mat.musR * tk, mat.g, mat.n, bb, mat.mua * tk);
     return q.shift / (s1 / Math.sqrt(1 - s1 * s1));
   }
-  function scatJob(e, q, se, b = -1) {
+  function scatJob(e, q, se, b = -1, tk = t, qb = null) {
     const near = 1 - q.radTail;
     let src = new Float64Array(N);
     for (let i = 0; i < N; i++) src[i] = q.Ts * near * e[i];
@@ -189,16 +227,16 @@ export function solveCavity({ E, nx, ny, step, table, mat, t, h, rhoB, rW, unifo
       // 출사 중심을 바깥으로 옮김: 셀 입사각(광원 기하)의 직진 시프트 t·tanθ' × 행의 전방 비(MC 평균 시프트 / 직진 시프트).
       // 작은 입사각도 r·(1 + t/(n·h)) 확대가 생기므로 행 상수 시프트(0° 행 = 0)로는 중심이 과집중된다(VS6).
       // 반경 분포(입사점 기준 |Δr|)는 2차 모멘트 보존 축소: <ρ²> = <r²> − shift_b² → 축척 √(<ρ²>/<r²>)
-      const f = fwdRatio(b), shift = q.shift * t, hh = Math.max(h, 1e-3);
-      const r = radialShift(src, nx, ny, step, center, (rr) => { const s1 = rr / Math.hypot(rr, hh) / mat.n; return f * t * s1 / Math.sqrt(1 - s1 * s1); });
+      const f = fwdRatio(b, tk, qb), shift = q.shift * tk, hh = Math.max(h, 1e-3);
+      const r = radialShift(src, nx, ny, step, center, (rr) => { const s1 = rr / Math.hypot(rr, hh) / mat.n; return f * tk * s1 / Math.sqrt(1 - s1 * s1); });
       src = r.out; leak += r.lost;
       let m2 = 0, m0 = 0;
-      for (let k = 0; k < N_RAD; k++) { const rr = 0.5 * (radEdge(k) + radEdge(k + 1)) * t * (q.radScale || 1); m2 += q.rad[k] * rr * rr; m0 += q.rad[k]; }
+      for (let k = 0; k < N_RAD; k++) { const rr = 0.5 * (radEdge(k) + radEdge(k + 1)) * tk * (q.radScale || 1); m2 += q.rad[k] * rr * rr; m0 += q.rad[k]; }
       if (m2 > 0) scale = Math.sqrt(Math.max(0.05, 1 - (shift * shift) / (m2 / m0)));
     }
     const tm = q.Ts * q.radTail * se;                    // 슬래브 도광(원거리) 성분 — 균일 근사
     if (!uniformTail) tail += tm;
-    return { src, kern: radialKernel(q.rad, t * (q.radScale || 1) * scale, step), u: uniformTail ? tm / N : 0 };   // 흡수 측방 축소 반영
+    return { src, kern: radialKernel(q.rad, tk * (q.radScale || 1) * scale, step), u: uniformTail ? tm / N : 0 };   // 흡수 측방 축소 반영
   }
   function runJobs(list, target) {
     for (let k = 0; k < list.length; k += 2) {
@@ -269,10 +307,16 @@ export function solveCavity({ E, nx, ny, step, table, mat, t, h, rhoB, rW, unifo
       Itot = up(Ic, cx, cy, f, nx, ny);
       }
     }
-    const sI = sum(Itot);
-    slabAbs += (1 - qd.Tb - qd.Ts - qd.R) * sI;
-    for (let i = 0; i < N; i++) Mrec[i] += qd.Tb * Itot[i];
-    if (qd.Ts > 0) runJobs([scatJob(Itot, qd, sI)], Mrec);
+    // 확산 재입사의 투과: 도착 위치의 국소 두께 단계로(재순환 반사 R_d·갭은 대표값 — 매끄러운 성분)
+    for (const L of levels) {
+      let Ik = Itot;
+      if (L.w) { Ik = new Float64Array(N); for (let i = 0; i < N; i++) Ik[i] = Itot[i] * L.w[i]; }
+      const qk = L.w ? table.query(mat.musR * L.t, mat.g, mat.n, table.diffuseRow, mat.mua * L.t) : qd, sI = sum(Ik);
+      if (!(sI > 0)) continue;
+      slabAbs += (1 - qk.Tb - qk.Ts - qk.R) * sI;
+      for (let i = 0; i < N; i++) Mrec[i] += qk.Tb * Ik[i];
+      if (qk.Ts > 0) runJobs([scatJob(Ik, qk, sI, -1, L.t)], Mrec);
+    }
   }
 
   const M = new Float64Array(N);
