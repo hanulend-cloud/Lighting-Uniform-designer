@@ -6,13 +6,22 @@
 import { _K as K, _nextEvent as nextEvent, _interface as iface, _ledModel as ledModel, makeScene } from './mc-body.js';
 import { fresnelR } from '../photometry.js';
 import { nextPow2, kernelSpectrum, convolve } from '../l2/fft.js';
+import { rng } from '../l2/mc-slab.js';
 
 const OFF = 1e-7, END_TOP = 1, END_PCB = 2, END_LOST = 3;
 
 // ---- 주경로(결정론) ----
-const pr = { end: 0, x: 0, y: 0, f: 0, sig: 0 };
+// nrm: 계면 사건마다 면 법선(최대 NMAX 개) — 서명(사건 종류)이 같아도 다른 면(꺾임 양쪽)을 지나면 사상이 불연속이라
+// 사각형을 보간하면 안 된다(VS5 채널 렌즈: 45° 경사/평탄 경계에서 ±40% 번짐). 면 법선 차 > 10° 면 불일치(꺾임)로 본다 — 원뿔·곡면처럼 연속 변화는 중점 검사가 담당.
+const NMAX = 6, COS_TOL = Math.cos(10 * Math.PI / 180);
+const pr = { end: 0, x: 0, y: 0, f: 0, sig: 0, nrm: null, nn: 0 };
 function primary(S, px, py, pz, dx, dy, dz) {
   let inB = false, f = 1, sig = 0;
+  const nrm = new Float64Array(3 * NMAX); let nn = 0;
+  pr.nrm = nrm; pr.nn = 0;
+  const rec = (E) => { if (nn < NMAX) { nrm[3 * nn] = E.nx; nrm[3 * nn + 1] = E.ny; nrm[3 * nn + 2] = E.nz; nn++; pr.nn = nn; } };
+  // 손실 종료(탈출·흡수 벽·갇힘)도 실제 계보 투과율 f 를 돌려준다 — f=0 으로 주면 그 에너지가 '2차 몫'으로 넘어가
+  // 2차 추적(주경로 계보는 집계 제외)에서 사라진다(VS5 채널 렌즈 0.4% 누수).
   for (let e = 0; e < 200; e++) {
     const E = nextEvent(S, px, py, pz, dx, dy, dz, inB, Infinity), t = E.t, kind = E.kind;
     if (!(t < Infinity)) break;
@@ -28,17 +37,21 @@ function primary(S, px, py, pz, dx, dy, dz) {
       px += OFF * Nx; py += OFF * Ny;
       continue;
     }
+    rec(E);
     const c = iface(S.n, dx, dy, dz, E.nx, E.ny, E.nz, inB);
     if (kind === K.TOP && inB && c.R < 1) { pr.end = END_TOP; pr.x = px; pr.y = py; pr.f = f * (1 - c.R); pr.sig = sig * 13 + 1; return pr; }
     if (c.R < 1) { f *= 1 - c.R; dx = c.tx; dy = c.ty; dz = c.tz; inB = !inB; sig = sig * 13 + kind + 5; }
     else { dx = c.rx; dy = c.ry; dz = c.rz; sig = sig * 13 + 11; }
     px += OFF * dx; py += OFF * dy; pz += OFF * dz;
   }
-  pr.end = END_LOST; pr.f = 0; pr.sig = -1; return pr;
+  pr.end = END_LOST; pr.f = f; pr.sig = -1; return pr;
 }
 
 // ---- 2차 가지(중심 광선, 주경로 계보는 제외) ----
+// 작은 가지는 버리지 않고 러시안 룰렛(생존 1/10, 가중 ×10) — 기댓값 보존. 하드 절단은 렌즈 형상에서 방출의 0.6% 를 잃었다(VS5).
+// 난수는 PSF 마다 고정 시드(sink.rnd) — 같은 입력이면 같은 결과(결정론).
 function secondary(S, o, d, w0, wCut, sink) {
+  const rr = (w) => { if (sink.rnd() < 0.1) return w * 10; sink.rr += w; return 0; };
   const st = [[o[0], o[1], o[2], d[0], d[1], d[2], 0, w0, 1]];
   while (st.length) {
     let [px, py, pz, dx, dy, dz, inB, w, prim] = st.pop();
@@ -56,7 +69,7 @@ function secondary(S, o, d, w0, wCut, sink) {
         const Nx = E.nx, Ny = E.ny, dn = dx * Nx + dy * Ny, R = fresnelR(Math.abs(dn), W.n ?? S.n);
         if (!prim) sink.lost += w * (1 - R);
         w *= R; dx -= 2 * dn * Nx; dy -= 2 * dn * Ny; px += OFF * Nx; py += OFF * Ny;
-        if (w < wCut) { if (!prim) sink.lost += w; break; }
+        if (w < wCut && !prim) { w = rr(w); if (!w) break; }
         continue;
       }
       const c = iface(S.n, dx, dy, dz, E.nx, E.ny, E.nz, !!inB);
@@ -68,12 +81,12 @@ function secondary(S, o, d, w0, wCut, sink) {
       } else if (c.R >= 1) { dx = c.rx; dy = c.ry; dz = c.rz; }
       else {
         const wr = w * c.R;                                    // 반사 가지 = 2차(주경로는 투과)
-        if (wr >= wCut) st.push([px + OFF * c.rx, py + OFF * c.ry, pz + OFF * c.rz, c.rx, c.ry, c.rz, inB, wr, 0]);
-        else if (wr > 0) sink.lost += wr;
+        const wk = wr >= wCut ? wr : wr > 0 ? rr(wr) : 0;
+        if (wk > 0) st.push([px + OFF * c.rx, py + OFF * c.ry, pz + OFF * c.rz, c.rx, c.ry, c.rz, inB, wk, 0]);
         w -= wr; dx = c.tx; dy = c.ty; dz = c.tz; inB = inB ? 0 : 1;
       }
       px += OFF * dx; py += OFF * dy; pz += OFF * dz;
-      if (w < wCut) { if (!prim) sink.lost += w; break; }
+      if (w < wCut && !prim) { w = rr(w); if (!w) break; }
     }
   }
 }
@@ -109,12 +122,12 @@ function raster(G, arr, xs, ys, P, uA = -1, uB = -1) {
 }
 
 // 앵커 LED 하나의 PSF. led: {x,y}, lm: ledModel, I0, opt: { Nt, Np, half, s, wCutRel }
-export function tracePsf(S, led, lm, I0, { Nt = 24, Np = 48, half, s, sSub = s, wCutRel = 1e-3, sub = 2, maxLevel = 4, rings = 'flux', subK = 2 } = {}) {
+export function tracePsf(S, led, lm, I0, { Nt = 24, Np = 48, half, s, sSub = s, wCutRel = 1e-3, sub = 3, maxLevel = 4, rings = 'flux', subK = 2, noSecondary = false, secBlur, nsMax = 4, midCheck = true } = {}) {
   const G = makeGridK(half, s), Ftot = I0 * lm.solid;
   const ledger = { emitted: Ftot, top: 0, pcb: 0, lost: 0, abs: 0 };
   const dirOf = (u, ph) => { const c = lm.cosTheta(Math.min(u, 1 - 1e-12)), sn = Math.sqrt(Math.max(0, 1 - c * c)); return [sn * Math.cos(ph), sn * Math.sin(ph), c]; };
   const o = [led.x, led.y, 1e-6];
-  const prim = (u, ph) => { ledger.nPrim = (ledger.nPrim ?? 0) + 1; const d = dirOf(u, ph), r = primary(S, o[0], o[1], o[2], d[0], d[1], d[2]); return { end: r.end, x: r.x - led.x, y: r.y - led.y, f: r.f, sig: r.sig }; };
+  const prim = (u, ph) => { ledger.nPrim = (ledger.nPrim ?? 0) + 1; const d = dirOf(u, ph), r = primary(S, o[0], o[1], o[2], d[0], d[1], d[2]); return { end: r.end, x: r.x - led.x, y: r.y - led.y, f: r.f, sig: r.sig, nrm: r.nrm, nn: r.nn }; };
   // 꼭짓점 격자
   // 고리 = 등각(θ) 분할(중심 r∝θ 거의 선형 — 등광속 분할은 중심에서 r∝√u 라 사상이 비선형), 광속은 CDF 로 정확
   const U = Array.from({ length: Nt + 1 }, (_, i) => (rings === 'theta' ? lm.uOf((i / Nt) * 89.5 * Math.PI / 180) : Math.min(i / Nt, lm.uOf(89.5 * Math.PI / 180))));
@@ -125,11 +138,31 @@ export function tracePsf(S, led, lm, I0, { Nt = 24, Np = 48, half, s, sSub = s, 
     else if (end === END_PCB) { if (splat(G, G.pcb, x, y, m)) ledger.pcb += m; else ledger.lost += m; }
   };
   const quad = (uA, uB, pA, pB, c, F, level) => {
-    const same = c[0].end !== END_LOST && c.every((q) => q.sig === c[0].sig && q.end === c[0].end);
+    const sameN = (q) => { if (q.nn !== c[0].nn) return false; for (let k = 0; k < q.nn; k++) { const a = q.nrm, b = c[0].nrm; if (a[3 * k] * b[3 * k] + a[3 * k + 1] * b[3 * k + 1] + a[3 * k + 2] * b[3 * k + 2] < COS_TOL) return false; } return true; };
+    const same = c[0].end !== END_LOST && c.every((q) => q.sig === c[0].sig && q.end === c[0].end && sameN(q));
     // 같은 경로라도 사각형이 노드 2칸보다 크면 세분 — 꼭짓점 쌍선형 사상이 r(θ) 비선형(tanθ, 중심 √u)을 못 따라감
     const big = same && level < maxLevel && (uA === 0 || Math.max(Math.hypot(c[0].x - c[2].x, c[0].y - c[2].y), Math.hypot(c[1].x - c[3].x, c[1].y - c[3].y)) > Math.max(subK * sSub, 0.1 * Math.hypot(c[0].x + c[2].x, c[0].y + c[2].y) / 2));   // 먼 곳은 상대 크기   // uA=0: 꼭짓점 수렴(r∝√u) 고리
+    // 중점 비선형 검사: 꼭짓점이 모여 있어도 내부가 접히는(집광·TIR 경계) 사각형은 쌍선형 보간이 틀린다 —
+    // 중심 광선 출사점을 보간 예측과 비교해 어긋나면(또는 경로가 다르면) 세분(최대 maxLevel+2 단). VS5 채널 렌즈 경사부 −10% 해소.
+    let mcPre = null;
+    if (midCheck && same && !big && level < maxLevel + 2) {
+      const um = (uA + uB) / 2, pm = (pA + pB) / 2;
+      mcPre = prim(um, pm);
+      const fr = uB > uA ? (Math.sqrt(um) - Math.sqrt(uA)) / (Math.sqrt(uB) - Math.sqrt(uA)) : 0.5;
+      const ex = (1 - fr) * 0.5 * (c[0].x + c[3].x) + fr * 0.5 * (c[1].x + c[2].x), ey = (1 - fr) * 0.5 * (c[0].y + c[3].y) + fr * 0.5 * (c[1].y + c[2].y);
+      const tol = Math.max(0.5 * sSub, 0.02 * Math.hypot(ex, ey));
+      if (mcPre.sig !== c[0].sig || mcPre.end !== c[0].end || Math.hypot(mcPre.x - ex, mcPre.y - ey) > tol) {
+        const m01 = prim(um, pA), m12 = prim(uB, pm), m23 = prim(um, pB), m30 = prim(uA, pm), mc = mcPre;
+        quad(uA, um, pA, pm, [c[0], m01, mc, m30], F / 4, level + 1);
+        quad(um, uB, pA, pm, [m01, c[1], m12, mc], F / 4, level + 1);
+        quad(um, uB, pm, pB, [mc, m12, c[2], m23], F / 4, level + 1);
+        quad(uA, um, pm, pB, [m30, mc, m23, c[3]], F / 4, level + 1);
+        return;
+      }
+    }
     if (same && !big) {
-      const P = (F * (c[0].f + c[1].f + c[2].f + c[3].f)) / 4;
+      // 주경로 에너지: 꼭짓점 4(각 1/8) + 중심(1/2) 구적 — 경사 스침 입사처럼 f(Fresnel)가 급변하면 꼭짓점 평균은 치우친다
+      const P = mcPre ? F * ((c[0].f + c[1].f + c[2].f + c[3].f) / 8 + mcPre.f / 2) : (F * (c[0].f + c[1].f + c[2].f + c[3].f)) / 4;
       const before = c[0].end === END_TOP ? G.top : G.pcb;
       const lost = raster(G, before, [c[0].x, c[1].x, c[2].x, c[3].x], [c[0].y, c[1].y, c[2].y, c[3].y], P, uA, uB);
       if (c[0].end === END_TOP) ledger.top += P - lost; else ledger.pcb += P - lost;
@@ -145,52 +178,46 @@ export function tracePsf(S, led, lm, I0, { Nt = 24, Np = 48, half, s, sSub = s, 
       quad(uA, um, pm, pB, [m30, mc, m23, c[3]], F / 4, level + 1);
       return;
     }
-    for (const q of c) dep(q.end, q.x, q.y, (F / 4) * q.f);
+    for (const q of c) { if (q.end === END_LOST) ledger.lost += (F / 4) * q.f; else dep(q.end, q.x, q.y, (F / 4) * q.f); }
   };
   const wCut = (Ftot / (Nt * Np)) * wCutRel;
-  // 2차 가지 출사는 그 사각형 주경로 출사 발자국(꼭짓점 사각형)을 평행이동해 래스터 — 중심 광선 1개의 점 분배는
-  // 바깥 고리에서 각 표본 간격이 노드보다 커져 줄무늬(앨리어싱)가 생긴다. 발자국이 없으면(경로 불일치) 점 분배.
-  let fp = null;
+  // 2차 가지 출사(Fresnel 반사·내부 반사)는 별도 배열에 점 분배 후 σ = secBlur 가우시안으로 평활해 더한다(질량 보존).
+  // 예전 '주경로 발자국 평행이동'은 경사 렌즈처럼 사상이 늘어난 사각형에서 2차 에너지를 수 mm 엉뚱하게 옮겼다(VS5 채널 렌즈 +60%).
+  const sec = new Float32Array(G.kn * G.kn);
   const depSec = (end, x, y, m) => {
-    if (!fp) { dep(end, x, y, m); return; }
-    const arr = end === END_TOP ? G.top : G.pcb;
-    const lost = raster(G, arr, fp.xs.map((v) => v - fp.cx + x), fp.ys.map((v) => v - fp.cy + y), m);
-    if (end === END_TOP) ledger.top += m - lost; else ledger.pcb += m - lost;
-    ledger.lost += lost;
+    if (end === END_TOP) { if (splat(G, sec, x, y, m)) ledger.top += m; else ledger.lost += m; }
+    else dep(end, x, y, m);
   };
   const sink = {
-    lost: 0, abs: 0,
+    lost: 0, abs: 0, rr: 0, rnd: rng(((led.x * 73856093) ^ (led.y * 19349663)) >>> 0 || 1),
     top: (x, y, m) => depSec(END_TOP, x - led.x, y - led.y, m),
     pcb: (x, y, m) => depSec(END_PCB, x - led.x, y - led.y, m),
   };
   // 2차 가지는 꼭짓점 광선에서 추적(주경로와 같은 표본). 사각형마다 주경로가 실제로 분배한 E_p 외의 몫 Fq − E_p 를
   // 꼭짓점들에 (1 − f_k) 비례로 나눈다 → 꼭짓점 k 의 2차 추적 초기 가중 = (Fq − E_p)/Σ(1 − f_j) (사각형 내 공통).
   // 중심 광선 1개로 운반하면 렌즈 경사처럼 f 가 급변하는 곳에서 주경로 구적과 어긋나 에너지가 샌다(VS7 L4).
-  const Wc = new Float64Array((Nt + 1) * Np), FP = new Array((Nt + 1) * Np).fill(null), centers = [];
+  // 2차 몫(주경로가 운반하지 못한 Fq − E_p)은 사각형 내부 층화 표본 ns×ns 로 운반: 표본 k 의 초기 가중 = rem/Σ(1 − f_j)
+  // (표본별 (1 − f_k) 비례 — 주경로 구적과 에너지 정확 일치). ns 는 2차 몫 비율에 따라 1~4 (경사 스침 반사처럼 큰 곳은 촘촘히).
   for (let i = 0; i < Nt; i++) for (let j = 0; j < Np; j++) {
     const j1 = (j + 1) % Np, pA = (2 * Math.PI * j) / Np, pB = (2 * Math.PI * (j + 1)) / Np;
     const cq = [C[i][j], C[i + 1][j], C[i + 1][j1], C[i][j1]];
     const Fq = (Ftot * (U[i + 1] - U[i])) / Np;
     const before = ledger.top + ledger.pcb + ledger.lost;
     quad(U[i], U[i + 1], pA, pB, cq, Fq, 0);
-    // 구적: 꼭짓점 4개(각 1/8) + 중심(1/2) — 바깥 고리처럼 (1 − f) 가 비선형인 곳에서 사다리꼴(꼭짓점만)은 스침각 꼭짓점에 과배분
-    const rem = Fq - (ledger.top + ledger.pcb + ledger.lost - before), uc = (U[i] + U[i + 1]) / 2, phc = (pA + pB) / 2, fc = prim(uc, phc).f;
-    const den = cq.reduce((a, q) => a + (1 - q.f) / 8, 0) + (1 - fc) / 2;
-    if (rem > 0 && den > 1e-12) {
-      const w = rem / den;
-      for (const [ii, jj] of [[i, j], [i + 1, j], [i + 1, j1], [i, j1]]) Wc[ii * Np + jj] += w / 8;
-      centers.push([uc, phc, w / 2, i, j]);
-    } else if (rem > 0) ledger.lost += rem;
-    // 2차 출사 발자국: 이 사각형이 같은 경로로 상면 탈출이면 그 꼭짓점 사각형(꼭짓점 (i,j) 에 기록)
-    if (!FP[i * Np + j] && cq.every((q) => q.end === END_TOP && q.sig === cq[0].sig))
-      FP[i * Np + j] = { xs: cq.map((q) => q.x), ys: cq.map((q) => q.y), cx: (cq[0].x + cq[1].x + cq[2].x + cq[3].x) / 4, cy: (cq[0].y + cq[1].y + cq[2].y + cq[3].y) / 4 };
+    const rem = Fq - (ledger.top + ledger.pcb + ledger.lost - before);
+    if (!(rem > 0)) continue;
+    if (noSecondary) { ledger.lost += rem; continue; }
+    const frac = rem / Fq, ns = Math.min(nsMax, frac < 0.03 ? 1 : frac < 0.1 ? 2 : frac < 0.3 ? 3 : 4), pts = [];
+    let den = 0;
+    for (let b = 0; b < ns; b++) for (let a = 0; a < ns; a++) {
+      const u = U[i] + ((a + 0.5) / ns) * (U[i + 1] - U[i]), ph = pA + ((b + 0.5) / ns) * (pB - pA), f = prim(u, ph).f;
+      pts.push([u, ph, f]); den += 1 - f;
+    }
+    if (!(den > 1e-12)) { ledger.lost += rem; continue; }
+    for (const [u, ph, f] of pts) if (f < 1) secondary(S, o, dirOf(u, ph), rem / den, wCut, sink);
   }
-  for (let i = 0; i <= Nt; i++) for (let j = 0; j < Np; j++) {
-    const w = Wc[i * Np + j]; if (!(w > 0)) continue;
-    fp = FP[i * Np + j] ?? FP[Math.max(0, i - 1) * Np + j] ?? null;
-    secondary(S, o, dirOf(U[i], (2 * Math.PI * j) / Np), w, wCut, sink);
-  }
-  for (const [uc, phc, w, i, j] of centers) { fp = FP[i * Np + j]; secondary(S, o, dirOf(uc, phc), w, wCut, sink); }
+  gaussBlur(sec, G.kn, (secBlur ?? 0.5 * sSub) / G.s);
+  for (let k = 0; k < sec.length; k++) G.top[k] += sec[k];
   // 장부: rest = 주경로 흡수 등(진단용)
   ledger.lost += sink.lost; ledger.abs = sink.abs;
   ledger.rest = ledger.emitted - ledger.top - ledger.pcb - ledger.lost - ledger.abs;
@@ -233,13 +260,13 @@ export function clearPsfCache() { _psfCache.clear(); _sceneCache.clear(); }
 //      anchorStep(비균일 형상 앵커 격자 간격), exact(검증용: LED 마다 실제 벽·측면 포함 추적)
 // 정밀도: 'full'(최종안·표시) / 'search'(자동탐색 반복 — 각도 격자·세분·재순환 위상·가지 절단을 낮춤, 최종안은 full 로 재검증)
 export const FIDELITY = {
-  full: { Nt: 24, maxLevel: 4, recQ: 2, recNt: 16, wCutRel: 1e-3 },
-  search: { Nt: 16, maxLevel: 3, recQ: 1, recNt: 12, wCutRel: 3e-3 },
+  full: { Nt: 24, maxLevel: 4, sub: 3, midCheck: true, nsMax: 4, recQ: 2, recNt: 16, wCutRel: 1e-3 },
+  search: { Nt: 16, maxLevel: 3, sub: 2, midCheck: false, nsMax: 1, recQ: 1, recNt: 12, wCutRel: 3e-3 },
 };
 export function shapeField(geom, depth, leds, led, grid, { n, mua = 0, rhoB = 0.5, fidelity = 'full', Nt, Np, uniform = false, symmetric = false, anchorStep, exact = false } = {}) {
   const FQ = FIDELITY[fidelity] ?? FIDELITY.full;
   Nt = Nt ?? FQ.Nt; Np = Np ?? 2 * Nt;
-  const tq = { maxLevel: FQ.maxLevel, wCutRel: FQ.wCutRel };
+  const tq = { maxLevel: FQ.maxLevel, sub: FQ.sub, midCheck: FQ.midCheck, nsMax: FQ.nsMax, wCutRel: FQ.wCutRel };
   const t0 = typeof performance !== 'undefined' ? performance.now() : Date.now();
   const lm = ledModel(led), I0 = led.I0 ?? 1;
   const { NX, NY, x0, y0, stepX, stepY } = grid;
@@ -284,7 +311,7 @@ export function shapeField(geom, depth, leds, led, grid, { n, mua = 0, rhoB = 0.
     let Gp = _psfCache.get(key);
     if (!Gp) {
       // 재순환 PSF 는 거친 격자(굽기와 같은 f·s, f·s ≤ h/2)로만 쓰이므로 그 간격으로 추적(래스터·세분 비용 ↓)
-      const fr = recF(), r = tracePsf(S, p, lmL, 1 / lmL.solid, { ...tq, Nt: FQ.recNt, Np: 2 * FQ.recNt, half, s: fr * s, sSub: Math.max(sE, fr * s) }); traced++;
+      const fr = recF(), r = tracePsf(S, p, lmL, 1 / lmL.solid, { maxLevel: 3, sub: 2, midCheck: false, nsMax: 1, wCutRel: 3e-3, Nt: FQ.recNt, Np: 2 * FQ.recNt, half, s: fr * s, sSub: Math.max(sE, fr * s) }); traced++;   // 재순환은 매끄러운 성분 — 가벼운 설정
       Gp = { kn: r.G.kn, kc: r.G.kc, s: r.G.s, top: r.G.top, Pp: r.ledger.pcb / r.ledger.emitted };
       if (_psfCache.size >= 64) _psfCache.delete(_psfCache.keys().next().value);
       _psfCache.set(key, Gp);
@@ -408,6 +435,18 @@ export function shapeField(geom, depth, leds, led, grid, { n, mua = 0, rhoB = 0.
   const t1 = typeof performance !== 'undefined' ? performance.now() : Date.now();
   const st = (globalThis.__shapeStats ??= { calls: 0, traced: 0, ms: 0, leds: 0 }); st.calls++; st.traced += traced; st.ms += t1 - t0; st.leds += leds.length;
   return { field, traced, ledger: ledgerSum, rec, ms: t1 - t0 };
+}
+
+// 분리형 가우시안(σ = 셀 단위), 경계 밖은 버림(질량 대부분 내부 — 커널은 영역 대각선을 덮음)
+function gaussBlur(A, kn, sig) {
+  if (!(sig > 0.3)) return;
+  const R = Math.ceil(3 * sig), wt = new Float64Array(2 * R + 1);
+  let sum = 0; for (let k = -R; k <= R; k++) { wt[k + R] = Math.exp(-(k * k) / (2 * sig * sig)); sum += wt[k + R]; }
+  for (let k = 0; k < wt.length; k++) wt[k] /= sum;
+  const tmp = new Float32Array(A.length);
+  for (let j = 0; j < kn; j++) for (let i = 0; i < kn; i++) { const v = A[j * kn + i]; if (!v) continue; for (let k = -R; k <= R; k++) { const ii = i + k; if (ii >= 0 && ii < kn) tmp[j * kn + ii] += v * wt[k + R]; } }
+  A.fill(0);
+  for (let j = 0; j < kn; j++) for (let i = 0; i < kn; i++) { const v = tmp[j * kn + i]; if (!v) continue; for (let k = -R; k <= R; k++) { const jj = j + k; if (jj >= 0 && jj < kn) A[jj * kn + i] += v * wt[k + R]; } }
 }
 
 // 텐트(삼각) 필터, 반폭 wx·wy (커널 셀 단위, 분리형) — 노드 값을 평가 간격 텐트 평균으로
