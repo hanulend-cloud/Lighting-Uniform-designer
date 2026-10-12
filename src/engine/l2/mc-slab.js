@@ -24,6 +24,10 @@ function radBin(r) {
   return k >= N_RAD ? -1 : k;   // R_MAX 밖은 버림(가중치는 Ts 총량에는 포함)
 }
 
+// 반사광 PCB 착지 반경(갭 h 단위) 분포를 저장하는 κ = t/h 격자. 착지 = κ·(하면 출사점, t 단위) + tanθ·(출사 방위) —
+// 출사점 이동과 출사 방향은 같은 쪽으로 상관(전방 산란)되어, 둘을 독립으로 합성하면 착지가 중심에 1.3배 몰린다(진단 2026-10-13).
+export const KAPPA = [0.03, 0.1, 0.3, 1], N_KAP = KAPPA.length;
+
 // 투과(산란 성분) 출사각(공기 중) bin: 0~10° 1° 간격 10개 + 10~90° 5° 간격 16개 = 26.
 export const N_ANG = 26;
 export function angEdgeDeg(k) { return k <= 10 ? k : 10 + (k - 10) * 5; }
@@ -71,6 +75,13 @@ export function emptyRecord() {
     TsR2: new Float64Array(N_PATH), // 산란 투과의 bin 별 Σw·r² — 흡수가 측방 확산 폭을 줄이는 효과(긴 경로 = 먼 출사) 보정용
     rad: new Float64Array(N_RAD),   // 산란 투과의 측방 반경 분포(가중치)
     ang: new Float64Array(N_ANG),   // 산란 투과의 공기 중 출사각 분포(가중치)
+    rRad: new Float64Array(N_RAD),  // 하면 내부 탈출(반사, 정반사 제외)의 측방 반경 분포 — 재순환 착지 커널용(형상 MC 진단 2026-10-13)
+    rAng: new Float64Array(N_ANG),  // 같은 빛의 공기 중 출사각 분포 — 스치는 각도로 나와 PCB 에 h·tanθ 만큼 멀리 떨어진다
+    radC: new Float64Array(N_RAD),  // 산란 투과의 측방 반경 분포 — 출사 x 가중 중앙값(xMed, 0) 기준. 입사점 기준 rad 를 시프트·축척하면
+                                    // 경사 입사의 전방 산란 덩어리가 도넛이 되어 중심이 꺼진다(얇은 우유빛 진단 2026-10-13).
+                                    // 평균은 멀리 도광된 꼬리에 끌려가(약산란에서 직진 출사점의 2~3배) 역시 도넛 — 중앙값은 덩어리에 붙는다.
+    xMed: 0,                        // 위 중심(두께 단위)
+    land: new Float64Array(N_KAP * N_RAD),   // 반사광 착지 반경(h 단위, radEdge bin) — κ 별 N_RAD 블록
     shift: 0,                       // 산란 투과 가중 평균 x 시프트(입사 방위 방향) — 합계, 정규화 전
     lost: 0,                        // roulette 손실(기댓값 보존이라 ≈0, 진단용)
   };
@@ -85,6 +96,7 @@ export function emptyRecord() {
 export function runSlab({ tau, g, n, inc, N, seed = 1, onEscape, phase }) {
   const rec = emptyRecord();
   const rnd = rng(seed);
+  let tsBuf = new Float64Array(3 * 4096), tsN = 0;   // 산란 투과 탈출 (x, y, w) — 끝에서 평균 시프트 기준 반경 분포
   const W_MIN = 1e-4, ROULETTE = 10;
   for (let p = 0; p < N; p++) {
     // 입사 방향(공기)
@@ -107,7 +119,7 @@ export function runSlab({ tau, g, n, inc, N, seed = 1, onEscape, phase }) {
         const Ri = fresnelInternal(cosIn, n);
         const wEsc = w * (1 - Ri);
         if (wEsc > 0) {
-          if (onEscape) onEscape(z === 1 ? 'T' : 'R', x, y, L, wEsc, scattered);
+          if (onEscape) onEscape(z === 1 ? 'T' : 'R', x, y, L, wEsc, scattered, ux, uy, uz);   // 내부 진행 방향(탈출 직전) — 공기 방향 = 수평 ×n
           const k = pathBin(L);
           if (z === 1) {
             if (scattered) {
@@ -115,10 +127,22 @@ export function runSlab({ tau, g, n, inc, N, seed = 1, onEscape, phase }) {
               const r = Math.hypot(x, y), kr = radBin(r);
               if (kr >= 0) rec.rad[kr] += wEsc;
               rec.shift += wEsc * x;
+              if (tsN + 3 > tsBuf.length) { const b = new Float64Array(tsBuf.length * 2); b.set(tsBuf); tsBuf = b; }
+              tsBuf[tsN++] = x; tsBuf[tsN++] = y; tsBuf[tsN++] = wEsc;
               const sOut = n * Math.sqrt(Math.max(0, 1 - cosIn * cosIn));
               rec.ang[angBin(Math.asin(Math.min(1, sOut)) * 180 / Math.PI)] += wEsc;
             } else { rec.Tb[k] += wEsc; rec.TbL[k] += wEsc * L; }
-          } else { rec.R[k] += wEsc; rec.RL[k] += wEsc * L; }
+          } else {
+            rec.R[k] += wEsc; rec.RL[k] += wEsc * L;
+            const kr = radBin(Math.hypot(x, y)); if (kr >= 0) rec.rRad[kr] += wEsc;
+            const ax = ux * n, ay = uy * n, s2 = ax * ax + ay * ay;
+            if (s2 < 1) {
+              const tn = 1 / Math.sqrt(1 - s2);
+              for (let c = 0; c < N_KAP; c++) { const kl = radBin(Math.hypot(KAPPA[c] * x + ax * tn, KAPPA[c] * y + ay * tn)); if (kl >= 0) rec.land[c * N_RAD + kl] += wEsc; }
+            }
+            const sOut = n * Math.sqrt(Math.max(0, 1 - cosIn * cosIn));
+            rec.rAng[angBin(Math.asin(Math.min(1, sOut)) * 180 / Math.PI)] += wEsc;
+          }
         }
         w *= Ri;
         uz = -uz;                                   // 내부 반사
@@ -140,6 +164,14 @@ export function runSlab({ tau, g, n, inc, N, seed = 1, onEscape, phase }) {
       }
     }
   }
+  let sw = 0;
+  const idx = new Uint32Array(tsN / 3);
+  for (let i = 0; i < idx.length; i++) { idx[i] = i; sw += tsBuf[3 * i + 2]; }
+  idx.sort((a, b) => tsBuf[3 * a] - tsBuf[3 * b]);
+  let xm = 0;
+  for (let i = 0, c = 0; i < idx.length; i++) { c += tsBuf[3 * idx[i] + 2]; if (c >= 0.5 * sw) { xm = tsBuf[3 * idx[i]]; break; } }
+  rec.xMed = xm;
+  for (let i = 0; i < tsN; i += 3) { const kr = radBin(Math.hypot(tsBuf[i] - xm, tsBuf[i + 1])); if (kr >= 0) rec.radC[kr] += tsBuf[i + 2]; }
   rec.photons = N;
   return rec;
 }

@@ -99,9 +99,18 @@ export function milkyShapeField(geom, depth, leds, grid, opt) {
     const one = [[psfAt(a.x, a.y), 1, 1, 1]];
     weightsOf = () => one;
   } else {
-    const stp = opt.anchorStep ?? Math.max(depth, Math.max(Wx, Wy) / 6);
-    const Kx = Math.max(2, Math.min(8, Math.round(Wx / stp))), Ky = NY > 1 ? Math.max(2, Math.min(8, Math.round(Wy / stp))) : 1;
-    const ax = Array.from({ length: Kx }, (_, k) => W.x0 + ((k + 0.5) / Kx) * Wx), ay = Array.from({ length: Ky }, (_, k) => W.y0 + ((k + 0.5) / Ky) * Wy);
+    // 앵커: LED 가 격자(고유 x·y 좌표 ≤ 16개씩)면 LED 좌표 자체 = LED 마다 정확한 국소 PSF. 벽 영역 균등 격자(≤8)는
+    // 오버행 pad 에 앵커를 낭비하고 두께 정점(테이퍼 중앙)을 놓쳐 중앙 과대(VS7M L3 Milky 6: 이상 로컬 슬래브 U 43% vs 50%).
+    const uniq = (v) => [...new Set(v.map((q) => Math.round(q * 1e6) / 1e6))].sort((a, b) => a - b);
+    const lx = uniq(leds.map((l) => l.x)), ly = uniq(leds.map((l) => l.y));
+    let ax, ay, Kx, Ky;
+    if (opt.anchorStep == null && lx.length <= 16 && ly.length <= 16 && lx.length * ly.length <= 4 * leds.length) {
+      ax = lx; ay = NY > 1 ? ly : [ly[0] ?? wcy]; Kx = ax.length; Ky = ay.length;
+    } else {
+      const stp = opt.anchorStep ?? Math.max(depth, Math.max(Wx, Wy) / 6);
+      Kx = Math.max(2, Math.min(8, Math.round(Wx / stp))); Ky = NY > 1 ? Math.max(2, Math.min(8, Math.round(Wy / stp))) : 1;
+      ax = Array.from({ length: Kx }, (_, k) => W.x0 + ((k + 0.5) / Kx) * Wx); ay = Array.from({ length: Ky }, (_, k) => W.y0 + ((k + 0.5) / Ky) * Wy);
+    }
     const Gs = new Map();
     const G_at = (i, j) => {
       let mi = i, mj = j, mx = 1, my = 1;
@@ -113,7 +122,8 @@ export function milkyShapeField(geom, depth, leds, grid, opt) {
     const lin = (arr, v) => {
       if (arr.length === 1 || v <= arr[0]) return [[0, 1]];
       if (v >= arr.at(-1)) return [[arr.length - 1, 1]];
-      const k = Math.min(arr.length - 2, Math.floor((v - arr[0]) / (arr[1] - arr[0]))), u = (v - arr[k]) / (arr[k + 1] - arr[k]);
+      let k = 0; while (k < arr.length - 2 && v > arr[k + 1]) k++;
+      const u = (v - arr[k]) / (arr[k + 1] - arr[k]);
       return [[k, 1 - u], [k + 1, u]];
     };
     weightsOf = (l) => { const o = []; for (const [i, wi] of lin(ax, l.x)) for (const [j, wj] of lin(ay, l.y)) { if (wi * wj <= 0) continue; const [G, mx, my] = G_at(i, j); o.push([G, wi * wj, mx, my]); } return o; };

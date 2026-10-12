@@ -19,7 +19,7 @@ const ok = (cond, msg) => { console.log((cond ? 'PASS ' : 'FAIL ') + msg); if (!
 const QUICK = process.argv.includes('--quick');
 const only = process.argv.find((a) => a.startsWith('--only='))?.slice(7);
 const run = (id) => !only || only.split(',').includes(id);
-const table = loadTable(), n = 1.59, rhoB = 0.5, intensity = (c) => c;
+const table = loadTable(), n = 1.59, rhoB = +(process.env.RHOB ?? 0.5), intensity = (c) => c;
 
 if (run('REG')) {
   for (const milky of [3, 7]) {
@@ -44,13 +44,14 @@ if (run('VS7M')) {
   { const s = structuredClone(DEFAULT_SPEC); s.levels[4].on = true; s.levels[3].on = false; const leds = ledPositions(s, 20, 20); mk('L4 포켓', buildBodyGeometry(s, [1, 4], 12, { leds, pitchX: 20, pitchY: 20, padX: P, padY: P }), leds, true, true); }
   { const s = structuredClone(DEFAULT_SPEC), leds = ledPositions(s, 20, 20), hf = heightfieldFromFn(200, 200, 0.25, (x, y) => -((x * x + y * y) / 16000), (x) => (Math.abs(x - 15) < 2 ? -6 : -3));
     mk('돔·리브', { hf, ox: 50, oy: 50, walls: { x0: -P, x1: 100 + P, y0: -P, y1: 100 + P }, imported: true, periodic: false, key: 'm-dome' }, leds, false, false); }
+  { const s = structuredClone(DEFAULT_SPEC); s.levels[1].thk = 1.5; const leds = ledPositions(s, 20, 20); mk('L1 평판 1.5mm', buildBodyGeometry(s, [1], 12, { leds, pitchX: 20, pitchY: 20, padX: P, padY: P }), leds, true, true); }
   const milkies = process.env.MILKY ? [+process.env.MILKY] : [3, 6];
   for (const [ci, c] of cases.entries()) {
     if (pick >= 0 && ci !== pick) continue;
     for (const milky of milkies) {
       const mat = l2Material(table, milky, n), medium = { mus: mat.musR / (1 - mat.g), g: mat.g, mua: mat.mua };
       const NX = 67, grid = { NX, NY: NX, x0: 0, y0: 0, stepX: 100 / (NX - 1), stepY: 100 / (NX - 1) };
-      const fast = milkyShapeField(c.geom, 12, c.leds, grid, { table, mat, rhoB, intensity, intensityKey: 'lam1', I0: 1, uniform: c.uniform, symmetric: c.symmetric, rWover: (process.env.WALLMODE ?? 'absorb') === 'absorb' ? 0 : undefined });
+      const fast = milkyShapeField(c.geom, 12, c.leds, grid, { table, mat, rhoB, intensity, intensityKey: 'lam1', I0: 1, uniform: c.uniform, symmetric: c.symmetric, rWover: (process.env.WALLMODE ?? 'absorb') === 'absorb' ? 0 : undefined, anchorStep: process.env.ANCHOR ? +process.env.ANCHOR : undefined });
       const hfT = c.geom.hf, Nper = +(process.env.NPER ?? (QUICK ? 4e4 : 8e5)) / (milky > 4 ? 2 : 1);
       const wd = { hf: { nx: hfT.nx, ny: hfT.ny, cell: hfT.cell, x0: hfT.x0, y0: hfT.y0, zt: Float64Array.from(hfT.zt), zb: Float64Array.from(hfT.zb), mask: hfT.mask },
         ox: c.geom.ox, oy: c.geom.oy, depth: 12, n, mua: mat.mua, medium, rhoB, walls: { ...c.geom.walls, mode: process.env.WALLMODE ?? 'absorb', R: fast.rW }, leds: c.leds, led, N: Nper, grid };
@@ -65,6 +66,10 @@ if (run('VS7M')) {
       const st = (f) => { const v = blocks(f); return { mean: v.reduce((p, q) => p + q, 0) / v.length, U: Math.min(...v) / Math.max(...v) }; };
       const sF = st(fast.field), sM = st(mc), per = res.map((r) => st(r.map)), sdU = Math.sqrt(per.reduce((a, q) => a + (q.U - sM.U) ** 2, 0) / (NW - 1) / NW);
       const dm = Math.abs(sF.mean / sM.mean - 1), du = Math.abs(sF.U - sM.U);
+      if (process.argv.includes('--map')) {
+        const bF = blocks(fast.field), bM = blocks(mc), nb = Math.round(Math.sqrt(bF.length));
+        for (let j = 0; j < nb; j += 2) console.log('   ' + Array.from({ length: nb }, (_, i) => (bF[j * nb + i] / bM[j * nb + i]).toFixed(2)).filter((_, i) => i % 2 === 0).join(' '));
+      }
       if (process.argv.includes('--fullcav')) {   // 진단: 벽 접기를 재순환 단계마다 하는 전체 캐비티 solve(평판 전용)
         const t = 3, h = 9, stp = 1, nx = 100, rWc = process.env.WALLMODE === 'absorb' ? 0 : fast.rW, src = [];
         for (const l of c.leds) src.push({ ...l, I0: 1 }, { x: -l.x, y: l.y, I0: rWc }, { x: 200 - l.x, y: l.y, I0: rWc }, { x: l.x, y: -l.y, I0: rWc }, { x: l.x, y: 200 - l.y, I0: rWc });

@@ -1,6 +1,6 @@
 {
  "version": 1,
- "rec": 292,
+ "rec": 559,
  "grids": {
   "tauR": [
    0,
@@ -64,6 +64,6 @@
  },
  "quick": false,
  "cells": 5760,
- "seconds": 5864,
- "created": "2026-10-08T07:08:12.810Z"
+ "seconds": 5114,
+ "created": "2026-10-12T17:49:46.643Z"
 }
