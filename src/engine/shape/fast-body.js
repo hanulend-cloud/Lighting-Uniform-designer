@@ -7,6 +7,7 @@ import { _K as K, _nextEvent as nextEvent, _interface as iface, _ledModel as led
 import { fresnelR } from '../photometry.js';
 import { nextPow2, kernelSpectrum, convolve } from '../l2/fft.js';
 import { rng } from '../l2/mc-slab.js';
+import { sharedHf } from './psf-pool.js';
 
 const OFF = 1e-7, END_TOP = 1, END_PCB = 2, END_LOST = 3;
 
@@ -92,9 +93,9 @@ function secondary(S, o, d, w0, wCut, sink) {
 }
 
 // ---- PSF 격자(LED 기준 오프셋, 밀도) ----
-function makeGridK(half, s) {
+function makeGridK(half, s, out) {
   const kc = Math.ceil(half / s), kn = 2 * kc + 1;
-  return { kc, kn, s, top: new Float32Array(kn * kn), pcb: new Float32Array(kn * kn) };
+  return { kc, kn, s, top: out?.top ?? new Float32Array(kn * kn), pcb: out?.pcb ?? new Float32Array(kn * kn) };
 }
 function splat(G, arr, x, y, m) {
   const fa = x / G.s + G.kc, fb = y / G.s + G.kc, a0 = Math.floor(fa), b0 = Math.floor(fb), ta = fa - a0, tb = fb - b0, d = m / (G.s * G.s);
@@ -122,17 +123,32 @@ function raster(G, arr, xs, ys, P, uA = -1, uB = -1) {
 }
 
 // 앵커 LED 하나의 PSF. led: {x,y}, lm: ledModel, I0, opt: { Nt, Np, half, s, wCutRel }
-export function tracePsf(S, led, lm, I0, { Nt = 24, Np = 48, half, s, sSub = s, wCutRel = 1e-3, sub = 3, maxLevel = 4, rings = 'flux', subK = 2, noSecondary = false, secBlur, nsMax = 4, midCheck = true } = {}) {
-  const G = makeGridK(half, s), Ftot = I0 * lm.solid;
-  const ledger = { emitted: Ftot, top: 0, pcb: 0, lost: 0, abs: 0 };
+// PSF 를 각도 고리 묶음 PSF_CHUNKS 개로 나눠 추적(묶음 c = i % PSF_CHUNKS 인 고리들) — 병렬 풀이 묶음 단위로 나눠 처리한다.
+// 묶음 수·묶음별 룰렛 시드·합산 순서를 고정해 순차/병렬, 코어 수와 무관하게 결과가 비트 단위로 같다.
+export const PSF_CHUNKS = 8;
+export function tracePsf(S, led, lm, I0, opt = {}) {
+  const kc = Math.ceil(opt.half / opt.s), kn = 2 * kc + 1, kk = kn * kn;
+  const G = makeGridK(opt.half, opt.s, opt.out), ledger = { emitted: 0, top: 0, pcb: 0, lost: 0, abs: 0, rest: 0 };
+  const tmp = { top: new Float32Array(kk), pcb: new Float32Array(kk) };
+  for (let c = 0; c < PSF_CHUNKS; c++) {
+    tmp.top.fill(0); tmp.pcb.fill(0);
+    const r = tracePsfChunk(S, led, lm, I0, { ...opt, out: tmp }, c);
+    for (let k = 0; k < kk; k++) { G.top[k] += tmp.top[k]; G.pcb[k] += tmp.pcb[k]; }
+    for (const key in ledger) ledger[key] += r.ledger[key];
+  }
+  return { G, ledger };
+}
+export function tracePsfChunk(S, led, lm, I0, { Nt = 24, Np = 48, half, s, sSub = s, wCutRel = 1e-3, sub = 3, maxLevel = 4, rings = 'flux', subK = 2, noSecondary = false, secBlur, nsMax = 4, midCheck = true, out = null } = {}, chunk = 0) {
+  const G = makeGridK(half, s, out), Ftot = I0 * lm.solid;
+  const ledger = { emitted: 0, top: 0, pcb: 0, lost: 0, abs: 0 };
   const dirOf = (u, ph) => { const c = lm.cosTheta(Math.min(u, 1 - 1e-12)), sn = Math.sqrt(Math.max(0, 1 - c * c)); return [sn * Math.cos(ph), sn * Math.sin(ph), c]; };
   const o = [led.x, led.y, 1e-6];
   const prim = (u, ph) => { ledger.nPrim = (ledger.nPrim ?? 0) + 1; const d = dirOf(u, ph), r = primary(S, o[0], o[1], o[2], d[0], d[1], d[2]); return { end: r.end, x: r.x - led.x, y: r.y - led.y, f: r.f, sig: r.sig, nrm: r.nrm, nn: r.nn }; };
   // 꼭짓점 격자
   // 고리 = 등각(θ) 분할(중심 r∝θ 거의 선형 — 등광속 분할은 중심에서 r∝√u 라 사상이 비선형), 광속은 CDF 로 정확
   const U = Array.from({ length: Nt + 1 }, (_, i) => (rings === 'theta' ? lm.uOf((i / Nt) * 89.5 * Math.PI / 180) : Math.min(i / Nt, lm.uOf(89.5 * Math.PI / 180))));
-  const C = [];
-  for (let i = 0; i <= Nt; i++) { const row = []; for (let j = 0; j < Np; j++) row.push(prim(U[i], (2 * Math.PI * j) / Np)); C.push(row); }
+  const C = [];   // 꼭짓점 행: 이 묶음의 고리(i, i+1)만 필요할 때 계산
+  const row = (i) => (C[i] ??= Array.from({ length: Np }, (_, j) => prim(U[i], (2 * Math.PI * j) / Np)));
   const dep = (end, x, y, m) => {
     if (end === END_TOP) { if (splat(G, G.top, x, y, m)) ledger.top += m; else ledger.lost += m; }
     else if (end === END_PCB) { if (splat(G, G.pcb, x, y, m)) ledger.pcb += m; else ledger.lost += m; }
@@ -189,7 +205,7 @@ export function tracePsf(S, led, lm, I0, { Nt = 24, Np = 48, half, s, sSub = s, 
     else dep(end, x, y, m);
   };
   const sink = {
-    lost: 0, abs: 0, rr: 0, rnd: rng(((led.x * 73856093) ^ (led.y * 19349663)) >>> 0 || 1),
+    lost: 0, abs: 0, rr: 0, rnd: rng((((led.x * 73856093) ^ (led.y * 19349663)) + chunk * 83492791) >>> 0 || 1),
     top: (x, y, m) => depSec(END_TOP, x - led.x, y - led.y, m),
     pcb: (x, y, m) => depSec(END_PCB, x - led.x, y - led.y, m),
   };
@@ -198,9 +214,14 @@ export function tracePsf(S, led, lm, I0, { Nt = 24, Np = 48, half, s, sSub = s, 
   // 중심 광선 1개로 운반하면 렌즈 경사처럼 f 가 급변하는 곳에서 주경로 구적과 어긋나 에너지가 샌다(VS7 L4).
   // 2차 몫(주경로가 운반하지 못한 Fq − E_p)은 사각형 내부 층화 표본 ns×ns 로 운반: 표본 k 의 초기 가중 = rem/Σ(1 − f_j)
   // (표본별 (1 − f_k) 비례 — 주경로 구적과 에너지 정확 일치). ns 는 2차 몫 비율에 따라 1~4 (경사 스침 반사처럼 큰 곳은 촘촘히).
-  for (let i = 0; i < Nt; i++) for (let j = 0; j < Np; j++) {
+  if (chunk === 0) { const miss = Ftot * (1 - U[Nt]); ledger.emitted += miss; ledger.lost += miss; }   // 89.5° 밖(추적 안 함) = 손실
+  for (let i = 0; i < Nt; i++) {
+   if (i % PSF_CHUNKS !== chunk) continue;
+   const Ci = row(i), Ci1 = row(i + 1);
+   ledger.emitted += Ftot * (U[i + 1] - U[i]);
+   for (let j = 0; j < Np; j++) {
     const j1 = (j + 1) % Np, pA = (2 * Math.PI * j) / Np, pB = (2 * Math.PI * (j + 1)) / Np;
-    const cq = [C[i][j], C[i + 1][j], C[i + 1][j1], C[i][j1]];
+    const cq = [Ci[j], Ci1[j], Ci1[j1], Ci[j1]];
     const Fq = (Ftot * (U[i + 1] - U[i])) / Np;
     const before = ledger.top + ledger.pcb + ledger.lost;
     quad(U[i], U[i + 1], pA, pB, cq, Fq, 0);
@@ -215,6 +236,7 @@ export function tracePsf(S, led, lm, I0, { Nt = 24, Np = 48, half, s, sSub = s, 
     }
     if (!(den > 1e-12)) { ledger.lost += rem; continue; }
     for (const [u, ph, f] of pts) if (f < 1) secondary(S, o, dirOf(u, ph), rem / den, wCut, sink);
+   }
   }
   gaussBlur(sec, G.kn, (secBlur ?? 0.5 * sSub) / G.s);
   for (let k = 0; k < sec.length; k++) G.top[k] += sec[k];
@@ -237,7 +259,7 @@ export function diffuseT(n, t, mua) {
 
 // ---- 열린 영역 PSF 장면: 생성 몸체는 높이맵 가장자리를 복제해 벽 너머로 연장(측면·캐비티 벽 없음) ----
 // 캐비티 벽은 중첩 단계에서 거울 LED(노드별 Fresnel)로 — L1·L2 와 같은 처리라 PSF 가 위치에 덜 묶인다.
-function openScene(geom, depth, n, mua, margin) {
+export function openScene(geom, depth, n, mua, margin) {
   const src = geom.hf;
   if (geom.imported) return makeScene({ hf: src, ox: geom.ox, oy: geom.oy, depth, n, medium: { mus: 0, g: 0, mua }, rhoB: 0, walls: null });
   const m = Math.ceil(margin / src.cell), nx = src.nx + 2 * m, ny = src.ny + 2 * m, N = nx * ny;
@@ -263,7 +285,7 @@ export const FIDELITY = {
   full: { Nt: 24, maxLevel: 4, sub: 3, midCheck: true, nsMax: 4, recQ: 2, recNt: 16, wCutRel: 1e-3 },
   search: { Nt: 16, maxLevel: 3, sub: 2, midCheck: false, nsMax: 1, recQ: 1, recNt: 12, wCutRel: 3e-3 },
 };
-export function shapeField(geom, depth, leds, led, grid, { n, mua = 0, rhoB = 0.5, fidelity = 'full', Nt, Np, uniform = false, symmetric = false, anchorStep, exact = false } = {}) {
+export function shapeField(geom, depth, leds, led, grid, { n, mua = 0, rhoB = 0.5, fidelity = 'full', Nt, Np, uniform = false, symmetric = false, anchorStep, exact = false, pool = globalThis.__psfPool } = {}) {
   const FQ = FIDELITY[fidelity] ?? FIDELITY.full;
   Nt = Nt ?? FQ.Nt; Np = Np ?? 2 * Nt;
   const tq = { maxLevel: FQ.maxLevel, sub: FQ.sub, midCheck: FQ.midCheck, nsMax: FQ.nsMax, wCutRel: FQ.wCutRel };
@@ -276,7 +298,6 @@ export function shapeField(geom, depth, leds, led, grid, { n, mua = 0, rhoB = 0.
   const sE = Math.min(stepX, NY > 1 ? stepY : stepX), s = sE / 2, half = Math.hypot(Wx, Wy) + 2 * sE;
   // 분산 맞춤: 고운 격자 분배(텐트 s)·LED 오프셋 쌍선형(텐트 s)이 이미 분산 2·s²/6 을 더하므로 사전 필터 반폭 = √(간격² − 2s²)
   const pre = (st) => Math.sqrt(Math.max(0, st * st - 2 * s * s)) / s;
-  const finish = (G) => { bake(G); tentFilter(G, pre(stepX), NY > 1 ? pre(stepY) : 0); };
   const ledgerSum = { emitted: 0, top: 0, pcb: 0, lost: 0, abs: 0, rest: 0 };
   let traced = 0;
   const field = new Float64Array(NX * NY);
@@ -302,87 +323,104 @@ export function shapeField(geom, depth, leds, led, grid, { n, mua = 0, rhoB = 0.
       }
     }
   };
-  // PCB 재순환: PCB 위 Lambertian 점광원(단위 광속)의 PSF 를 실제 형상으로 추적(대표 위치 평균)해 PCB 지도와 합성곱.
-  // 평균 두께 평판 T_d·평균 갭 P_h 근사는 L4 포켓처럼 바닥이 크게 기운 형상에서 재순환을 과대평가(VS7 L4 +2%).
-  const lmL = ledModel({ model: 'lambertian', beamX: 120 });
-  let recPos = [{ x: wcx, y: wcy }], phaseOf = null;   // phaseOf(dx, dy) → recPos 인덱스(앵커 LED 기준 오프셋)
-  const recPsf = (S, tag, p) => {
-    const key = `${geom.key}|rec|${fidelity}|${tag}|${p.x.toFixed(3)},${p.y.toFixed(3)}|${stepX.toFixed(5)}|${stepY.toFixed(5)}|${half.toFixed(3)}|${n}|${mua}`;
-    let Gp = _psfCache.get(key);
-    if (!Gp) {
-      // 재순환 PSF 는 거친 격자(굽기와 같은 f·s, f·s ≤ h/2)로만 쓰이므로 그 간격으로 추적(래스터·세분 비용 ↓)
-      const fr = recF(), r = tracePsf(S, p, lmL, 1 / lmL.solid, { maxLevel: 3, sub: 2, midCheck: false, nsMax: 1, wCutRel: 3e-3, Nt: FQ.recNt, Np: 2 * FQ.recNt, half, s: fr * s, sSub: Math.max(sE, fr * s) }); traced++;   // 재순환은 매끄러운 성분 — 가벼운 설정
-      Gp = { kn: r.G.kn, kc: r.G.kc, s: r.G.s, top: r.G.top, Pp: r.ledger.pcb / r.ledger.emitted };
-      if (_psfCache.size >= 64) _psfCache.delete(_psfCache.keys().next().value);
-      _psfCache.set(key, Gp);
+
+  // ---- 장면(열린 영역 'open' / 실제 벽·측면 'real')과 PSF 추적 ----
+  // 필요한 PSF 를 먼저 열거(enum)하고 풀이 있으면 한 번에 병렬 추적(raw), 없으면 필요할 때 순차 추적. 같은 입력 → 같은 결과.
+  const margin = Math.max(20, 3 * depth);
+  const sceneOf = (kind) => {
+    const key = `${geom.key}|${kind}`;
+    let S = _sceneCache.get(key);
+    if (!S) {
+      S = kind === 'open' ? openScene(geom, depth, n, mua, margin)
+        : makeScene({ hf: geom.hf, ox: geom.ox, oy: geom.oy, depth, n, medium: { mus: 0, g: 0, mua }, rhoB: 0, walls: { ...geom.walls, mode: 'fresnel', n } });
+      if (_sceneCache.size > 6) _sceneCache.clear();
+      _sceneCache.set(key, S);
     }
+    return S;
+  };
+  const lmL = ledModel({ model: 'lambertian', beamX: 120 });
+  const recF = () => { const f0 = Math.max(1, Math.min(6, Math.floor(hGap / (2 * s)))); return f0 % 2 ? f0 : f0 - 1 || 1; };
+  const ledOpts = { ...tq, Nt, Np, half, s, sSub: sE };
+  // 재순환은 매끄러운 성분 — 가벼운 설정, 굽기와 같은 거친 간격(f·s ≤ h/2)으로 추적
+  const recOpts = () => ({ maxLevel: 3, sub: 2, midCheck: false, nsMax: 1, wCutRel: 3e-3, Nt: FQ.recNt, Np: 2 * FQ.recNt, half, s: recF() * s, sSub: Math.max(sE, recF() * s) });
+  const raw = new Map();        // 키 → { G, ledger } (일괄 추적 결과)
+  let enumMode = false;
+  const want = new Map();       // 키 → { kind, x, y, rec }
+  const trace = (key, kind, x, y, rec) => {
+    const hit = raw.get(key);
+    if (hit) { raw.delete(key); return hit; }
+    traced++;
+    return rec ? tracePsf(sceneOf(kind), { x, y }, lmL, 1 / lmL.solid, recOpts()) : tracePsf(sceneOf(kind), { x, y }, lm, I0, ledOpts);
+  };
+  let recPos = [{ x: wcx, y: wcy }], phaseOf = null, recKind = 'open';
+  const recPsf = (p) => {
+    const key = `${geom.key}|rec|${fidelity}|${recKind}|${p.x.toFixed(3)},${p.y.toFixed(3)}|${stepX.toFixed(5)}|${stepY.toFixed(5)}|${half.toFixed(3)}|${n}|${mua}`;
+    let Gp = _psfCache.get(key);
+    if (Gp) return Gp;
+    if (enumMode) { want.set(key, { kind: recKind, x: p.x, y: p.y, rec: true }); return null; }
+    const r = trace(key, recKind, p.x, p.y, true);
+    Gp = { kn: r.G.kn, kc: r.G.kc, s: r.G.s, top: r.G.top, Pp: r.ledger.pcb / r.ledger.emitted };
+    if (_psfCache.size >= 64) _psfCache.delete(_psfCache.keys().next().value);
+    _psfCache.set(key, Gp);
     return Gp;
   };
-  const recF = () => { const f0 = Math.max(1, Math.min(6, Math.floor(hGap / (2 * s)))); return f0 % 2 ? f0 : f0 - 1 || 1; };
-  const recFor = (S, tag) => ({ list: recPos.map((p) => recPsf(S, tag, p)), phaseOf });
-  let recS = null;
-  const bake = (G) => bakeRecycle(G, rhoB, recS ? recFor(recS.S, recS.tag) : null, hGap);
+  const finish = (G) => {
+    bakeRecycle(G, rhoB, rhoB > 0 ? { list: recPos.map(recPsf), phaseOf } : null, hGap);
+    tentFilter(G, pre(stepX), NY > 1 ? pre(stepY) : 0);
+  };
+  const psfKey = (kind, x, y) => `${geom.key}|${kind}|${fidelity}|${x.toFixed(4)}|${y.toFixed(4)}|${Nt}|${Np}|${stepX.toFixed(5)}|${stepY.toFixed(5)}|${half.toFixed(3)}|${n}|${mua}|${led.model}|${led.beamX}|${I0}|${rhoB}`;
+  let ledKind = 'open';
+  const psfAt = (x, y) => {
+    const gk = psfKey(ledKind, x, y);
+    let G = _psfCache.get(gk);
+    if (G) return G;
+    if (enumMode) { want.set(gk, { kind: ledKind, x, y, rec: false }); return { pending: gk }; }
+    const r = trace(gk, ledKind, x, y, false);
+    for (const k in ledgerSum) ledgerSum[k] += r.ledger[k];
+    G = r.G; finish(G);
+    if (_psfCache.size >= 48) _psfCache.delete(_psfCache.keys().next().value);
+    _psfCache.set(gk, G);
+    return G;
+  };
 
-  if (exact) {
-    const S = makeScene({ hf: geom.hf, ox: geom.ox, oy: geom.oy, depth, n, medium: { mus: 0, g: 0, mua }, rhoB: 0, walls: { ...geom.walls, mode: 'fresnel', n } });
-    recS = { S, tag: 'exact' };
-    for (const l of leds) {
-      const r = tracePsf(S, l, lm, I0, { ...tq, Nt, Np, half, s, sSub: sE }); traced++;
-      for (const k in ledgerSum) ledgerSum[k] += r.ledger[k];
-      finish(r.G);
-      addLed(r.G, l.x, l.y, 1, 1, 1, 0);
+  // ---- LED → (PSF, 가중, 거울 부호) 사상 구성 (모드별) ----
+  let images = true;
+  const r6 = (v) => Math.round(v * 1e6) / 1e6;
+  const lxs = [...new Set(leds.map((l) => r6(l.x)))].sort((a, b) => a - b), lys = [...new Set(leds.map((l) => r6(l.y)))].sort((a, b) => a - b);
+  const buildWeights = () => {
+    if (exact) {   // 검증·불러온 몸체: LED 마다 실제 장면(Fresnel 캐비티 벽·몸체 측면) 추적
+      images = false; ledKind = 'real'; recKind = 'real';
+      return (l) => [[psfAt(l.x, l.y), 1, 1, 1]];
     }
-  } else {
-    let S = _sceneCache.get(geom.key);
-    if (!S) { S = openScene(geom, depth, n, mua, Math.max(20, 3 * depth)); if (_sceneCache.size > 6) _sceneCache.clear(); _sceneCache.set(geom.key, S); }
-    recS = { S, tag: 'open' };
-    const psfAt = (x, y) => {
-      const gk = `${geom.key}|${S === _sceneCache.get(geom.key) ? 'open' : 'real'}|${fidelity}|${x.toFixed(4)}|${y.toFixed(4)}|${Nt}|${Np}|${stepX.toFixed(5)}|${stepY.toFixed(5)}|${half.toFixed(3)}|${n}|${mua}|${led.model}|${led.beamX}|${I0}|${rhoB}`;
-      let G = _psfCache.get(gk);
-      if (!G) {
-        const r = tracePsf(S, { x, y }, lm, I0, { ...tq, Nt, Np, half, s, sSub: sE }); traced++;
-        for (const k in ledgerSum) ledgerSum[k] += r.ledger[k];
-        G = r.G; finish(G);
-        if (_psfCache.size >= 48) _psfCache.delete(_psfCache.keys().next().value);
-        _psfCache.set(gk, G);
-      }
-      return G;
-    };
-    let weightsOf, images = true;
     // 주기 형상(L4 국부 렌즈): 경사가 빛을 몸체에 가두고(TIR) 그 빛이 몸체 외곽 측면에서 되돌아오므로 열린 영역 PSF + 거울
     // (공기 경로 Fresnel)로는 그 몫을 잃는다(VS7 L4 −4%). → LED 등급(벽에서 0·1번째 열, 내부)별 앵커를 실제 장면(캐비티 벽·
     // 외곽 측면 포함)에서 추적하고 같은 등급 LED 는 평행이동. 거울 대칭이면 1/4 만.
-    const r6 = (v) => Math.round(v * 1e6) / 1e6;
-    const lxs = [...new Set(leds.map((l) => r6(l.x)))].sort((a, b) => a - b), lys = [...new Set(leds.map((l) => r6(l.y)))].sort((a, b) => a - b);
     // 탐색 정밀도는 열린 영역 단일 PSF + 거울(균일도 ±1%p, 평균은 −4% 까지 — 탐색 판정은 균일도), 최종안은 full 로 재검증
     if (fidelity === 'full' && geom.periodic && lxs.length * lys.length === leds.length && leds.length > 1) {
-      images = false;
-      const realKey = `${geom.key}|real`;
-      let SR = _sceneCache.get(realKey);
-      if (!SR) { SR = makeScene({ hf: geom.hf, ox: geom.ox, oy: geom.oy, depth, n, medium: { mus: 0, g: 0, mua }, rhoB: 0, walls: { ...geom.walls, mode: 'fresnel', n } }); if (_sceneCache.size > 6) _sceneCache.clear(); _sceneCache.set(realKey, SR); }
-      S = SR; recS = { S: SR, tag: 'real' };
+      images = false; ledKind = 'real'; recKind = 'real';
       const anc = (i, nn) => (nn <= 5 || i <= 1 || i >= nn - 2 ? i : Math.floor((nn - 1) / 2));
       const midL = { x: lxs[Math.floor((lxs.length - 1) / 2)], y: lys[Math.floor((lys.length - 1) / 2)] };
-      // 재순환 위상(내부 LED 기준 단위 셀)
       const gx = lxs.length > 1 ? lxs[1] - lxs[0] : 0, gy = NY > 1 && lys.length > 1 ? lys[1] - lys[0] : 0, Q = FQ.recQ;
-      if (gx > 0) {
+      if (gx > 0) {   // 재순환 위상(내부 LED 기준 단위 셀)
         recPos = []; for (let qj = 0; qj < (gy > 0 ? Q : 1); qj++) for (let qi = 0; qi < Q; qi++) recPos.push({ x: midL.x + (qi / Q) * gx, y: midL.y + (qj / Q) * gy });
         const ph = (d, g) => (g > 0 ? ((Math.round((((d % g) + g) % g) / g * Q) % Q)) : 0);
         phaseOf = (dx, dy) => ph(dy, gy) * Q + ph(dx, gx);
       }
       const Gs = new Map(), idx = new Map(lxs.map((v, k) => [v, k])), idy = new Map(lys.map((v, k) => [v, k]));
-      weightsOf = (l) => {
+      return (l) => {
         let ai = anc(idx.get(r6(l.x)), lxs.length), aj = anc(idy.get(r6(l.y)), lys.length), mx = 1, my = 1;
         if (symmetric) { if (ai > (lxs.length - 1) / 2) { ai = lxs.length - 1 - ai; mx = -1; } if (aj > (lys.length - 1) / 2) { aj = lys.length - 1 - aj; my = -1; } }
         const key = ai * 100000 + aj;
         if (!Gs.has(key)) Gs.set(key, psfAt(lxs[ai], lys[aj]));
         return [[Gs.get(key), 1, mx, my]];
       };
-    } else if (uniform) {
+    }
+    ledKind = 'open'; recKind = 'open';
+    if (uniform) {
       let a = { x: wcx, y: wcy };
       if (geom.periodic && leds.length) {
         a = leds.reduce((b, l) => (Math.hypot(l.x - wcx, l.y - wcy) < Math.hypot(b.x - wcx, b.y - wcy) ? l : b));
-        // 재순환 위상: 단위 셀 3×3 위치마다 PCB Lambertian PSF — 포켓 반사분이 LED 주변 PCB 로 돌아와 그 렌즈를 다시 지나는
+        // 재순환 위상: 단위 셀 위치마다 PCB Lambertian PSF — 포켓 반사분이 LED 주변 PCB 로 돌아와 그 렌즈를 다시 지나는
         // 위치 의존성을 보존(대표 위치 평균은 이를 지워 균일도를 과대평가, VS7 L4). PCB 지도는 오프셋의 셀 내 위상으로 나눈다.
         const gap = (key) => { let d = Infinity; for (const l of leds) { const v = Math.abs(l[key] - a[key]); if (v > 1e-6 && v < d) d = v; } return Number.isFinite(d) ? d : 0; };
         const gx = gap('x'), gy = NY > 1 ? gap('y') : 0, Q = FQ.recQ;
@@ -392,43 +430,73 @@ export function shapeField(geom, depth, leds, led, grid, { n, mua = 0, rhoB = 0.
           phaseOf = (dx, dy) => ph(dy, gy) * Q + ph(dx, gx);
         }
       }
-      const one = [[psfAt(a.x, a.y), 1, 1, 1]];
-      weightsOf = () => one;
-    } else {
-      const step = anchorStep ?? Math.max(depth, Math.max(Wx, Wy) / 6);
-      const Kx = Math.max(2, Math.min(8, Math.round(Wx / step))), Ky = NY > 1 ? Math.max(2, Math.min(8, Math.round(Wy / step))) : 1;
-      const ax = Array.from({ length: Kx }, (_, k) => geom.walls.x0 + ((k + 0.5) / Kx) * Wx), ay = Array.from({ length: Ky }, (_, k) => geom.walls.y0 + ((k + 0.5) / Ky) * Wy);
-      const Gs = new Map();
-      const G_at = (i, j) => {
-        let mi = i, mj = j, mx = 1, my = 1;
-        if (symmetric) { if (i > (Kx - 1) / 2) { mi = Kx - 1 - i; mx = -1; } if (j > (Ky - 1) / 2) { mj = Ky - 1 - j; my = -1; } }
-        const key = mi * 100 + mj;
-        if (!Gs.has(key)) Gs.set(key, psfAt(ax[mi], ay[mj]));
-        return [Gs.get(key), mx, my];
-      };
-      const lin = (arr, v) => {   // 앵커 좌표 쌍선형 가중(양끝 밖은 끝 앵커)
-        if (arr.length === 1 || v <= arr[0]) return [[0, 1]];
-        if (v >= arr.at(-1)) return [[arr.length - 1, 1]];
-        const k = Math.min(arr.length - 2, Math.floor((v - arr[0]) / (arr[1] - arr[0]))), u = (v - arr[k]) / (arr[k + 1] - arr[k]);
-        return [[k, 1 - u], [k + 1, u]];
-      };
-      weightsOf = (l) => {
-        const out = [];
-        for (const [i, wi] of lin(ax, l.x)) for (const [j, wj] of lin(ay, l.y)) { if (wi * wj <= 0) continue; const [G, mx, my] = G_at(i, j); out.push([G, wi * wj, mx, my]); }
-        return out;
-      };
+      let one = null;
+      return () => (one ??= [[psfAt(a.x, a.y), 1, 1, 1]]);
     }
-    // 직접 + 캐비티 벽 거울(벽에서 3·depth 안의 LED — L1 과 같은 절단)
-    const wCut = 3 * depth, { x0: wx0, x1: wx1, y0: wy0, y1: wy1 } = geom.walls;
-    for (const l of leds) {
-      for (const [G, w, mx, my] of weightsOf(l)) {
-        addLed(G, l.x, l.y, w, mx, my, 0);
-        if (!images) continue;
-        if (l.x - wx0 < wCut) addLed(G, 2 * wx0 - l.x, l.y, w, -mx, my, 1);
-        if (wx1 - l.x < wCut) addLed(G, 2 * wx1 - l.x, l.y, w, -mx, my, 1);
-        if (NY > 1 && l.y - wy0 < wCut) addLed(G, l.x, 2 * wy0 - l.y, w, mx, -my, 2);
-        if (NY > 1 && wy1 - l.y < wCut) addLed(G, l.x, 2 * wy1 - l.y, w, mx, -my, 2);
-      }
+    const step = anchorStep ?? Math.max(depth, Math.max(Wx, Wy) / 6);
+    const Kx = Math.max(2, Math.min(8, Math.round(Wx / step))), Ky = NY > 1 ? Math.max(2, Math.min(8, Math.round(Wy / step))) : 1;
+    const ax = Array.from({ length: Kx }, (_, k) => geom.walls.x0 + ((k + 0.5) / Kx) * Wx), ay = Array.from({ length: Ky }, (_, k) => geom.walls.y0 + ((k + 0.5) / Ky) * Wy);
+    const Gs = new Map();
+    const G_at = (i, j) => {
+      let mi = i, mj = j, mx = 1, my = 1;
+      if (symmetric) { if (i > (Kx - 1) / 2) { mi = Kx - 1 - i; mx = -1; } if (j > (Ky - 1) / 2) { mj = Ky - 1 - j; my = -1; } }
+      const key = mi * 100 + mj;
+      if (!Gs.has(key)) Gs.set(key, psfAt(ax[mi], ay[mj]));
+      return [Gs.get(key), mx, my];
+    };
+    const lin = (arr, v) => {   // 앵커 좌표 쌍선형 가중(양끝 밖은 끝 앵커)
+      if (arr.length === 1 || v <= arr[0]) return [[0, 1]];
+      if (v >= arr.at(-1)) return [[arr.length - 1, 1]];
+      const k = Math.min(arr.length - 2, Math.floor((v - arr[0]) / (arr[1] - arr[0]))), u = (v - arr[k]) / (arr[k + 1] - arr[k]);
+      return [[k, 1 - u], [k + 1, u]];
+    };
+    return (l) => {
+      const out = [];
+      for (const [i, wi] of lin(ax, l.x)) for (const [j, wj] of lin(ay, l.y)) { if (wi * wj <= 0) continue; const [G, mx, my] = G_at(i, j); out.push([G, wi * wj, mx, my]); }
+      return out;
+    };
+  };
+
+  // 1) 열거 → 2) 일괄 병렬 추적(풀이 있고 2개 이상일 때) → 3) 실제 사상으로 합산
+  if (pool && pool.size > 1) {
+    enumMode = true;
+    const wf = buildWeights();
+    for (const l of leds) wf(l);
+    if (rhoB > 0) recPos.forEach(recPsf);
+    enumMode = false;
+    const groups = new Map();
+    for (const [key, w] of want) { const g = `${w.kind}|${w.rec ? 1 : 0}`; (groups.get(g) ?? groups.set(g, []).get(g)).push([key, w]); }
+    for (const [, list] of groups) {
+      const kind = list[0][1].kind, rec = list[0][1].rec;
+      const desc = { key: `${geom.key}|${kind}`, kind, hf: sharedHf(geom.key, geom.hf), ox: geom.ox, oy: geom.oy, walls: geom.walls, imported: !!geom.imported, depth, n, mua, margin };
+      // PSF 마다 고리 묶음 PSF_CHUNKS 개 작업 → 결과를 묶음 순서대로 합산(순차 tracePsf 와 같은 순서 — 비트 동일)
+      const tasks = [];
+      for (const [, w] of list) for (let c = 0; c < PSF_CHUNKS; c++) tasks.push({ x: w.x, y: w.y, led: rec ? { model: 'lambertian', beamX: 120 } : { model: led.model, beamX: led.beamX }, I0: rec ? 1 / lmL.solid : I0, opts: rec ? recOpts() : ledOpts, chunk: c });
+      const res = pool.traceBatch(desc, tasks);
+      list.forEach(([key], i) => {
+        const r0 = res[i * PSF_CHUNKS], kk = r0.G.kn * r0.G.kn;
+        const G = { kc: r0.G.kc, kn: r0.G.kn, s: r0.G.s, top: new Float32Array(kk), pcb: new Float32Array(kk) }, ledger = { emitted: 0, top: 0, pcb: 0, lost: 0, abs: 0, rest: 0 };
+        for (let c = 0; c < PSF_CHUNKS; c++) {
+          const r = res[i * PSF_CHUNKS + c];
+          for (let k = 0; k < kk; k++) { G.top[k] += r.G.top[k]; G.pcb[k] += r.G.pcb[k]; }
+          for (const q in ledger) ledger[q] += r.ledger[q];
+        }
+        raw.set(key, { G, ledger });
+      });
+      traced += list.length;
+    }
+  }
+  const weightsOf = buildWeights();
+  // 직접 + 캐비티 벽 거울(벽에서 3·depth 안의 LED — L1 과 같은 절단)
+  const wCut = 3 * depth, { x0: wx0, x1: wx1, y0: wy0, y1: wy1 } = geom.walls;
+  for (const l of leds) {
+    for (const [G, w, mx, my] of weightsOf(l)) {
+      addLed(G, l.x, l.y, w, mx, my, 0);
+      if (!images) continue;
+      if (l.x - wx0 < wCut) addLed(G, 2 * wx0 - l.x, l.y, w, -mx, my, 1);
+      if (wx1 - l.x < wCut) addLed(G, 2 * wx1 - l.x, l.y, w, -mx, my, 1);
+      if (NY > 1 && l.y - wy0 < wCut) addLed(G, l.x, 2 * wy0 - l.y, w, mx, -my, 2);
+      if (NY > 1 && wy1 - l.y < wCut) addLed(G, l.x, 2 * wy1 - l.y, w, mx, -my, 2);
     }
   }
   const rec = rhoB > 0 ? { h: hGap, Td: diffuseT(n, tMean, mua), tMean } : null;

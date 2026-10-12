@@ -3,7 +3,7 @@
 //  - 생성 평판: 윗면 = depth(평탄), 바닥 = 기존 정본 수식(L4 가 L3 대체: l4BotZAt / l3BotZAt / L1 두께).
 //  - 불러온 몸체(L3 = STEP): 높이맵 재표본 + L4 국부 형상 Δ_L4 = l4BotZAt − (depth − L1 두께).
 // 반환 hf 는 makeScene 의 hf(높이 = depth 기준 상대값), ox·oy 는 높이맵 원점의 툴 좌표.
-import { l3BotZAt, l4BotZAt, levelParams } from '../../model/levels.js';
+import { l3BotZAt, l4BotZFn, levelParams } from '../../model/levels.js';
 import { importedBodyActive, getBody } from './runtime.js';
 import { sampleHeightfield } from './heightfield.js';
 
@@ -37,6 +37,7 @@ export function buildBodyGeometry(spec, active, depth, { leds = [], pitchX, pitc
   const thk1 = A.has(1) ? (levelParams(spec, 1).thk ?? spec.body.baseThk) : spec.body.baseThk;
   const halfP = Math.max(1, Math.min(pitchX ?? X, pitchY ?? pitchX ?? Y) / 2);
   const near = useL4 ? nearestFn(leds, 2 * halfP) : null;
+  const l4z = useL4 ? l4BotZFn(spec, A, depth, halfP) : null;
   const imported = importedBodyActive(spec, [...A]);
   const warnings = [];
 
@@ -51,7 +52,7 @@ export function buildBodyGeometry(spec, active, depth, { leds = [], pitchX, pitc
       zt[k] = src.zt[k]; zb[k] = src.zb[k];
       if (useL4) {
         const x = X / 2 + src.x0 + (i + 0.5) * c, y = Y / 2 + src.y0 + (j + 0.5) * c;
-        const d = l4BotZAt(spec, A, depth, near(x, y), halfP) - (depth - thk1);
+        const d = l4z(near(x, y)) - (depth - thk1);
         let nb = zb[k] + d;
         if (nb > zt[k] - minBody) { nb = zt[k] - minBody; clipped++; }
         zb[k] = Math.max(zb[k], nb);
@@ -74,7 +75,7 @@ export function buildBodyGeometry(spec, active, depth, { leds = [], pitchX, pitc
     const y = gy0 + (j + 0.5) * c;
     for (let i = 0; i < nx; i++) {
       const x = gx0 + (i + 0.5) * c;
-      const bot = useL4 ? l4BotZAt(spec, A, depth, near(x, y), halfP)
+      const bot = useL4 ? l4z(near(x, y))
         : useL3 ? l3BotZAt(spec, depth, Math.min(X, Math.max(0, x)), Math.min(Y, Math.max(0, y)))
         : depth - thk1;
       const k = j * nx + i;

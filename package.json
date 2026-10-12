@@ -10,7 +10,7 @@
     "test:step": "node test/smoke-step.mjs",
     "test:shape": "node test/shape-import.mjs && node test/shape-mc.mjs --quick",
     "test:shape-full": "node test/shape-mc.mjs && node test/shape-fast.mjs && node test/shape-vs5.mjs",
-    "test:shape-fast": "node test/shape-fast.mjs --quick",
+    "test:shape-fast": "node test/shape-fast.mjs --quick && node test/shape-pool.mjs",
     "test:l2": "node test/l2-mc.mjs && node test/l2-diffusion.mjs && node test/l2-table.mjs && node test/l2-milky.mjs && node test/l2-fft.mjs && node test/l2-cavity.mjs && node test/l2-integration.mjs && node test/l2-fit.mjs && node test/l2-db.mjs && node test/l2-mie.mjs"
   },
   "keywords": ["lighting", "optics", "uniformity", "led", "dfm", "simulator"],

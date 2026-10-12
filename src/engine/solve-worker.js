@@ -13,6 +13,7 @@ import { setBodyMesh, clearBody } from './shape/runtime.js';
 import { solveCombo, solvePerLevel, GRID } from './solver.js';
 import { computeField, computeCameraLuminance } from './directLit.js';
 import { combinedEffect } from '../model/levels.js';
+import { createPsfPool } from './shape/psf-pool.js';
 
 let ready = null, curId = 0, evals = 0, lastPost = 0, phase = '';
 const soloCache = {};
@@ -42,10 +43,11 @@ self.onmessage = async (e) => {
         await initL2(browserLoader(m.l2Base));
         setMaterialDb(createDb(m.db?.base ?? [], m.db?.user ?? []));
         const st = l2State();
-        post({ type: 'ready', l2: { error: st.error, ok: !!st.check?.ok } });
+        post({ type: 'ready', l2: { error: st.error, ok: !!st.check?.ok }, pool: globalThis.__psfPool?.size ?? 1 });
       })();
       return;
     }
+    if (m.type === 'pool') { if (self.crossOriginIsolated && m.ports?.length) globalThis.__psfPool = createPsfPool(m.ports); return; }   // 메인이 만든 보조 Worker 포트
     await ready;
     if (m.type === 'db') { setMaterialDb(createDb(m.db.base ?? [], m.db.user ?? [])); for (const k in soloCache) delete soloCache[k]; return; }
     if (m.type === 'body') {
@@ -72,7 +74,7 @@ self.onmessage = async (e) => {
       let heat = null;
       if (m.heat) { step(id, '히트맵'); heat = heatField(spec, common, m.heat); }
       const tr = [resEval.field.buffer]; if (heat && heat.field.buffer !== resEval.field.buffer) tr.push(heat.field.buffer);
-      post({ type: 'result', id, combo, common, resEval, heat, ms: performance.now() - t0, evals }, tr);
+      post({ type: 'result', id, combo, common, resEval, heat, ms: performance.now() - t0, evals, poolStats: globalThis.__psfPool?.stats }, tr);
       const solo = [];
       for (const level of m.soloLevels) {
         const sig = JSON.stringify([spec.goal, spec.target, spec.space.depth, spec.led, spec.body, spec.levels[level], spec.opt]);

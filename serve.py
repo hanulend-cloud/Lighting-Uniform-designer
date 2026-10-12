@@ -10,6 +10,9 @@ class NoCacheHandler(http.server.SimpleHTTPRequestHandler):
         self.send_header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
         self.send_header("Pragma", "no-cache")
         self.send_header("Expires", "0")
+        # 교차 출처 격리 — SharedArrayBuffer(형상 PSF 병렬 추적 풀)에 필요. credentialless: CDN(OCC) 모듈은 CORS 로 그대로 로드
+        self.send_header("Cross-Origin-Opener-Policy", "same-origin")
+        self.send_header("Cross-Origin-Embedder-Policy", "credentialless")
         super().end_headers()
 
 

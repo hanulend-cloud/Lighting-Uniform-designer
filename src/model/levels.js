@@ -337,6 +337,10 @@ function l4RiseAt(sp, rel) {
 // L4 전체 높이(botZ, mm): LED 로부터의 거리(dist, mm — X 단면이면 |x-ledX|, 2D 등고선이면
 // 실제 반경거리)에서의 기구물 하면 위치. bodyProfile 과 buildGeometry(plan.js 용) 가 공유.
 export function l4BotZAt(spec, active, depth, dist, halfP) {
+  return l4BotZFn(spec, active, depth, halfP)(dist);
+}
+// 같은 식의 클로저 판(파라미터 1회 해석) — 높이맵처럼 셀마다 부를 때(형상 solver body-geom) levelParams 반복 비용 제거
+export function l4BotZFn(spec, active, depth, halfP) {
   const ledTop = spec.led.sizeZ;
   const topZ = depth;
   const A = active instanceof Set ? active : new Set(active);
@@ -345,9 +349,11 @@ export function l4BotZAt(spec, active, depth, dist, halfP) {
   const sp = levelParams(spec, 4);
   const gap = clamp(sp.gap ?? 2, 0.5, Math.max(0.5, topZ - ledTop - minBody));
   const flatHalf = (sp.flatX ?? 4) / 2;
-  if (dist <= flatHalf) return ledTop + gap;
-  const rel = Math.min(dist - flatHalf, halfP);
-  return Math.min(topZ - minBody, ledTop + gap + l4RiseAt(sp, rel));
+  return (dist) => {
+    if (dist <= flatHalf) return ledTop + gap;
+    const rel = Math.min(dist - flatHalf, halfP);
+    return Math.min(topZ - minBody, ledTop + gap + l4RiseAt(sp, rel));
+  };
 }
 
 // 기구물 단면(X 방향): 활성 형상 난이도 기준

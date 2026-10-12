@@ -236,15 +236,17 @@ function run() {
   $('#timing').textContent = '계산 중…';
 }
 
+let poolSize = 1;
 function onSolverMessage(e) {
   const m = e.data;
+  if (m.type === 'ready') { poolSize = m.pool ?? 1; return; }
   if (m.type === 'progress') {
     if (m.id !== jobId || !busy) return;
     const tail = `${m.phase} · 평가 ${m.evals}회 · ${((performance.now() - jobT0) / 1000).toFixed(1)}s${pending ? ' (입력 변경 대기)' : ''}`;
     $('#timing').textContent = resultText ? `${resultText} · ⏳ ${tail}` : `계산 중… ${tail}`;
     return;
   }
-  if (m.type === 'result') { applyResult({ ...m, solo: lastSolo }, pending); return; }   // 설계안 먼저 — 레벨별 표는 이전 값 유지
+  if (m.type === 'result') { globalThis.__poolStats = m.poolStats; applyResult({ ...m, solo: lastSolo }, pending); return; }   // 설계안 먼저 — 레벨별 표는 이전 값 유지
   if (m.type === 'solo') {
     busy = false;
     lastSolo = m.solo;
@@ -324,7 +326,7 @@ function applyResult({ combo, common, resEval, solo, heat, evals }, stale) {
   else { $('#pane-heat').classList.add('stale'); $('#pane-prof').classList.add('stale'); }
 
   resultText =
-    `연산 ${(performance.now() - t0).toFixed(0)} ms (평가 ${evals}회, 백그라운드)${stale ? ' · 입력 변경 반영 중…' : ''} · 목표 균일도 ${(spec.goal.U0 * 100).toFixed(0)}% · 깊이 ${depth}mm`
+    `연산 ${(performance.now() - t0).toFixed(0)} ms (평가 ${evals}회, 백그라운드${poolSize > 1 ? ` · 병렬 ${poolSize}스레드` : ''})${stale ? ' · 입력 변경 반영 중…' : ''} · 목표 균일도 ${(spec.goal.U0 * 100).toFixed(0)}% · 깊이 ${depth}mm`
     + (spec._l2MigrationNote ? ' · ⚠ L2 모델 변경: 저장된 설계의 Milky 를 새 눈금으로 변환했습니다(결과가 이전과 다를 수 있음)' : '');
   $('#timing').textContent = resultText;
   delete spec._l2MigrationNote;   // 1회성 고지 — 다음 저장부터 빠짐
@@ -621,6 +623,16 @@ solver = new Worker(new URL('./engine/solve-worker.js', import.meta.url), { type
 solver.onmessage = onSolverMessage;
 solver.onerror = (e) => { $('#timing').textContent = `계산 Worker 오류: ${e.message ?? e}`; };
 solver.postMessage({ type: 'init', l2Base: new URL('./engine/l2/data/', import.meta.url).href, db: dbLists() });
+// PSF 병렬 풀(교차 출처 격리일 때): 보조 Worker 를 여기(메인)서 만들고 MessageChannel 로 계산 Worker 와 직접 연결
+if (globalThis.crossOriginIsolated) {
+  const K = Math.min(7, (navigator.hardwareConcurrency ?? 2) - 2), ports = [];
+  for (let k = 0; k < K; k++) {
+    const w = new Worker(new URL('./engine/shape/psf-worker.js', import.meta.url), { type: 'module' }), ch = new MessageChannel();
+    w.postMessage({ type: 'port', port: ch.port2 }, [ch.port2]);
+    ports.push(ch.port1);
+  }
+  if (ports.length) solver.postMessage({ type: 'pool', ports }, ports);
+}
 syncBody();
 mount();
 setupZoom();
