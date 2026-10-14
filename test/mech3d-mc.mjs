@@ -103,4 +103,12 @@ const transmit = (S, N = 200000) => { let up = 0; const res = runMC3D(S, { sourc
   let lost = 0; for (const seed of [7, 8, 9]) lost += runMC3D(S, { source: src, N: 100000, seed }).ledger.lost;
   ok(lost === 0, `60° 도광 바 30만 광자: lost ${lost}`);
 }
+{   // 메쉬 모서리 정확히 적중: 사각면 대각선(x=y) 수직 광선, 세로 모서리(x=y=0)에 45° 광선 — 이웃 삼각형 t≈0 반복 없음
+  const S = scene([boxMesh(0, 0, 0, 10, 10, 2)], [part(0, 'clear')]), T1 = (1 - R) / (1 + R);
+  const diag = { flux: 1, sample: (r) => { const s = 1 + 8 * r(); return [s, s, -1, 0, 0, 1]; } };
+  const edge = { flux: 1, sample: (r) => [-1, -1, 0.1 + 1.8 * r(), Math.SQRT1_2, Math.SQRT1_2, 0] };
+  let up = 0; const a = runMC3D(S, { source: diag, N: 4000, seed: 2, maxEvents: 3000, onEscape: (x, y, z, dx, dy, dz, w) => { if (dz > 0) up += w; } }).ledger;
+  const b = runMC3D(S, { source: edge, N: 4000, seed: 2, maxEvents: 3000 }).ledger;
+  ok(a.lost === 0 && b.lost === 0 && Math.abs(up / a.emitted - T1) < 0.01 && balance(a) < 1e-9 && balance(b) < 1e-9, `모서리 적중: 대각선 T ${(up / a.emitted).toFixed(4)} (해석 ${T1.toFixed(4)}), lost 대각선 ${a.lost} / 세로 모서리 ${b.lost}`);
+}
 done();

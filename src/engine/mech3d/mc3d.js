@@ -4,7 +4,7 @@
 //   허용 간격 안에 겹쳐 있으면 짝(coincident) 면이다. 허용 간격: 두 법선이 1e-4 이내로 반평행(평면)이면 0.02mm(spec §3.4),
 //   아니면 0.04mm(곡면 테셀레이션 현 오차). 짝의 모드는 contacts 지정('contact'|'air'), 지정이 없으면 광학 접촉(spec §3.4 기본).
 //   전이는 이 한 번의 충돌에서 처리하고, 그 전이의 정확한 두 면 (부품, 면) 이 같은 자리(허용 간격 이내)에서 다시 잡히면 통과한다.
-// 수치: 사건 뒤 출발점을 옮기지 않고 직전 적중 삼각형을 다음 광선에서 제외한다(tMin = 0). 체적 산란 뒤에는 제외 없음.
+// 수치: 사건 뒤 출발점을 옮기지 않고 직전 적중 삼각형을 다음 광선에서 제외하고 tMin = 1e-9 로 둔다(모서리 적중의 이웃 삼각형 t≈0 반복 방지). 체적 산란 뒤에는 제외 없음.
 // 비용: Milky 가 매우 높으면(≥ 9.5) 광자당 수 ms 가 든다 — P4 에서 사건 예산(event budget)을 둔다.
 // 편광: 광자마다 전기장 단위벡터 E ⟂ d 를 추적한다(Fresnel s/p 분리). 확산 반사·면 처리·체적 산란 뒤에는 무작위화.
 // onExit(part, face, x,y,z, dx,dy,dz, w): 투과성 부품에서 공기로 나가는 **모든** 전이(내부 공기 틈 포함 — 이후 다른 부품에
@@ -13,6 +13,7 @@ import { intersectRay, queryBox } from './bvh.js';
 import { fresnelPolarized, reflectFinish, randomPolarization } from './surface.js';
 import { rng } from '../l2/mc-slab.js';
 
+const T_MIN = 1e-9;   // 삼각형 제외와 함께 쓰는 아주 작은 tMin — 모서리 적중 시 이웃 삼각형의 t≈0 재적중 차단
 const COIN_GAP_PLANAR = 0.02, COIN_GAP = 0.04, COIN_PLANAR_DOT = -(1 - 1e-4), COIN_DOT = -0.97, COIN_BOX = 0.05, COIN_BARY = 1e-6;
 
 function sampleHG(g, u) {
@@ -91,13 +92,13 @@ export function runMC3D(S, { source, N, seed = 1, onExit = null, onEscape = null
     let [ex, ey, ez] = randomPolarization(dx, dy, dz, rnd);
     // 직전 짝 면 전이의 정확한 두 면 (부품, 면) — 같은 자리의 짝 면 적중만 통과(얇은 부품의 반대면은 통과하지 않음)
     let skipPA = -1, skipFA = -1, skipPB = -1, skipFB = -1, skipTol = 0, skipX = 0, skipY = 0, skipZ = 0, skipNx = 0, skipNy = 0, skipNz = 0;
-    let lastTri = -1, lastTri2 = -1;   // 직전 적중 삼각형(+ 맞붙은 짝 삼각형) — 다음 광선에서 제외(출발점 이동 없음, tMin = 0)
+    let lastTri = -1, lastTri2 = -1;   // 직전 적중 삼각형(+ 맞붙은 짝 삼각형) — 다음 광선에서 제외(출발점 이동 없음, tMin = 1e-9)
     stack.length = 0;
     for (let e = 0; ; e++) {
       if (e > maxEvents) { L.lost += w; break; }
       const cur = stack.length ? stack[stack.length - 1] : -1, med = cur >= 0 ? optics[cur] : null;
       const sFree = med && med.mus > 0 ? -Math.log(1 - rnd()) / med.mus : Infinity;
-      const h = intersectRay(bvh, px, py, pz, dx, dy, dz, 0, sFree, lastTri, lastTri2);
+      const h = intersectRay(bvh, px, py, pz, dx, dy, dz, T_MIN, sFree, lastTri, lastTri2);
       if (!h && !Number.isFinite(sFree)) {
         if (cur >= 0) { L.lost += w; break; }   // 매질 안에서 교차 없음 = 열린 메쉬(진단)
         L.escaped += w; if (onEscape) onEscape(px, py, pz, dx, dy, dz, w); break;
@@ -158,7 +159,7 @@ export function runMC3D(S, { source, N, seed = 1, onExit = null, onEscape = null
           if (entering) reflectBy(fins[finOf[tri]]);
           else lost = true;   // 불투명 부품 안쪽에서 닿음(진단)
         }
-        else if (entering ? stack.includes(q) : !stack.includes(q)) { /* 겹친 부품의 경계 — 통과 */ }
+        else if (entering ? stack.includes(q) : !stack.includes(q)) { lastTri2 = prevTri; }   // 겹친 부품의 경계(또는 모서리 이웃 삼각형) — 통과, 직전 삼각형도 계속 제외
         else if (fins[finOf[tri]].kind !== 'gloss') reflectBy(fins[finOf[tri]]);   // 반사형 코팅(양면)
         else if (entering) { if (!fresnel(nCur, nOf(q))) stack.push(q); }   // 공기 또는 다른 부품 안(중첩)에서 진입
         else {
