@@ -46,4 +46,10 @@ for (let t = 0; t < nT; t++) {
 }
 ok(miss === 0 && got.size > 0, `박스 질의: 후보 ${got.size}, 누락 ${miss}`);
 ok(buildBvh(new Float32Array(0), new Uint32Array(0)) && intersectRay(buildBvh(new Float32Array(0), new Uint32Array(0)), 0, 0, 0, 1, 0, 0) === null, '빈 메쉬 → null');
+{   // skipTri: 지정 삼각형을 건너뛰고 다음 적중(마지막 적중 면 재적중 방지, tMin = 0 허용)
+  const bb = buildBvh(boxMesh(0, 0, 0, 2, 2, 2).positions, boxMesh(0, 0, 0, 2, 2, 2).triangles);
+  const h0 = intersectRay(bb, 0.5, 1.5, 0, 0, 0, 1, 0);   // 바닥면(z=0) 위 출발: tMin 0 이면 바닥 적중
+  const h1 = intersectRay(bb, 0.5, 1.5, 0, 0, 0, 1, 0, Infinity, h0?.tri ?? -1);
+  ok(h0 && h0.t === 0 && h1 && Math.abs(h1.t - 2) < 1e-6 && h1.tri !== h0.tri, `skipTri: 출발면 t ${h0?.t} 제외 → 다음 적중 t ${h1?.t.toFixed(6)}`);
+}
 done();

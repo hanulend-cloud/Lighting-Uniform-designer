@@ -88,4 +88,19 @@ const transmit = (S, N = 200000) => { let up = 0; const res = runMC3D(S, { sourc
     ok(L.lost === 0 && balance(L) < 1e-9, `불투명 블록 위 Milky(${mode}): lost ${(L.lost / L.emitted).toExponential(1)}, 면흡수 ${(L.absSurf / L.emitted).toFixed(3)}`);
   }
 }
+{   // 얇은 부품(0.03~0.1mm): 짝 면 통과는 정확한 (부품, 면)만 — 얇은 판의 반대면을 건너뛰지 않음. 실제 0.03mm 공기 틈(미지정) = 판 2장
+  const T1 = (1 - R) / (1 + R), T2 = (1 - R) / (1 + 3 * R);
+  for (const th of [0.03, 0.045, 0.1]) for (const mode of [null, 'air']) {
+    const x = transmit(scene([boxMesh(0, 0, 0, 10, 10, 2), boxMesh(0, 0, 2, 10, 10, th)], [part(0, 'clear'), part(1, 'clear')], mode ? [{ a: 0, faceA: 1, b: 1, faceB: 0, area: 100, mode }] : []), 100000), want = mode ? T2 : T1;
+    ok(Math.abs(x.T - want) < 0.004 && x.L.lost === 0, `얇은 판 ${th}mm(${mode ?? '미지정=접촉'}): T ${x.T.toFixed(4)} (해석 ${want.toFixed(4)}), lost ${x.L.lost}`);
+  }
+  const g = transmit(scene([boxMesh(0, 0, 0, 10, 10, 2), boxMesh(0, 0, 2.03, 10, 10, 2)], [part(0, 'clear'), part(1, 'clear')]), 100000);
+  ok(Math.abs(g.T - T2) < 0.004 && g.L.lost === 0, `실제 0.03mm 공기 틈(평면 판정 0.02mm 초과): T ${g.T.toFixed(4)} (판 2장 ${T2.toFixed(4)})`);
+}
+{   // 모서리 누설: 60° 도광 바(끝면 입사) — 마지막 적중 삼각형 제외(OFF 이동 없음)
+  const S = scene([boxMesh(0, 0, 0, 100, 10, 2)], [part(0, 'clear')]), th = Math.PI / 3;
+  const src = { flux: 1, sample: (r) => [-1, 4.5 + r(), 0.5 + r() - Math.tan(th), Math.cos(th), 0, Math.sin(th)] };
+  let lost = 0; for (const seed of [7, 8, 9]) lost += runMC3D(S, { source: src, N: 100000, seed }).ledger.lost;
+  ok(lost === 0, `60° 도광 바 30만 광자: lost ${lost}`);
+}
 done();
