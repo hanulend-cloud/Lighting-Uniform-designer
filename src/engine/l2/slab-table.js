@@ -168,7 +168,16 @@ export function createTable(meta, data) {
     };
   }
   // mode: undefined(자동 전이) | 'mc' | 'diff'
+  // 질의 메모: solve 마다 밴드별로 같은 (τ', g, n, 행, μa·t) 를 다시 묻는다 — v3 필드(radC·land) 로 cell() 이 무거워져 탐색 비용의 큰 몫.
+  // 반환 객체는 공유되므로 호출측은 고치지 말 것(복사 후 표시 — mie-material compositeTable 참고).
+  const memo = new Map();
   function query(tauR, g, n, row, muaT = 0, mode) {
+    const key = `${tauR}|${g}|${n}|${row}|${muaT}|${mode ?? ''}`;
+    let q = globalThis.__noQueryMemo ? null : memo.get(key);
+    if (!q) { q = query0(tauR, g, n, row, muaT, mode); if (memo.size > 20000) memo.clear(); memo.set(key, q); }
+    return q;
+  }
+  function query0(tauR, g, n, row, muaT = 0, mode) {
     if (mode === 'mc' || (!mode && tauR <= SW_LO)) return mc(tauR, g, n, row, muaT);
     if (mode === 'diff' || tauR >= SW_HI) return diff(tauR, g, n, row, muaT);
     const w = Math.log(tauR / SW_LO) / Math.log(SW_HI / SW_LO);

@@ -1,4 +1,5 @@
 // L2 solver 런타임 — 응답 테이블을 한 번 로드·자체검증(validateTable)해 보관한다 (spec §5.5).
+import { unpackTable, TABLE_ENCODING } from './table-codec.js';
 // 브라우저: main.js 가 시작 시 await initL2(browserLoader()). Node 테스트: initL2(nodeLoader()).
 // 테이블이 없거나 검증 실패면 L2 결과는 "신뢰 불가"로 표시된다 — 옛 근사식으로 조용히 대체하지 않는다.
 import { createTable } from './slab-table.js';
@@ -23,12 +24,13 @@ export function l2State() { return state; }
 export function browserLoader(base = './src/engine/l2/data/') {
   return async () => {
     const get = async (f) => { const r = await fetch(base + f); if (!r.ok) throw new Error(`${f} ${r.status}`); return r; };
-    const [meta, bin, refAD] = await Promise.all([
-      get('slab-meta.json').then((r) => r.json()),
-      get('slab-table.bin').then((r) => r.arrayBuffer()),
-      get('ref-ad.json').then((r) => r.json()),
-    ]);
-    return { meta, data: new Float32Array(bin), refAD };
+    const [meta, refAD] = await Promise.all([get('slab-meta.json').then((r) => r.json()), get('ref-ad.json').then((r) => r.json())]);
+    if (meta.encoding === TABLE_ENCODING) {   // 압축 표(가수 12비트 + 바이트 평면 + gzip)
+      const r = await get('slab-table.f32z');
+      const raw = await new Response(r.body.pipeThrough(new DecompressionStream('gzip'))).arrayBuffer();
+      return { meta, data: unpackTable(new Uint8Array(raw)), refAD };
+    }
+    return { meta, data: new Float32Array(await get('slab-table.bin').then((r) => r.arrayBuffer())), refAD };
   };
 }
 

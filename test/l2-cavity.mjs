@@ -3,6 +3,8 @@ import { loadTable } from './l2-util.mjs';
 import { solveCavity } from '../src/engine/l2/cavity-solver.js';
 import { bandIrradiance } from '../src/engine/l2/incident.js';
 import { checkResult } from '../src/engine/l2/validator.js';
+import { systemPsf } from '../src/engine/l2/psf.js';
+import { l2Material } from '../src/engine/l2/material.js';
 
 let fail = 0;
 const ok = (cond, msg) => { console.log((cond ? 'PASS ' : 'FAIL ') + msg); if (!cond) fail++; };
@@ -41,6 +43,15 @@ for (const [name, mat, t, h, rW] of cases) {
   const v = checkResult(res);
   ok(v.ok, `${name}: V2 err=${res.energy.err.toExponential(2)} top/in=${(res.energy.top / res.energy.input).toFixed(3)} iter=${res.iterations} ${ms.toFixed(0)}ms`);
   if (mat.musR === 0) ok(sum(res.Mscat) === 0, `${name}: Milky 0 → 산란 성분 0 (V3 시스템: 직진 + 재순환만)`);
+}
+
+// 2단 격자 PSF: 영역(=거친 격자 간격)이 바뀌어도 중앙 PSF 가 같아야 한다(예전: 셀 255개 상한 → 격자 1.6~3mm 흐림, 배열 U +1~4%p)
+{
+  const mat = l2Material(table, 6, 1.59), args = { table, mat, t: 3, h: 9, rhoB: 0.5, intensity: (c) => c, intensityKey: 'lam-ts', I0: 1, step: 0.5 };
+  const A = systemPsf({ ...args, extentX: 240, extentY: 240 }), B = systemPsf({ ...args, extentX: 800, extentY: 800 });
+  const at = (P, d) => { const K = P.K.fine && d <= P.K.fine.hx ? P.K.fine : P.K, f = (d - K.dxMin) / K.stepX, a = Math.floor(f), j = (K.kNy - 1) / 2; return K.data[j * K.kNx + a] * (1 - (f - a)) + K.data[j * K.kNx + a + 1] * (f - a); };
+  let md = 0; for (const d of [0, 3, 7, 10, 14, 20, 30]) md = Math.max(md, Math.abs(at(B, d) / at(A, d) - 1));
+  ok(!!B.K.fine && B.step > 3 && md < 0.01, `2단 격자 PSF: 영역 240 vs 800mm(거친 ${B.step.toFixed(2)}mm) 중앙 0~30mm 최대 상대차 ${(md * 100).toFixed(2)}% (<1%)`);
 }
 
 if (fail) { console.log(`\n${fail} FAIL`); process.exit(1); }

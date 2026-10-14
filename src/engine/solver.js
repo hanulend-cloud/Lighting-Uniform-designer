@@ -114,13 +114,13 @@ function evalField(spec, eff, pX, pY, gridN = GRID, padX = 0, padY = 0, fidelity
     ? computeCameraLuminance(spec, {
         depth: spec.space.depth, pitchX: pX, pitchY: pY, nx: g.nx, ny: g.ny,
         transmit: eff.transmit, decenterX: eff.decenterX ?? 0, decenterY: eff.decenterY ?? 0,
-        edgeBoost: eff.edgeBoost, padX, padY, coneDeg: LUMIN_CONE_DEG, l2: eff.l2,
+        edgeBoost: eff.edgeBoost, padX, padY, coneDeg: LUMIN_CONE_DEG, l2: eff.l2, l2Fidelity: fidelity,
       })
     : computeField(spec, {
         depth: spec.space.depth, pitchX: pX, pitchY: pY, nx: g.nx, ny: g.ny,
         blurMmX: eff.blurX, blurMmY: eff.blurY, transmit: eff.transmit,
         decenterX: eff.decenterX ?? 0, decenterY: eff.decenterY ?? 0, edgeBoost: eff.edgeBoost, active: proxy ? undefined : eff.active, shape: proxy ? undefined : eff.shape, shapeFidelity: fidelity,
-        padX, padY, l2: eff.l2,
+        padX, padY, l2: eff.l2, l2Fidelity: fidelity,
       });
   // L3(균일두께 용기)가 켜져 있으면 그 보강 폭만큼 판정 마진을 줄여, 보강 효과가 실제로 반영되게 함.
   // computeCameraLuminance 도 이제 L3/L4 바닥면 경사에서의 실제 굴절·전반사를 광선추적으로
@@ -273,6 +273,7 @@ function solveXY(spec, active, gridN, effOverride, pMaxOverride) {
 function finalizeShape(spec, active, gridN, effOverride, best) {
   const { maxD, target, pMin, X, Y } = bounds(spec);
   const eff = effOverride ?? combinedEffect(spec, maxD, active);
+  if (eff.l2 && !eff.shape && best && !SHAPE_PROXY) return finalizeL2(spec, eff, gridN, best, { maxD, target, pMin, X, Y });
   if (!eff.shape || eff.l2 || !best || SHAPE_PROXY) return best;   // 대리 탐색 중엔 바깥에서 1회만 재검증
   // 피치 축소 단계는 'search'(빠름), 확정 수치는 'full' 1회 — full 이 그래도 미달이면 그대로 보고(정직)
   const atS = memoEval(spec, eff, gridN, best.padX ?? 0, best.padY ?? 0, 'search');
@@ -280,6 +281,19 @@ function finalizeShape(spec, active, gridN, effOverride, best) {
   for (let g = 0; best.feasible && rankOf(atS(pX, pY), target) < 2 && g < 4 && (pX > pMin || pY > pMin); g++) { pX = Math.max(pMin, pX - 1); pY = Math.max(pMin, pY - 1); }
   const r = evalField(spec, eff, pX, pY, gridN, best.padX ?? 0, best.padY ?? 0, 'full');
   return { ...pack(spec, pX, pY, r, X, Y, target, eff, maxD, best.padX ?? 0, best.padY ?? 0), fidelity: 'full' };
+}
+
+// L2(밀키) 최종 확정: 탐색은 'search'(PSF 단일 격자 + 측벽 보정 재순환 차만 — 약간 낙관, +1~2%p) → 최종안을 'full'
+// (2단 격자 PSF + 측벽 보정 전체)로 재평가. full 이 미달이면 피치를 1mm 씩(최대 4회) 줄여 full 달성점을 찾는다.
+function finalizeL2(spec, eff, gridN, best, { maxD, target, pMin, X, Y }) {
+  const padX = best.padX ?? 0, padY = best.padY ?? 0;
+  let pX = best.pitchX, pY = best.pitchY ?? best.pitchX;
+  let r = evalField(spec, eff, pX, pY, gridN, padX, padY, 'full');
+  for (let g = 0; best.feasible && rankOf(r, target) < 2 && g < 4 && (pX > pMin || pY > pMin); g++) {
+    pX = Math.max(pMin, pX - 1); pY = Math.max(pMin, pY - 1);
+    r = evalField(spec, eff, pX, pY, gridN, padX, padY, 'full');
+  }
+  return { ...pack(spec, pX, pY, r, X, Y, target, eff, maxD, padX, padY), fidelity: 'full' };
 }
 
 // effOverride 를 주면 combinedEffect(spec, active) 대신 그 확산 효과를 그대로 사용

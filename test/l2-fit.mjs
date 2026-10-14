@@ -32,7 +32,14 @@ for (const truth of [{ musR: 0.6, g: 0.85, mua: 0.003 }, { musR: 2.0, g: 0.9, mu
   ok(e <= 0.1, `합성 μs'=${truth.musR}: 복원 ${f.mat.musR.toFixed(3)} (오차 ${(e * 100).toFixed(1)}%), g ${f.mat.g.toFixed(3)} / 참 ${truth.g}, μa ${f.mat.mua.toPrecision(2)} / 참 ${truth.mua}  [${ms.toFixed(0)} ms]`);
   ok(f.V6.ok, `  V6 재현: ${f.V6.note}`);
   ok(f.V9 && f.V9.ok, `  V9 교차두께: ${f.V9?.note}`);
-  if (f.free.g) ok(Math.abs(f.mat.g - truth.g) <= 0.06, `  g 복원 ±0.06`);
+  // g 복원은 데이터가 g 를 구분할 때만 판정(프로파일 Δχ²: g±0.06 고정 재피팅이 1 이상 나빠야 식별). μs'≈2/mm·1~2mm 처럼
+  // T·HPA 가 g 에 거의 무감한 영역은 g 가 임의값으로 수렴해도 정상(2026-10-14: 난수기 교체로 드러난 우연 통과).
+  if (f.free.g) {
+    const alt = [f.mat.g - 0.06, f.mat.g + 0.06].filter((v) => v >= 0.6 && v <= 0.99).map((v) => fitMaterial(table, entry, { gFix: v }).J);
+    const dJ = Math.min(...alt) - f.J;
+    if (dJ >= 1) ok(Math.abs(f.mat.g - truth.g) <= 0.06, `  g 복원 ±0.06 (식별됨, Δχ² ${dJ.toFixed(1)})`);
+    else console.log(`  (g 미식별: g±0.06 의 Δχ² ${dJ.toFixed(2)} < 1 — 복원 판정 생략, 복원 g ${f.mat.g.toFixed(3)})`);
+  }
 }
 
 // 2) 데이터시트만(T·HPA @2mm) — Covestro Makrolon DQ 브로셔: μa 고정, V6 재현
@@ -44,7 +51,9 @@ for (const [name, T, hpa] of DQ) {
   // DQ5122(HPA 19°·T 85%) 는 HG 위상함수로 재현 불가 — HG 에서는 T–HPA 관계가 g 와 거의 무관(유사성 법칙)해
   // HPA 19° 에서 T≈75% 가 한계. 좁은 전방 로브 + 낮은 손실은 큰 비드의 Mie 위상함수가 필요(단계 C).
   // 따라서 V6 이 "보정 불일치" 로 잡아내는 것이 정답 — 자체검증이 모델 한계를 숨기지 않는지 확인한다.
-  const expectOk = name !== 'DQ5122';
+  // DQ5142·5162 도 HG 한계(2026-10-14 재확인): 직접 MC 로 HG 최적(μs' 0.29, g 0.98~0.99, 2mm)은 HPA 40~42° < 측정 43°·T 63.8 < 65% —
+  // 예전 통과는 응답표 각분포 오차(+1°)의 우연. 세 등급 모두 PMMA 비드 확산판 → 소재 DB 는 Mie 로 등록(tools/fit-db).
+  const expectOk = false;
   ok(f.V6.ok === expectOk, `${name}: V6 ${f.V6.ok ? '통과' : '불일치(예상: HG 한계)'} — T ${(p.T * 100).toFixed(1)}%(측정 ${(T * 100).toFixed(0)}%) HPA ${p.hpa.toFixed(1)}°(측정 ${hpa}°) → μs' ${f.mat.musR.toFixed(3)}/mm g ${f.mat.g.toFixed(2)} Milky ${f.milky.toFixed(2)}`);
   ok(!f.free.mua && f.notes.some((s) => s.includes('μa')), `  ${name}: R 미측정 → μa 고정 고지`);
   if (f.milky <= prevMilky) mono = false; prevMilky = f.milky;

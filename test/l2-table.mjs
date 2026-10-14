@@ -3,6 +3,7 @@ import { loadTable, loadRefAD } from './l2-util.mjs';
 import { validateTable } from '../src/engine/l2/validator.js';
 import { createTable, REC } from '../src/engine/l2/slab-table.js';
 import { runSlab } from '../src/engine/l2/mc-slab.js';
+import { packTable, unpackTable } from '../src/engine/l2/table-codec.js';
 
 let fail = 0;
 const ok = (cond, msg) => { console.log((cond ? 'PASS ' : 'FAIL ') + msg); if (!cond) fail++; };
@@ -31,6 +32,13 @@ ok(v.ok, '테이블 검증 전체 통과');
 // 범위 밖 플래그
 ok(table.query(1, 0.5, 1.59, 0).outOfRange && table.query(1, 0.9, 1.40, 0).outOfRange && !table.query(1, 0.9, 1.59, 0).outOfRange, 'g·n 격자 밖 → outOfRange');
 ok(table.bandOf(1) === 0 && table.bandOf(Math.cos(85 * Math.PI / 180)) === table.angleRows - 1, '입사 cos → 밴드');
+
+// 표 압축 코덱 왕복: 가수 12비트 반올림 → 상대 오차 ≤ 2^-13, 0·부호·길이 보존
+{
+  const a = Float32Array.from([0, 1, -1, 3.14159, 1e-30, 6.02e23, 5e-6, 0.9999999]), b = unpackTable(packTable(a));
+  let me = 0; for (let i = 0; i < a.length; i++) if (a[i]) me = Math.max(me, Math.abs(b[i] / a[i] - 1));
+  ok(b.length === a.length && b[0] === 0 && Math.sign(b[2]) === -1 && me <= 2 ** -13, `표 압축 코덱 왕복 (최대 상대오차 ${me.toExponential(1)} ≤ 1.2e-4)`);
+}
 
 if (fail) { console.log(`\n${fail} FAIL`); process.exit(1); }
 console.log('\nall PASS');

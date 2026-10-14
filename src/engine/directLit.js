@@ -10,6 +10,9 @@ import { l2State, materialDb } from './l2/runtime.js';
 import { milkyFromMusR } from './l2/milky.js';
 import { compositeTable } from './l2/mie-material.js';
 import { createTable } from './l2/slab-table.js';
+import { solveCavity } from './l2/cavity-solver.js';
+import { radEdge, N_RAD } from './l2/mc-slab.js';
+import { bandIrradiance } from './l2/incident.js';
 import { b64ToF32 } from '../model/materials-db.js';
 import { importedBodyActive } from './shape/runtime.js';
 import { buildBodyGeometry } from './shape/body-geom.js';
@@ -206,6 +209,7 @@ function botZFor(spec, depth, shapeKind, leds, halfP, x, y) {
 }
 
 function sample(K, dx, dy) {
+  if (K.fine && Math.abs(dx) <= K.fine.hx && Math.abs(dy) <= K.fine.hy) K = K.fine;   // 2단 격자 PSF: 중앙은 가는 격자
   let fa = (dx - K.dxMin) / K.stepX;
   let fb = K.kNy > 1 ? (dy - K.dyMin) / K.stepY : 0;
   if (fa < 0) fa = 0; else if (fa > K.kNx - 1) fa = K.kNx - 1;
@@ -220,7 +224,7 @@ function sample(K, dx, dy) {
 }
 
 // ---- L2 (Milky 체적 산란) — spec 2026-10-07 §5.3, A2 PSF 방식 ----
-function ledIntensity(spec) {
+export function ledIntensity(spec) {
   const model = spec.led.model;
   const p = model === 'gaussian' ? { sigma: gaussianSigma(spec.led.beamX) } : { m: lambertianExponent(spec.led.beamX) };
   return {
@@ -230,7 +234,8 @@ function ledIntensity(spec) {
 }
 
 // 현재 사양의 L2 물성·기하·PSF. 테이블이 없으면 { error }.
-export function l2Setup(spec, depth, l2, edgeBoost, step, padX = 0, padY = 0) {
+// fast: 탐색 정밀도(PSF 단일 격자) — solver 최종안은 'full' 로 재평가(finalizeL2)
+export function l2Setup(spec, depth, l2, edgeBoost, step, padX = 0, padY = 0, fast = false) {
   const st = l2State();
   if (!st.table) return { error: st.error ?? 'L2 테이블 없음' };
   const warnings = [];
@@ -253,7 +258,7 @@ export function l2Setup(spec, depth, l2, edgeBoost, step, padX = 0, padY = 0) {
   const li = ledIntensity(spec);
   const BX = spec.target.xLen + 2 * Math.max(0, padX), BY = spec.target.yLen + 2 * Math.max(0, padY);
   const tbl = tableFor(ent, st.table);
-  const psf = systemPsf({ table: tbl, mat, t, h, rhoB, intensity: li.intensity, intensityKey: li.key, I0: li.I0, extentX: 2 * BX, extentY: 2 * BY, step });
+  const psf = systemPsf({ table: tbl, mat, t, h, rhoB, intensity: li.intensity, intensityKey: li.key, I0: li.I0, extentX: 2 * BX, extentY: 2 * BY, step, fast });
   if (psf.qn.outOfRange) warnings.push('굴절률·g 가 테이블 격자 밖 — 가장자리 값으로 근사');
   if (psf.qn.beyondMaterial) warnings.push('두께가 입자 소재표 범위를 넘음 — HG(g≤0.99) 근사');
   const tableOk = !!st.check?.ok;
@@ -299,11 +304,95 @@ function l2GridConv(psf, NX, NY, stepX, stepY) {
   return c;
 }
 
+// L2 측벽(밀키 수지, 확산 반사율 R = R_d) 보정(2026-10-13): 열린 PSF 중첩(LED 만) + ΔW, ΔW = [벽 solve − 열린 solve](거친 격자).
+// 벽 solve 는 갭 전달이 벽에 맞은 빛을 램버시안 재방출(cavity-solver wallDiffuse), 슬래브 옆면은 탈출 — 형상 MC 'diffuse' 벽과 같은 물리.
+// 예전 거울 LED(전 높이 정반사 R) 근사는 벽이 가까우면 균일도 과대(벽 10mm: +1.2~1.5%p, 잡음 맞춤 VS7M). 두 solve 의 같은 이산화 오차는 차에서 상쇄.
+const _wallDelta = new Map();
+// 슬래브 측방 커널(확산 입사 행, 흡수 축소 포함)의 1D 주변분포 한쪽 꼬리 T₁(s) = P(Δx > s) — 등방 2D 반경 분포에서 (1/π)·acos(s/r) 적분.
+const _edgeTail = new Map();
+function slabEdgeTail(set) {
+  const { table, mat, t } = set, key = [table.phaseKey ?? 'HG', mat.musR, mat.g, mat.mua, mat.n, t].join('|');
+  let f = _edgeTail.get(key);
+  if (f) return f;
+  const q = table.query(mat.musR * t, mat.g, mat.n, table.diffuseRow, mat.mua * t), sc = t * (q.radScale || 1), NS = 64, sMax = radEdge(N_RAD) * sc, tab = new Float64Array(NS + 1);
+  for (let a = 0; a <= NS; a++) {
+    const s = (a / NS) * sMax; let v = 0;
+    for (let k = 0; k < N_RAD; k++) { if (!(q.rad[k] > 0)) continue; for (let u = 0; u < 4; u++) { const r = Math.sqrt(((radEdge(k) * sc) ** 2) + ((u + 0.5) / 4) * (((radEdge(k + 1) * sc) ** 2) - ((radEdge(k) * sc) ** 2))); if (r > s) v += (q.rad[k] / 4) * Math.acos(s / r) / Math.PI; } }
+    tab[a] = v;
+  }
+  f = (d) => { if (!(d > 0)) return 0.5; const x = (d / sMax) * NS; if (x >= NS) return 0; const i = Math.floor(x); return tab[i] + (tab[i + 1] - tab[i]) * (x - i); };
+  if (_edgeTail.size > 16) _edgeTail.clear();
+  _edgeTail.set(key, f);
+  return f;
+}
+
+export function l2WallDelta(set, leds, li, box, grid, fast = false) {
+  const { wx0, wx1, wy0, wy1 } = box, { NX, NY, x0, y0, stepX, stepY } = grid;
+  // 거친 격자(재순환은 갭 h 척도로 매끄러움) — 간격 h/3(1.5~4mm, 셀 ≤200/축), 열린 solve 여유 = 재순환 도달거리(6h+30, ≤100mm)
+  const { h: hG } = set, Wd = wx1 - wx0, Hd = wy1 - wy0, cs = globalThis.__wallCs ?? (fast ? Math.max(3, Math.min(6, hG / 2)) : Math.max(1.5, Math.min(4, Math.max(hG / 3, Math.max(Wd, Hd) / 200)))), mg = Math.min(100, 6 * hG + 30);
+  const key = [set.psf.key, fast ? 'f' : 'F', wx0, wx1, wy0, wy1, NX, NY, x0, y0, stepX, stepY, cs, leds.map((l) => `${l.x.toFixed(3)},${l.y.toFixed(3)}`).join(';')].join('|');
+  const hit = _wallDelta.get(key); if (hit) return hit;
+  const nxw = Math.max(3, Math.round(Wd / cs)), nyw = Math.max(3, Math.round(Hd / cs)), m0 = Math.round(mg / cs), nxo = nxw + 2 * m0, nyo = nyw + 2 * m0;
+  const { mat, t, h, rhoB, table } = set, R = set.psf.rW, T0 = performance.now();
+  const LUT = new Float64Array(2049); for (let k = 0; k <= 2048; k++) LUT[k] = li.intensity(k / 2048);   // 광도 표(cos 선형) — acos·pow 반복 제거
+  const inten = (c) => { const f = Math.min(2048, Math.max(0, c * 2048)), k = Math.min(2047, f | 0); return LUT[k] + (LUT[k + 1] - LUT[k]) * (f - k); };
+  const Eo = bandIrradiance({ sources: leds.map((l) => ({ x: l.x - wx0 + m0 * cs, y: l.y - wy0 + m0 * cs, I0: li.I0 })), intensity: inten, h: Math.max(h, 1e-3), nx: nxo, ny: nyo, step: cs, table });
+  const Ew = Eo.map((b) => { const o = new Float64Array(nxw * nyw); for (let j = 0; j < nyw; j++) for (let i = 0; i < nxw; i++) o[j * nxw + i] = b[(j + m0) * nxo + i + m0]; return o; });
+  const wallIn = { L: new Float64Array(nyw), R: new Float64Array(nyw), B: new Float64Array(nxw), T: new Float64Array(nxw) };
+  for (const b of Eo) for (let j = 0; j < nyo; j++) for (let i = 0; i < nxo; i++) {
+    const ii = i - m0, jj = j - m0, v = b[j * nxo + i];
+    if (!v || (ii >= 0 && ii < nxw && jj >= 0 && jj < nyw)) continue;
+    const cj = Math.min(nyw - 1, Math.max(0, jj)), ci = Math.min(nxw - 1, Math.max(0, ii));
+    if (ii < 0) wallIn.L[cj] += v; else if (ii >= nxw) wallIn.R[cj] += v; else if (jj < 0) wallIn.B[ci] += v; else wallIn.T[ci] += v;
+  }
+  const T1 = performance.now();
+  // 직접광의 벽 입사: LED 마다 네 벽의 (벽 셀, 높이 구간)별 해석 적분 — 높이를 알아야 재방출 착지가 맞다(LED 가 벽 1mm 면 낮게 맞음).
+  // 벽면 조도 = I0·I(cosθ)·(d/r)/r², cosθ = z/r(LED 축 기준). 단위는 E 와 같게(셀 플럭스/cs²).
+  const KZ = 6, hh = Math.max(h, 1e-3), zc = Array.from({ length: KZ }, (_, q) => ((q + 0.5) / KZ) * hh);
+  const wallInH = { K: KZ, z: zc, L: zc.map(() => new Float64Array(nyw)), R: zc.map(() => new Float64Array(nyw)), B: zc.map(() => new Float64Array(nxw)), T: zc.map(() => new Float64Array(nxw)) };
+  const wallFlux = (d, ds, q) => {   // 벽까지 거리 d, 벽 셀 중심의 벽 방향 오프셋 ds, 높이 구간 q → 셀(cs × hh/KZ) 플럭스/cs²
+    const SS = d < 2 * cs ? 8 : 3, SZ = 4, dz = hh / KZ; let v = 0;
+    for (let a = 0; a < SS; a++) for (let b = 0; b < SZ; b++) {
+      const sy = ds + ((a + 0.5) / SS - 0.5) * cs, z = (q + (b + 0.5) / SZ) * dz, r2 = d * d + sy * sy + z * z, r = Math.sqrt(r2);
+      v += li.I0 * inten(z / r) * (d / r) / r2;
+    }
+    return (v / (SS * SZ)) * cs * dz / (cs * cs);
+  };
+  const reach = 40 * hh;
+  // 높이별·점 커널 직접광(실험, 기본 꺼짐 — VS7M 미검증. 균일 높이 선광원 방식이 8/8 검증됨)
+  if (globalThis.__wallPointKernel) for (const l of leds) {
+    const lx = l.x - wx0, ly = l.y - wy0, side = [['L', lx, ly, nyw], ['R', Wd - lx, ly, nyw], ['B', ly, lx, nxw], ['T', Hd - ly, lx, nxw]];
+    for (const [k, d, along, n] of side) {
+      if (!(d > 0) || d > reach) continue;
+      for (let j = 0; j < n; j++) { const ds = (j + 0.5) * cs - along; if (Math.abs(ds) > reach) continue; for (let q = 0; q < KZ; q++) wallInH[k][q][j] += wallFlux(d, ds, q); }
+    }
+  }
+  if (globalThis.__wallTiming) { const sA = (o) => o.reduce((a, v) => a + v.reduce((p, q) => p + q, 0), 0), tH = ['L', 'R', 'B', 'T'].reduce((a, k) => a + sA(wallInH[k]), 0), tE = ['L', 'R', 'B', 'T'].reduce((a, k) => a + wallIn[k].reduce((p, q) => p + q, 0), 0);
+    console.log(`벽 직접광 합: 해석 ${tH.toFixed(4)} vs 하면 평면 밖 ${tE.toFixed(4)} (비 ${(tH / tE).toFixed(4)}) | 변별 L ${sA(wallInH.L).toFixed(3)} B ${sA(wallInH.B).toFixed(3)}`); }
+  const Sw = solveCavity({ E: Ew, nx: nxw, ny: nyw, step: cs, table, mat, t, h, rhoB, rW: R, uniformTail: false, walled: true, wallDiffuse: true, wallInH: globalThis.__wallPointKernel ? wallInH : null, wallIn, recycleOnly: fast, tol: fast ? 1e-3 : 1e-5, gapRmax: Math.min(Math.hypot(Wd, Hd), 12 * hG) });
+  const T2 = performance.now();
+  const So = solveCavity({ E: Eo, nx: nxo, ny: nyo, step: cs, table, mat, t, h, rhoB, rW: 0, uniformTail: false, recycleOnly: fast, tol: fast ? 1e-3 : 1e-5, gapRmax: 12 * hG });   // 갭 커널 99.3% 반경 — 두 solve 같은 절단(차에서 상쇄)
+  if (globalThis.__wallTiming) console.log(`ΔW ${nxw}×${nyw}/${nxo}×${nyo} cs ${cs.toFixed(2)}: 입사 ${(T1 - T0).toFixed(0)} 벽 ${(T2 - T1).toFixed(0)} 열린 ${(performance.now() - T2).toFixed(0)}ms (반복 ${Sw.iterations})`);
+  const bil = (M, n, m, ox, x, y) => {
+    const fa = (x - wx0) / cs + ox - 0.5, fb = (y - wy0) / cs + ox - 0.5, a = Math.min(n - 2, Math.max(0, Math.floor(fa))), b = Math.min(m - 2, Math.max(0, Math.floor(fb)));
+    const u = Math.min(1, Math.max(0, fa - a)), v = Math.min(1, Math.max(0, fb - b));
+    return (1 - u) * (1 - v) * M[b * n + a] + u * (1 - v) * M[b * n + a + 1] + (1 - u) * v * M[(b + 1) * n + a] + u * v * M[(b + 1) * n + a + 1];
+  };
+  const d = new Float64Array(NX * NY);
+  for (let j = 0; j < NY; j++) for (let i = 0; i < NX; i++) { const x = x0 + i * stepX, y = y0 + j * stepY; d[j * NX + i] = bil(Sw.M, nxw, nyw, 0, x, y) - bil(So.M, nxo, nyo, m0, x, y); }
+  const out = { d, err: Sw.energy.err };
+  if (globalThis.__l2perf) { const P = globalThis.__l2perf, k = fast ? 'wallS' : 'wallF'; P[k] = (P[k] ?? 0) + 1; P[k + 'Ms'] = (P[k + 'Ms'] ?? 0) + performance.now() - T0; P.wall++; P.wallMs += performance.now() - T0; P.cells = `${nxw}x${nyw}/${nxo}x${nyo}@${cs.toFixed(1)}`; }
+  if (_wallDelta.size > 16) _wallDelta.clear();
+  _wallDelta.set(key, out);
+  return out;
+}
+
 function computeFieldL2(spec, opt, g) {
   const { leds, dim, NX, NY, x0, x1, y0, y1, stepX, stepY, X, Y, wx0, wx1, wy0, wy1 } = g;
   const depth = opt.depth ?? opt.od;
   const step = Math.min(stepX, NY > 1 ? stepY : stepX);
-  const set = l2Setup(spec, depth, opt.l2, opt.edgeBoost, step, opt.padX ?? 0, opt.padY ?? 0);
+  const l2Fast = opt.l2Fidelity === 'search';
+  const set = l2Setup(spec, depth, opt.l2, opt.edgeBoost, step, opt.padX ?? 0, opt.padY ?? 0, l2Fast);
   const field = new Float64Array(NX * NY), fieldBall = new Float64Array(NX * NY);
   const base = { field, nx: NX, ny: NY, stepX, stepY, dim, leds, depth, extent: { x0, x1, y0, y1 } };
   if (set.error) return { ...base, l2: { error: set.error, trans: 0, fieldBall, fScat: 1 / Math.PI, warnings: [set.error], check: { ok: false, checks: [{ id: 'L2', ok: false, value: 0, limit: '-', note: set.error }] } } };
@@ -348,8 +437,13 @@ function computeFieldL2(spec, opt, g) {
       if (ww > 0 && a >= 0 && a < W && b >= 0 && b < H) S[b * W + a] += w * ww;
     }
   };
+  // 측벽: 2D·형상 없음이면 확산 측벽 보정(ΔW), 그 외(1D 단면·S2b)는 기존 거울 LED
+  let wallWarn = null;
+  const wallMode = opt.l2WallModel ?? globalThis.__l2WallModel ?? 'diffuse';   // 'diffuse'(기본) | 'mirror'(예전 거울 LED) | 'none'(진단: 벽 없음)
+  const wallDiffuse = !shapePsf && NY > 1 && wallMode === 'diffuse';
   for (const l of leds) {
     splat(l.x, l.y, 1);
+    if (wallDiffuse || wallMode === 'none') continue;
     splat(2 * wx0 - l.x, l.y, rW); splat(2 * wx1 - l.x, l.y, rW);
     splat(l.x, 2 * wy0 - l.y, rW); splat(l.x, 2 * wy1 - l.y, rW);
   }
@@ -357,9 +451,26 @@ function computeFieldL2(spec, opt, g) {
   const tailU = (psf.tailFlux * leds.length) / Math.max(1e-9, (wx1 - wx0) * (wy1 - wy0));
   for (let j = 0; j < NY; j++) for (let i = 0; i < NX; i++) {
     const o = (j + ky) * W + i + kx;
-    field[j * NX + i] = Math.max(0, cA[o]) + tailU;
+    field[j * NX + i] = cA[o] + tailU;
     fieldBall[j * NX + i] = Math.max(0, cB[o]);
   }
+  if (wallDiffuse) {
+    const Rw = opt.l2WallR ?? rW, setW = Rw === rW ? set : { ...set, psf: { ...set.psf, rW: Rw, key: set.psf.key + '|Rw' + Rw } };
+    const wd = l2WallDelta(setW, leds, ledIntensity(spec), { wx0, wx1, wy0, wy1 }, { NX, NY, x0, y0, stepX, stepY }, l2Fast);
+    for (let k = 0; k < field.length; k++) field[k] += wd.d[k];
+    // 슬래브 옆면(=측벽) 절단: 국소 균일 조사에서 옆면까지 거리 s 의 출사 = 1 − (1−R)·T₁(s), T₁ = 슬래브 커널 1D 주변분포의 한쪽 꼬리.
+    // 벽 너머로 들어갔어야 할 빛은 벽에 맞고(ΔW 직접광 항), 안에서 들어가 너머로 나갈 빛은 측벽이 R 로 되돌린다. 커널(~t)은 ΔW 거친 격자보다 작아
+    // 거기서는 안 보이므로 해석 인자로(형상 MC: 1mm 밀키 8.2, 벽 1mm 옆 출사 −10~14%).
+    // (미검증 — 형상 MC 점값 대비 흡수벽 과암·확산벽 과명이 섞여 기본 꺼짐. 2026-10-13 center 시나리오 진단 중)
+    const T1 = slabEdgeTail(set), fac = (d) => 1 - (1 - Rw) * T1(d);
+    // 측벽 근접 경고: 슬래브 측방 확산 꼬리로 벽 옆 어두워짐 ≈ (2−R)·T₁(s) 가 5% 를 넘는 거리 s₀ 안에 타겟 가장자리가 있으면
+    // 그 가장자리 줄의 밝기는 과대(거친 격자 ΔW 가 서브 mm 현상을 못 봄 — 형상 MC: 벽 1mm·밀키 8.2·1mm 에서 가장자리 줄 +12%).
+    let s0 = 0; while (s0 < 50 && (2 - Rw) * T1(s0) > 0.05) s0 += 0.1;   // 5%: 균일도 판정을 바꿀 수준
+    const gapEdge = Math.min(x0 - wx0, wx1 - x1, ...(NY > 1 ? [y0 - wy0, wy1 - y1] : []));
+    if (gapEdge < s0) wallWarn = `측벽이 타겟 가장자리에서 ${gapEdge.toFixed(1)}mm — 슬래브 측방 확산 범위(${s0.toFixed(1)}mm) 안이라 가장자리 줄 밝기가 실제보다 밝게 계산될 수 있음(균일도 낙관)`;
+    if (globalThis.__slabEdgeFactor) for (let j = 0; j < NY; j++) for (let i = 0; i < NX; i++) { const x = x0 + i * stepX, y = y0 + j * stepY; field[j * NX + i] *= fac(x - wx0) * fac(wx1 - x) * fac(y - wy0) * fac(wy1 - y); }
+  }
+  for (let k = 0; k < field.length; k++) if (field[k] < 0) field[k] = 0;
   const bX = opt.blurMmX ?? opt.blurMm ?? 0, bY = opt.blurMmY ?? opt.blurMm ?? 0;   // L2 외 레벨(L5 등)의 산란
   blurSeparable(field, NX, NY, bX / stepX, bY / stepY);
   blurSeparable(fieldBall, NX, NY, bX / stepX, bY / stepY);
@@ -374,7 +485,7 @@ function computeFieldL2(spec, opt, g) {
     return { ...base, shape: { warnings: sh.geom.warnings, solver: 'local-slab' },
       l2: { trans: psf.trans * T, fieldBall, fScat: psf.fScat, warnings, check: { ok: set.check.ok && psf.check.ok, checks: [...set.check.checks, ...psf.check.checks] }, info: { ...set.info, trans: psf.trans, solver: 'local-slab' } } };
   }
-  return { ...base, l2: { trans: psf.trans * T, fieldBall, fScat: psf.fScat, warnings: set.warnings, check: set.check, info: set.info } };
+  return { ...base, l2: { trans: psf.trans * T, fieldBall, fScat: psf.fScat, warnings: wallWarn ? [...set.warnings, wallWarn] : set.warnings, check: set.check, info: set.info } };
 }
 
 // 형상 해석(투명 S2a·밀키 S2b 공용): 활성 형상 레벨·불러온 몸체 → 툴 좌표 높이맵(캐시). 형상이 없으면 null.

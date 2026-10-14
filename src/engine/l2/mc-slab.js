@@ -44,16 +44,24 @@ export function fresnelInternal(cosIn, n) {
   return fresnelR(Math.sqrt(1 - s * s), n);   // Fresnel 반사율은 계면 양방향 동일
 }
 
-// 재현 가능한 PRNG (mulberry32)
+// 재현 가능한 PRNG — sfc32(128비트 상태, 주기 ≥ 2^32 보장·평균 ~2^127) + splitmix32 시드 확산.
+// 예전 mulberry32(주기 2^32 ≈ 4.3e9)는 Milky 6 형상 MC(워커당 ~1e9 추첨 × 16 워커)에서 주기를 여러 번 돌아 워커들이 같은 난수를
+// 재사용 → 워커 간 표준오차 과소·시드 바꿔도 같은 답·벽 모드만 바꿔도 벽에 안 닿은 빛이 체계적으로 달라짐(2026-10-13 진단).
 export function rng(seed) {
-  let a = seed >>> 0;
-  return () => {
-    a = (a + 0x6D2B79F5) >>> 0;
-    let t = a;
-    t = Math.imul(t ^ (t >>> 15), t | 1);
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  let s = seed >>> 0;
+  const sm = () => { s = (s + 0x9E3779B9) >>> 0; let z = s; z = Math.imul(z ^ (z >>> 16), 0x21F0AAAD); z = Math.imul(z ^ (z >>> 15), 0x735A2D97); return (z ^ (z >>> 15)) >>> 0; };
+  let a = sm(), b = sm(), c = sm(), d = sm() | 1;
+  const next = () => {
+    const t = (((a + b) >>> 0) + d) >>> 0;
+    d = (d + 1) >>> 0;
+    a = b ^ (b >>> 9);
+    b = (c + (c << 3)) >>> 0;
+    c = ((c << 21) | (c >>> 11)) >>> 0;
+    c = (c + t) >>> 0;
+    return t;
   };
+  for (let i = 0; i < 12; i++) next();
+  return () => next() / 4294967296;
 }
 
 function sampleHG(g, u) {

@@ -44,10 +44,9 @@ export function buildMieTable({ opt, n, tauMax, rows = STD_ROWS, N = 20000, seed
 export function compositeTable(mie, main, phaseKey) {
   const tM = mie.meta.tauMax;
   const query = (tauR, g, n, row, muaT = 0, mode) => {
-    if (tauR <= tM) { const q = mie.query(tauR, g, n, row, muaT, 'mc'); q.outOfRange = false; return q; }
-    const q = main.query(tauR, Math.min(g, 0.99), n, row, muaT, mode);
-    q.beyondMaterial = true;
-    return q;
+    // 표 질의는 메모(공유 객체)라 플래그는 복사본에
+    if (tauR <= tM) return { ...mie.query(tauR, g, n, row, muaT, 'mc'), outOfRange: false };
+    return { ...main.query(tauR, Math.min(g, 0.99), n, row, muaT, mode), beyondMaterial: true };
   };
   return { ...main, meta: { ...main.meta, phaseKey }, query, phaseKey, mieTable: mie };
 }

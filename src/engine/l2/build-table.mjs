@@ -8,6 +8,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { runSlab } from './mc-slab.js';
 import { packRecord, REC, SW_HI } from './slab-table.js';
+import { packTable, TABLE_ENCODING } from './table-codec.js';
+import zlib from 'node:zlib';
 
 const COS85 = Math.cos(85 * Math.PI / 180);
 export const GRIDS = {
@@ -53,8 +55,11 @@ if (!isMainThread) {
     w.on('error', rej); w.on('exit', res);
   })));
   fs.mkdirSync(outDir, { recursive: true });
-  fs.writeFileSync(path.join(outDir, 'slab-table.bin'), Buffer.from(data.buffer));
-  const meta = { version: 1, rec: REC, grids: G, quick, cells: jobs.length, seconds: Math.round((Date.now() - t0) / 1000), created: new Date().toISOString() };
+  // 저장소 표는 압축(table-codec: 가수 12비트 + 바이트 평면 + gzip, 12.9 → 4.3MB). --raw 면 Float32 원본(.bin)
+  const raw = process.argv.includes('--raw');
+  if (raw) fs.writeFileSync(path.join(outDir, 'slab-table.bin'), Buffer.from(data.buffer));
+  else fs.writeFileSync(path.join(outDir, 'slab-table.f32z'), zlib.gzipSync(packTable(data), { level: 9 }));
+  const meta = { version: 1, ...(raw ? {} : { encoding: TABLE_ENCODING }), rec: REC, grids: G, quick, cells: jobs.length, seconds: Math.round((Date.now() - t0) / 1000), created: new Date().toISOString() };
   fs.writeFileSync(path.join(outDir, 'slab-meta.json'), JSON.stringify(meta, null, 1));
   console.log(`wrote ${outDir} — ${jobs.length} cells in ${meta.seconds}s`);
 }

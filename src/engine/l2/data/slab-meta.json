@@ -64,6 +64,7 @@
  },
  "quick": false,
  "cells": 5760,
- "seconds": 5114,
- "created": "2026-10-12T17:49:46.643Z"
+ "seconds": 9098,
+ "created": "2026-10-14T04:08:33.909Z",
+ "encoding": "f32m12-shuffle-gzip"
 }

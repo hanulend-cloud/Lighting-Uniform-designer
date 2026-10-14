@@ -8,7 +8,7 @@ import { rng } from '../l2/mc-slab.js';
 const NONE = 0, TOP = 1, BOT = 2, SIDE = 3, PCB = 4, WALL = 5, ESC_SIDE = 6, ESC_UP = 7;
 const KIND = ['none', 'top', 'bot', 'side', 'pcb', 'wall', 'escSide', 'escUp'];
 const OFF = 1e-7;            // 계면 사건 후 출발점 이동(mm)
-export const F_SCAT = 1, F_REFL = 2;   // 가지 이력: 산란 / 반사(계면·PCB·측벽)
+export const F_SCAT = 1, F_REFL = 2, F_PCB = 4, F_WALL = 8;   // 가지 이력: 산란 / 반사(계면·PCB·측벽) / PCB 반사(재순환 성분 진단)
 
 // 높이맵 → 장면. hf: heightfield.js 형식(셀 중심 값), ox·oy: 높이맵 원점의 툴 좌표, depth: 윗면 기준 높이.
 // medium: { mus, g, mua } (없으면 투명·무흡수), phase: { sample(u)→cosθ } (없으면 HG(g)),
@@ -316,14 +316,14 @@ export function runBodyMC(S, { leds = [null], led = { I0: 1 }, emit = null, N, s
             dx = nx2; dy = ny2; dz = nz2;
           }
         } else if (kind === PCB) {
-          ledger.pcb += w * (1 - rhoB); w *= rhoB; flags |= F_REFL;
+          ledger.pcb += w * (1 - rhoB); w *= rhoB; flags |= F_REFL | F_PCB;
           if (w <= 0) break;
           [dx, dy, dz] = lamb(0, 0, 1);
           pz = OFF;
         } else if (kind === WALL) {
           const Nx = E.nx, Ny = E.ny;
           if (!walls || walls.mode === 'absorb') { ledger.wall += w; break; }
-          flags |= F_REFL;
+          flags |= F_REFL | F_WALL;
           if (walls.mode === 'diffuse') {
             const R = walls.R ?? 0; ledger.wall += w * (1 - R); w *= R; if (w <= 0) break;
             [dx, dy, dz] = lamb(Nx, Ny, 0);

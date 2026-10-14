@@ -61,8 +61,11 @@ for (const x of [5, 36]) {
   const t0 = performance.now();
   const r = fitParticle(table, { n: 1.586, samples: [synth(1, 31), synth(2, 32)] }, BEADS.PMMA, HOST.PC);
   const truthR = mus * (1 - opt.g), e = Math.abs(r.fit.mat.musR / truthR - 1);
-  ok(e <= 0.1 && r.dRange[0] <= 3 && r.dRange[1] >= 3 && r.fit.V6.ok,
-    `입자 피팅: μs' ${r.fit.mat.musR.toFixed(4)} / 참 ${truthR.toFixed(4)} (오차 ${(e * 100).toFixed(1)}%), d ${r.d_um.toFixed(2)}µm 범위 ${r.dRange.map((v) => v.toFixed(1)).join('~')} ∋ 3 (χ²min ${r.chi2min.toFixed(1)}, dof ${r.dof}, Δχ² ${r.dChi.toFixed(1)}), V6 ${r.fit.V6.note} [${((performance.now() - t0) / 1000).toFixed(0)} s]`);
+  // 지름 판정은 2σ: dRange 는 Δχ²=1(1σ, 표시용) 구간이라 참값을 ~32% 확률로 놓친다(2026-10-14 난수기 교체 후 d 2.73, 1σ 2.6~2.9).
+  // 1σ 반폭을 양쪽 2배로 넓힌 구간(≈95%)에 참값이 들어가야 한다.
+  const lo2 = r.d_um - 2 * (r.d_um - r.dRange[0]), hi2 = r.d_um + 2 * (r.dRange[1] - r.d_um);
+  ok(e <= 0.1 && lo2 <= 3 && hi2 >= 3 && r.fit.V6.ok,
+    `입자 피팅: μs' ${r.fit.mat.musR.toFixed(4)} / 참 ${truthR.toFixed(4)} (오차 ${(e * 100).toFixed(1)}%), d ${r.d_um.toFixed(2)}µm 1σ ${r.dRange.map((v) => v.toFixed(1)).join('~')} · 2σ ${lo2.toFixed(1)}~${hi2.toFixed(1)} ∋ 3 (χ²min ${r.chi2min.toFixed(1)}, dof ${r.dof}, Δχ² ${r.dChi.toFixed(1)}), V6 ${r.fit.V6.note} [${((performance.now() - t0) / 1000).toFixed(0)} s]`);
 }
 
 if (fail) { console.log(`\n${fail} FAIL`); process.exit(1); }

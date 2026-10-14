@@ -5,7 +5,8 @@
 //  ③ 재순환: 입사 가중 평균 갭·두께의 닫힌 해 + 재입사 투과는 도착 위치 국소 두께 단계
 // 앵커: 주기 형상(L4)은 PSF 1개(중심 LED — 주기라 평행이동 정확), L3·불러온 몸체는 고정 격자 앵커 쌍선형(피치 무관 → 평가 간 캐시).
 // 캐비티 벽은 기존 L2 와 같이 거울 LED × 확산 반사율 R_d. 가정: 윗면 평탄 근사(국소 슬래브), 바닥 경사의 자기 가림 무시.
-import { solveCavity } from '../l2/cavity-solver.js';
+import { solveCavity, twoScale } from '../l2/cavity-solver.js';
+import { withFine } from '../l2/psf.js';
 import { checkResult } from '../l2/validator.js';
 import { normalRadianceFactor } from '../l2/slab-table.js';
 import { sampleHeightfield } from './heightfield.js';
@@ -24,13 +25,13 @@ function sampler(geom, depth) {
 
 // 앵커 1개의 밀키 로컬 슬래브 PSF
 export function milkyPsf(geom, depth, at, { table, mat, rhoB, intensity, intensityKey, I0, extentX, extentY, step, maxLevels = 5 }) {
-  const s = Math.max(step, extentX / MAX_CELLS, extentY / MAX_CELLS);
-  const odd = (v) => { const k = Math.max(3, Math.ceil(v)); return k % 2 ? k : k + 1; };
-  const nx = odd(extentX / s), ny = odd(extentY / s), N = nx * ny;
-  const key = [geom.key, maxLevels, at.x.toFixed(3), at.y.toFixed(3), table.phaseKey ?? 'HG', mat.musR, mat.g, mat.mua, mat.n, depth, rhoB, intensityKey, I0, nx, ny, s].map((v) => (typeof v === 'number' ? v.toPrecision(7) : v)).join('|');
+  const key = [geom.key, 'F2', maxLevels, at.x.toFixed(3), at.y.toFixed(3), table.phaseKey ?? 'HG', mat.musR, mat.g, mat.mua, mat.n, depth, rhoB, intensityKey, I0, extentX, extentY, step].map((v) => (typeof v === 'number' ? v.toPrecision(7) : v)).join('|');
   const hit = _cache.get(key);
   if (hit) return hit;
-  const smp = sampler(geom, depth), cx = (nx * s) / 2, cy = (ny * s) / 2;
+  const smp = sampler(geom, depth);
+  let tEff = 1, h = depth, first = true;
+  const run = (s, nx, ny) => {
+  const N = nx * ny, cx = (nx * s) / 2, cy = (ny * s) / 2;
   const E = Array.from({ length: table.angleRows }, () => new Float64Array(N)), tMap = new Float64Array(N);
   let sw = 0, swh = 0, swt = 0;
   const d = Math.max(0.05, s * 0.25);
@@ -55,21 +56,24 @@ export function milkyPsf(geom, depth, at, { table, mat, rhoB, intensity, intensi
       sw += v; swh += v * zb; swt += v * tMap[k];
     }
   }
-  const h = sw > 0 ? swh / sw : depth, tEff = sw > 0 ? swt / sw : 1;
-  const res = solveCavity({ E, nx, ny, step: s, table, mat, t: tEff, h, rhoB, rW: 0, uniformTail: false, gapRmax: Math.max(extentX, extentY) / 2, center: { x: cx, y: cy }, tMap, maxLevels });
+  const hR = sw > 0 ? swh / sw : depth, tR = sw > 0 ? swt / sw : 1;   // 거친 전체 해의 값을 대표로(영역 크기에 따라 미세하게 다름)
+  if (first) { h = hR; tEff = tR; first = false; }
+  return solveCavity({ E, nx, ny, step: s, table, mat, t: tR, h: hR, rhoB, rW: 0, uniformTail: false, gapRmax: Math.max(extentX, extentY) / 2, center: { x: cx, y: cy }, tMap, maxLevels });
+  };
+  const ts = twoScale(run, { extentX, extentY, step, maxCells: MAX_CELLS }), { s, nx, ny, res } = ts, cx = (nx * s) / 2, cy = (ny * s) / 2;
   const tauR = mat.musR * tEff, muaT = mat.mua * tEff;
   const qn = table.query(tauR, mat.g, mat.n, 0, muaT), qd = table.query(tauR, mat.g, mat.n, table.diffuseRow, muaT);
   const sum = (a) => a.reduce((p, v) => p + v, 0);
   const sS = sum(res.Mscat), sR = sum(res.Mrec);
   const fScat = sS + sR > 0 ? (sS * normalRadianceFactor(qn.ang) + sR * normalRadianceFactor(qd.ang)) / (sS + sR) : 1 / Math.PI;
-  const K = (data) => ({ data, kNx: nx, kNy: ny, dxMin: -((nx - 1) / 2) * s, dyMin: -((ny - 1) / 2) * s, stepX: s, stepY: s });
+  const K = (data, fd) => withFine({ data, kNx: nx, kNy: ny, dxMin: -((nx - 1) / 2) * s, dyMin: -((ny - 1) / 2) * s, stepX: s, stepY: s }, ts.fine, fd);
   // 99% 에너지 반경(거울 LED 절단용)
   let tot = 0; const rings = [];
   for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) { const v = res.M[j * nx + i]; if (v > 0) { rings.push([Math.hypot((i + 0.5) * s - cx, (j + 0.5) * s - cy), v]); tot += v; } }
   rings.sort((a, b) => a[0] - b[0]);
   let acc = 0, r99 = rings.at(-1)?.[0] ?? 0; for (const [rr, v] of rings) { acc += v; if (acc >= 0.99 * tot) { r99 = rr; break; } }
   const out = {
-    key, K: K(res.M), Kball: K(res.Mball), step: s, h, tEff, r99,
+    key, K: K(res.M, 'M'), Kball: K(res.Mball, 'Mball'), step: s, h, tEff, r99,
     tailFlux: res.tail * s * s, trans: (res.energy.top + res.tail) / res.energy.input,
     fScat, qn, qd, rW: qd.R, check: checkResult(res), energy: res.energy,
   };
@@ -79,6 +83,7 @@ export function milkyPsf(geom, depth, at, { table, mat, rhoB, intensity, intensi
 }
 
 const bil = (K, dx, dy) => {
+  if (K.fine && Math.abs(dx) <= K.fine.hx && Math.abs(dy) <= K.fine.hy) K = K.fine;   // 2단 격자 PSF
   const fa = (dx - K.dxMin) / K.stepX, fb = (dy - K.dyMin) / K.stepY, a0 = Math.floor(fa), b0 = Math.floor(fb);
   if (a0 < 0 || b0 < 0 || a0 + 1 >= K.kNx || b0 + 1 >= K.kNy) return 0;
   const ta = fa - a0, tb = fb - b0, w = K.kNx, D = K.data;

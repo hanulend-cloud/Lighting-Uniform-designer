@@ -86,6 +86,92 @@ function foldConv(c, inp, rW) {
   return { out, lost };
 }
 
+// 확산(램버시안) 측벽(2026-10-13): 갭 전달이 영역 밖으로 나간 빛 = 벽에 맞음 → 반사율 R 로 램버시안 재방출. 벽 높이 균일 분포를
+// 가정한 선광원의 착지 분포(벽에서 거리 x, 셀 간격 s): F(X) = (X − √(X²+h²) + h)/(2h) — 슬래브 하면·PCB 로 반씩. 측벽은 같은 밀키 수지라
+// 정반사 거울(접기)이 아니라 확산 반사(형상 MC 벽 'diffuse' 대비: 거울 LED 근사는 벽 10mm 에서 균일도 +2.7~5.4%p 과대).
+function wallProfile(h, s, n) {
+  const F = (X) => (X - Math.sqrt(X * X + h * h) + h) / (2 * h), w = new Float64Array(n);
+  for (let k = 0; k < n; k++) w[k] = F((k + 1) * s) - F(k * s);
+  return w;
+}
+// 벽 플럭스(경계 셀별: L·R 길이 dy, B·T 길이 dx) → 재방출을 slab·pcb 두 배열에 같은 분포로 더함. 반환 = 영역 안에 놓인 양(×2 배열 합)
+function wallEmit(wf, R, prof, dx, dy, slab, pcb) {
+  let put = 0;
+  const dep = (o, v) => { slab[o] += v; pcb[o] += v; put += 2 * v; };
+  for (let j = 0; j < dy; j++) for (let k = 0; k < Math.min(dx, prof.length); k++) {
+    const a = wf.L[j] * R * prof[k], b = wf.R[j] * R * prof[k];
+    if (a) dep(j * dx + k, a); if (b) dep(j * dx + dx - 1 - k, b);
+  }
+  for (let i = 0; i < dx; i++) for (let k = 0; k < Math.min(dy, prof.length); k++) {
+    const a = wf.B[i] * R * prof[k], b = wf.T[i] * R * prof[k];
+    if (a) dep(k * dx + i, a); if (b) dep((dy - 1 - k) * dx + i, b);
+  }
+  return put;
+}
+// 높이 z 에서의 램버시안 선광원 재방출 착지(벽에서 거리 X, 한 면 기준 반): G_a(X) = ½(1 − a/√(X²+a²)), a = 그 면까지 수직 거리.
+// 슬래브 하면 a = h − z, PCB a = z. 직접광은 LED 가 벽 가까우면 낮게 맞아 슬래브로 가는 반이 멀리 퍼진다(균일 높이 가정은 벽 바로 옆 과대).
+function heightProfile(a, s, n) {
+  const G = (X) => 0.5 * (1 - a / Math.sqrt(X * X + a * a)), w = new Float64Array(n);
+  for (let k = 0; k < n; k++) w[k] = G((k + 1) * s) - G(k * s);
+  return w;
+}
+function wallEmit2(wf, R, pS, pP, dx, dy, slab, pcb) {
+  let put = 0;
+  const n = Math.max(dx, dy);
+  for (let j = 0; j < dy; j++) for (let k = 0; k < Math.min(dx, n); k++) {
+    const a = wf.L[j] * R, b = wf.R[j] * R;
+    if (a) { slab[j * dx + k] += a * pS[k]; pcb[j * dx + k] += a * pP[k]; put += a * (pS[k] + pP[k]); }
+    if (b) { slab[j * dx + dx - 1 - k] += b * pS[k]; pcb[j * dx + dx - 1 - k] += b * pP[k]; put += b * (pS[k] + pP[k]); }
+  }
+  for (let i = 0; i < dx; i++) for (let k = 0; k < Math.min(dy, n); k++) {
+    const a = wf.B[i] * R, b = wf.T[i] * R;
+    if (a) { slab[k * dx + i] += a * pS[k]; pcb[k * dx + i] += a * pP[k]; put += a * (pS[k] + pP[k]); }
+    if (b) { slab[(dy - 1 - k) * dx + i] += b * pS[k]; pcb[(dy - 1 - k) * dx + i] += b * pP[k]; put += b * (pS[k] + pP[k]); }
+  }
+  return put;
+}
+
+// 벽 위 램버시안 점광원(높이 z)의 수평면 착지 2D 커널: E(x, s) = x·a/(π(x²+s²+a²)²) — x 벽에서 거리, s 벽 방향, a 면까지 수직 거리.
+// 셀 [k·s, (k+1)·s] × [(m−½)s, (m+½)s] 를 3×3 표본으로 적분. 총합 ≤ ½(한 면). 직접광은 LED 근처 벽 몇 mm 에 몰려 맞으므로
+// 선광원(벽 방향 균일) 착지를 같은 열에만 놓으면 LED 피치로 줄무늬가 생긴다.
+function pointWallKernel(a, s, n) {
+  const M = Math.min(n, Math.ceil((8 * a + 2 * s) / s)), K = new Float64Array(n * (2 * M + 1));
+  for (let k = 0; k < n; k++) for (let m = -M; m <= M; m++) {
+    let v = 0;
+    for (let p = 0; p < 3; p++) for (let q = 0; q < 3; q++) { const x = (k + (p + 0.5) / 3) * s, y = (m + (q + 0.5) / 3 - 0.5) * s; v += (x * a) / (Math.PI * (x * x + y * y + a * a) ** 2); }
+    K[k * (2 * M + 1) + m + M] = (v / 9) * s * s;
+  }
+  return { K, M };
+}
+function wallEmitPoint(wf, R, kS, kP, dx, dy, slab, pcb) {
+  let put = 0;
+  const dep = (o, wS, wP, v) => { slab[o] += v * wS; pcb[o] += v * wP; put += v * (wS + wP); };
+  const side = (len, depth, flux, at) => {   // at(k, j) → 셀 인덱스(벽에서 k 번째, 벽 방향 j)
+    for (let j = 0; j < len; j++) { const v = flux[j] * R; if (!v) continue;
+      for (let k = 0; k < depth; k++) for (let m = -kS.M; m <= kS.M; m++) { const jj = j + m; if (jj < 0 || jj >= len) continue;
+        const wS = kS.K[k * (2 * kS.M + 1) + m + kS.M], wP = Math.abs(m) <= kP.M ? kP.K[k * (2 * kP.M + 1) + m + kP.M] : 0; if (wS || wP) dep(at(k, jj), wS, wP, v); } }
+  };
+  side(dy, dx, wf.L, (k, j) => j * dx + k); side(dy, dx, wf.R, (k, j) => j * dx + dx - 1 - k);
+  side(dx, dy, wf.B, (k, i) => k * dx + i); side(dx, dy, wf.T, (k, i) => (dy - 1 - k) * dx + i);
+  return put;
+}
+
+// 컨볼루션 → 영역 안(out) + 밖으로 나간 양을 가장 가까운 벽 셀로(wf). 커널 절단분은 lost.
+function convWall(c, inp) {
+  const { dx, dy, kr, W, H } = c, out = new Float64Array(dx * dy), wf = { L: new Float64Array(dy), R: new Float64Array(dy), B: new Float64Array(dx), T: new Float64Array(dx) };
+  const conv = convolve(padIn(inp, dx, dy, kr, W, H), c.spec);
+  let wsum = 0;
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    const v = conv[y * W + x]; if (v === 0) continue;
+    const i = x - kr, j = y - kr;
+    if (i >= 0 && i < dx && j >= 0 && j < dy) { out[j * dx + i] += v; continue; }
+    const jj = Math.min(dy - 1, Math.max(0, j)), ii = Math.min(dx - 1, Math.max(0, i));
+    if (i < 0) wf.L[jj] += v; else if (i >= dx) wf.R[jj] += v; else if (j < 0) wf.B[ii] += v; else wf.T[ii] += v;
+    wsum += v;
+  }
+  return { out, wf, wsum, lost: (1 - c.ksum) * sum(inp) };
+}
+
 // 서로 다른 커널 두 개를 복소 FFT 한 번으로(정확) — 밴드별 산란 투과용
 function foldConvPair(dx, dy, ka, kb, inA, inB, rW) {
   const kr = Math.max(ka.kr, kb.kr), W = nextPow2(dx + 2 * kr + 1), H = nextPow2(dy + 2 * kr + 1);
@@ -274,8 +360,11 @@ function accNorm(a) {   // rAcc → landK 입력(정규화). 착지 분포는 �
   const w = a.w || 1, lw = a.lw || 1;
   return { rr: Float64Array.from(a.rr, (v) => v / w), ra: Float64Array.from(a.ra, (v) => v / w), land: Float64Array.from(a.land, (v) => v / lw), landOk: a.lw > 0 && a.lw > a.w * (1 - 1e-9) };
 }
-export function solveCavity({ E, nx, ny, step, table, mat, t, h, rhoB, rW, uniformTail = true, gapRmax, center = null, tMap = null, maxLevels = 5, specSplit = true, rKern = null, rdKern = null, lambertRecycle = !!globalThis.__lambertRecycle, returnD = false, landD = null, landDd = null }) {
+export function solveCavity({ E, nx, ny, step, table, mat, t, h, rhoB, rW, uniformTail = true, gapRmax, center = null, tMap = null, maxLevels = 5, specSplit = true, rKern = null, rdKern = null, lambertRecycle = !!globalThis.__lambertRecycle, returnD = false, landD = null, landDd = null, walled = false, wallDiffuse = false, wallIn = null, wallInH = null, recycleOnly = false, tol = 1e-5 }) {
   const N = nx * ny;
+  // 슬래브 내부 측방 전달의 벽: 슬래브 옆면을 나온 빛은 곧바로 측벽(같은 밀키, 확산 R)에 맞아 슬래브로 되돌아온다 → R 로 접기.
+  // (형상 MC 벽 0mm·Milky 3: 옆면 탈출 가정 U 67.5% · 접기 69.6% · MC 70.8%) — 진단용으로 끌 수 있음
+  const rWs = wallDiffuse && globalThis.__noSlabWallFold ? 0 : rW;
   const levels = tMap ? thicknessLevels(tMap, E, N, maxLevels) : [{ t, w: null }];
   if (tMap) t = levels.length === 1 ? levels[0].t : t ?? levels[Math.floor(levels.length / 2)].t;   // 재순환 대표 두께(호출측 t = 입사 가중 평균 권장)
   const tauR = mat.musR * t, muaT = mat.mua * t;
@@ -309,7 +398,7 @@ export function solveCavity({ E, nx, ny, step, table, mat, t, h, rhoB, rW, unifo
       MbL.set(r.out); leak += r.lost;
     }
     for (let i = 0; i < N; i++) Mball[i] += MbL[i];
-    runJobs(jobs, Mscat);
+    if (!recycleOnly) runJobs(jobs, Mscat);   // recycleOnly: 1차 투과(밴드별 FFT) 생략 — 벽 보정 ΔW(재순환 차)용
   }
   // 행 b 의 산란 투과 평균 시프트 / 직진 시프트(t·tanθ') 비 — 행 0(수직)은 0/0 이라 행 1 값 사용
   function fwdRatio(b, tk, qb, med = false) {
@@ -345,11 +434,11 @@ export function solveCavity({ E, nx, ny, step, table, mat, t, h, rhoB, rW, unifo
     for (let k = 0; k < list.length; k += 2) {
       const a = list[k], b = list[k + 1];
       if (b) {
-        const r = foldConvPair(nx, ny, a.kern, b.kern, a.src, b.src, rW);
+        const r = foldConvPair(nx, ny, a.kern, b.kern, a.src, b.src, rWs);
         leak += r.lost;
         for (let i = 0; i < N; i++) target[i] += r.outA[i] + r.outB[i] + a.u + b.u;
       } else {
-        const r = foldConv(makeConv(nx, ny, a.kern), a.src, rW);
+        const r = foldConv(makeConv(nx, ny, a.kern), a.src, rWs);
         leak += r.lost;
         for (let i = 0; i < N; i++) target[i] += r.out[i] + a.u;
       }
@@ -426,7 +515,7 @@ export function solveCavity({ E, nx, ny, step, table, mat, t, h, rhoB, rW, unifo
       // (벽 1회 접기 밖) 어차피 누설로 집계되므로 커널을 키워도 결과가 같고 FFT 만 커진다.
       const gk = gapKernel(h, sc, Math.min(31.6 * h, gapRmax ?? Math.max(nx, ny) * step));
       const Ic = new Float64Array(cx * cy);
-      if (rW === 0) {
+      if (rW === 0 && !walled) {   // walled: 영역 경계 = 실제 벽(흡수 rW=0 포함) → 반복 접기 경로
         // 벽 없는 열린 영역(PSF): 주파수 영역 닫힌 해 I = rho P^2 D / (1 - rho R_d P^2), B = P D + R_d P I.
         // 에너지는 독립 집계: 보드 흡수 (1-rho) sum B, 영역 밖 I 의 (1-R_d) 는 누설, 커널 절단은 공식으로.
         const kr = gk.kr, W = nextPow2(cx + 2 * kr + 1), H = nextPow2(cy + 2 * kr + 1), sp = kernelSpectrum(gk.k, kr, W, H);
@@ -481,6 +570,41 @@ export function solveCavity({ E, nx, ny, step, table, mat, t, h, rhoB, rW, unifo
         Itot = up(Ic, cx, cy, f, nx, ny);
       } else {
       const conv = makeConv(cx, cy, gk);
+      if (wallDiffuse) {
+        // 확산 측벽: 갭 전달에서 밖으로 나간 빛 → 벽 램버시안 재방출(슬래브·PCB 반씩). 직접광의 벽 입사(wallIn, 가는 격자 경계)도 첫 단계에 포함.
+        const prof = wallProfile(h, sc, Math.max(cx, cy)), cs = new Float64Array(cx * cy), cp = new Float64Array(cx * cy);
+        const dn = (a, n) => { const o = new Float64Array(n); for (let k = 0; k < a.length; k++) o[Math.min(n - 1, Math.floor(k / f))] += a[k]; return o; };
+        if (wallInH) {   // 높이별 직접광 벽 입사(K 구간): 구간마다 착지 분포가 다르다
+          const K = wallInH.K, n = Math.max(cx, cy);
+          for (let q = 0; q < K; q++) {
+            const z = wallInH.z[q], kS = pointWallKernel(Math.max(1e-3, h - z), sc, Math.min(n, Math.ceil((10 * h) / sc))), kP = pointWallKernel(Math.max(1e-3, z), sc, Math.min(n, Math.ceil((10 * h) / sc)));
+            const w0 = { L: dn(wallInH.L[q], cy), R: dn(wallInH.R[q], cy), B: dn(wallInH.B[q], cx), T: dn(wallInH.T[q], cx) }, tot = [w0.L, w0.R, w0.B, w0.T].reduce((a, v) => a + sum(v), 0);
+            const put = wallEmitPoint(w0, rW, kS, kP, cx, cy, cs, cp); leak += tot - put; input += tot;
+          }
+        } else if (wallIn) {
+          const w0 = { L: dn(wallIn.L, cy), R: dn(wallIn.R, cy), B: dn(wallIn.B, cx), T: dn(wallIn.T, cx) }, tot = [w0.L, w0.R, w0.B, w0.T].reduce((a, v) => a + sum(v), 0);
+          const put = wallEmit(w0, rW, prof, cx, cy, cs, cp); leak += tot - put;   // 흡수(1−R)·영역 밖 착지 = 누설(벽 흡수)
+          input += tot;   // 직접광의 벽 입사분도 입력으로 집계(장부 닫힘)
+        }
+        let carry = cp;
+        for (let i = 0; i < Ic.length; i++) Ic[i] += cs[i];
+        Dc = Float64Array.from(Dc); for (let i = 0; i < Dc.length; i++) Dc[i] += cs[i] * qd.R;
+        for (iterations = 1; iterations <= 200; iterations++) {
+          const B = convWall(conv, Dc); leak += B.lost;
+          const s1 = new Float64Array(cx * cy), p1 = new Float64Array(cx * cy);
+          leak += B.wsum - wallEmit(B.wf, rW, prof, cx, cy, s1, p1);
+          const Bo = B.out; for (let i = 0; i < Bo.length; i++) Bo[i] += p1[i] + carry[i];
+          const sB = sum(Bo); boardAbs += (1 - rhoB) * sB;
+          for (let i = 0; i < Bo.length; i++) Bo[i] *= rhoB;
+          const I = convWall(conv, Bo); leak += I.lost;
+          const s2 = new Float64Array(cx * cy), p2 = new Float64Array(cx * cy);
+          leak += I.wsum - wallEmit(I.wf, rW, prof, cx, cy, s2, p2);
+          for (let i = 0; i < Ic.length; i++) { const v = I.out[i] + s1[i] + s2[i]; Ic[i] += v; I.out[i] = v * qd.R; }
+          carry = p2; Dc = I.out;
+          if (sum(Dc) + sum(carry) < tol * sD0) break;
+        }
+        leak += sum(Dc) + sum(carry);
+      } else
       for (iterations = 1; iterations <= 200; iterations++) {
         const B = foldConv(conv, Dc, rW); leak += B.lost;
         const sB = sum(B.out); boardAbs += (1 - rhoB) * sB;
@@ -488,7 +612,7 @@ export function solveCavity({ E, nx, ny, step, table, mat, t, h, rhoB, rW, unifo
         const I = foldConv(conv, B.out, rW); leak += I.lost;
         for (let i = 0; i < Ic.length; i++) { Ic[i] += I.out[i]; I.out[i] *= qd.R; }
         Dc = I.out;
-        if (sum(Dc) < 1e-5 * sD0) break;
+        if (sum(Dc) < tol * sD0) break;
       }
       leak += sum(Dc);                                   // 미전파 잔여(≤1e-5, 누설로 집계)
       Itot = up(Ic, cx, cy, f, nx, ny);
@@ -510,4 +634,33 @@ export function solveCavity({ E, nx, ny, step, table, mat, t, h, rhoB, rW, unifo
   for (let i = 0; i < N; i++) M[i] = Mball[i] + Mscat[i] + Mrec[i];
   const top = sum(M), err = input > 0 ? Math.abs(input - (top + tail + boardAbs + slabAbs + leak)) / input : 0;
   return { M, Mball, Mscat, Mrec, tail, iterations, energy: { input, top, tail, boardAbs, slabAbs, leak, err }, ...(returnD ? { D0, S, rAcc } : {}) };
+}
+
+// 2단 격자 PSF(2026-10-13): PSF 영역(기구 2배)을 셀 255개로 덮으면 격자가 1.5~3mm 로 거칠어져 셀 평균 + 쌍선형 보간이
+// σ≈s/2 흐림이 되고 LED 사이 최소값이 올라 균일도가 과대(3mm Milky 6 배열 U: 0.5mm 53.9% · 1.57mm 55.5% · 3.14mm 57.8%).
+// run(s, nx, ny) → solveCavity 결과(광원 = 격자 중심). 거친 전체 해(에너지·꼬리·장부) + 가는 중앙 해(sf, ≤maxCells):
+// 가는 해에는 중앙 영역 밖(먼 재순환 귀환)의 기여가 없으므로 거친 해 차이(전체 − 같은 중앙 영역)를 매끄러운 보정으로 더한다.
+export function twoScale(run, { extentX, extentY, step, maxCells = 255, fineStep = 0.5, single = false }) {
+  const odd = (v) => { const k = Math.max(3, Math.ceil(v)); return k % 2 ? k : k + 1; };
+  const s = Math.max(step, extentX / maxCells, extentY / maxCells), nx = odd(extentX / s), ny = odd(extentY / s);
+  const tq = () => performance.now(); let tA = tq();
+  const res = run(s, nx, ny); globalThis.__runTimes?.push(tq() - tA);
+  const sf = Math.min(step, globalThis.__fineStep ?? fineStep);
+  if (single || globalThis.__noTwoScale || s <= sf * 1.25) return { s, nx, ny, res, fine: null };   // single: 탐색 정밀도(최종안은 2단 격자로 재평가)
+  const nfx = odd(Math.min(maxCells, extentX / sf)), nfy = odd(Math.min(maxCells, extentY / sf));
+  tA = tq(); const resF = run(sf, nfx, nfy); globalThis.__runTimes?.push(tq() - tA);
+  const ncx = odd((nfx * sf) / s), ncy = odd((nfy * sf) / s); tA = tq(); const resS = run(s, ncx, ncy); globalThis.__runTimes?.push(tq() - tA);
+  const bilC = (M, n, m, dx, dy) => {   // 중심 기준 오프셋(mm) → 셀 중심 격자 쌍선형(밖 0)
+    const fa = dx / s + (n - 1) / 2, fb = dy / s + (m - 1) / 2, a0 = Math.floor(fa), b0 = Math.floor(fb);
+    if (a0 < 0 || b0 < 0 || a0 + 1 >= n || b0 + 1 >= m) return 0;
+    const ta = fa - a0, tb = fb - b0;
+    return (M[b0 * n + a0] * (1 - ta) + M[b0 * n + a0 + 1] * ta) * (1 - tb) + (M[(b0 + 1) * n + a0] * (1 - ta) + M[(b0 + 1) * n + a0 + 1] * ta) * tb;
+  };
+  const M = Float64Array.from(resF.M);
+  for (let j = 0; j < nfy; j++) for (let i = 0; i < nfx; i++) {
+    const dx = (i - (nfx - 1) / 2) * sf, dy = (j - (nfy - 1) / 2) * sf;
+    M[j * nfx + i] += bilC(res.M, nx, ny, dx, dy) - bilC(resS.M, ncx, ncy, dx, dy);
+  }
+  // 가는 격자 사용 범위: 영역 가장자리(절단 차이) 제외 — 중앙 80%
+  return { s, nx, ny, res, fine: { s: sf, nx: nfx, ny: nfy, M, Mball: resF.Mball, hx: 0.4 * nfx * sf, hy: 0.4 * nfy * sf } };
 }
