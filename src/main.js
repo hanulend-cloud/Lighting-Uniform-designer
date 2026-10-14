@@ -17,6 +17,9 @@ import { drawPlan } from './ui/plan.js';
 import { drawHeatmap } from './ui/heatmap.js';
 import { buildLevels, updateLevels, renderVerdict, drawProfiles } from './ui/analysis.js';
 import { exportStep } from './export/step-ui.js';
+import { setMech3dMesh, getMech3d, initialMech3dSpec, saveMech3dIDB, loadMech3dIDB } from './engine/mech3d/runtime.js';
+import { setPartMaterial, setPartMaterialParam, setPartFinish } from './engine/mech3d/materials.js';
+import { renderMech3dPanel } from './ui/mech3d-panel.js';
 
 const LS_KEY = 'uds.spec.v11';
 
@@ -115,6 +118,7 @@ function buildForm() {
     form.appendChild(grp);
   }
   $('#btn-reset').onclick = () => { spec = structuredClone(DEFAULT_SPEC); markSoloReset(); mount(); schedule(); };
+  $('#file-mech3d').onchange = (e) => { const f = e.target.files?.[0]; if (f) importMech3d(f); e.target.value = ''; };
   $('#btn-step').onclick = () => {
     if (!last) return;
     exportStep(spec, last.combo, last.geom, last.active);
@@ -175,6 +179,61 @@ function reorient(change) {
 function clearShape() {
   spec.body.shape = { source: 'plate', name: '', flipZ: false, rot: 0 };
   clearBody(); syncBody(); markSoloReset(); schedule();
+}
+
+// ---- 3D 기구 모드 (spec 2026-10-14 §3) ----
+let m3sel = null, m3view = null;
+function applyMode() {
+  const m3 = spec.mode === 'mech3d' && !!spec.mech3d && !!getMech3d();
+  $('#mech3d-wrap').hidden = !m3;
+  $('#design-wrap').hidden = m3;
+  $('#results-wrap').hidden = m3;
+  if (m3) renderMech3d();
+}
+async function renderMech3d(meshChanged = false) {
+  const kinds = spec.mech3d.parts.map((p) => p.material.kind);
+  if (!m3view) {
+    const { createMech3dView } = await import('./ui/mech3d-view.js');
+    m3view = createMech3dView($('#mech3d-canvas'), { onPick: (s) => { m3sel = s; renderMech3d(); } });
+    meshChanged = true;
+  }
+  if (meshChanged) m3view.setParts(getMech3d().parts, kinds); else m3view.setKinds(kinds);
+  m3view.setSelection(m3sel);
+  renderMech3dPanel($('#mech3d-panel'), spec.mech3d, m3sel, materialDb()?.list() ?? [], {
+    onSelect: (i) => { m3sel = { part: i, face: null }; renderMech3d(); },
+    onKind: (i, k) => updPart(i, (p) => setPartMaterial(p, k)),
+    onMat: (i, key, v) => updPart(i, (p) => setPartMaterialParam(p, key, v)),
+    onFinish: (i, face, f) => updPart(i, (p) => setPartFinish(p, face, f)),
+    onContact: (i, mode) => { spec.mech3d.contacts[i] = { ...spec.mech3d.contacts[i], mode }; persist(); },
+    onExit: () => { spec.mode = 'flat'; persist(); applyMode(); schedule(); },
+  });
+}
+function updPart(i, fn) {
+  spec.mech3d.parts[i] = fn(spec.mech3d.parts[i]);
+  persist(); renderMech3d();
+}
+function importMech3d(file) {
+  const st = $('#mech3d-status');
+  $('#mech3d-wrap').hidden = false; $('#design-wrap').hidden = true; $('#results-wrap').hidden = true;
+  st.textContent = `${file.name} 읽는 중…`;
+  file.text().then((text) => {
+    const w = new Worker(new URL('./engine/mech3d/mech3d-worker.js', import.meta.url), { type: 'module' });
+    w.onmessage = (m) => {
+      if (m.data.stage) { st.textContent = m.data.stage; return; }
+      w.terminate();
+      if (m.data.error) { st.textContent = `불러오기 실패: ${m.data.error}`; applyMode(); return; }
+      setMech3dMesh(file.name, m.data.parts);
+      spec.mech3d = initialMech3dSpec();
+      spec.mode = 'mech3d';
+      m3sel = null;
+      saveMech3dIDB().catch(() => {});
+      persist();
+      st.textContent = `불러옴: ${file.name} · 부품 ${m.data.parts.length}개 · 접촉면 ${spec.mech3d.contacts.length}개 — Milky 부품부터 지정하세요`;
+      applyMode(); renderMech3d(true);
+    };
+    w.onerror = (e) => { w.terminate(); st.textContent = `불러오기 실패: ${e.message ?? e}`; applyMode(); };
+    w.postMessage({ text });
+  });
 }
 
 // 실측소재 선택 — 소재의 μs'·g·μa 를 쓰고, Milky 입력칸에는 그 소재의 Milky(파생값)를 보여 준다
@@ -579,6 +638,8 @@ function migrate(s) {
   if (s.preview.level == null) s.preview.level = 3;
   s.body ??= structuredClone(DEFAULT_SPEC.body);
   s.body.shape ??= structuredClone(DEFAULT_SPEC.body.shape);
+  s.mode ??= 'flat';
+  s.mech3d ??= null;
   // ver<10 저장값은 판정제외 마진 5% 를 품고 있어 새 기본(0 = 타겟 전체 판정)을 덮어쓴다 —
   // 마진과 오버행 설정을 버리고 현재 기본값으로 시작한다. ver 10 에서 사용자가 직접 넣은 값은 유지.
   if (!(s.ver >= 10)) {
@@ -618,6 +679,8 @@ migrate(spec);
 if (spec.body.shape.source === 'step' && !(await loadBodyIDB({ flipZ: spec.body.shape.flipZ, rot: spec.body.shape.rot }))) {
   spec.body.shape = structuredClone(DEFAULT_SPEC.body.shape);
 }
+// 3D 기구 복원(IndexedDB) — 메쉬가 없으면 평판 모드로
+if (spec.mode === 'mech3d' && !(spec.mech3d && await loadMech3dIDB())) { spec.mode = 'flat'; spec.mech3d = null; }
 // 계산 Worker 시작 — L2 응답표·소재 DB·불러온 몸체를 Worker 쪽에도 싣는다(메인은 L2 카드 표시용으로 따로 보유)
 solver = new Worker(new URL('./engine/solve-worker.js', import.meta.url), { type: 'module' });
 solver.onmessage = onSolverMessage;
@@ -639,4 +702,5 @@ setupZoom();
 setupHeatPick();
 window.addEventListener('resize', schedule);
 forceHeatOnNextRun = true;   // 첫 계산에 히트맵 포함
+applyMode();
 schedule();
