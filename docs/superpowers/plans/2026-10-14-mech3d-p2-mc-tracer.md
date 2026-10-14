@@ -53,7 +53,7 @@ UI·Worker 병렬화는 P4/P5 에서 한다. P2 는 엔진과 검증까지만 �
 
 **탈출:** 교차가 없으면 공기 중에서 무한히 탈출한 것으로 보고 `onEscape` 를 호출한다. 매질 안에서 교차가 없으면 열린 메쉬이므로 `lost` 로 진단한다.
 
-**수치:** 사건 뒤 출발점을 새 방향으로 `OFF = 1e-5` mm 이동하고, `tMin = 1e-7` 이다. 가중치 < `w0·1e-3` 이면 러시안 룰렛(생존 0.1, ×10)을 한다.
+**수치(최종):** 사건 뒤에는 출발점을 이동하지 않고, 다음 교차에서 마지막에 맞은 삼각형(공존 전이면 두 삼각형)을 제외하며 tMin = 1e-9 이다(아래 실행 로그 참고 — 처음 계획의 OFF 방식은 모서리 누설·얇은 판 문제로 교체). 가중치 < `w0·1e-3` 이면 러시안 룰렛(생존 0.1, ×10)을 한다.
 
 **원장 보존(V3D-2):** emitted + rrGain = escaped + absSurf + absVol + lost + rrLoss.
 
@@ -852,6 +852,6 @@ git push origin master
 - **얇은 부품**: 정확히 같은 면의 짝은 건너뛰고, 평면 판정 간격은 0.02mm 이다.
 - **직전 삼각형 제외**: 자기 교차를 막는다.
 - **모서리 루프**: 모서리 적중 시 tMin 1e-9 와 삼각형 제외를 함께 써서 무한 반복을 막는다.
-- 산란 뒤에는 출발점 이동(OFF)을 하지 않는다(매질 내부 점이므로 불필요, 얇은 판에서 면 건너뜀 방지).
+- 산란 뒤 출발점 이동(OFF) 제거: 면에서 1e-5mm 안쪽에서 산란한 광자가 그 면을 향하면 OFF 이동만으로 교차 검사 없이 면을 넘어 불투명 부품 안으로 들어가 lost 가 됐다(불투명 블록 위 Milky, lost 1.4e-4~5.3e-4). 이후 OFF 자체를 마지막 삼각형 제외 + tMin 1e-9 로 대체.
 
 **Task 6 변경:** `test:mech3d` 에는 빠른 suite(mesh·bvh·materials·contacts·import·surface·optics·scene)만 두고, 느린 suite 는 `test:mech3d-mc` = `node test/mech3d-mc.mjs && node test/mech3d-v1.mjs`(약 1분 36초)로 분리했다. `src/main.js` 의 `onMat` 에서 DB 소재를 고르면 Milky 칸을 `milkyFromMusR(table, fitted.musR)`(소수 2자리)로 맞춘다. `npm test`, `test:mech3d`, `test:mech3d-mc` 모두 exit 0.
