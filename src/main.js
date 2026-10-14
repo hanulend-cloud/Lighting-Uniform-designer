@@ -117,7 +117,8 @@ function buildForm() {
     }
     form.appendChild(grp);
   }
-  $('#btn-reset').onclick = () => { spec = structuredClone(DEFAULT_SPEC); markSoloReset(); mount(); schedule(); };
+  $('#btn-reset').onclick = () => { spec = structuredClone(DEFAULT_SPEC); markSoloReset(); mount(); m3sel = null; applyMode(); schedule(); };
+  $('#btn-mech3d-show').onclick = () => { spec.mode = 'mech3d'; persist(); applyMode(); };
   $('#file-mech3d').onchange = (e) => { const f = e.target.files?.[0]; if (f) importMech3d(f); e.target.value = ''; };
   $('#btn-step').onclick = () => {
     if (!last) return;
@@ -182,22 +183,21 @@ function clearShape() {
 }
 
 // ---- 3D 기구 모드 (spec 2026-10-14 §3) ----
-let m3sel = null, m3view = null;
+let m3sel = null, m3view = null, m3viewP = null, m3meshShown = null;
 function applyMode() {
   const m3 = spec.mode === 'mech3d' && !!spec.mech3d && !!getMech3d();
   $('#mech3d-wrap').hidden = !m3;
   $('#design-wrap').hidden = m3;
   $('#results-wrap').hidden = m3;
-  if (m3) renderMech3d();
+  $('#btn-mech3d-show').hidden = m3 || !(spec.mech3d && getMech3d());
+  if (m3) renderMech3d().catch((e) => { $('#mech3d-status').textContent = `3D 뷰 오류: ${e.message ?? e}`; });
 }
-async function renderMech3d(meshChanged = false) {
+const getView = () => m3viewP ??= import('./ui/mech3d-view.js').then(({ createMech3dView }) => (m3view = createMech3dView($('#mech3d-canvas'), { onPick: (s) => { m3sel = s; renderMech3d(); } })));
+async function renderMech3d() {
   const kinds = spec.mech3d.parts.map((p) => p.material.kind);
-  if (!m3view) {
-    const { createMech3dView } = await import('./ui/mech3d-view.js');
-    m3view = createMech3dView($('#mech3d-canvas'), { onPick: (s) => { m3sel = s; renderMech3d(); } });
-    meshChanged = true;
-  }
-  if (meshChanged) m3view.setParts(getMech3d().parts, kinds); else m3view.setKinds(kinds);
+  await getView();
+  const cur = getMech3d();
+  if (m3meshShown !== cur) { m3meshShown = cur; m3view.setParts(cur.parts, kinds); } else m3view.setKinds(kinds);
   m3view.setSelection(m3sel);
   renderMech3dPanel($('#mech3d-panel'), spec.mech3d, m3sel, materialDb()?.list() ?? [], {
     onSelect: (i) => { m3sel = { part: i, face: null }; renderMech3d(); },
@@ -205,7 +205,7 @@ async function renderMech3d(meshChanged = false) {
     onMat: (i, key, v) => updPart(i, (p) => setPartMaterialParam(p, key, v)),
     onFinish: (i, face, f) => updPart(i, (p) => setPartFinish(p, face, f)),
     onContact: (i, mode) => { spec.mech3d.contacts[i] = { ...spec.mech3d.contacts[i], mode }; persist(); },
-    onExit: () => { spec.mode = 'flat'; persist(); applyMode(); schedule(); },
+    onExit: () => { spec.mode = 'flat'; m3sel = null; persist(); applyMode(); schedule(); },
   });
 }
 function updPart(i, fn) {
@@ -222,18 +222,21 @@ function importMech3d(file) {
       if (m.data.stage) { st.textContent = m.data.stage; return; }
       w.terminate();
       if (m.data.error) { st.textContent = `불러오기 실패: ${m.data.error}`; applyMode(); return; }
-      setMech3dMesh(file.name, m.data.parts);
-      spec.mech3d = initialMech3dSpec();
-      spec.mode = 'mech3d';
-      m3sel = null;
-      saveMech3dIDB().catch(() => {});
-      persist();
-      st.textContent = `불러옴: ${file.name} · 부품 ${m.data.parts.length}개 · 접촉면 ${spec.mech3d.contacts.length}개 — Milky 부품부터 지정하세요`;
-      applyMode(); renderMech3d(true);
+      try {
+        setMech3dMesh(file.name, m.data.parts);
+        const ms = initialMech3dSpec();
+        spec.mech3d = ms;
+        spec.mode = 'mech3d';
+        m3sel = null;
+        saveMech3dIDB().catch(() => {});
+        persist();
+        st.textContent = `불러옴: ${file.name} · 부품 ${m.data.parts.length}개 · 접촉면 ${ms.contacts.length}개 — Milky 부품부터 지정하세요`;
+        applyMode();
+      } catch (e) { st.textContent = `불러오기 실패: ${e.message ?? e}`; applyMode(); }
     };
     w.onerror = (e) => { w.terminate(); st.textContent = `불러오기 실패: ${e.message ?? e}`; applyMode(); };
     w.postMessage({ text });
-  });
+  }).catch((e) => { st.textContent = `불러오기 실패: ${e.message ?? e}`; applyMode(); });
 }
 
 // 실측소재 선택 — 소재의 μs'·g·μa 를 쓰고, Milky 입력칸에는 그 소재의 Milky(파생값)를 보여 준다
@@ -261,6 +264,7 @@ let autoHeat = false;  // 판정 격자를 정확도 우선(1.5mm)으로 낮춰 
 let last = null;   // { spec 상태 파생값 } — 조도 렌더링 버튼용
 
 function schedule() {
+  if (spec.mode === 'mech3d') return;
   clearTimeout(timer);
   $('#timing').textContent = '계산 대기 중…';
   timer = setTimeout(runAsync, 220);
@@ -599,7 +603,9 @@ function exportJson() {
 function importJson(e) {
   const f = e.target.files[0]; if (!f) return;
   const r = new FileReader();
-  r.onload = () => { try { spec = JSON.parse(r.result); migrate(spec); mount(); schedule(); } catch { alert('JSON 파싱 실패'); } };
+  r.onload = () => { try { spec = JSON.parse(r.result); migrate(spec);
+    if (spec.mode === 'mech3d' && !(spec.mech3d && getMech3d() && spec.mech3d.parts.length === getMech3d().parts.length)) { spec.mode = 'flat'; spec.mech3d = null; }
+    mount(); m3sel = null; applyMode(); schedule(); } catch { alert('JSON 파싱 실패'); } };
   r.readAsText(f);
 }
 
