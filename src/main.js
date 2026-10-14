@@ -6,6 +6,7 @@ import { initL2, browserLoader, l2State, setMaterialDb, materialDb } from './eng
 import { createDb } from './model/materials-db.js';
 import { renderL2Panel } from './ui/l2-panel.js';
 import { migrateMilkyV13 } from './engine/l2/material.js';
+import { milkyFromMusR } from './engine/l2/milky.js';
 import { setBodyMesh, reorientBody, clearBody, bodyInfo, saveBodyIDB, loadBodyIDB, importedBodyActive, getBody } from './engine/shape/runtime.js';
 import { mountShapeControls, setShapeStatus, renderShapeInfo } from './ui/shape-panel.js';
 import { metrics, centerZoneFrac } from './engine/uniformity.js';
@@ -202,7 +203,13 @@ async function renderMech3d() {
   renderMech3dPanel($('#mech3d-panel'), spec.mech3d, m3sel, materialDb()?.list() ?? [], {
     onSelect: (i) => { m3sel = { part: i, face: null }; renderMech3d(); },
     onKind: (i, k) => updPart(i, (p) => setPartMaterial(p, k)),
-    onMat: (i, key, v) => updPart(i, (p) => setPartMaterialParam(p, key, v)),
+    onMat: (i, key, v) => updPart(i, (p) => {
+      let q = setPartMaterialParam(p, key, v);
+      // DB 소재 선택: Milky 칸을 그 소재의 피팅 μs' 에 해당하는 값으로(Milky = 농도 — 이후 사용자가 조절)
+      const ent = key === 'dbId' && v ? materialDb()?.get(v) : null, tbl = l2State().table;
+      if (ent && tbl) q = setPartMaterialParam(q, 'milky', Math.round(milkyFromMusR(tbl, ent.fitted.musR) * 100) / 100);
+      return q;
+    }),
     onFinish: (i, face, f) => updPart(i, (p) => setPartFinish(p, face, f)),
     onContact: (i, mode) => { spec.mech3d.contacts[i] = { ...spec.mech3d.contacts[i], mode }; persist(); },
     onExit: () => { spec.mode = 'flat'; m3sel = null; persist(); applyMode(); schedule(); },
