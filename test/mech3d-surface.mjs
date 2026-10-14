@@ -1,5 +1,5 @@
 // 3D MC 계면·면 처리: node test/mech3d-surface.mjs
-import { fresnelInterface, lambert, reflectFinish } from '../src/engine/mech3d/surface.js';
+import { fresnelInterface, fresnelPolarized, lambert, reflectFinish } from '../src/engine/mech3d/surface.js';
 import { rng } from '../src/engine/l2/mc-slab.js';
 import { ok, done } from './mech3d-util.mjs';
 
@@ -39,5 +39,21 @@ const n = 1.586, R0 = ((n - 1) / (n + 1)) ** 2, near = (a, b, e = 1e-9) => Math.
   ok(Math.abs(bl / K - expB) < 0.003, `흑색 R5: 반사 ${(bl / K).toFixed(4)} (기대 ${expB.toFixed(4)} = 광택 Fresnel + 확산)`);
   const back = reflectFinish({ kind: 'whiteDiffuse', R: 1 }, 0, 0, 1, 0, 0, 1, r);   // 법선과 같은 쪽으로 오는 빛(안쪽에서 코팅에 닿음)
   ok(back && back[2] < 0, '안쪽에서 닿으면 안쪽 반구로 반사');
+}
+{   // 편광 Fresnel: s/p 분해, 브루스터각, E ⟂ 진행 방향 유지, 비편광 평균 = fresnelInterface
+  const a = Math.PI / 4, d = [Math.sin(a), 0, -Math.cos(a)];
+  const u = fresnelInterface(...d, 0, 0, 1, 1, n);
+  const s = fresnelPolarized(...d, 0, 1, 0, 0, 0, 1, 1, n), p = fresnelPolarized(...d, Math.cos(a), 0, Math.sin(a), 0, 0, 1, 1, n);
+  ok(near(0.5 * (s.R + p.R), u.R) && s.R > p.R, `편광 Fresnel 45°: Rs ${s.R.toFixed(4)} Rp ${p.R.toFixed(4)} 평균 = 비편광 ${u.R.toFixed(4)}`);
+  const b = Math.atan(n), db = [Math.sin(b), 0, -Math.cos(b)], pb = fresnelPolarized(...db, Math.cos(b), 0, Math.sin(b), 0, 0, 1, 1, n);
+  const perp = (E, D) => Math.abs(E[0] * D[0] + E[1] * D[1] + E[2] * D[2]);
+  ok(pb.R < 1e-12 && perp([pb.etx, pb.ety, pb.etz], [pb.tx, pb.ty, pb.tz]) < 1e-12 && perp([p.erx, p.ery, p.erz], [p.rx, p.ry, p.rz]) < 1e-12, `브루스터각 p 편광 R ${pb.R.toExponential(1)}, E ⟂ d`);
+  const m = Math.SQRT1_2, mx = fresnelPolarized(...d, m * Math.cos(a), m, m * Math.sin(a), 0, 0, 1, 1, n);
+  ok(near(mx.R, 0.5 * (s.R + p.R)) && Math.abs(mx.ery) ** 2 / (mx.erx ** 2 + mx.ery ** 2 + mx.erz ** 2) > 0.5, '45° 혼합 편광: R = 평균, 반사광은 s 우세');
+}
+{   // 흑색·광택 면 처리의 정반사는 입사 매질 굴절률 기준(수지에 접착 → 거의 0)
+  const r = rng(5), K = 200000; let air = 0, res = 0;
+  for (let i = 0; i < K; i++) { if (reflectFinish({ kind: 'gloss' }, 0, 0, -1, 0, 0, 1, r)) air++; if (reflectFinish({ kind: 'gloss' }, 0, 0, -1, 0, 0, 1, r, n)) res++; }
+  ok(Math.abs(air / K - 0.04) < 0.003 && res / K < 0.002, `광택 불투명 정반사: 공기 쪽 ${(air / K).toFixed(4)}, 수지(n ${n}) 쪽 ${(res / K).toFixed(5)}`);
 }
 done();

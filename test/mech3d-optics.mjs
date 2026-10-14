@@ -42,4 +42,12 @@ ok(partOptics(defaultPart(0, 'p', 1), ctx).transmissive === false, '불투명 �
   const q = table.query(o.mus * (1 - o.g) * 1.5, o.g, o.n, normalRow(table), 0);
   ok(Math.abs(q.Tb + q.Ts - 0.1) < 1e-3 && o.g === 0.9, `반투과 백색 T10%@1.5mm: 표 재계산 T ${(q.Tb + q.Ts).toFixed(4)}`);
 }
+{   // 투명 T 극소 정밀도, Milky 상한 9.9(MILKY_UI_MAX)
+  const n0 = partOptics(P('clear'), ctx).n, R0 = ((n0 - 1) / (n0 + 1)) ** 2, B = (1 - R0) ** 2;
+  const o = partOptics(P('clear', { T: 1e-9, tRef: 2 }), ctx), x = Math.exp(-o.mua * 2), T = B * x / (1 - R0 * R0 * x * x);
+  ok(Number.isFinite(o.mua) && rel(T, 1e-9) < 1e-6, `투명 T 1e-9: μa ${o.mua.toFixed(3)}, 재계산 T ${T.toExponential(4)}`);
+  const a = partOptics(P('milky', { milky: 9.9 }), ctx), b = partOptics(P('milky', { milky: 10 }), ctx);
+  const ent = db.get('covestro-dq5142'), c = partOptics(P('milky', { dbId: ent.id, milky: 9.9 }), ctx), d = partOptics(P('milky', { dbId: ent.id, milky: 10 }), ctx);
+  ok(a.mus === b.mus && c.mus === d.mus, `Milky 상한 9.9: 추상 μs ${b.mus.toFixed(2)}, DB μs ${d.mus.toFixed(2)}`);
+}
 done();

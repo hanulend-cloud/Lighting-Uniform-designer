@@ -1,6 +1,6 @@
 // 3D 기구 부품 소재 → 광학 물성 — spec 2026-10-14 §3.2, §6.1·§6.2(Milky 레벨 = 입자 농도: μs·μa 비례, 위상함수 고정).
 // 반환: 불투명 { transmissive:false } / 투과성 { transmissive:true, n, mus, g, mua, phase(null = HG(g)) }
-import { l2Material, L2_G, MUA_RESIN } from '../l2/material.js';
+import { l2Material, L2_G, MUA_RESIN, MILKY_UI_MAX } from '../l2/material.js';
 import { musRFromMilky } from '../l2/milky.js';
 import { particleOptics } from '../l2/mie.js';
 import { RESIN_N } from './materials.js';
@@ -36,8 +36,8 @@ export function partOptics(part, { table, db = null }) {
   if (m.kind === 'clear') {
     // 비간섭 다중 반사 슬랩: T = B·x/(1−R0²x²), x = e^{−μa t}, B = (1−R0)²
     const R0 = ((n0 - 1) / (n0 + 1)) ** 2, B = (1 - R0) ** 2;
-    const x = m.T >= (1 - R0) / (1 + R0) ? 1 : (-B + Math.sqrt(B * B + 4 * R0 * R0 * m.T * m.T)) / (2 * R0 * R0 * m.T);
-    return { transmissive: true, n: n0, mus: 0, g: 0, mua: Math.max(0, -Math.log(Math.min(1, x)) / m.tRef), phase: null };
+    const x = m.T >= (1 - R0) / (1 + R0) ? 1 : 2 * m.T / (B + Math.sqrt(B * B + 4 * R0 * R0 * m.T * m.T));   // 근의 공식 유리화(T 극소 정밀도)
+    return { transmissive: true, n: n0, mus: 0, g: 0, mua: Math.max(0, -Math.log(Math.min(1, Math.max(x, 1e-300))) / m.tRef), phase: null };
   }
   if (m.kind === 'whiteTrans') {
     const musR = whiteTransMusR(table, m.T, m.tRef, n0);
@@ -46,10 +46,10 @@ export function partOptics(part, { table, db = null }) {
   // milky
   const ent = m.dbId ? db?.get(m.dbId) : null;
   if (!ent) {
-    const a = l2Material(table, m.milky, n0);
+    const a = l2Material(table, Math.min(m.milky, MILKY_UI_MAX), n0);
     return { transmissive: true, n: n0, mus: a.musR / (1 - a.g), g: a.g, mua: a.mua, phase: null };
   }
-  const musR = musRFromMilky(table, Math.min(m.milky, 9.999)), f = ent.fitted;
+  const musR = musRFromMilky(table, Math.min(m.milky, MILKY_UI_MAX)), f = ent.fitted;
   const mua = f.musR > 0 ? MUA_RESIN + Math.max(0, f.mua - MUA_RESIN) * (musR / f.musR) : MUA_RESIN;
   return { transmissive: true, n: ent.n, mus: musR / (1 - f.g), g: f.g, mua, phase: ent.model === 'mie' && ent.particle ? miePhaseOf(ent) : null };
 }

@@ -5,9 +5,9 @@ import { _ledModel } from '../shape/mc-body.js';
 export function ledSource({ x, y, z, axis = [0, 0, 1], xAxis = null, model = 'lambertian', beam = 120, sizeX = 0, sizeY = 0, I0 = 1 }) {
   const lm = _ledModel({ model, beamX: beam });
   const al = Math.hypot(...axis), a = axis.map((v) => v / al);
-  let u = xAxis ?? (Math.abs(a[2]) < 0.9 ? [0, 0, 1] : [1, 0, 0]);
-  const ud = u[0] * a[0] + u[1] * a[1] + u[2] * a[2];
-  u = [u[0] - ud * a[0], u[1] - ud * a[1], u[2] - ud * a[2]];
+  const perp = (w) => { const d = w[0] * a[0] + w[1] * a[1] + w[2] * a[2]; return [w[0] - d * a[0], w[1] - d * a[1], w[2] - d * a[2]]; };
+  let u = xAxis ? perp(xAxis) : null;
+  if (!u || Math.hypot(...u) < 1e-6 * Math.hypot(...xAxis)) u = perp(Math.abs(a[2]) < 0.9 ? [0, 0, 1] : [1, 0, 0]);   // xAxis ∥ axis → 기본 직교축
   const ul = Math.hypot(...u); u = u.map((v) => v / ul);
   const v = [a[1] * u[2] - a[2] * u[1], a[2] * u[0] - a[0] * u[2], a[0] * u[1] - a[1] * u[0]];
   return {

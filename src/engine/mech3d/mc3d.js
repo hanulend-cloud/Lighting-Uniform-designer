@@ -1,11 +1,17 @@
 // 3D MC 추적기 — spec 2026-10-14 §6.1. 부품 메쉬 장면(scene3d.buildTraceScene)을 확률 선택(가중 불변) 방식으로 추적.
 // 매질 스택: 광자가 들어가 있는 투과성 부품(맨 위 = 현재 매질, 빈 스택 = 공기). 규칙은 P2 계획 "물리 규칙" 절 참고.
-// onExit(part, face, x,y,z, dx,dy,dz, w): 투과성 부품에서 공기로 나갈 때. onEscape(x,y,z, dx,dy,dz, w): 공기 중 무한 탈출.
-import { intersectRay } from './bvh.js';
-import { fresnelInterface, reflectFinish } from './surface.js';
+// 맞붙은 면은 면 단위가 아니라 **점 단위**로 판정한다: 면에 닿은 점에서 다른 부품의 반대 법선 삼각형이
+//   0.04mm(간격 + 곡면 현 오차) 안에 겹쳐 있으면 짝(coincident) 면이다. 짝의 모드는 contacts 지정('contact'|'air'),
+//   지정이 없으면 광학 접촉(spec §3.4 기본). 전이는 이 한 번의 충돌에서 처리하고, 바로 다음 짝 면 충돌은 통과한다.
+// 편광: 광자마다 전기장 단위벡터 E ⟂ d 를 추적한다(Fresnel s/p 분리). 확산 반사·면 처리·체적 산란 뒤에는 무작위화.
+// onExit(part, face, x,y,z, dx,dy,dz, w): 투과성 부품에서 공기로 나가는 **모든** 전이(내부 공기 틈 포함 — 이후 다른 부품에
+//   다시 들어갈 수 있음). onEscape(x,y,z, dx,dy,dz, w): 공기 중 무한 탈출 = 원거리장 총량.
+import { intersectRay, queryBox } from './bvh.js';
+import { fresnelPolarized, reflectFinish, randomPolarization } from './surface.js';
 import { rng } from '../l2/mc-slab.js';
 
 const OFF = 1e-5, T_MIN = 1e-7;
+const COIN_GAP = 0.04, COIN_DOT = -0.97, COIN_BOX = 0.05, COIN_BARY = 1e-6;
 
 function sampleHG(g, u) {
   if (Math.abs(g) < 1e-6) return 2 * u - 1;
@@ -13,42 +19,79 @@ function sampleHG(g, u) {
   return (1 + g * g - f * f) / (2 * g);
 }
 
-// 공기막(맞붙은 '공기층' 면): 매질 A(nA) 쪽에서 막에 닿음. B = { n }(투과성) | { fin }(불투명 면 처리).
-// 막 안 다중 반사를 끝까지 풀어 { dir, into: 'A'|'B' } 또는 null(흡수) 반환.
-function filmCross(dx, dy, dz, Nx, Ny, Nz, nA, B, rnd) {
-  const f = fresnelInterface(dx, dy, dz, Nx, Ny, Nz, nA, 1);
-  if (f.R >= 1 || rnd() < f.R) return { dir: [f.rx, f.ry, f.rz], into: 'A' };
-  let d = [f.tx, f.ty, f.tz];
-  for (let k = 0; k < 100; k++) {
-    if (B.fin) { const r = reflectFinish(B.fin, d[0], d[1], d[2], Nx, Ny, Nz, rnd); if (!r) return null; d = r; }
-    else {
-      const g = fresnelInterface(d[0], d[1], d[2], Nx, Ny, Nz, 1, B.n);
-      if (!(g.R >= 1 || rnd() < g.R)) return { dir: [g.tx, g.ty, g.tz], into: 'B' };
-      d = [g.rx, g.ry, g.rz];
+// 다른 부품의 반대 법선 삼각형이 근처에 있을 수 있는 삼각형 표시(점 단위 판정의 사전 거름) — 장면별 캐시
+const coinCache = new WeakMap();
+function coinFlags(S) {
+  if (coinCache.has(S)) return coinCache.get(S);
+  const { P, T, normals: NM, partOf, bvh } = S, nT = partOf.length, flag = new Uint8Array(nT), buf = [];
+  for (let t = 0; t < nT; t++) {
+    const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
+    for (let k = 0; k < 3; k++) for (let c = 0; c < 3; c++) { const v = P[T[t * 3 + k] * 3 + c]; lo[c] = Math.min(lo[c], v - COIN_BOX); hi[c] = Math.max(hi[c], v + COIN_BOX); }
+    queryBox(bvh, lo, hi, buf);
+    for (const c of buf) {
+      if (partOf[c] === partOf[t]) continue;
+      if (NM[t * 3] * NM[c * 3] + NM[t * 3 + 1] * NM[c * 3 + 1] + NM[t * 3 + 2] * NM[c * 3 + 2] <= COIN_DOT) { flag[t] = 1; break; }
     }
-    const h = fresnelInterface(d[0], d[1], d[2], Nx, Ny, Nz, 1, nA);
-    if (!(h.R >= 1 || rnd() < h.R)) return { dir: [h.tx, h.ty, h.tz], into: 'A' };
-    d = [h.rx, h.ry, h.rz];
   }
-  return null;   // 막 안 무한 반사(수치) — 흡수로 처리
+  coinCache.set(S, flag);
+  return flag;
 }
 
 export function runMC3D(S, { source, N, seed = 1, onExit = null, onEscape = null, wMinRel = 1e-3, maxEvents = 100000 }) {
   const t0 = typeof performance !== 'undefined' ? performance.now() : Date.now();
   const rnd = rng(seed), w0 = source.flux / N, wMin = w0 * wMinRel;
   const L = { emitted: 0, escaped: 0, absSurf: 0, absVol: 0, lost: 0, rrLoss: 0, rrGain: 0 };
-  const { optics, normals: NM, partOf, faceOf, fins, finOf, contact, film } = S;
+  const { P, T, optics, normals: NM, partOf, faceOf, fins, finOf, contact, film, bvh } = S;
   const nOf = (q) => (q < 0 ? 1 : optics[q].n);
+  const flag = coinFlags(S), qbuf = [], lo = [0, 0, 0], hi = [0, 0, 0];
+
+  // 점 (x,y,z) 에서 tri 와 맞붙은 다른 부품 삼각형(없으면 −1)
+  function partnerAt(tri, x, y, z) {
+    if (!flag[tri]) return -1;
+    lo[0] = x - COIN_BOX; lo[1] = y - COIN_BOX; lo[2] = z - COIN_BOX; hi[0] = x + COIN_BOX; hi[1] = y + COIN_BOX; hi[2] = z + COIN_BOX;
+    queryBox(bvh, lo, hi, qbuf);
+    const q = partOf[tri], Nx = NM[tri * 3], Ny = NM[tri * 3 + 1], Nz = NM[tri * 3 + 2];
+    let best = -1, bestD = Infinity;
+    for (const c of qbuf) {
+      if (partOf[c] === q) continue;
+      const cx = NM[c * 3], cy = NM[c * 3 + 1], cz = NM[c * 3 + 2];
+      if (Nx * cx + Ny * cy + Nz * cz > COIN_DOT) continue;
+      const a = T[c * 3] * 3, b = T[c * 3 + 1] * 3, e = T[c * 3 + 2] * 3;
+      const dist = (x - P[a]) * cx + (y - P[a + 1]) * cy + (z - P[a + 2]) * cz;
+      if (Math.abs(dist) > COIN_GAP || Math.abs(dist) >= bestD) continue;
+      // 평면 투영점의 무게중심 좌표
+      const px = x - dist * cx - P[a], py = y - dist * cy - P[a + 1], pz = z - dist * cz - P[a + 2];
+      const ux = P[b] - P[a], uy = P[b + 1] - P[a + 1], uz = P[b + 2] - P[a + 2], vx = P[e] - P[a], vy = P[e + 1] - P[a + 1], vz = P[e + 2] - P[a + 2];
+      const uu = ux * ux + uy * uy + uz * uz, uv = ux * vx + uy * vy + uz * vz, vv = vx * vx + vy * vy + vz * vz;
+      const pu = px * ux + py * uy + pz * uz, pv = px * vx + py * vy + pz * vz, den = uu * vv - uv * uv;
+      if (!(den > 0)) continue;
+      const s = (vv * pu - uv * pv) / den, t = (uu * pv - uv * pu) / den;
+      if (s < -COIN_BARY || t < -COIN_BARY || s + t > 1 + COIN_BARY) continue;
+      best = c; bestD = Math.abs(dist);
+    }
+    return best;
+  }
+  // 짝 면의 모드: contacts 지정 우선, 없으면 광학 접촉
+  const modeOf = (q, f, q2) => {
+    const c = contact.get(`${q}|${f}`); if (c && c.part === q2) return 'contact';
+    const m = film.get(`${q}|${f}`); if (m && m.part === q2) return 'air';
+    return 'contact';
+  };
+
   const stack = [];
   for (let p = 0; p < N; p++) {
     L.emitted += w0;
     let [px, py, pz, dx, dy, dz] = source.sample(rnd), w = w0;
+    let [ex, ey, ez] = randomPolarization(dx, dy, dz, rnd);
+    let skipA = -1, skipB = -1, skipX = 0, skipY = 0, skipZ = 0, skipNx = 0, skipNy = 0, skipNz = 0;   // 직전 짝 면 전이
+    let tMin = T_MIN;   // 면 사건 뒤 T_MIN, 체적 산란 뒤 0(출발점이 면 위가 아님)
     stack.length = 0;
     for (let e = 0; ; e++) {
       if (e > maxEvents) { L.lost += w; break; }
       const cur = stack.length ? stack[stack.length - 1] : -1, med = cur >= 0 ? optics[cur] : null;
       const sFree = med && med.mus > 0 ? -Math.log(1 - rnd()) / med.mus : Infinity;
-      const h = intersectRay(S.bvh, px, py, pz, dx, dy, dz, T_MIN, sFree);
+      const h = intersectRay(bvh, px, py, pz, dx, dy, dz, tMin, sFree);
+      tMin = T_MIN;
       if (!h && !Number.isFinite(sFree)) {
         if (cur >= 0) { L.lost += w; break; }   // 매질 안에서 교차 없음 = 열린 메쉬(진단)
         L.escaped += w; if (onEscape) onEscape(px, py, pz, dx, dy, dz, w); break;
@@ -57,6 +100,7 @@ export function runMC3D(S, { source, N, seed = 1, onExit = null, onEscape = null
       px += t * dx; py += t * dy; pz += t * dz;
       if (med && med.mua > 0) { const a = w * (1 - Math.exp(-med.mua * t)); L.absVol += a; w -= a; }
       if (!h) {   // 체적 산란
+        skipA = -1;
         const cth = med.phase ? med.phase.sample(rnd()) : sampleHG(med.g, rnd()), sth = Math.sqrt(Math.max(0, 1 - cth * cth));
         const phi = 2 * Math.PI * rnd(), cp = Math.cos(phi), sp = Math.sin(phi);
         if (Math.abs(dz) > 0.99999) { dx = sth * cp; dy = sth * sp; dz = Math.sign(dz) * cth; }
@@ -65,64 +109,92 @@ export function runMC3D(S, { source, N, seed = 1, onExit = null, onEscape = null
           const nx2 = sth * (dx * dz * cp - dy * sp) / tmp + dx * cth, ny2 = sth * (dy * dz * cp + dx * sp) / tmp + dy * cth, nz2 = -sth * cp * tmp + dz * cth;
           dx = nx2; dy = ny2; dz = nz2;
         }
+        const l = Math.hypot(dx, dy, dz); dx /= l; dy /= l; dz /= l;
+        [ex, ey, ez] = randomPolarization(dx, dy, dz, rnd);
+        tMin = 0;   // OFF 이동 없음: 면에 1e-5 보다 가까운 산란점에서 OFF 가 면을 건너뛰지 않게
       } else {
         const tri = h.tri, q = partOf[tri], face = faceOf[tri];
         const Nx = NM[tri * 3], Ny = NM[tri * 3 + 1], Nz = NM[tri * 3 + 2];
-        const entering = dx * Nx + dy * Ny + dz * Nz < 0;
-        let dir = null, absorbed = false;
-        const reflectBy = (fin) => { const r = reflectFinish(fin, dx, dy, dz, Nx, Ny, Nz, rnd); if (r) dir = r; else absorbed = true; };
-        // 공기막 결과 반영: into B 면 cur 를 빼고 b 로 들어감(b < 0 = 불투명이라 진입 없음)
-        const viaFilm = (B, b) => {
-          const r = filmCross(dx, dy, dz, Nx, Ny, Nz, nOf(cur), B, rnd);
-          if (!r) { absorbed = true; return; }
-          dir = r.dir;
-          if (r.into === 'B' && b >= 0) { stack.splice(stack.lastIndexOf(cur), 1); stack.push(b); }
-        };
-        const fm = film.get(`${q}|${face}`);
-        if (!optics[q].transmissive) {
-          if (cur >= 0 && fm && fm.part === cur) viaFilm({ fin: fins[finOf[tri]] }, -1);   // 불투명 면과 공기막을 두고 맞붙음
-          else reflectBy(fins[finOf[tri]]);
+        // 직전 짝 면 전이의 쌍둥이 면(같은 평면, 0.04mm 이내) — 이미 처리했으므로 통과
+        if (skipA >= 0 && (q === skipA || q === skipB) && Math.abs(Nx * skipNx + Ny * skipNy + Nz * skipNz) > -COIN_DOT
+          && Math.abs((px - skipX) * skipNx + (py - skipY) * skipNy + (pz - skipZ) * skipNz) <= COIN_GAP + 1e-3) {
+          skipA = -1;
+          px += OFF * dx; py += OFF * dy; pz += OFF * dz;
+          continue;
         }
-        else if (entering ? stack.includes(q) : !stack.includes(q)) { /* 겹친 접촉면 — 통과 */ }
-        else if (fins[finOf[tri]].kind !== 'gloss') reflectBy(fins[finOf[tri]]);   // 반사형 코팅(양면)
-        else {
-          const ct = contact.get(`${q}|${face}`);
-          if (entering) {
-            if (ct && ct.part === cur) {   // 접촉면을 상대 쪽 삼각형으로 먼저 만남: cur → q 직접 굴절
-              const f = fresnelInterface(dx, dy, dz, Nx, Ny, Nz, nOf(cur), nOf(q));
-              if (f.R >= 1 || rnd() < f.R) dir = [f.rx, f.ry, f.rz];
-              else { dir = [f.tx, f.ty, f.tz]; stack.pop(); stack.push(q); }
-            } else if (cur >= 0) viaFilm({ n: nOf(q) }, q);   // 다른 투과 부품 안에서 q 진입 = 맞붙은 공기막
-            else {
-              const f = fresnelInterface(dx, dy, dz, Nx, Ny, Nz, 1, nOf(q));
-              if (rnd() < f.R) dir = [f.rx, f.ry, f.rz]; else { dir = [f.tx, f.ty, f.tz]; stack.push(q); }
-            }
-          } else if (!ct && fm) {   // 공기막을 두고 맞붙은 상대 면이 같은 자리에 있음 — 여기서 함께 처리
-            viaFilm(optics[fm.part].transmissive ? { n: nOf(fm.part) } : { fin: S.finishOfFace(fm.part, fm.face) }, optics[fm.part].transmissive ? fm.part : -1);
+        skipA = -1;
+        const entering = dx * Nx + dy * Ny + dz * Nz < 0;
+        let dir = null, E = null, absorbed = false, lost = false;
+        const nCur = nOf(cur);
+        const reflectBy = (fin) => { const r = reflectFinish(fin, dx, dy, dz, Nx, Ny, Nz, rnd, nCur); if (r) { dir = r; E = null; } else absorbed = true; };
+        // 편광 Fresnel n1 → n2: 반사면 true
+        const fresnel = (n1, n2) => {
+          const f = fresnelPolarized(dx, dy, dz, ex, ey, ez, Nx, Ny, Nz, n1, n2);
+          if (f.R >= 1 || rnd() < f.R) { dir = [f.rx, f.ry, f.rz]; E = [f.erx, f.ery, f.erz]; return true; }
+          dir = [f.tx, f.ty, f.tz]; E = [f.etx, f.ety, f.etz]; return false;
+        };
+        const tri2 = partnerAt(tri, px, py, pz);
+        if (tri2 >= 0) {
+          // 짝 면: 이탈하는 부품 A → 들어가는 부품 B (진입 q ⇔ 짝 부품에서 이탈)
+          const q2 = partOf[tri2], triA = entering ? tri2 : tri, triB = entering ? tri : tri2, A = partOf[triA], B = partOf[triB];
+          const mode = modeOf(q, face, q2);
+          if (!optics[A].transmissive) lost = true;   // 불투명 부품 안에서 출발(진단)
+          else if (fins[finOf[triA]].kind !== 'gloss') reflectBy(fins[finOf[triA]]);   // A 면의 반사형 코팅
+          else if (optics[B].transmissive && fins[finOf[triB]].kind !== 'gloss') reflectBy(fins[finOf[triB]]);
+          else if (mode === 'contact') {
+            if (!optics[B].transmissive) reflectBy(fins[finOf[triB]]);   // 불투명 부품에 접착
+            else if (!fresnel(nCur, nOf(B))) { const i = stack.lastIndexOf(A); if (i >= 0) stack.splice(i, 1); stack.push(B); }
           } else {
-            let other;
-            if (ct) other = ct.part;
-            else { other = -1; for (let i = stack.length - 1; i >= 0; i--) if (stack[i] !== q) { other = stack[i]; break; } }
-            if (other >= 0 && !optics[other].transmissive) reflectBy(S.finishOfFace(other, ct.face));   // 불투명 부품과 맞닿은 면
-            else {
-              const f = fresnelInterface(dx, dy, dz, Nx, Ny, Nz, nOf(cur), nOf(other));
-              if (f.R >= 1 || rnd() < f.R) dir = [f.rx, f.ry, f.rz];
-              else {
-                dir = [f.tx, f.ty, f.tz];
-                stack.splice(stack.lastIndexOf(q), 1);
-                if (other >= 0 && stack[stack.length - 1] !== other) stack.push(other);
-                if (!stack.length && onExit) onExit(q, face, px, py, pz, f.tx, f.ty, f.tz, w);
-              }
-            }
+            const r = filmCross(optics[B].transmissive ? { n: nOf(B) } : { fin: fins[finOf[triB]] });
+            if (r === 'B' && optics[B].transmissive) { const i = stack.lastIndexOf(A); if (i >= 0) stack.splice(i, 1); stack.push(B); }
+          }
+          skipA = A; skipB = B; skipX = px; skipY = py; skipZ = pz; skipNx = Nx; skipNy = Ny; skipNz = Nz;
+        } else if (!optics[q].transmissive) {
+          if (entering) reflectBy(fins[finOf[tri]]);
+          else lost = true;   // 불투명 부품 안쪽에서 닿음(진단)
+        }
+        else if (entering ? stack.includes(q) : !stack.includes(q)) { /* 겹친 부품의 경계 — 통과 */ }
+        else if (fins[finOf[tri]].kind !== 'gloss') reflectBy(fins[finOf[tri]]);   // 반사형 코팅(양면)
+        else if (entering) { if (!fresnel(nCur, nOf(q))) stack.push(q); }   // 공기 또는 다른 부품 안(중첩)에서 진입
+        else {
+          let other = -1;
+          for (let i = stack.length - 1; i >= 0; i--) if (stack[i] !== q) { other = stack[i]; break; }
+          if (!fresnel(nCur, nOf(other))) {
+            stack.splice(stack.lastIndexOf(q), 1);
+            if (other >= 0 && stack[stack.length - 1] !== other) stack.push(other);
+            if (!stack.length && onExit) onExit(q, face, px, py, pz, dir[0], dir[1], dir[2], w);
           }
         }
+        if (lost) { L.lost += w; break; }
         if (absorbed) { L.absSurf += w; break; }
         if (dir) {
           const l = Math.hypot(dir[0], dir[1], dir[2]);
           dx = dir[0] / l; dy = dir[1] / l; dz = dir[2] / l;
+          if (E) { ex = E[0]; ey = E[1]; ez = E[2]; } else [ex, ey, ez] = randomPolarization(dx, dy, dz, rnd);
+        }
+
+        // 공기막(맞붙은 '공기층' 면): 현재 매질(nCur) → 공기 → B. B = { n }(투과성) | { fin }(불투명 면 처리).
+        // 막 안 다중 반사를 끝까지 풀어 dir·E 를 정하고 'A' | 'B' 반환(흡수면 absorbed). 최대 100회, 넘으면 흡수.
+        function filmCross(Bm) {
+          if (fresnel(nCur, 1)) return 'A';
+          for (let k = 0; k < 100; k++) {
+            const sx = dx, sy = dy, sz = dz, sex = ex, sey = ey, sez = ez;
+            dx = dir[0]; dy = dir[1]; dz = dir[2]; ex = E[0]; ey = E[1]; ez = E[2];   // 막 안 광선
+            if (Bm.fin) {
+              const r = reflectFinish(Bm.fin, dx, dy, dz, Nx, Ny, Nz, rnd, 1);
+              if (!r) { absorbed = true; dx = sx; dy = sy; dz = sz; ex = sex; ey = sey; ez = sez; return null; }
+              const l = Math.hypot(r[0], r[1], r[2]); dir = [r[0] / l, r[1] / l, r[2] / l]; E = randomPolarization(dir[0], dir[1], dir[2], rnd);
+            } else if (!fresnel(1, Bm.n)) { dx = sx; dy = sy; dz = sz; ex = sex; ey = sey; ez = sez; return 'B'; }
+            dx = dir[0]; dy = dir[1]; dz = dir[2]; ex = E[0]; ey = E[1]; ez = E[2];   // 막 안에서 A 쪽으로
+            const back = !fresnel(1, nCur);
+            dx = sx; dy = sy; dz = sz; ex = sex; ey = sey; ez = sez;
+            if (back) return 'A';
+          }
+          absorbed = true;
+          return null;
         }
       }
-      px += OFF * dx; py += OFF * dy; pz += OFF * dz;
+      if (tMin) { px += OFF * dx; py += OFF * dy; pz += OFF * dz; }
       if (w < wMin) {
         if (rnd() < 0.1) { L.rrGain += 9 * w; w *= 10; } else { L.rrLoss += w; break; }
       }
