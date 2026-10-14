@@ -5,18 +5,7 @@
 
 import { buildStepForSpec } from './step-export.js';
 
-const OC_VERSION = '2.0.0-beta.b5ff984';
-const OC_BASE = `https://cdn.jsdelivr.net/npm/opencascade.js@${OC_VERSION}/dist/`;
-
-let ocPromise = null;
-function loadOc() {
-  if (!ocPromise) {
-    ocPromise = import(/* webpackIgnore: true */ OC_BASE + 'opencascade.full.js').then((mod) =>
-      mod.default({ locateFile: (p) => (p.endsWith('.wasm') ? OC_BASE + 'opencascade.full.wasm' : p) })
-    ).catch((e) => { ocPromise = null; throw e; });
-  }
-  return ocPromise;
-}
+import { loadOc } from '../engine/shape/oc-loader.js';
 
 self.onmessage = async (ev) => {
   try {
