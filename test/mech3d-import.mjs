@@ -4,6 +4,7 @@ import { shapesToStepText } from '../src/export/oc-build.js';
 import { readStepParts, readStepMesh } from '../src/engine/shape/step-import.js';
 import { meshVolume } from '../src/engine/mech3d/mesh.js';
 import { findContacts } from '../src/engine/mech3d/contacts.js';
+import { setMech3dMesh, initialMech3dSpec, getMech3d } from '../src/engine/mech3d/runtime.js';
 import { buildSampleShapes, SAMPLE } from './fixtures/mech3d-sample.mjs';
 import { ok, done } from './mech3d-util.mjs';
 
@@ -23,4 +24,10 @@ for (const [k, want] of Object.entries(SAMPLE.contactArea)) ok(Math.abs((sum[k] 
 ok(!Object.keys(sum).some((k) => k.endsWith('|3') || k.startsWith('3|')), '떨어진 원기둥은 접촉 없음');
 const legacy = readStepMesh(oc, text);
 ok(legacy.solidCount === 4 && Math.abs(legacy.volume - SAMPLE.volumes[0]) < 1e-3 && legacy.droppedVolumes.length === 3, '기존 readStepMesh(L3 몸체) 동작 유지');
+setMech3dMesh('sample.stp', parts);
+const ms = initialMech3dSpec();
+ok(getMech3d().combined.partOf.length === parts.reduce((s, p) => s + p.triangles.length / 3, 0) && getMech3d().bvh.order.length === getMech3d().combined.partOf.length, '런타임: 결합 메쉬·BVH 생성');
+ok(ms.name === 'sample.stp' && ms.parts.length === 4 && ms.parts[0].name === '부품 1' && ms.parts[3].material.kind === 'opaque', '초기 spec: 부품 4개, 기본 소재 불투명');
+ok(ms.parts[0].size.every((v, k) => Math.abs(v - [120, 20, 12][k]) < 1e-3), `초기 spec: 하우징 외곽 ${ms.parts[0].size.join('×')}`);
+ok(ms.contacts.length === c.length && ms.contacts.every((x) => x.mode === 'contact'), '초기 spec: 접촉면 기본 = 광학 접촉');
 done();
