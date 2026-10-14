@@ -604,7 +604,8 @@ function importJson(e) {
   const f = e.target.files[0]; if (!f) return;
   const r = new FileReader();
   r.onload = () => { try { spec = JSON.parse(r.result); migrate(spec);
-    if (spec.mode === 'mech3d' && !(spec.mech3d && getMech3d() && spec.mech3d.parts.length === getMech3d().parts.length)) { spec.mode = 'flat'; spec.mech3d = null; }
+    if (spec.mech3d && !(getMech3d() && spec.mech3d.parts.length === getMech3d().parts.length)) { spec.mode = 'flat'; spec.mech3d = null; }
+    if (spec.mode === 'mech3d' && !spec.mech3d) spec.mode = 'flat';
     mount(); m3sel = null; applyMode(); schedule(); } catch { alert('JSON 파싱 실패'); } };
   r.readAsText(f);
 }

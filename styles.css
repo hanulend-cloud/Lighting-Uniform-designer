@@ -273,7 +273,7 @@ main { flex: 1 1 auto; min-height: 0; display: grid;
 .m3-hd button { margin-left: auto; }
 .m3-part { padding: 4px 6px; border-radius: 4px; cursor: pointer; }
 .m3-part.on { background: rgba(255, 176, 32, 0.18); }
-.m3-kind { display: inline-block; min-width: 64px; font-size: 11px; padding: 1px 4px; border-radius: 3px; background: #2a3242; }
+.m3-kind { display: inline-block; min-width: 64px; font-size: 11px; padding: 1px 4px; border-radius: 3px; background: #2a3242; color: #e8edf5; }
 .m3-kind.k-milky { background: #3a4a5a; } .m3-kind.k-clear { background: #1f4766; } .m3-kind.k-whiteTrans { background: #55524a; }
 .m3-sub { margin-top: 10px; font-size: 12px; opacity: 0.8; }
 .m3-row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin: 4px 0; }
