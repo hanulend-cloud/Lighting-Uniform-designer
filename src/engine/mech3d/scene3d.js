@@ -24,7 +24,8 @@ export function buildTraceScene(rt, mspec, ctx) {
   // 맞붙은 면(P1 감지): '접촉' = 광학 접촉(contact), '공기층' = 얇은 공기막(film). 양방향 조회.
   const contact = new Map(), film = new Map();
   for (const c of mspec.contacts ?? []) {
-    const m = c.mode === 'contact' ? contact : film;
+    const m = c.mode === 'contact' ? contact : c.mode === 'air' ? film : null;
+    if (!m) continue;
     m.set(`${c.a}|${c.faceA}`, { part: c.b, face: c.faceB });
     m.set(`${c.b}|${c.faceB}`, { part: c.a, face: c.faceA });
   }

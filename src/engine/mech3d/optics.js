@@ -14,11 +14,11 @@ export function normalRow(table) {
 
 const phaseCache = new Map();
 function miePhaseOf(ent) {
-  if (!phaseCache.has(ent.id)) {
-    const p = ent.particle;
-    phaseCache.set(ent.id, particleOptics({ d_um: p.d_um, nP: p.nP, nH: ent.n, lambda_um: p.lambda_um ?? 0.55 }).phase);
+  const p = ent.particle, key = `${ent.id}|${p.d_um}|${p.nP}|${ent.n}|${p.lambda_um ?? 0.55}`;
+  if (!phaseCache.has(key)) {
+    phaseCache.set(key, particleOptics({ d_um: p.d_um, nP: p.nP, nH: ent.n, lambda_um: p.lambda_um ?? 0.55 }).phase);
   }
-  return phaseCache.get(ent.id);
+  return phaseCache.get(key);
 }
 
 function whiteTransMusR(table, T, tRef, n) {
@@ -34,8 +34,10 @@ export function partOptics(part, { table, db = null }) {
   if (m.kind === 'opaque') return { transmissive: false };
   const n0 = RESIN_N[m.resin] ?? RESIN_N.PC;
   if (m.kind === 'clear') {
-    const R0 = ((n0 - 1) / (n0 + 1)) ** 2;
-    return { transmissive: true, n: n0, mus: 0, g: 0, mua: Math.max(0, -Math.log(Math.min(1, m.T / (1 - R0) ** 2)) / m.tRef), phase: null };
+    // 비간섭 다중 반사 슬랩: T = B·x/(1−R0²x²), x = e^{−μa t}, B = (1−R0)²
+    const R0 = ((n0 - 1) / (n0 + 1)) ** 2, B = (1 - R0) ** 2;
+    const x = m.T >= (1 - R0) / (1 + R0) ? 1 : (-B + Math.sqrt(B * B + 4 * R0 * R0 * m.T * m.T)) / (2 * R0 * R0 * m.T);
+    return { transmissive: true, n: n0, mus: 0, g: 0, mua: Math.max(0, -Math.log(Math.min(1, x)) / m.tRef), phase: null };
   }
   if (m.kind === 'whiteTrans') {
     const musR = whiteTransMusR(table, m.T, m.tRef, n0);
@@ -47,7 +49,7 @@ export function partOptics(part, { table, db = null }) {
     const a = l2Material(table, m.milky, n0);
     return { transmissive: true, n: n0, mus: a.musR / (1 - a.g), g: a.g, mua: a.mua, phase: null };
   }
-  const musR = musRFromMilky(table, m.milky), f = ent.fitted;
-  const mua = f.musR > 0 ? f.mua * (musR / f.musR) : MUA_RESIN;
+  const musR = musRFromMilky(table, Math.min(m.milky, 9.999)), f = ent.fitted;
+  const mua = f.musR > 0 ? MUA_RESIN + Math.max(0, f.mua - MUA_RESIN) * (musR / f.musR) : MUA_RESIN;
   return { transmissive: true, n: ent.n, mus: musR / (1 - f.g), g: f.g, mua, phase: ent.model === 'mie' && ent.particle ? miePhaseOf(ent) : null };
 }
