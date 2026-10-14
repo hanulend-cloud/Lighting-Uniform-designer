@@ -1,0 +1,82 @@
+// 3D 기구 패널 — spec 2026-10-14 §3. 부품 목록 · 선택 부품의 소재/면 처리 · 선택 면 덮어쓰기 · 접촉면 목록.
+// 상태는 갖지 않는다: m = spec.mech3d, sel = { part, face } | null, dbList = 실측소재 DB 목록, h = 이벤트 처리기.
+import { PART_KINDS, FINISH_KINDS, RESIN_N, resolveFinish } from '../engine/mech3d/materials.js';
+
+const esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
+const pct = (x) => Math.round(x * 1000) / 10;
+const opts = (obj, cur) => Object.entries(obj).map(([k, v]) => `<option value="${k}" ${k === cur ? 'selected' : ''}>${esc(v.label ?? k)}</option>`).join('');
+
+function finishRow(f, scope, allowInherit) {
+  const k = f ? FINISH_KINDS[f.kind] : null;
+  return `<div class="m3-row"><select data-m3-finish="${scope}">
+      ${allowInherit ? `<option value="" ${f ? '' : 'selected'}>부품 기본 따름</option>` : ''}${opts(FINISH_KINDS, f?.kind)}</select>
+    ${k?.hasR ? `반사율 <input type="number" min="0" max="100" step="1" value="${pct(f.R)}" data-m3-finishr="${scope}">%` : ''}</div>`;
+}
+
+function materialParams(mat, dbList) {
+  const resin = `<select data-m3-mat="resin">${Object.keys(RESIN_N).map((r) => `<option ${r === mat.resin ? 'selected' : ''}>${r}</option>`).join('')}</select>`;
+  switch (mat.kind) {
+    case 'milky':
+      return `<div class="m3-row">소재 <select data-m3-mat="dbId"><option value="">추상 Milky</option>${dbList.map((e) => `<option value="${esc(e.id)}" ${e.id === mat.dbId ? 'selected' : ''}>${esc(e.name)}</option>`).join('')}</select>
+        Milky <input type="number" min="0" max="10" step="0.1" value="${mat.milky}" data-m3-mat="milky"></div>`;
+    case 'clear':
+      return `<div class="m3-row">${resin} 투과율 <input type="number" min="1" max="100" step="1" value="${pct(mat.T)}" data-m3-mat="T">% @ <input type="number" min="0.1" step="0.1" value="${mat.tRef}" data-m3-mat="tRef">mm</div>`;
+    case 'whiteTrans':
+      return `<div class="m3-row">${resin} 투과율 <input type="number" min="1" max="100" step="1" value="${pct(mat.T)}" data-m3-mat="T">% @ <input type="number" min="0.1" step="0.1" value="${mat.tRef}" data-m3-mat="tRef">mm</div>`;
+    default:
+      return '';
+  }
+}
+
+function partEditor(p, sel, dbList) {
+  const face = sel.face;
+  return `<div class="m3-edit">
+    <div class="m3-sub">${esc(p.name)} — 부품 소재</div>
+    <div class="m3-row"><select data-m3-kind>${opts(PART_KINDS, p.material.kind)}</select></div>
+    ${materialParams(p.material, dbList)}
+    <div class="m3-sub">면 처리 (부품 기본)</div>
+    ${finishRow(p.finish, 'part', false)}
+    ${face != null ? `<div class="m3-sub">선택한 면 #${face}${p.faceFinish[face] ? ' · 덮어씀' : ''}</div>${finishRow(p.faceFinish[face] ?? null, 'face', true)}` : '<div class="mut">3D 뷰에서 면을 클릭하면 그 면만 다르게 지정할 수 있습니다</div>'}
+  </div>`;
+}
+
+// h = { onSelect(part), onKind(part, kind), onMat(part, key, value), onFinish(part, face|null, finish|null), onContact(i, mode), onExit() }
+export function renderMech3dPanel(el, m, sel, dbList, h) {
+  const p = sel?.part != null ? m.parts[sel.part] : null;
+  el.innerHTML = `
+    <div class="m3-hd">3D 기구 <b>${esc(m.name)}</b> <button data-m3-exit>평판 모드로</button></div>
+    <div class="m3-parts">${m.parts.map((q, i) => `<div class="m3-part ${i === sel?.part ? 'on' : ''}" data-m3-part="${i}">
+      <span class="m3-kind k-${q.material.kind}">${PART_KINDS[q.material.kind].label}</span> ${esc(q.name)} <span class="mut">${q.size.map((v) => v.toFixed(1)).join('×')}mm · ${q.volume.toFixed(0)} mm³</span></div>`).join('')}</div>
+    ${p ? partEditor(p, sel, dbList) : '<div class="mut">부품을 목록이나 3D 뷰에서 클릭하세요</div>'}
+    <div class="m3-sub">접촉면 (체크 = 공기층 없음, 이중사출·접착)</div>
+    <div class="m3-contacts">${m.contacts.length ? m.contacts.map((c, i) => `<label><input type="checkbox" data-m3-contact="${i}" ${c.mode === 'contact' ? 'checked' : ''}>
+      ${esc(m.parts[c.a].name)} ↔ ${esc(m.parts[c.b].name)} · ${c.area.toFixed(1)} mm²</label>`).join('') : '<div class="mut">감지된 접촉면 없음</div>'}</div>`;
+
+  el.querySelector('[data-m3-exit]').onclick = h.onExit;
+  el.querySelectorAll('[data-m3-part]').forEach((d) => { d.onclick = () => h.onSelect(+d.dataset.m3Part); });
+  el.querySelectorAll('[data-m3-contact]').forEach((c) => { c.onchange = () => h.onContact(+c.dataset.m3Contact, c.checked ? 'contact' : 'air'); });
+  if (!p) return;
+  const i = sel.part;
+  el.querySelector('[data-m3-kind]').onchange = (e) => h.onKind(i, e.target.value);
+  el.querySelectorAll('[data-m3-mat]').forEach((x) => {
+    x.onchange = () => {
+      const k = x.dataset.m3Mat;
+      const v = k === 'T' ? +x.value / 100 : (k === 'milky' || k === 'tRef') ? +x.value : x.value;
+      h.onMat(i, k, v);
+    };
+  });
+  el.querySelectorAll('[data-m3-finish]').forEach((x) => {
+    x.onchange = () => {
+      const face = x.dataset.m3Finish === 'face' ? sel.face : null;
+      const k = x.value;
+      h.onFinish(i, face, k ? (FINISH_KINDS[k].hasR ? { kind: k, R: FINISH_KINDS[k].R } : { kind: k }) : null);
+    };
+  });
+  el.querySelectorAll('[data-m3-finishr]').forEach((x) => {
+    x.onchange = () => {
+      const face = x.dataset.m3Finishr === 'face' ? sel.face : null;
+      const cur = face == null ? p.finish : resolveFinish(p, face);
+      h.onFinish(i, face, { ...cur, R: Math.min(1, Math.max(0, +x.value / 100)) });
+    };
+  });
+}
