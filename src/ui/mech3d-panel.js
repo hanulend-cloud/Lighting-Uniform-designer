@@ -10,7 +10,7 @@ function finishRow(f, scope, allowInherit) {
   const k = f ? FINISH_KINDS[f.kind] : null;
   return `<div class="m3-row"><select data-m3-finish="${scope}">
       ${allowInherit ? `<option value="" ${f ? '' : 'selected'}>부품 기본 따름</option>` : ''}${opts(FINISH_KINDS, f?.kind)}</select>
-    ${k?.hasR ? `반사율 <input type="number" min="0" max="100" step="1" value="${pct(f.R)}" data-m3-finishr="${scope}">%` : ''}</div>`;
+    ${k?.hasR ? `반사율 <input type="number" min="0" max="100" step="1" value="${esc(pct(f.R))}" data-m3-finishr="${scope}">%` : ''}</div>`;
 }
 
 function materialParams(mat, dbList) {
@@ -18,11 +18,11 @@ function materialParams(mat, dbList) {
   switch (mat.kind) {
     case 'milky':
       return `<div class="m3-row">소재 <select data-m3-mat="dbId"><option value="">추상 Milky</option>${dbList.map((e) => `<option value="${esc(e.id)}" ${e.id === mat.dbId ? 'selected' : ''}>${esc(e.name)}</option>`).join('')}</select>
-        Milky <input type="number" min="0" max="10" step="0.1" value="${mat.milky}" data-m3-mat="milky"></div>`;
+        Milky <input type="number" min="0" max="10" step="0.1" value="${esc(mat.milky)}" data-m3-mat="milky"></div>`;
     case 'clear':
-      return `<div class="m3-row">${resin} 투과율 <input type="number" min="1" max="100" step="1" value="${pct(mat.T)}" data-m3-mat="T">% @ <input type="number" min="0.1" step="0.1" value="${mat.tRef}" data-m3-mat="tRef">mm</div>`;
+      return `<div class="m3-row">${resin} 투과율 <input type="number" min="1" max="100" step="1" value="${esc(pct(mat.T))}" data-m3-mat="T">% @ <input type="number" min="0.1" step="0.1" value="${esc(mat.tRef)}" data-m3-mat="tRef">mm</div>`;
     case 'whiteTrans':
-      return `<div class="m3-row">${resin} 투과율 <input type="number" min="1" max="100" step="1" value="${pct(mat.T)}" data-m3-mat="T">% @ <input type="number" min="0.1" step="0.1" value="${mat.tRef}" data-m3-mat="tRef">mm</div>`;
+      return `<div class="m3-row">${resin} 투과율 <input type="number" min="1" max="100" step="1" value="${esc(pct(mat.T))}" data-m3-mat="T">% @ <input type="number" min="0.1" step="0.1" value="${esc(mat.tRef)}" data-m3-mat="tRef">mm</div>`;
     default:
       return '';
   }
@@ -46,14 +46,14 @@ export function renderMech3dPanel(el, m, sel, dbList, h) {
   el.innerHTML = `
     <div class="m3-hd">3D 기구 <b>${esc(m.name)}</b> <button data-m3-exit>평판 모드로</button></div>
     <div class="m3-parts">${m.parts.map((q, i) => `<div class="m3-part ${i === sel?.part ? 'on' : ''}" data-m3-part="${i}">
-      <span class="m3-kind k-${q.material.kind}">${PART_KINDS[q.material.kind].label}</span> ${esc(q.name)} <span class="mut">${q.size.map((v) => v.toFixed(1)).join('×')}mm · ${q.volume.toFixed(0)} mm³</span></div>`).join('')}</div>
+      <span class="m3-kind k-${q.material.kind}">${PART_KINDS[q.material?.kind]?.label ?? '?'}</span> ${esc(q.name)} <span class="mut">${(q.size ?? []).map((v) => v.toFixed(1)).join('×')}mm · ${(q.volume ?? 0).toFixed(0)} mm³</span></div>`).join('')}</div>
     ${p ? partEditor(p, sel, dbList) : '<div class="mut">부품을 목록이나 3D 뷰에서 클릭하세요</div>'}
     <div class="m3-sub">접촉면 (체크 = 공기층 없음, 이중사출·접착)</div>
     <div class="m3-contacts">${m.contacts.length ? m.contacts.map((c, i) => `<label><input type="checkbox" data-m3-contact="${i}" ${c.mode === 'contact' ? 'checked' : ''}>
-      ${esc(m.parts[c.a].name)} ↔ ${esc(m.parts[c.b].name)} · ${c.area.toFixed(1)} mm²</label>`).join('') : '<div class="mut">감지된 접촉면 없음</div>'}</div>`;
+      ${esc(m.parts[c.a]?.name ?? '?')} ↔ ${esc(m.parts[c.b]?.name ?? '?')} · ${(c.area ?? 0).toFixed(1)} mm²</label>`).join('') : '<div class="mut">감지된 접촉면 없음</div>'}</div>`;
 
   el.querySelector('[data-m3-exit]').onclick = h.onExit;
-  el.querySelectorAll('[data-m3-part]').forEach((d) => { d.onclick = () => h.onSelect(+d.dataset.m3Part); });
+  el.querySelectorAll('[data-m3-part]').forEach((d) => { d.onpointerdown = () => h.onSelect(+d.dataset.m3Part); });
   el.querySelectorAll('[data-m3-contact]').forEach((c) => { c.onchange = () => h.onContact(+c.dataset.m3Contact, c.checked ? 'contact' : 'air'); });
   if (!p) return;
   const i = sel.part;
@@ -61,7 +61,11 @@ export function renderMech3dPanel(el, m, sel, dbList, h) {
   el.querySelectorAll('[data-m3-mat]').forEach((x) => {
     x.onchange = () => {
       const k = x.dataset.m3Mat;
-      const v = k === 'T' ? +x.value / 100 : (k === 'milky' || k === 'tRef') ? +x.value : x.value;
+      let v = x.value;
+      if (k === 'T') v = Math.min(1, Math.max(0.01, +x.value / 100));
+      else if (k === 'milky') v = Math.min(10, Math.max(0, +x.value));
+      else if (k === 'tRef') v = Math.max(0.1, +x.value);
+      if (typeof v === 'number' && Number.isNaN(v)) return;
       h.onMat(i, k, v);
     };
   });
@@ -75,6 +79,7 @@ export function renderMech3dPanel(el, m, sel, dbList, h) {
   el.querySelectorAll('[data-m3-finishr]').forEach((x) => {
     x.onchange = () => {
       const face = x.dataset.m3Finishr === 'face' ? sel.face : null;
+      if (Number.isNaN(+x.value)) return;
       const cur = face == null ? p.finish : resolveFinish(p, face);
       h.onFinish(i, face, { ...cur, R: Math.min(1, Math.max(0, +x.value / 100)) });
     };

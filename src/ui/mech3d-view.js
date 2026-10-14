@@ -23,7 +23,8 @@ export function createMech3dView(canvas, { onPick }) {
   let meshes = [], partsRef = [], kinds = [], sel = null;
 
   function resize() {
-    const w = canvas.clientWidth || 600, h = canvas.clientHeight || 400;
+    if (canvas.clientWidth === 0) return;
+    const w = canvas.clientWidth, h = canvas.clientHeight || 400;
     renderer.setSize(w, h, false); camera.aspect = w / h; camera.updateProjectionMatrix(); render();
   }
   new ResizeObserver(resize).observe(canvas);
@@ -40,6 +41,7 @@ export function createMech3dView(canvas, { onPick }) {
     col.needsUpdate = true;
     m.material.opacity = KIND_OPACITY[kinds[i]];
     m.material.transparent = KIND_OPACITY[kinds[i]] < 1;
+    m.material.depthWrite = !m.material.transparent; m.renderOrder = m.material.transparent ? 1 : 0;
   }
 
   // parts: 런타임 scene.parts, kindsOf: 부품별 소재 종류 배열
@@ -52,7 +54,7 @@ export function createMech3dView(canvas, { onPick }) {
       g.setAttribute('color', new THREE.BufferAttribute(new Float32Array(p.positions.length), 3));
       g.setIndex(new THREE.BufferAttribute(p.triangles, 1));
       g.computeVertexNormals();
-      const m = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ vertexColors: true, side: THREE.DoubleSide, roughness: 0.6, depthWrite: true }));
+      const m = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ vertexColors: true, side: THREE.DoubleSide, roughness: 0.6 }));
       m.userData.part = i;
       scene.add(m);
       return m;
@@ -71,7 +73,8 @@ export function createMech3dView(canvas, { onPick }) {
 
   const ray = new THREE.Raycaster();
   let down = null;
-  canvas.addEventListener('pointerdown', (e) => { down = [e.clientX, e.clientY]; });
+  canvas.addEventListener('pointerdown', (e) => { if (e.button === 0 && e.isPrimary) down = [e.clientX, e.clientY]; });
+  canvas.addEventListener('pointercancel', () => { down = null; });
   canvas.addEventListener('pointerup', (e) => {
     if (!down || Math.hypot(e.clientX - down[0], e.clientY - down[1]) > 4) { down = null; return; }
     down = null;
