@@ -54,9 +54,9 @@ export function setPartMaterialParam(part, key, value) {
 
 // face = null 이면 부품 기본 면 처리, 숫자면 그 면만 덮어쓰기(finish = null 이면 덮어쓰기 해제)
 export function setPartFinish(part, face, finish) {
-  if (face == null) return { ...part, finish };
+  if (face == null) return { ...part, finish: finish && { ...finish } };
   const faceFinish = { ...part.faceFinish };
-  if (finish == null) delete faceFinish[face]; else faceFinish[face] = finish;
+  if (finish == null) delete faceFinish[face]; else faceFinish[face] = { ...finish };
   return { ...part, faceFinish };
 }
 
@@ -68,7 +68,7 @@ export function partIndex(material) {
 }
 
 export function validatePart(part) {
-  const e = [], m = part.material;
+  const e = [], m = part.material ?? {};
   if (!PART_KINDS[m.kind]) e.push(`소재 종류 오류: ${m.kind}`);
   if (m.kind === 'milky' && !(m.milky >= 0 && m.milky <= 10)) e.push('Milky 는 0~10');
   if (m.kind === 'clear' || m.kind === 'whiteTrans') {

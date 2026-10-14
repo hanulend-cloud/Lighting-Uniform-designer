@@ -1,9 +1,10 @@
 // 부품 간 광학 접촉면(이중사출·접착) 감지 — spec 2026-10-14 §3.4.
-// 서로 다른 부품의 삼각형이 거리 ≤ gap, 법선 반대 → 같은 평면으로 보고 교차 면적을 (부품A, 면A, 부품B, 면B)별로 합산.
+// 서로 다른 부품의 삼각형이 거리 ≤ gap+chord(chord = 테셀레이션 허용오차), 법선 반대(내적 ≤ −0.97) → 같은 평면으로 보고 교차 면적을 (부품A, 면A, 부품B, 면B)별로 합산.
+// 평면 접촉은 정확하고, 곡면 접촉은 근사(투영 면적, 테셀레이션 허용오차 이내)다.
 import { buildBvh, queryBox } from './bvh.js';
 import { bounds } from './mesh.js';
 
-const NDOT = -0.98, MIN_AREA = 0.01;
+const NDOT = -0.97, MIN_AREA = 0.01;
 
 function triFrame(P, T, t) {
   const a = T[t * 3] * 3, b = T[t * 3 + 1] * 3, c = T[t * 3 + 2] * 3;
@@ -45,7 +46,7 @@ function clipArea(poly, clip) {
 const overlaps = (A, B, m) => A[0] - m <= B[3] && B[0] - m <= A[3] && A[1] - m <= B[4] && B[1] - m <= A[4] && A[2] - m <= B[5] && B[2] - m <= A[5];
 
 // parts: [{ positions, triangles, faceIds, bvh? }] → [{ a, faceA, b, faceB, area(mm²) }] (a < b)
-export function findContacts(parts, { gap = 0.02 } = {}) {
+export function findContacts(parts, { gap = 0.02, chord = 0.02 } = {}) {
   const bvhs = parts.map((p) => p.bvh ?? buildBvh(p.positions, p.triangles));
   const bb = parts.map((p) => bounds(p.positions));
   const acc = new Map(), cand = [];
@@ -55,8 +56,8 @@ export function findContacts(parts, { gap = 0.02 } = {}) {
     for (let t = 0; t < A.triangles.length / 3; t++) {
       const fa = triFrame(A.positions, A.triangles, t);
       if (!fa.area) continue;
-      const lo = [0, 1, 2].map((k) => Math.min(fa.v[0][k], fa.v[1][k], fa.v[2][k]) - gap);
-      const hi = [0, 1, 2].map((k) => Math.max(fa.v[0][k], fa.v[1][k], fa.v[2][k]) + gap);
+      const lo = [0, 1, 2].map((k) => Math.min(fa.v[0][k], fa.v[1][k], fa.v[2][k]) - gap - chord);
+      const hi = [0, 1, 2].map((k) => Math.max(fa.v[0][k], fa.v[1][k], fa.v[2][k]) + gap + chord);
       queryBox(bvhs[b], lo, hi, cand);
       if (!cand.length) continue;
       const { u, w } = planeBasis(fa.n), d0 = dot(fa.n, fa.v[0]);
@@ -65,7 +66,8 @@ export function findContacts(parts, { gap = 0.02 } = {}) {
       for (const tb of cand) {
         const fb = triFrame(B.positions, B.triangles, tb);
         if (!fb.area || dot(fa.n, fb.n) > NDOT) continue;
-        if (fb.v.some((p) => Math.abs(dot(fa.n, p) - d0) > gap)) continue;
+        const cen = [0, 1, 2].map((k) => (fb.v[0][k] + fb.v[1][k] + fb.v[2][k]) / 3);   // 곡면은 정점이 A 평면에서 멀어질 수 있어 무게중심으로 판정(평면 접촉은 동일)
+        if (Math.abs(dot(fa.n, cen) - d0) > gap + chord) continue;
         let pb = fb.v.map((p) => [dot(p, u), dot(p, w)]);
         if (signedArea(pb) < 0) pb = pb.reverse();
         const ar = clipArea(pa, pb);

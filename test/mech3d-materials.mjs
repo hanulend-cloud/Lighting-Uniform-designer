@@ -22,4 +22,11 @@ ok(validatePart(m).length === 0, '정상 부품 오류 없음');
 ok(validatePart({ ...m, material: { ...m.material, milky: 11 } }).length === 1, 'Milky 11 → 오류');
 ok(validatePart(setPartFinish(m, 0, { kind: 'black', R: 1.5 })).length === 1, '반사율 150% → 오류');
 ok(validatePart({ ...setPartMaterial(p0, 'clear'), material: { kind: 'clear', resin: 'PC', T: 0, tRef: 2 } }).length === 1, '투과율 0 → 오류');
+{
+  const fin = { kind: 'black', R: 0.05 }, q = setPartFinish(m, null, fin);
+  fin.R = 0.9;
+  ok(q.finish.R === 0.05 && setPartFinish(m, 2, fin).faceFinish[2] !== fin, '면 처리는 복사 저장(원본 객체 변경 영향 없음)');
+  let r; try { r = validatePart({ id: 1, name: 'x', finish: m.finish }); } catch { r = null; }
+  ok(r && r.length >= 1, '소재 없는 부품 → 던지지 않고 오류 메시지');
+}
 done();
