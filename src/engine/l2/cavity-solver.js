@@ -389,7 +389,7 @@ export function solveCavity({ E, nx, ny, step, table, mat, t, h, rhoB, rW, unifo
       const wR = Math.max(0, q.R - (b < table.angleRows ? fresnelR(table.grids.rows[b], mat.n) : 0)) * se;
       if (q.rRadOk) { const w = wR; rAcc.w += w; for (let k = 0; k < N_RAD; k++) rAcc.rr[k] += w * q.rRad[k]; for (let k = 0; k < N_ANG; k++) rAcc.ra[k] += w * q.rAng[k]; }
       if (q.landOk) { const w = wR; rAcc.lw += w; for (let k = 0; k < N_KAP * N_RAD; k++) rAcc.land[k] += w * q.land[k]; }
-      if (q.Ts > 0) jobs.push(scatJob(e, q, se, center ? b : -1, tk, qb));
+      if (q.Ts > 0 && !recycleOnly) jobs.push(scatJob(e, q, se, center ? b : -1, tk, qb));
     }
     if (center) {   // 직진 성분: 기하 시프트 t·tanθ' (입사각 = 광원 기하에서 정확)
       const n = mat.n, r = radialShift(MbL, nx, ny, step, center, (rr) => {
