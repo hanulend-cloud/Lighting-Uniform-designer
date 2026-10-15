@@ -150,7 +150,7 @@ export function findEmitters(parts, leds, ref, face, pcb = -1) {
     const st = meshStats(parts[i]), v = pcb >= 0 ? towardLed(parts[pcb], st.center) : null;
     const fi0 = faceInfo(parts[i], face), ok0 = match(st, fi0);
     const bad = { part: i, face: -1, needsCheck: true };
-    const good = (f, fi) => ({ part: i, face: f, pos: fi.c, axis: fi.n, xAxis: fi.xAxis, needsCheck: false });
+    const good = (f, fi) => (insideOwn(parts[i], fi.c, fi.n) ? bad : { part: i, face: f, pos: fi.c, axis: fi.n, xAxis: fi.xAxis, needsCheck: false });   // 발광점이 자기 솔리드 안이면 확인 필요
     if (!v) {   // PCB 정보 없음: 면 순서 일치 우선, 아니면 첫 기술자 일치 면
       if (ok0) return good(face, fi0);
       for (let k = 0; k < parts[i].faceCount; k++) { const c = faceInfo(parts[i], k); if (match(st, c)) return good(k, c); }
@@ -185,5 +185,39 @@ export function pickLedNearRay(parts, candidates, origin, dir, maxDist = 5) {
     const { t, perp } = rayPerp(fi.c, origin, d);
     if (perp < bp - 0.05 || (perp <= bp + 0.05 && t < bt)) { bp = Math.min(bp, perp); bt = t; face = k; }
   }
-  return { part, face };
+  return { part, face: face >= 0 ? refineEmitterFace(m, face) : face };
+}
+
+// 발광면 보정: 클릭한 면과 평행한 면(면적가중 법선 내적 > 0.95) 중 법선 방향으로 가장 바깥(dot(중심, n) 최대, 동률이면 넓은 면).
+// 몸체 윗면(렌즈 둘레 고리)을 눌러도 렌즈 윗면을 발광면으로 — 몸체 윗면에서 쏘면 렌즈 솔리드 안에서 시작한다.
+export function refineEmitterFace(mesh, face) {
+  const f0 = faceInfo(mesh, face);
+  if (!f0 || f0.degenerate) return face;
+  let best = face, bd = dot(f0.c, f0.n), ba = f0.area;
+  for (let k = 0; k < mesh.faceCount; k++) {
+    if (k === face) continue;
+    const fi = faceInfo(mesh, k);
+    if (!fi || fi.degenerate || dot(fi.n, f0.n) <= 0.95) continue;
+    const dk = dot(fi.c, f0.n);
+    if (dk > bd + 1e-6 || (Math.abs(dk - bd) <= 1e-6 && fi.area > ba)) { best = k; bd = dk; ba = fi.area; }
+  }
+  return best;
+}
+
+// 점 p 가 메쉬 안인지: p + 1e-4·dir(+미세 흔들기) 에서 dir 방향 광선이 메쉬 삼각형과 만나는 횟수가 홀수면 안(Möller–Trumbore)
+function insideOwn(m, p, dir) {
+  const P = m.positions, T = m.triangles, o = [p[0] + 1e-4 * dir[0] + 1.3e-5, p[1] + 1e-4 * dir[1] + 0.7e-5, p[2] + 1e-4 * dir[2] + 0.9e-5];   // 미세 흔들기: 면 중심이 삼각형 모서리 위면 두 번 세는 것 방지
+  let hits = 0;
+  for (let t = 0; t < T.length / 3; t++) {
+    const a = T[t * 3] * 3, b = T[t * 3 + 1] * 3, c = T[t * 3 + 2] * 3;
+    const e1 = [P[b] - P[a], P[b + 1] - P[a + 1], P[b + 2] - P[a + 2]], e2 = [P[c] - P[a], P[c + 1] - P[a + 1], P[c + 2] - P[a + 2]];
+    const h = [dir[1] * e2[2] - dir[2] * e2[1], dir[2] * e2[0] - dir[0] * e2[2], dir[0] * e2[1] - dir[1] * e2[0]], det = dot(e1, h);
+    if (Math.abs(det) < 1e-12) continue;
+    const sv = [o[0] - P[a], o[1] - P[a + 1], o[2] - P[a + 2]], u = dot(sv, h) / det;
+    if (u < 0 || u > 1) continue;
+    const q = [sv[1] * e1[2] - sv[2] * e1[1], sv[2] * e1[0] - sv[0] * e1[2], sv[0] * e1[1] - sv[1] * e1[0]], v = dot(dir, q) / det;
+    if (v < 0 || u + v > 1) continue;
+    if (dot(e2, q) / det > 0) hits++;
+  }
+  return hits % 2 === 1;
 }

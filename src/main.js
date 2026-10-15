@@ -23,7 +23,7 @@ import { setPartMaterial, setPartMaterialParam, setPartFinish } from './engine/m
 import { renderMech3dPanel } from './ui/mech3d-panel.js';
 import { setLedMesh, getLedMesh, clearLedMesh, saveLedIDB, loadLedIDB } from './engine/mech3d/runtime.js';
 import { migrateMech3d } from './engine/mech3d/defs.js';
-import { meshStats, findLeds, findEmitters, pcbIndex, pickLedNearRay } from './engine/mech3d/led-detect.js';
+import { meshStats, findLeds, findEmitters, pcbIndex, pickLedNearRay, refineEmitterFace } from './engine/mech3d/led-detect.js';
 import { transformMesh } from './engine/mech3d/xform.js';
 import { lineFromData, lightData, obsDirection } from './engine/mech3d/line.js';
 import { manualLeds } from './engine/mech3d/placement.js';
@@ -372,10 +372,12 @@ async function renderMech3dInner() {
 // LED 선택 맞춤: 빈 곳·PCB(가장 큰 LED STEP 부품)를 눌렀으면 클릭 광선에서 가까운 LED(와 발광면)로 바꾼다. 반환 = LED STEP 부품 번호 기준 { part, face, snapped } | null
 function snapLedPick(s, nMech, needFace) {
   const parts = ledPartsNow();
-  if (!parts || !s?.ray) return s?.part != null && s.part >= nMech ? { part: s.part - nMech, face: s.face, snapped: false } : null;
+  // 직접 맞힌 면은 평행한 가장 바깥 면으로 보정(몸체 윗면 → 렌즈 윗면). pickLedNearRay 결과는 이미 보정됨
+  const direct = (i) => ({ part: i, face: needFace && parts ? refineEmitterFace(parts[i], s.face) : s.face, snapped: false });
+  if (!parts || !s?.ray) return s?.part != null && s.part >= nMech ? direct(s.part - nMech) : null;
   const vol = (i) => parts[i].volume ?? meshStats(parts[i]).volume;
   const big = parts.reduce((b, _, i) => (vol(i) > vol(b) ? i : b), 0), hit = s.part != null && s.part >= nMech ? s.part - nMech : null;
-  if (hit != null && (hit !== big || parts.length < 2)) return { part: hit, face: s.face, snapped: false };
+  if (hit != null && (hit !== big || parts.length < 2)) return direct(hit);
   const r = pickLedNearRay(parts, parts.map((_, i) => i).filter((i) => i !== big), s.ray.o, s.ray.d);
   if (!r || (needFace && r.face < 0)) return null;
   return { ...r, snapped: true };

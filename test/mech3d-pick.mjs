@@ -1,5 +1,5 @@
 // 가까운 LED 선택(작은 LED 를 정확히 못 눌러도 클릭 광선에서 가까운 LED·발광면으로 맞춤): node test/mech3d-pick.mjs
-import { pickLedNearRay } from '../src/engine/mech3d/led-detect.js';
+import { pickLedNearRay, refineEmitterFace, findEmitters, faceInfo } from '../src/engine/mech3d/led-detect.js';
 import { transformMesh } from '../src/engine/mech3d/xform.js';
 import { boxMesh, mergeMeshes, ok, done } from './mech3d-util.mjs';
 
@@ -24,4 +24,15 @@ ok(r && r.part === 1 && r.face === 7, `측면 발광 패키지 → 면 ${r?.face
 // 같은 패키지를 위에서 보면 렌즈 면(법선 −x)은 카메라를 향하지 않음 → 몸체 윗면 쪽(렌즈 아님)
 r = pickLedNearRay(side, [1], [0, 0, 50], [0, 0, -1]);
 ok(r && r.face !== 7, `측면 패키지를 위에서 → 렌즈 아닌 면 ${r?.face}`);
+
+// 발광면 보정: 클릭한 면과 평행(법선 내적 > 0.95)한 면 중 법선 방향으로 가장 바깥 면
+ok(refineEmitterFace(parts[2], 1) === 7 && Math.abs(faceInfo(parts[2], 7).c[2] - 1.1) < 1e-6, `몸체 윗면 클릭 → 렌즈 윗면 ${refineEmitterFace(parts[2], 1)}`);
+ok(refineEmitterFace(side[1], 1) === 7, `측면 패키지 몸체 −x 면 → 렌즈 −x 면 ${refineEmitterFace(side[1], 1)}`);
+const plain = boxMesh(0, 0, 0, 3, 2, 1);
+ok(refineEmitterFace(plain, 1) === 1, '단순 상자 LED → 같은 면');
+// 안쪽 발광 방지: 몸체 윗면(렌즈 속)을 발광면으로 주면 needsCheck
+const emIn = findEmitters(parts, cands, 1, 1, 0);
+ok(emIn.every((e) => e.needsCheck), `발광 위치가 LED 솔리드 안 → 확인 필요(${emIn.filter((e) => e.needsCheck).length}/${emIn.length})`);
+const emOk = findEmitters(parts, cands, 1, 7, 0);
+ok(emOk.every((e) => !e.needsCheck), '렌즈 윗면 → 정상');
 done();
