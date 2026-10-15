@@ -169,7 +169,8 @@ export function findEmitters(parts, leds, ref, face, pcb = -1) {
 // 부품: 면적가중 중심이 카메라 앞(t > 0)이고 광선까지 수직거리 ≤ maxDist 인 후보 중 최근접.
 // 면: 카메라를 향한 면(바깥 법선 · (−d) > 0.3) 중 중심이 광선에 가장 가까운 면, 0.05mm 이내 동률이면 카메라에 가까운(t 작은) 면.
 const rayPerp = (p, o, d) => { const v = sub(p, o), t = dot(v, d); return { t, perp: len(sub(v, d.map((x) => x * t))) }; };
-export function pickLedNearRay(parts, candidates, origin, dir, maxDist = 5) {
+// pcb ≥ 0 이면(맞춤 선택) 발광면은 광선과 무관하게 윗면 발광 가정(topEmitterFace) — 비스듬한 시점에서 몸체 측면이 고르는 것을 막음.
+export function pickLedNearRay(parts, candidates, origin, dir, maxDist = 5, pcb = -1) {
   const d = unit(dir);
   let part = -1, best = Infinity;
   for (const i of candidates) {
@@ -177,6 +178,7 @@ export function pickLedNearRay(parts, candidates, origin, dir, maxDist = 5) {
     if (t > 0 && perp <= maxDist && perp < best) { best = perp; part = i; }
   }
   if (part < 0) return null;
+  if (pcb >= 0) return { part, face: topEmitterFace(parts, part, pcb) };
   const m = parts[part];
   let face = -1, bp = Infinity, bt = Infinity;
   for (let k = 0; k < m.faceCount; k++) {
@@ -225,4 +227,18 @@ function insideOwn(m, p, dir) {
 // 화면 기준 LED 맞춤 반경(mm): 클릭 지점 깊이의 화소당 mm × px, 최소 minMm. 값이 없으면 minMm
 export function snapRadius(worldPerPixel, minMm = 5, px = 14) {
   return Number.isFinite(worldPerPixel) && worldPerPixel > 0 ? Math.max(minMm, px * worldPerPixel) : minMm;
+}
+
+// 윗면 발광 가정의 발광면: v = unit(LED 중심 − PCB 최근접점) 과 법선 내적이 가장 큰 면(> 0.7) → 가장 바깥 평행 면. 없으면 −1
+export function topEmitterFace(parts, part, pcb) {
+  const m = parts[part], v = towardLed(parts[pcb], meshStats(m).center);
+  if (!v) return -1;
+  let face = -1, bd = 0.7;
+  for (let k = 0; k < m.faceCount; k++) {
+    const fi = faceInfo(m, k);
+    if (!fi || fi.degenerate) continue;
+    const dv = dot(fi.n, v);
+    if (dv > bd) { bd = dv; face = k; }
+  }
+  return face >= 0 ? refineEmitterFace(m, face) : -1;
 }

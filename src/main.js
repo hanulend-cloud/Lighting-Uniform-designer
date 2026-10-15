@@ -386,7 +386,7 @@ function snapLedPick(s, nMech, needFace) {
   const vol = (i) => parts[i].volume ?? meshStats(parts[i]).volume;
   const big = parts.reduce((b, _, i) => (vol(i) > vol(b) ? i : b), 0), hit = s.part != null && s.part >= nMech ? s.part - nMech : null;
   if (hit != null && (hit !== big || parts.length < 2)) return direct(hit);
-  const r = pickLedNearRay(parts, parts.map((_, i) => i).filter((i) => i !== big), s.ray.o, s.ray.d, snapRadius(s.worldPerPixel));   // 반경 = max(5mm, 14px)
+  const r = pickLedNearRay(parts, parts.map((_, i) => i).filter((i) => i !== big), s.ray.o, s.ray.d, snapRadius(s.worldPerPixel), needFace ? big : -1);   // 반경 = max(5mm, 14px), 발광면 = 윗면 발광 가정(PCB 반대쪽)
   if (!r || (needFace && r.face < 0)) return null;
   return { ...r, snapped: true };
 }
@@ -404,7 +404,7 @@ function onM3Pick(s) {
     if (!p) { m3status('가까운 LED 를 찾지 못함 — LED 가까이를 클릭하세요'); return; }
     try {
       applyStepRecognition(M.light.step, { part: p.part, face: p.face });
-      if (p.snapped) m3ledInfo += ' (가까운 LED 로 선택)';
+      if (p.snapped) m3ledInfo += ' (가까운 LED · 윗면 발광으로 가정 — 측면 발광 LED 는 확대해서 발광면을 직접 클릭)';
       m3pick = null; m3status('');
     } catch (e) { m3ledInfo = `LED 인식 실패: ${e.message}`; }
     m3calcToken++; m3calc = null; persist(); renderMech3d(); return;

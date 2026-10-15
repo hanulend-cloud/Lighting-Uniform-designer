@@ -1,5 +1,5 @@
 // 가까운 LED 선택(작은 LED 를 정확히 못 눌러도 클릭 광선에서 가까운 LED·발광면으로 맞춤): node test/mech3d-pick.mjs
-import { pickLedNearRay, refineEmitterFace, snapRadius, findEmitters, faceInfo } from '../src/engine/mech3d/led-detect.js';
+import { pickLedNearRay, refineEmitterFace, snapRadius, topEmitterFace, findEmitters, faceInfo } from '../src/engine/mech3d/led-detect.js';
 import { transformMesh } from '../src/engine/mech3d/xform.js';
 import { boxMesh, mergeMeshes, ok, done } from './mech3d-util.mjs';
 
@@ -40,4 +40,11 @@ ok(snapRadius(0.1) === 5 && Math.abs(snapRadius(1) - 14) < 1e-9 && snapRadius(un
 // 멀리서 본 경우(화소당 1mm): 9.4mm 빗나간 클릭도 LED 선택(고정 5mm 면 없음)
 r = pickLedNearRay(parts, cands, [8, 5, 50], [0, 0, -1], snapRadius(1));
 ok(r && r.part === 1 && pickLedNearRay(parts, cands, [8, 5, 50], [0, 0, -1]) === null, `화소당 1mm → 9.4mm 빗나간 클릭도 LED ${r?.part}`);
+// 맞춤 선택(직접 맞히지 않음)은 윗면 발광 가정: PCB 반대쪽(LED 중심 − PCB 최근접점) 을 향한 면 → 가장 바깥 평행 면
+const ob = [20.4, 0.3, 0.4], oo = [ob[0] + 30, ob[1] - 40, ob[2] + 20];
+r = pickLedNearRay(parts, cands, oo, [ob[0] - oo[0], ob[1] - oo[1], ob[2] - oo[2]], 5, 0);
+ok(r && r.part === 2 && r.face === 7 && faceInfo(parts[2], 7).n[2] > 0.999, `비스듬한 광선 맞춤 → LED ${r?.part} 면 ${r?.face}(렌즈 윗면, +z)`);
+ok(topEmitterFace(parts, 2, 0) === 7, 'topEmitterFace = 렌즈 윗면');
+// 직접 맞힌 측면 패키지의 렌즈 면은 그대로(보정만)
+ok(refineEmitterFace(side[1], 7) === 7, '측면 패키지 렌즈 면 직접 클릭 → 그 면');
 done();
