@@ -45,8 +45,8 @@ export function createMech3dView(canvas, { onPick }) {
     m.material.depthWrite = !m.material.transparent; m.renderOrder = m.material.transparent ? 1 : 0;
   }
 
-  // parts: 런타임 scene.parts, kindsOf: 부품별 소재 종류 배열
-  function setParts(parts, kindsOf) {
+  // parts: 런타임 scene.parts, kindsOf: 부품별 소재 종류 배열, keepCamera: 카메라를 다시 맞추지 않음(LED 위치 보정 등)
+  function setParts(parts, kindsOf, { keepCamera = false } = {}) {
     for (const m of meshes) { scene.remove(m); m.geometry.dispose(); m.material.dispose(); }
     partsRef = parts; kinds = kindsOf.slice();
     meshes = parts.map((p, i) => {
@@ -61,6 +61,7 @@ export function createMech3dView(canvas, { onPick }) {
       return m;
     });
     meshes.forEach((_, i) => colorize(i));
+    if (keepCamera) { render(); return; }
     const box = new THREE.Box3(); meshes.forEach((m) => box.expandByObject(m));
     const c = box.getCenter(new THREE.Vector3()), r = box.getSize(new THREE.Vector3()).length() / 2 || 10;
     controls.target.copy(c);
