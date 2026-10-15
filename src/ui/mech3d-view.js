@@ -1,5 +1,5 @@
 // 3D 기구 뷰 — spec 2026-10-14 §3. 부품을 소재 종류별 색으로 그리고, 선택 부품·면을 강조한다.
-// 클릭(드래그 아님) → onPick({ part, face }) 또는 onPick(null). 회전·이동·확대는 OrbitControls(Z 위).
+// 클릭(드래그 아님) → onPick({ part, face, ray:{o,d} }) 또는 onPick(null)(선택 모드에선 { part:null, face:null, ray }). 회전·이동·확대는 OrbitControls(Z 위).
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
@@ -17,6 +17,7 @@ export function createMech3dView(canvas, { onPick }) {
   scene.add(new THREE.HemisphereLight(0xffffff, 0x404050, 1.0));
   const sun = new THREE.DirectionalLight(0xffffff, 0.8); sun.position.set(1, -1, 2); scene.add(sun);
   const controls = new OrbitControls(camera, canvas);
+  controls.enableZoom = true;   // 휠 확대(OrbitControls 가 캔버스 wheel 을 직접 처리 — 다른 wheel 처리기 없음)
   const render = () => renderer.render(scene, camera);
   controls.addEventListener('change', render);
 
@@ -40,8 +41,9 @@ export function createMech3dView(canvas, { onPick }) {
       for (let j = 0; j < 3; j++) col.setXYZ(T[t * 3 + j], c.r, c.g, c.b);
     }
     col.needsUpdate = true;
-    m.material.opacity = KIND_OPACITY[kinds[i]];
-    m.material.transparent = KIND_OPACITY[kinds[i]] < 1;
+    const op = ghost?.(i) ? Math.min(0.15, KIND_OPACITY[kinds[i]]) : KIND_OPACITY[kinds[i]];   // 투시: LED 선택 중 기구물 반투명
+    m.material.opacity = op;
+    m.material.transparent = op < 1;
     m.material.depthWrite = !m.material.transparent; m.renderOrder = m.material.transparent ? 1 : 0;
   }
 
@@ -96,6 +98,9 @@ export function createMech3dView(canvas, { onPick }) {
     meshes.forEach((_, i) => { if (touched.has(i)) colorize(i); }); render();
   }
   function setSelection(s) { sel = s; meshes.forEach((_, i) => colorize(i)); render(); }
+  // 선택 모드별 클릭 대상·투시: pickable(i) = 클릭 가능한 부품, ghostOf(i) = 반투명으로 비출 부품(둘 다 null = 전체/없음)
+  let pickable = null, ghost = null;
+  function setPickMode(pickableFn, ghostFn) { pickable = pickableFn; ghost = ghostFn; meshes.forEach((_, i) => colorize(i)); render(); }
 
   const ray = new THREE.Raycaster();
   let down = null;
@@ -106,11 +111,13 @@ export function createMech3dView(canvas, { onPick }) {
     down = null;
     const r = canvas.getBoundingClientRect();
     ray.setFromCamera(new THREE.Vector2(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1), camera);
-    const h = ray.intersectObjects(meshes, false)[0];
-    if (!h) { onPick(null); return; }
+    const h = ray.intersectObjects(pickable ? meshes.filter((m) => pickable(m.userData.part)) : meshes, false)[0];
+    // 선택 모드(pickable 지정)에서는 클릭 광선도 넘긴다 — 빈 곳 클릭이어도 { part: null, face: null, ray } (가까운 LED 맞춤용)
+    const rr = { o: ray.ray.origin.toArray(), d: ray.ray.direction.toArray() };
+    if (!h) { onPick(pickable ? { part: null, face: null, ray: rr } : null); return; }
     const part = h.object.userData.part;
-    onPick({ part, face: partsRef[part].faceIds[h.faceIndex] });
+    onPick({ part, face: partsRef[part].faceIds[h.faceIndex], ray: rr });
   });
 
-  return { setParts, setKinds, setSelection, setOverlay, render };
+  return { setParts, setKinds, setSelection, setOverlay, setPickMode, render };
 }

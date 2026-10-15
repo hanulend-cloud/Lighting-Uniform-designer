@@ -23,7 +23,7 @@ import { setPartMaterial, setPartMaterialParam, setPartFinish } from './engine/m
 import { renderMech3dPanel } from './ui/mech3d-panel.js';
 import { setLedMesh, getLedMesh, clearLedMesh, saveLedIDB, loadLedIDB } from './engine/mech3d/runtime.js';
 import { migrateMech3d } from './engine/mech3d/defs.js';
-import { meshStats, findLeds, findEmitters, pcbIndex } from './engine/mech3d/led-detect.js';
+import { meshStats, findLeds, findEmitters, pcbIndex, pickLedNearRay } from './engine/mech3d/led-detect.js';
 import { transformMesh } from './engine/mech3d/xform.js';
 import { lineFromData, lightData, obsDirection } from './engine/mech3d/line.js';
 import { manualLeds } from './engine/mech3d/placement.js';
@@ -360,27 +360,49 @@ async function renderMech3dInner() {
     line3d = Float32Array.from(out);
   }
   m3view.setOverlay({ obsFaces: M.observe.faces, line3d, arrows });
+  // 선택 모드: LED 발광면/제외 → LED STEP 부품만 클릭되고 기구물은 투시, 관측면·PCB 면 → 기구 부품만 클릭
+  { const nM = cur.parts.length, led = m3pick === 'led' || m3pick === 'ledx', mech = m3pick === 'obs' || m3pick === 'pcb';
+    m3view.setPickMode(led ? (i) => i >= nM : mech ? (i) => i < nM : null, led ? (i) => i < nM : null); }
   const li = m3line ? `라인: ${{ line: '직선', circle: '원', path: '곡선' }[m3line.kind]}${m3line.closed ? '(닫힘)' : ''} · 길이 ${m3line.length.toFixed(1)}mm · 폭 ${m3line.width.toFixed(1)}mm${m3line.branched ? ' · ⚠ 갈래 있음(가장 긴 경로 사용)' : ''}` : (M.observe.faces.length && !m3lineErr ? '라인 인식 중…' : '');
   // 자동 격자 값(표시용 — tally.js 규칙과 같음. w 칸은 최대 국소 폭 대신 라인 폭으로 근사)
   const auto = m3line ? { cellS: Math.max(1, m3line.length / 100), cellW: Math.max(0.5, m3line.width / 8), winS: Math.max(5, m3line.length / 10) } : null;
   renderLightPanel($('#mech3d-light'), M, { pick: m3pick, lineInfo: li, lineErr: m3lineErr, ledInfo: m3ledInfo, calc: m3calc, busy: !!m3busyRun, auto, dir: M.observe.dir ?? m3line?.frame.d }, m3LightHandlers());
 }
 // 3D 뷰 클릭 — 기구 부품 수(nMech) 이상인 번호는 LED STEP 부품
+// LED 선택 맞춤: 빈 곳·PCB(가장 큰 LED STEP 부품)를 눌렀으면 클릭 광선에서 가까운 LED(와 발광면)로 바꾼다. 반환 = LED STEP 부품 번호 기준 { part, face, snapped } | null
+function snapLedPick(s, nMech, needFace) {
+  const parts = ledPartsNow();
+  if (!parts || !s?.ray) return s?.part != null && s.part >= nMech ? { part: s.part - nMech, face: s.face, snapped: false } : null;
+  const vol = (i) => parts[i].volume ?? meshStats(parts[i]).volume;
+  const big = parts.reduce((b, _, i) => (vol(i) > vol(b) ? i : b), 0), hit = s.part != null && s.part >= nMech ? s.part - nMech : null;
+  if (hit != null && (hit !== big || parts.length < 2)) return { part: hit, face: s.face, snapped: false };
+  const r = pickLedNearRay(parts, parts.map((_, i) => i).filter((i) => i !== big), s.ray.o, s.ray.d);
+  if (!r || (needFace && r.face < 0)) return null;
+  return { ...r, snapped: true };
+}
 function onM3Pick(s) {
   const nMech = getMech3d().parts.length, M = spec.mech3d;
-  if ((m3pick === 'led' || m3pick === 'ledx') && s && s.part < nMech) { m3status('LED STEP 부품(PCB·LED)을 클릭하세요 — 기구 부품은 이 모드에서 선택되지 않음'); return; }
+  if (s && s.part == null && m3pick !== 'led' && m3pick !== 'ledx') s = null;   // 선택 모드 빈 곳 클릭(광선만) — LED 모드에서만 씀
+  if ((m3pick === 'led' || m3pick === 'ledx') && s && s.part != null && s.part < nMech) { m3status('LED STEP 부품(PCB·LED)을 클릭하세요 — 기구 부품은 이 모드에서 선택되지 않음'); return; }
   if (m3pick === 'obs' && s && s.part < nMech) {
     const k = M.observe.faces.findIndex((f) => f.part === s.part && f.face === s.face);
     if (k >= 0) M.observe.faces.splice(k, 1); else M.observe.faces.push({ part: s.part, face: s.face });
     m3calcToken++; m3calc = null; persist(); refreshLine(); renderMech3d(); return;
   }
   if (m3pick === 'led' && s && M.light.step) {
-    try { applyStepRecognition(M.light.step, { part: s.part - nMech, face: s.face }); m3pick = null; m3status(''); }
-    catch (e) { m3ledInfo = `LED 인식 실패: ${e.message}`; }
+    const p = snapLedPick(s, nMech, true);
+    if (!p) { m3status('가까운 LED 를 찾지 못함 — LED 가까이를 클릭하세요'); return; }
+    try {
+      applyStepRecognition(M.light.step, { part: p.part, face: p.face });
+      if (p.snapped) m3ledInfo += ' (가까운 LED 로 선택)';
+      m3pick = null; m3status('');
+    } catch (e) { m3ledInfo = `LED 인식 실패: ${e.message}`; }
     m3calcToken++; m3calc = null; persist(); renderMech3d(); return;
   }
   if (m3pick === 'ledx' && s && M.light.step) {
-    const st = M.light.step, i = s.part - nMech; st.excluded ??= [];
+    const p = snapLedPick(s, nMech, false);
+    if (!p) { m3status('가까운 LED 를 찾지 못함 — LED 가까이를 클릭하세요'); return; }
+    const st = M.light.step, i = p.part; st.excluded ??= []; m3status('');
     const k = st.excluded.indexOf(i); if (k >= 0) st.excluded.splice(k, 1); else if (st.leds.includes(i)) st.excluded.push(i);
     m3calcToken++; m3calc = null; persist(); renderMech3d(); return;
   }

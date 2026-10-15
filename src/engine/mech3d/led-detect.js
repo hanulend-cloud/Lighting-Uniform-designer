@@ -164,3 +164,26 @@ export function findEmitters(parts, leds, ref, face, pcb = -1) {
     return good(pick.f, pick.fi);
   });
 }
+
+// 클릭 광선(o + t·d)에서 가까운 LED 와 그 발광면 고르기 — 작은 LED 를 정확히 못 눌러도(PCB·빈 곳 클릭) 맞춘다.
+// 부품: 면적가중 중심이 카메라 앞(t > 0)이고 광선까지 수직거리 ≤ maxDist 인 후보 중 최근접.
+// 면: 카메라를 향한 면(바깥 법선 · (−d) > 0.3) 중 중심이 광선에 가장 가까운 면, 0.05mm 이내 동률이면 카메라에 가까운(t 작은) 면.
+const rayPerp = (p, o, d) => { const v = sub(p, o), t = dot(v, d); return { t, perp: len(sub(v, d.map((x) => x * t))) }; };
+export function pickLedNearRay(parts, candidates, origin, dir, maxDist = 5) {
+  const d = unit(dir);
+  let part = -1, best = Infinity;
+  for (const i of candidates) {
+    const { t, perp } = rayPerp(meshStats(parts[i]).center, origin, d);
+    if (t > 0 && perp <= maxDist && perp < best) { best = perp; part = i; }
+  }
+  if (part < 0) return null;
+  const m = parts[part];
+  let face = -1, bp = Infinity, bt = Infinity;
+  for (let k = 0; k < m.faceCount; k++) {
+    const fi = faceInfo(m, k);
+    if (!fi || fi.degenerate || -dot(fi.n, d) <= 0.3) continue;
+    const { t, perp } = rayPerp(fi.c, origin, d);
+    if (perp < bp - 0.05 || (perp <= bp + 0.05 && t < bt)) { bp = Math.min(bp, perp); bt = t; face = k; }
+  }
+  return { part, face };
+}

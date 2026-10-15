@@ -284,3 +284,5 @@ main { flex: 1 1 auto; min-height: 0; display: grid;
 .m3-res.err { background: rgba(255, 90, 54, 0.12); }
 .m3-res .warn { color: #c96a26; }
 #mech3d-light input[type=number] { width: 56px; }
+
+#inputbar[hidden] { display: none; }
