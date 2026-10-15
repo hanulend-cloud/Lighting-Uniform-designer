@@ -1,5 +1,5 @@
-// 3D 기구 패널 — spec 2026-10-14 §3. 부품 목록 · 선택 부품의 소재/면 처리 · 선택 면 덮어쓰기 · 접촉면 목록.
-// 상태는 갖지 않는다: m = spec.mech3d, sel = { part, face } | null, dbList = 실측소재 DB 목록, h = 이벤트 처리기.
+// 3D 기구 — 부품 속성(소재·면 처리·선택 면 덮어쓰기) · 접촉면 편집기 (spec 2026-10-14 §3, 2026-10-15 m3-cad-ui: 피처 트리 노드별).
+// 상태는 갖지 않는다: m = spec.mech3d, sel = { part, face|null }, dbList = 실측소재 DB 목록, h = 이벤트 처리기.
 import { PART_KINDS, FINISH_KINDS, RESIN_N, resolveFinish } from '../engine/mech3d/materials.js';
 
 const esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
@@ -40,22 +40,11 @@ function partEditor(p, sel, dbList) {
   </div>`;
 }
 
-// h = { onSelect(part), onKind(part, kind), onMat(part, key, value), onFinish(part, face|null, finish|null), onContact(i, mode), onExit() }
-export function renderMech3dPanel(el, m, sel, dbList, h) {
-  const p = sel?.part != null ? m.parts[sel.part] : null;
-  el.innerHTML = `
-    <div class="m3-hd">3D 기구 <b>${esc(m.name)}</b> <button data-m3-exit>평판 모드로</button></div>
-    <div class="m3-parts">${m.parts.map((q, i) => `<div class="m3-part ${i === sel?.part ? 'on' : ''}" data-m3-part="${i}">
-      <span class="m3-kind k-${q.material.kind}">${PART_KINDS[q.material?.kind]?.label ?? '?'}</span> ${esc(q.name)} <span class="mut">${(q.size ?? []).map((v) => v.toFixed(1)).join('×')}mm · ${(q.volume ?? 0).toFixed(0)} mm³</span></div>`).join('')}</div>
-    ${p ? partEditor(p, sel, dbList) : '<div class="mut">부품을 목록이나 3D 뷰에서 클릭하세요</div>'}
-    <div class="m3-sub">접촉면 (체크 = 공기층 없음, 이중사출·접착)</div>
-    <div class="m3-contacts">${m.contacts.length ? m.contacts.map((c, i) => `<label><input type="checkbox" data-m3-contact="${i}" ${c.mode === 'contact' ? 'checked' : ''}>
-      ${esc(m.parts[c.a]?.name ?? '?')} ↔ ${esc(m.parts[c.b]?.name ?? '?')} · ${(c.area ?? 0).toFixed(1)} mm²</label>`).join('') : '<div class="mut">감지된 접촉면 없음</div>'}</div>`;
-
-  el.querySelector('[data-m3-exit]').onclick = h.onExit;
-  el.querySelectorAll('[data-m3-part]').forEach((d) => { d.onpointerdown = () => h.onSelect(+d.dataset.m3Part); });
-  el.querySelectorAll('[data-m3-contact]').forEach((c) => { c.onchange = () => h.onContact(+c.dataset.m3Contact, c.checked ? 'contact' : 'air'); });
-  if (!p) return;
+// 부품 노드 — sel = { part, face|null }, h = { onKind(part, kind), onMat(part, key, value), onFinish(part, face|null, finish|null) }
+export function renderPartProps(el, m, sel, dbList, h) {
+  const p = m.parts[sel.part];
+  if (!p) { el.innerHTML = '<div class="mut">부품을 찾을 수 없음</div>'; return; }
+  el.innerHTML = `<div class="m3-h">속성 · ${esc(p.name)} <span class="mut">${(p.size ?? []).map((v) => v.toFixed(1)).join('×')}mm · ${(p.volume ?? 0).toFixed(0)} mm³</span></div>${partEditor(p, sel, dbList)}`;
   const i = sel.part;
   el.querySelector('[data-m3-kind]').onchange = (e) => h.onKind(i, e.target.value);
   el.querySelectorAll('[data-m3-mat]').forEach((x) => {
@@ -84,4 +73,12 @@ export function renderMech3dPanel(el, m, sel, dbList, h) {
       h.onFinish(i, face, { ...cur, R: Math.min(1, Math.max(0, +x.value / 100)) });
     };
   });
+}
+
+// 접촉면 노드 — h = { onContact(i, 'contact'|'air') }
+export function renderContactsProps(el, m, h) {
+  el.innerHTML = `<div class="m3-h">속성 · 접촉면 <span class="mut">(체크 = 공기층 없음, 이중사출·접착)</span></div>
+    <div class="m3-contacts">${m.contacts.length ? m.contacts.map((c, i) => `<label><input type="checkbox" data-m3-contact="${i}" ${c.mode === 'contact' ? 'checked' : ''}>
+      ${esc(m.parts[c.a]?.name ?? '?')} ↔ ${esc(m.parts[c.b]?.name ?? '?')} · ${(c.area ?? 0).toFixed(1)} mm²</label>`).join('') : '<div class="mut">감지된 접촉면 없음</div>'}</div>`;
+  el.querySelectorAll('[data-m3-contact]').forEach((c) => { c.onchange = () => h.onContact(+c.dataset.m3Contact, c.checked ? 'contact' : 'air'); });
 }

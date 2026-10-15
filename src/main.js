@@ -19,16 +19,15 @@ import { drawHeatmap } from './ui/heatmap.js';
 import { buildLevels, updateLevels, renderVerdict, drawProfiles } from './ui/analysis.js';
 import { exportStep } from './export/step-ui.js';
 import { setMech3dMesh, getMech3d, initialMech3dSpec, saveMech3dIDB, loadMech3dIDB } from './engine/mech3d/runtime.js';
-import { setPartMaterial, setPartMaterialParam, setPartFinish } from './engine/mech3d/materials.js';
-import { renderMech3dPanel } from './ui/mech3d-panel.js';
+import { setPartMaterial, setPartMaterialParam, setPartFinish, PART_KINDS } from './engine/mech3d/materials.js';
+import { renderPartProps, renderContactsProps } from './ui/mech3d-panel.js';
 import { setLedMesh, getLedMesh, clearLedMesh, saveLedIDB, loadLedIDB } from './engine/mech3d/runtime.js';
 import { migrateMech3d } from './engine/mech3d/defs.js';
 import { meshStats, findLeds, findEmitters, pcbIndex, pickLedNearRay, refineEmitterFace, snapRadius } from './engine/mech3d/led-detect.js';
 import { transformMesh } from './engine/mech3d/xform.js';
-import { lineFromData, lightData, obsDirection } from './engine/mech3d/line.js';
+import { lineFromData, obsDirection } from './engine/mech3d/line.js';
 import { manualLeds } from './engine/mech3d/placement.js';
-import { tallyGeometry, tallyStats } from './engine/mech3d/tally.js';
-import { renderLightPanel } from './ui/mech3d-light-panel.js';
+import { renderLightProps, renderLedProps, renderObserveProps, renderTargetProps } from './ui/mech3d-light-panel.js';
 
 const LS_KEY = 'uds.spec.v11';
 
@@ -280,14 +279,6 @@ async function refreshLine() {
     if (key === m3lineKey) { m3line = null; m3lineErr = `라인 인식 실패: ${e.message}`; renderMech3d(); }
   }
 }
-// 집계 격자 인자(빈칸 = 자동) — tally.js 계약: cellS·cellW·winS(null = 자동). 구버전 obs.cell 은 쓰지 않음
-const m3TallyObs = (O, dir) => ({ ...O, dir, cell: null, cellS: O.cellS ?? null, cellW: O.cellW ?? null, winS: O.winS ?? null });
-// 집계 격자 — (라인, cellS, cellW, winS, 가장자리 제외) 별로 캐시(계산 ≈60ms)
-function m3Geometry(obs) {
-  const key = JSON.stringify([obs.cellS, obs.cellW, obs.winS, obs.edgeExcl]);
-  if (!m3G || m3G.line !== m3line || m3G.key !== key) m3G = { line: m3line, key, G: tallyGeometry(m3line, obs) };
-  return m3G.G;
-}
 function currentEmitters() {
   const L = spec.mech3d.light;
   if (L.kind === 'step') { const ex = new Set(L.step?.excluded ?? []); return (L.step?.emitters ?? []).filter((e) => !e.needsCheck && !ex.has(e.part)); }
@@ -345,8 +336,16 @@ async function renderMech3dInner() {
     m3meshShown = meshKey; m3view.setParts([...cur.parts, ...(lp ?? [])], kinds, { keepCamera });
   } else m3view.setKinds(kinds);
   m3view.setSelection(m3sel);
-  renderMech3dPanel($('#mech3d-panel'), spec.mech3d, m3sel, materialDb()?.list() ?? [], {
-    onSelect: (i) => { m3sel = { part: i, face: null }; renderMech3d(); },
+  // 임시(Task 13 에서 m3/app.js 의 피처 트리·속성 패널로 대체): 부품 목록 + 노드별 편집기를 옛 패널 자리에 이어 그린다
+  const pe = $('#mech3d-panel'), m3esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
+  pe.innerHTML = `<div class="m3-hd">3D 기구 <b>${m3esc(M.name)}</b> <button data-m3-exit>평판 모드로</button></div>
+    <div class="m3-parts">${M.parts.map((q, i) => `<div class="m3-part ${i === m3sel?.part ? 'on' : ''}" data-m3-part="${i}">
+      <span class="m3-kind k-${q.material.kind}">${PART_KINDS[q.material?.kind]?.label ?? '?'}</span> ${m3esc(q.name)} <span class="mut">${(q.size ?? []).map((v) => v.toFixed(1)).join('×')}mm · ${(q.volume ?? 0).toFixed(0)} mm³</span></div>`).join('')}</div>
+    <div data-m3-node="part"></div><div data-m3-node="contacts"></div>`;
+  pe.querySelector('[data-m3-exit]').onclick = () => { spec.mode = 'flat'; m3sel = null; m3pick = null; persist(); applyMode(); schedule(); };
+  pe.querySelectorAll('[data-m3-part]').forEach((d) => { d.onpointerdown = () => { m3sel = { part: +d.dataset.m3Part, face: null }; renderMech3d(); }; });
+  const partEl = pe.querySelector('[data-m3-node="part"]');
+  if (m3sel?.part != null && M.parts[m3sel.part]) renderPartProps(partEl, M, m3sel, materialDb()?.list() ?? [], {
     onKind: (i, k) => updPart(i, (p) => setPartMaterial(p, k)),
     onMat: (i, key, v) => updPart(i, (p) => {
       let q = setPartMaterialParam(p, key, v);
@@ -356,8 +355,10 @@ async function renderMech3dInner() {
       return q;
     }),
     onFinish: (i, face, f) => updPart(i, (p) => setPartFinish(p, face, f)),
+  });
+  else partEl.innerHTML = '<div class="mut">부품을 목록이나 3D 뷰에서 클릭하세요</div>';
+  renderContactsProps(pe.querySelector('[data-m3-node="contacts"]'), M, {
     onContact: (i, mode) => { spec.mech3d.contacts[i] = { ...spec.mech3d.contacts[i], mode }; m3calcToken++; m3calc = null; persist(); },
-    onExit: () => { spec.mode = 'flat'; m3sel = null; m3pick = null; persist(); applyMode(); schedule(); },
   });
   let arrows = [];
   try { arrows = currentEmitters().map((e) => ({ pos: e.pos, axis: e.axis })); } catch { arrows = []; }
@@ -374,7 +375,14 @@ async function renderMech3dInner() {
   const li = m3line ? `라인: ${{ line: '직선', circle: '원', path: '곡선' }[m3line.kind]}${m3line.closed ? '(닫힘)' : ''} · 길이 ${m3line.length.toFixed(1)}mm · 폭 ${m3line.width.toFixed(1)}mm${m3line.branched ? ' · ⚠ 갈래 있음(가장 긴 경로 사용)' : ''}` : (M.observe.faces.length && !m3lineErr ? '라인 인식 중…' : '');
   // 자동 격자 값(표시용 — tally.js 규칙과 같음. w 칸은 최대 국소 폭 대신 라인 폭으로 근사)
   const auto = m3line ? { cellS: Math.max(1, m3line.length / 100), cellW: Math.max(0.5, m3line.width / 8), winS: Math.max(5, m3line.length / 10) } : null;
-  renderLightPanel($('#mech3d-light'), M, { pick: m3pick, lineInfo: li, lineErr: m3lineErr, ledInfo: m3ledInfo, calc: m3calc, busy: !!m3busyRun, auto, dir: M.observe.dir ?? m3line?.frame.d }, m3LightHandlers());
+  // 임시(Task 13 에서 대체): 광원 · LED · 관측면 · 목표 노드 편집기를 이어 그린다. 계산 버튼은 없어짐(점진 계산은 Task 12)
+  const le = $('#mech3d-light'), lh = m3LightHandlers(), lui = { pick: m3pick, ledInfo: m3ledInfo };
+  le.innerHTML = '<div data-m3-node="light"></div><div data-m3-node="led"></div><div data-m3-node="observe"></div><div data-m3-node="target"></div>';
+  const node = (k) => le.querySelector(`[data-m3-node="${k}"]`);
+  renderLightProps(node('light'), M, lui, lh);
+  renderLedProps(node('led'), M, lui, lh);
+  renderObserveProps(node('observe'), M, { pick: m3pick, lineInfo: li, lineErr: m3lineErr, auto, dir: M.observe.dir ?? m3line?.frame.d }, lh);
+  renderTargetProps(node('target'), M, lh);
 }
 // 3D 뷰 클릭 — 기구 부품 수(nMech) 이상인 번호는 LED STEP 부품
 // LED 선택 맞춤: 빈 곳·PCB(가장 큰 LED STEP 부품)를 눌렀으면 클릭 광선에서 가까운 LED(와 발광면)로 바꾼다. 반환 = LED STEP 부품 번호 기준 { part, face, snapped } | null
@@ -446,7 +454,8 @@ function m3LightHandlers() {
     onClearObs: () => { M.observe.faces = []; upd(); refreshLine(); },
     onObsDir: (v) => { M.observe.dir = v ? (() => { const l = Math.hypot(...v); return v.map((x) => x / l); })() : null; upd(); refreshLine(); },
     onRetryLine: () => { m3lineKey = ''; refreshLine(); },
-    onCalc: (N) => runM3Calc(N),
+    onTarget: (key, v) => { M.observe[key] = v; upd(); },
+    onCheckParam: (key, v) => { M.checks[key] = v; upd(); },
   };
 }
 function importLedStep(file) {
@@ -466,37 +475,6 @@ function importLedStep(file) {
     w.onerror = (e) => { w.terminate(); m3ledInfo = `불러오기 실패: ${e.message ?? e}`; renderMech3d(); };
     w.postMessage({ text });
   }).catch((e) => { m3ledInfo = `불러오기 실패: ${e.message}`; renderMech3d(); });
-}
-// 계산: Worker K 개에 광자를 나눠 돌리고(서로 다른 seed), 배치별 누적을 합쳐 판정
-async function runM3Calc(N) {
-  if (m3busyRun) return;
-  const M = spec.mech3d, token = m3calcToken, run = ++m3runSeq;
-  try {
-    if (!m3line) throw new Error('관측면을 먼저 지정하세요');
-    const emitters = currentEmitters();
-    if (!emitters.length) throw new Error('광원을 지정하세요');
-    const K = Math.max(1, Math.min(8, (navigator.hardwareConcurrency ?? 4) - 1)), t0 = performance.now();
-    m3busyRun = run;
-    m3calc = { busy: `계산 중… (Worker ${K}개, 광자 ${N.toLocaleString()})` }; renderMech3d();
-    const obs = m3TallyObs(M.observe, M.observe.dir ?? m3line.frame.d);
-    const G = m3Geometry(obs), lineData = lightData(m3line);
-    const mechParts = rawParts(getMech3d().parts);
-    const ledParts = M.light.kind === 'step' && getLedMesh() ? rawParts(getLedMesh().parts) : null;
-    const batches = Math.max(4, Math.round(10 / K)), per = Math.ceil(N / K);
-    let res;
-    try { res = await Promise.all(Array.from({ length: K }, (_, k) => m3call(m3w(k), { type: 'run', mechParts, mspec: M, ledParts, lineData, G, obs, emitters, N: per, seed: 1000 + k, batches }))); }
-    catch (e) { if (m3busyRun === run) m3killPool('계산 중단');   throw e; }   // 남은 Worker 는 정리(다음 계산 때 새로 만든다)
-    if (m3busyRun === run) m3busyRun = 0;
-    if (token !== m3calcToken || spec.mech3d !== M) { renderMech3d(); return; }   // 계산 중 입력이 바뀜 — 결과 버림
-    const st = tallyStats(G, res.flatMap((r) => r.accs), obs, res.flatMap((r) => r.cnts));
-    const led = res.reduce((a, r) => { for (const k in r.ledger) a[k] = (a[k] ?? 0) + r.ledger[k]; return a; }, {});
-    m3calc = { ...st, N: per * K, sec: (performance.now() - t0) / 1000, escape: led.emitted ? led.escaped / led.emitted : NaN };
-  } catch (e) {
-    if (m3busyRun === run) m3busyRun = 0;
-    if (token !== m3calcToken || spec.mech3d !== M) { renderMech3d(); return; }
-    m3calc = { error: `계산 실패: ${e.message}` };
-  }
-  renderMech3d();
 }
 function updPart(i, fn) {
   spec.mech3d.parts[i] = fn(spec.mech3d.parts[i]);
