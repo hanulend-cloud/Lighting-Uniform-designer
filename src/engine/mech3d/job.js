@@ -29,11 +29,36 @@ export function composeScene({ rt, mspec, ledParts, table, db, line }) {
   return buildTraceScene(rt2, { ...mspec, parts: [...mspec.parts, ...extraSpecs] }, { table, db });
 }
 
+// 발광점 목록 → 합친 광원(runJob·runChunk 공용)
+export function ledSources(emitters, ledSpec) {
+  if (!emitters.length) throw new Error('광원이 없음 — LED 를 지정하세요');
+  return combineSources(emitters.map((e) => ledSource({ x: e.pos[0], y: e.pos[1], z: e.pos[2], axis: e.axis, xAxis: e.xAxis, model: ledSpec.model, beam: ledSpec.beam, sizeX: ledSpec.sizeX, sizeY: ledSpec.sizeY })));
+}
+
+// 점진 계산 청크 — spec 2026-10-15 m3-cad-ui §4. runMC3D 1회(배치 하나)를 seed 그대로 돌린다.
+// runJob 배치 b 와 같은 시드(seed·7919+b)·광자 수를 주면 acc·cnt·ledger 가 비트 단위로 같다(같은 콜백 순서).
+// leak: 관측면이 아닌 면으로 탈출한 빛 — 탈출 광자의 마지막 출사 (부품, 면) 별 가중치 합. 출사 기록이 없으면(투과 부품을 거치지 않고 틈으로 바로) '-1|-1'.
+// escObs: 마지막 출사가 관측면인 탈출 가중치(방향 무관). Σleak + escObs = ledger.escaped.
+export function runChunk({ S, line, obs, G, emitters, ledSpec, N, seed }) {
+  const src = ledSources(emitters, ledSpec), a = makeAccumulator(G, line, obs);
+  const faces = new Set(obs.faces.map((f) => `${f.part}|${f.face}`)), leak = {};
+  let lastPart = -1, lastFace = -1, lastP = -1, escObs = 0;
+  const r = runMC3D(S, {
+    source: src, N, seed,
+    onExit(part, face, x, y, z, dx, dy, dz, w, p) { a.onExit(part, face, x, y, z, dx, dy, dz, w, p); lastPart = part; lastFace = face; lastP = p; },
+    onEscape(x, y, z, dx, dy, dz, w, p) {
+      a.onEscape(x, y, z, dx, dy, dz, w, p);
+      const k = lastP === p ? `${lastPart}|${lastFace}` : '-1|-1';
+      if (faces.has(k)) escObs += w; else leak[k] = (leak[k] ?? 0) + w;
+    },
+  });
+  return { acc: a.acc, cnt: a.cnt, ledger: r.ledger, leak, escObs, ms: r.ms };
+}
+
 // 시드 규약: 배치 b 는 seed*7919+b 를 쓴다. 여러 Worker 로 나눌 때는 Worker 마다 서로 다른 seed 를 주고(배치 시드가 겹치지 않게), 각자 batches 개 배치를 돌려 합친다.
 // emitters: [{ pos, axis, xAxis }] (LED STEP 은 변환 적용 후 좌표), ledSpec: light.spec
 export function runJob({ S, line, obs, G, emitters, ledSpec, N, seed, batches = 10 }) {
-  if (!emitters.length) throw new Error('광원이 없음 — LED 를 지정하세요');
-  const src = combineSources(emitters.map((e) => ledSource({ x: e.pos[0], y: e.pos[1], z: e.pos[2], axis: e.axis, xAxis: e.xAxis, model: ledSpec.model, beam: ledSpec.beam, sizeX: ledSpec.sizeX, sizeY: ledSpec.sizeY })));
+  const src = ledSources(emitters, ledSpec);
   const accs = [], cnts = [], ledger = { emitted: 0, escaped: 0, absSurf: 0, absVol: 0, lost: 0, rrLoss: 0, rrGain: 0 };
   let ms = 0;
   const per = Math.ceil(N / batches);
