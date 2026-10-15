@@ -164,4 +164,16 @@ const OPT = { chunkN: 1000, bins: 10, debounceMs: 500, tickMs: 1000, maxPhotons:
   P.dispose(); P.cancel(); P.restart(job(2)); await T.advance(2000);
   ok(ups.length === n && chunks(p).length === nc && P.snapshot().state === 'idle', 'dispose 뒤 알림·청크 없음');
 }
+{   // 사용자 일시정지는 물리 변경(다시 시작) 뒤에도 유지
+  const T = fakeTimers(), p = delayedPort(T);
+  const P = createProgressive({ ports: [p], timers: T, opts: OPT });
+  P.restart(job(1)); await T.advance(650); P.pause();
+  await T.advance(200); const nc = chunks(p).length;
+  P.restart(job(2)); await T.advance(2000);
+  ok(scenes(p).at(-1).sceneKey === 's2' && P.snapshot().state === 'paused' && chunks(p).length === nc, '일시정지 중 다시 시작: 새 장면만 보내고 paused 유지, 청크 없음');
+  P.resume(); await T.advance(150);
+  const nw = chunks(p).slice(nc);
+  ok(P.snapshot().state === 'running' && nw.length > 0 && nw.every((m) => m.sceneKey === 's2') && nw[0].seed === chunkSeed(1, 0), '재개 → 새 장면 청크(번호 0부터)');
+  P.cancel();
+}
 done();

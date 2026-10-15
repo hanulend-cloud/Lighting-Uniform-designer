@@ -42,6 +42,7 @@ export function createProgressive({ ports, timers = globalThis, onUpdate = () =>
     if (disposed) return;
     gen++; stopTick();
     if (debounce != null) timers.clearTimeout(debounce);
+    if (state === 'paused') wantPaused = true;   // 사용자 일시정지는 다시 시작 뒤에도 유지(여러 값을 고치는 동안)
     resetAcc(); job = null; pendingJob = j; state = 'pending'; reason = null; error = null;
     const g = gen;
     debounce = timers.setTimeout(() => { debounce = null; begin(g); }, o.debounceMs);
