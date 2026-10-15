@@ -11,8 +11,8 @@
     "test:shape": "node test/shape-import.mjs && node test/shape-mc.mjs --quick",
     "test:shape-full": "node test/shape-mc.mjs && node test/shape-fast.mjs && node test/shape-vs5.mjs",
     "test:shape-fast": "node test/shape-fast.mjs --quick && node test/shape-pool.mjs",
-    "test:mech3d": "node test/mech3d-mesh.mjs && node test/mech3d-bvh.mjs && node test/mech3d-materials.mjs && node test/mech3d-contacts.mjs && node test/mech3d-import.mjs && node test/mech3d-surface.mjs && node test/mech3d-optics.mjs && node test/mech3d-scene.mjs && node test/mech3d-pick.mjs",
-    "test:mech3d-mc": "node test/mech3d-mc.mjs && node test/mech3d-v1.mjs",
+    "test:mech3d": "node test/mech3d-mesh.mjs && node test/mech3d-bvh.mjs && node test/mech3d-materials.mjs && node test/mech3d-contacts.mjs && node test/mech3d-import.mjs && node test/mech3d-surface.mjs && node test/mech3d-optics.mjs && node test/mech3d-scene.mjs && node test/mech3d-pick.mjs && node test/mech3d-xform.mjs && node test/mech3d-led.mjs && node test/mech3d-line.mjs && node test/mech3d-place.mjs && node test/mech3d-tally.mjs",
+    "test:mech3d-mc": "node test/mech3d-mc.mjs && node test/mech3d-v1.mjs && node test/mech3d-job.mjs",
     "test:l2": "node test/l2-mc.mjs && node test/l2-diffusion.mjs && node test/l2-table.mjs && node test/l2-milky.mjs && node test/l2-fft.mjs && node test/l2-cavity.mjs && node test/l2-integration.mjs && node test/l2-fit.mjs && node test/l2-db.mjs && node test/l2-mie.mjs"
   },
   "keywords": ["lighting", "optics", "uniformity", "led", "dfm", "simulator"],
