@@ -553,10 +553,10 @@ export function recognizeLine(parts, faces, dir) {
     if (R.cell > want * 1.001 && (ex / want + 7) * (ey / want + 7) <= 4e6) { R = rasterize(tris, want); topo = cleanTopology(R); dt = distanceTransform(R); W0 = ridgeWidth(R, dt); }
   }
   const cell = R.cell;
-  // 구멍 가르기: 고리의 안쪽(넓이 > 4W² 또는 크기 > 3W)만 '닫힌 고리'로 센다. 더 작은 구멍(나사 보스 등)은 중심선용 마스크에서만 메우고
+  // 구멍 가르기: 등가 지름 2·√(넓이/π) ≥ 띠 폭 W(능선 중앙값)인 구멍만 고리의 안쪽('닫힌 고리')으로 센다. 더 작은 구멍(나사 보스 등)은 중심선용 마스크에서만 메우고
   // (세선화·단면 중점), 원래 마스크는 inside()/boundaryDist() 에 그대로 둔다 → 집계는 구멍을 뺀다.
   const maskC = Uint8Array.from(R.mask), small = new Set(); let openings = 0;
-  for (const h of topo.holes) { if (h.size * cell * cell > 4 * W0 * W0 || h.ext * cell > 3 * W0) openings++; else small.add(h.id); }
+  for (const h of topo.holes) { if (2 * Math.sqrt((h.size * cell * cell) / Math.PI) >= W0) openings++; else small.add(h.id); }
   if (openings > 1) throw new Error(ERR_SHAPE);
   if (small.size) for (let k = 0; k < maskC.length; k++) if (!maskC[k] && small.has(topo.lab[k])) maskC[k] = 1;
   const closed = openings === 1, RC = small.size ? { ...R, mask: maskC } : R, dtC = small.size ? distanceTransform(RC) : dt;

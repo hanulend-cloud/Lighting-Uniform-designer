@@ -182,4 +182,15 @@ for (const rh of [0.5, 1.5, 3]) {   // N3: 띠 안의 작은 구멍(나사 보�
   let e = 0; P.forEach((p, i) => { let ds = sg * (sw[i][0] - sw[0][0]) - (p[2] - P[0][2]); ds -= L.length * Math.round(ds / L.length); e = Math.max(e, Math.abs(ds), Math.abs(fw * sw[i][1] - p[3])); });
   ok(L.closed && e < 0.1, `경주로 260+R20: 셀 ${L.data.raster.cell.toFixed(3)}, (s,w) 최대 오차 ${e.toFixed(3)} (<0.1), ${ms.toFixed(0)}ms`);
 }
+{   // 넓은 고리 R20 폭 16(r 12..28): 구멍 지름 24 ≥ 폭 16 → 닫힌 고리
+  let L = null, msg = ''; try { L = recog(annulusTris(0, 0, 12, 28, 512)); } catch (e) { msg = e.message; }
+  ok(L && L.kind === 'circle' && L.closed && Math.abs(L.length - 40 * Math.PI) <= 0.3, `넓은 고리 R20 폭 16: ${L ? `${L.kind}, closed=${L.closed}, 둘레 ${L.length.toFixed(3)} (${(40 * Math.PI).toFixed(3)}±0.3)` : msg}`);
+  if (L) {
+    const P = []; for (let k = 0; k < 24; k++) { const th = (2 * Math.PI * k) / 24; for (const f of [0, 0.4, -0.4]) { const r = 20 + f * 8; P.push([r * Math.cos(th), r * Math.sin(th), 20 * th, -f * 8]); } }
+    const sw = P.map(([x, y]) => L.toSW(x, y)); let d = sw[3][0] - sw[0][0]; d -= L.length * Math.round(d / L.length); const sg = d < 0 ? -1 : 1;
+    const k = P.findIndex((p) => p[3] !== 0), fw = sw[k][1] * P[k][3] < 0 ? -1 : 1;
+    let e = 0; P.forEach((p, i) => { let ds = sg * (sw[i][0] - sw[0][0]) - (p[2] - P[0][2]); ds -= L.length * Math.round(ds / L.length); e = Math.max(e, Math.abs(ds), Math.abs(fw * sw[i][1] - p[3])); });
+    ok(e <= 0.2, `V3D-5 넓은 고리 R20 폭 16: (s,w) 최대 오차 ${e.toFixed(3)} (≤0.2)`);
+  }
+}
 done();
