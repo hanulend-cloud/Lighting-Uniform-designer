@@ -27,6 +27,14 @@ ok(ramp(0).every((v, k) => Math.abs(v - [0x20, 0x30, 0x6e][k] / 255) < 1e-12) &&
 { const m = extractFaces(top, new Set([1])), s = subdivide(m, 0.5), c = subdivide(m, 0.01, 1000);
   ok(Math.abs(area(s) - 600) < 0.01 && maxEdge(s) <= 0.5 + 1e-6 && s.triangles.length / 3 === 2 * 201 * 201, `subdivide: 면적 ${area(s).toFixed(4)} 보존, 최대 변 ${maxEdge(s).toFixed(4)} ≤ 0.5, 삼각형 ${s.triangles.length / 3}`);
   ok(c.triangles.length / 3 <= 1000 && c.triangles.length / 3 >= 2 && Math.abs(area(c) - 600) < 0.01, `subdivide 상한: ${c.triangles.length / 3} ≤ 1000`); }
+{   // subdivide 상한: 원본 삼각형이 이미 상한보다 많으면 세분하지 않음(n=1), 가느다란 삼각형 하나가 n² 로 폭주하지 않음
+  const many = { positions: Float32Array.from([0, 0, 0, 1, 0, 0, 0, 1, 0]), triangles: Uint32Array.from(Array.from({ length: 30 }, () => [0, 1, 2]).flat()) };
+  const r = subdivide(many, 0.01, 10);
+  ok(r.triangles.length / 3 === 30, `원본 30개 > 상한 10 → 세분 없음(${r.triangles.length / 3}개)`);
+  const sliver = { positions: Float32Array.from([0, 0, 0, 100, 0, 0, 0, 0.01, 0]), triangles: Uint32Array.from([0, 1, 2]) };
+  const sl = subdivide(sliver, 0.5, 1000);
+  ok(sl.triangles.length / 3 <= 1000 && sl.triangles.length / 3 >= 1, `가느다란 삼각형: ${sl.triangles.length / 3}개 ≤ 1000`);
+}
 {   // 유효 칸 중심 정점 → 그 칸(값 = 집계 지도), 폭 밖 정점 → 같은 s 행의 가장 가까운 유효 칸
   const pts = [], want = [];
   for (let i = 0; i < G.ns; i++) for (let j = 0; j < G.nw; j++) {

@@ -28,8 +28,9 @@ export function subdivide(m, maxEdge, maxTris = 200000) {
   const d = (a, b) => Math.hypot(P[3 * a] - P[3 * b], P[3 * a + 1] - P[3 * b + 1], P[3 * a + 2] - P[3 * b + 2]);
   for (let t = 0; t < nT; t++) { const a = T[3 * t], b = T[3 * t + 1], c = T[3 * t + 2]; Lmax[t] = Math.max(d(a, b), d(b, c), d(c, a)); }
   let e = maxEdge;
-  const nOf = (t) => Math.max(1, Math.ceil(Lmax[t] / e - 1e-9));
-  for (;;) { let tot = 0; for (let t = 0; t < nT; t++) tot += nOf(t) ** 2; if (tot <= maxTris || e > 1e9) break; e *= 1.25; }
+  const nCap = Math.max(1, Math.floor(Math.sqrt(maxTris)));   // 삼각형 하나가 n² 로 폭주하지 않게
+  const nOf = (t) => Math.min(nCap, Math.max(1, Math.ceil(Lmax[t] / e - 1e-9)));   // 각자 자기 최장 변으로
+  for (;;) { let tot = 0; for (let t = 0; t < nT; t++) tot += nOf(t) ** 2; if (tot <= maxTris || tot === nT || e > 1e9) break; e *= 1.25; }   // tot === nT: 전부 n=1(더 줄일 수 없음)
   const pos = [], tri = [];
   for (let t = 0; t < nT; t++) {
     const n = nOf(t), A = 3 * T[3 * t], B = 3 * T[3 * t + 1], C = 3 * T[3 * t + 2], base = pos.length / 3;
@@ -58,6 +59,7 @@ function nearestValid(G, s, w) {
   let i = Math.floor(s / G.ds);
   i = G.closed ? ((i % G.ns) + G.ns) % G.ns : Math.max(0, Math.min(G.ns - 1, i));
   const j = Math.max(0, Math.min(G.nw - 1, Math.floor((w - G.w0) / G.cell)));
+  if (G.valid[i * G.nw + j]) return i * G.nw + j;   // 자기 칸이 유효하면 바로
   for (let di = 0; di < G.ns; di++) {
     for (const sg of di ? [-1, 1] : [1]) {
       let ii = i + sg * di;

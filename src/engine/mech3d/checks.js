@@ -11,8 +11,8 @@ const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a
 const isTrans = (mspec, q) => (mspec.parts[q]?.material?.kind ?? 'opaque') !== 'opaque';
 const vtx = (P, i) => [P[3 * i], P[3 * i + 1], P[3 * i + 2]];
 function triInfo(P, T, t) {
-  const a = vtx(P, T[3 * t]), b = vtx(P, T[3 * t + 1]), c = vtx(P, T[3 * t + 2]), n = cross(sub(b, a), sub(c, a)), l = Math.hypot(...n) || 1;
-  return { n: n.map((v) => v / l), area: l / 2, c: [(a[0] + b[0] + c[0]) / 3, (a[1] + b[1] + c[1]) / 3, (a[2] + b[2] + c[2]) / 3] };
+  const a = vtx(P, T[3 * t]), b = vtx(P, T[3 * t + 1]), c = vtx(P, T[3 * t + 2]), n = cross(sub(b, a), sub(c, a)), l = Math.hypot(...n), ln = l || 1;   // 퇴화 삼각형은 area 0
+  return { n: n.map((v) => v / ln), area: l / 2, c: [(a[0] + b[0] + c[0]) / 3, (a[1] + b[1] + c[1]) / 3, (a[2] + b[2] + c[2]) / 3] };
 }
 
 // 점 p 가 닫힌 메쉬(부품) 안인가 — 반직선 교차 수의 홀짝
@@ -41,18 +41,21 @@ export function triBoxOverlap(c, h, a, b, d) {
 
 // ① LED–부품 간섭: 발광점(축 방향 lift 띄움)이 부품 안 / LED 몸체 외곽 상자(tol 만큼 줄임)가 부품 삼각형과 겹침 — 각각 1건
 // emitters: [{pos, axis}], bodies: [{led, lo:[3], hi:[3]}](LED STEP 의 LED 몸체 외곽, 월드 좌표)
-export function checkInterference({ rt, emitters = [], bodies = [], tol = 0.02, lift = 0.05 }) {
+// mspec 가 있으면 투과 부품 안의 발광점(포팅 LED)은 'potted' 경고. exclude: 검사에서 뺄 부품 번호(LED STEP 의 PCB 등)
+export function checkInterference({ rt, mspec = null, emitters = [], bodies = [], tol = 0.02, lift = 0.05, exclude = [] }) {
+  const ex = new Set(exclude);
   if (!emitters.length && !bodies.length) return { status: 'na', count: 0, items: [] };
   const items = [], cand = [];
   emitters.forEach((e, i) => {
     const al = Math.hypot(...e.axis) || 1, q = e.pos.map((v, k) => v + (lift * e.axis[k]) / al);
-    rt.parts.forEach((part, p) => { if (insidePart(part, q)) items.push({ led: i, part: p, kind: 'inside', pos: e.pos }); });
+    rt.parts.forEach((part, p) => { if (!ex.has(p) && insidePart(part, q)) items.push({ led: i, part: p, kind: mspec && isTrans(mspec, p) ? 'potted' : 'inside', pos: e.pos }); });
   });
   for (const b of bodies) {
     const lo = b.lo.map((v) => v + tol), hi = b.hi.map((v) => v - tol);
     if (lo.some((v, k) => v > hi[k])) continue;
     const c = lo.map((v, k) => (v + hi[k]) / 2), h = lo.map((v, k) => (hi[k] - v) / 2);
     rt.parts.forEach((part, p) => {
+      if (ex.has(p)) return;
       const P = part.positions, T = part.triangles;
       let hit = false;
       for (const t of queryBox(part.bvh, lo, hi, cand)) {
@@ -62,7 +65,8 @@ export function checkInterference({ rt, emitters = [], bodies = [], tol = 0.02, 
       if (!hit && insidePart(part, c)) items.push({ led: b.led, part: p, kind: 'body-inside', pos: c });
     });
   }
-  return { status: items.length ? 'bad' : 'ok', count: items.length, items };
+  const bad = items.some((x) => x.kind !== 'potted');
+  return { status: bad ? 'bad' : items.length ? 'warn' : 'ok', count: items.length, items };
 }
 
 // 축 axis 둘레 반각 halfDeg 원뿔 안 n 방향(cos 균등 + 황금각 나선, 결정적)
@@ -93,6 +97,7 @@ function traceToObs(rt, mspec, obsParts, o, d) {
 // ② LED–커버 거리·도달: LED 마다 지향각 안 nRays 광선 중 관측 부품에 닿는 비율, 축 광선의 관측 부품까지 거리
 export function checkReach({ rt, mspec, emitters = [], obsParts, beam = 120, nRays = 64, minReach = defaultChecks().minReach }) {
   if (!emitters.length || !obsParts?.size) return { status: 'na', minReach: null, minDist: null, items: [] };
+  nRays = Math.max(1, nRays);
   const half = Math.min(89, beam / 2);
   const items = emitters.map((e, i) => {
     let n = 0; const blk = new Map();
@@ -114,7 +119,7 @@ export function checkThinWall({ rt, mspec, minWall = defaultChecks().minWall, sa
   rt.parts.forEach((part, p) => {
     if (!isTrans(mspec, p)) return;
     const P = part.positions, T = part.triangles, nT = T.length / 3, order = [];
-    for (let t = 0; t < nT; t++) order.push([t, triInfo(P, T, t).area]);
+    for (let t = 0; t < nT; t++) { const ar = triInfo(P, T, t).area; if (ar >= 1e-9) order.push([t, ar]); }   // 퇴화(면적 0) 삼각형 제외
     order.sort((x, y) => y[1] - x[1]);
     let mn = Infinity, at = null;
     for (const [t] of order.slice(0, samples)) {
@@ -145,10 +150,10 @@ export function checkLeak({ leak, escaped, maxLeak = defaultChecks().maxLeak }) 
 }
 
 // 기하 점검 ①②③ 묶음 — 기준값은 mspec.checks(없으면 기본)
-export function runGeomChecks({ rt, mspec, emitters = [], bodies = [], obsParts = new Set(), beam = 120 }) {
+export function runGeomChecks({ rt, mspec, emitters = [], bodies = [], obsParts = new Set(), beam = 120, exclude = [] }) {
   const C = { ...defaultChecks(), ...(mspec.checks ?? {}) };
   return {
-    interference: checkInterference({ rt, emitters, bodies }),
+    interference: checkInterference({ rt, mspec, emitters, bodies, exclude }),
     reach: checkReach({ rt, mspec, emitters, obsParts, beam, minReach: C.minReach }),
     wall: checkThinWall({ rt, mspec, minWall: C.minWall }),
   };

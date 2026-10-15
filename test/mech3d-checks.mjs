@@ -48,6 +48,36 @@ const mk = (meshes, kinds) => ({ rt: buildSceneMesh('t', meshes), mspec: { parts
   const t3 = mk([boxMesh(0, 0, 0, 5, 5, 5)], ['opaque']);
   ok(checkThinWall({ rt: t3.rt, mspec: t3.mspec }).status === 'na', '투과 부품 없음 → na');
 }
+{   // ③-b 구 껍데기(극점에 퇴화 삼각형 다수): 면적 0 삼각형이 샘플을 채워 na 가 되면 안 됨
+  const shell = (R, t, rings = 180, seg = 360) => {
+    const P = [], T = [], F = [];
+    const sphere = (r, flip) => {
+      const base = P.length / 3;
+      for (let i = 0; i <= rings; i++) for (let j = 0; j < seg; j++) { const th = (Math.PI * i) / rings, ph = (2 * Math.PI * j) / seg; const pole = i === 0 || i === rings; P.push(pole ? 0 : r * Math.sin(th) * Math.cos(ph), pole ? 0 : r * Math.sin(th) * Math.sin(ph), r * Math.cos(th)); }   // 극점은 정확히 한 점(퇴화)
+      for (let i = 0; i < rings; i++) for (let j = 0; j < seg; j++) {
+        const a = base + i * seg + j, b = base + i * seg + ((j + 1) % seg), c = base + (i + 1) * seg + j, d = base + (i + 1) * seg + ((j + 1) % seg);
+        const tr = flip ? [[a, b, c], [b, d, c]] : [[a, c, b], [b, c, d]];
+        for (const q of tr) { T.push(...q); F.push(flip ? 1 : 0); }
+      }
+    };
+    sphere(R, false); sphere(R - t, true);
+    return { positions: Float32Array.from(P), triangles: Uint32Array.from(T), faceIds: Uint32Array.from(F), faceCount: 2 };
+  };
+  const s3 = mk([shell(30, 3)], ['clear']), w3 = checkThinWall({ rt: s3.rt, mspec: s3.mspec });
+  ok(w3.status === 'ok' && Math.abs(w3.min - 3) < 0.1, `구 껍데기 3mm(퇴화 삼각형 포함): 최소 ${w3.min?.toFixed(3)}mm, 상태 ${w3.status}`);
+  const s5 = mk([shell(30, 0.5)], ['clear']), w5 = checkThinWall({ rt: s5.rt, mspec: s5.mspec });
+  ok(w5.status === 'warn' && Math.abs(w5.min - 0.5) < 0.05, `구 껍데기 0.5mm → 경고(최소 ${w5.min?.toFixed(3)})`);
+}
+{   // ①-b 포팅 LED(투과 부품 안) = 경고, 불투명 안 = 불량, 제외 부품 = 무시, nRays 0 방어
+  const body = boxMesh(0, 0, 0, 40, 40, 10), em = [{ pos: [20, 20, 5], axis: [0, 0, 1] }];
+  const pt = mk([body], ['clear']), pq = mk([body], ['opaque']);
+  const r1 = checkInterference({ rt: pt.rt, mspec: pt.mspec, emitters: em, bodies: [] }), r2 = checkInterference({ rt: pq.rt, mspec: pq.mspec, emitters: em, bodies: [] });
+  ok(r1.status === 'warn' && r1.items[0].kind === 'potted' && r2.status === 'bad' && r2.items[0].kind === 'inside', `포팅: 투과 ${r1.status}/${r1.items[0]?.kind}, 불투명 ${r2.status}/${r2.items[0]?.kind}`);
+  const r3 = checkInterference({ rt: pq.rt, mspec: pq.mspec, emitters: em, bodies: [{ led: 0, lo: [18, 18, 3], hi: [22, 22, 5] }], exclude: [0] });
+  ok(r3.status === 'ok' && r3.count === 0, 'PCB 등 제외 부품(exclude)은 간섭에서 뺌');
+  const z = mk([boxMesh(0, 0, 10, 20, 20, 2)], ['milky']);
+  ok(checkReach({ rt: z.rt, mspec: z.mspec, emitters: [{ pos: [10, 10, 0], axis: [0, 0, 1] }], obsParts: new Set([0]), beam: 120, nRays: 0 }).items[0].reach <= 1, 'nRays 0 → 1 로 보정(NaN 없음)');
+}
 {   // ④ 새는 빛: 청크 결과 합산 → 비율·가장 큰 면
   const m = mergeLeak([{ leak: { '2|3': 0.3, '-1|-1': 0.05 }, ledger: { escaped: 1 } }, { leak: { '2|3': 0.1 }, ledger: { escaped: 1 } }]);
   const r = checkLeak({ ...m, maxLeak: 0.2 });
