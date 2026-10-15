@@ -15,5 +15,6 @@ export function transformMesh(m, offset = [0, 0, 0], rot = [0, 0, 0]) {
     const q = applyPoint(R, [m.positions[i], m.positions[i + 1], m.positions[i + 2]], offset);
     P[i] = q[0]; P[i + 1] = q[1]; P[i + 2] = q[2];
   }
-  return { ...m, positions: P };
+  const { bvh, ...rest } = m;   // 위치가 바뀌었으므로 캐시된 BVH 는 버림
+  return { ...rest, positions: P };
 }

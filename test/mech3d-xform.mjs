@@ -15,4 +15,6 @@ ok(L.kind === 'none' && L.solder === '백색' && L.manual.count === 10 && SOLDER
 ok(O.faces.length === 0 && O.cone === 30 && O.cell === 0.5 && O.edgeExcl === 0.5 && O.targetLen === 0.8, '관측 기본값');
 const old = { name: 'x', parts: [], contacts: [] };
 ok(migrateMech3d(old).light.kind === 'none' && old.observe.faces.length === 0, '마이그레이션: 빠진 필드 채움');
+const mb = { ...m, bvh: { x: 1 } };
+ok(!('bvh' in transformMesh(mb, [1, 0, 0], [0, 0, 0])), '변환 사본은 캐시된 bvh 를 버림');
 done();

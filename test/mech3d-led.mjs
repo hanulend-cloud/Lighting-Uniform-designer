@@ -25,4 +25,31 @@ ok(Math.abs(faceInfo(parts[1], 7).area - 1) < 1e-6, '발광면 면적 1mm²');
 const shuffled = { ...parts[2], faceIds: Uint32Array.from(parts[2].faceIds, (f) => (f === 7 ? 3 : f === 3 ? 7 : f)) };
 const em2 = findEmitters([parts[0], parts[1], shuffled], [1, 2], 1, 7);
 ok(em2[1].face === 3 && !em2[1].needsCheck, `면 순서 다름 → 기술자로 발광면 찾음(면 ${em2[1].face})`);
+
+// --- 리뷰 수정 ---
+// 1) xAxis: 2×1 직사각형 면의 장축, 회전 후에도 정확. 정사각형은 null
+const rect = boxMesh(-1, -0.5, 0, 2, 1, 1);                       // 윗면(face 1) 2×1, 장축 = x
+const rr = transformMesh(rect, [3, 1, 0], [0, 0, 37]);
+const longAx = [Math.cos(37 * Math.PI / 180), Math.sin(37 * Math.PI / 180), 0];
+const dotA = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+ok(Math.abs(dotA(faceInfo(rect, 1).xAxis, [1, 0, 0])) > 0.9999, '직사각형 장축(원본)');
+ok(Math.abs(dotA(faceInfo(rr, 1).xAxis, longAx)) > 0.9999, '직사각형 장축(37° 회전 후)');
+ok(faceInfo(boxMesh(-1, -1, 0, 2, 2, 1), 1).xAxis === null, '정사각형 면 → xAxis null');
+// 2) 대칭 면: 2×2×1 상자 LED, 기준 발광면 = 윗면(1). 면 번호 0·1 을 맞바꿔(윗면=0) 면 순서 일치가 바닥을 가리키게 함
+const pcbB = boxMesh(-5, -5, -1, 30, 10, 1);
+const b0 = boxMesh(-1, -1, 0, 2, 2, 1), b1 = transformMesh(b0, [10, 0, 0], [0, 0, 0]);
+const b1s = { ...b1, faceIds: Uint32Array.from(b1.faceIds, (f) => (f === 1 ? 0 : f === 0 ? 1 : f)) };
+const bp = [pcbB, b0, b1s];
+const emB = findEmitters(bp, [1, 2], 1, 1, 0);
+ok(emB[0].axis[2] > 0.99 && emB[1].face === 0 && !emB[1].needsCheck && emB[1].axis[2] > 0.99, `대칭 면: PCB 반대쪽(윗면) 선택(face ${emB[1].face}, axis z ${emB[1].axis?.[2]})`);
+const emC = findEmitters([pcbB, led0], [1], 1, 0, 0);   // 비대칭 LED 의 바닥면(PCB 쪽) 을 기준으로 → 확인 필요
+ok(emC.every((e) => e.needsCheck), 'PCB 를 향한 발광축 → needsCheck');
+// 3) 닫힌 면(원통형) → degenerate
+const cyl = { positions: Float32Array.from([0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 1, 0, 0]), triangles: Uint32Array.from([0, 1, 2, 3, 4, 5]), faceIds: Uint32Array.from([0, 0]), faceCount: 1 };
+ok(faceInfo(cyl, 0).degenerate === true, '법선 합 0 인 면 → degenerate');
+ok(findEmitters([cyl], [0], 0, 0)[0].needsCheck, 'degenerate 발광면 → needsCheck');
+// 4) pcbIndex: 큰 먼 부품보다 LED 근처 부품
+const far = boxMesh(500, 500, 0, 100, 100, 100);
+ok(pcbIndex([far, ...parts.slice(0, 6)], [2, 3, 4, 5, 6]) === 1, 'PCB = LED 근처의 최대 부피(먼 큰 부품 제외)');
+ok(pcbIndex([far], []) === 0 && pcbIndex([parts[1]], [0]) === -1, 'pcbIndex: LED 없으면 최대 부피, 후보 없으면 -1');
 done();
