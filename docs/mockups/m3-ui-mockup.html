@@ -1,0 +1,230 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>3D 기구 모드 UI 시안</title>
+<style>
+  :root { --bg:#eef0f4; --panel:#fff; --line:#d9dde5; --text:#1d2330; --mut:#6b7385; --acc:#1f6fd1; --accbg:#e4effc; --ok:#2e8b57; --bad:#c8402f; --warn:#b7791f; --vp:#141a26; }
+  * { box-sizing:border-box; }
+  body { margin:0; font:13px/1.45 "Segoe UI","Malgun Gothic",sans-serif; color:var(--text); background:var(--bg); }
+  .app { display:grid; grid-template-rows:auto 1fr auto; height:100vh; }
+  .note { background:#fff8e5; border-bottom:1px solid #f0dca8; padding:4px 12px; font-size:12px; color:#7a5a12; }
+  /* 명령 막대 */
+  .cmd { display:flex; gap:4px; align-items:center; padding:6px 10px; background:var(--panel); border-bottom:1px solid var(--line); flex-wrap:wrap; }
+  .cmd button { border:1px solid var(--line); background:#fff; border-radius:6px; padding:5px 10px; cursor:pointer; font:inherit; }
+  .cmd button.on { background:var(--accbg); border-color:var(--acc); color:var(--acc); }
+  .cmd .sep { width:1px; height:22px; background:var(--line); margin:0 4px; }
+  .cmd .hint { margin-left:auto; color:var(--mut); font-size:12px; }
+  /* 본문 */
+  .main { display:grid; grid-template-columns:230px minmax(0,1fr) 290px; min-height:0; }
+  .tree, .props { background:var(--panel); overflow:auto; padding:10px; }
+  .tree { border-right:1px solid var(--line); }
+  .props { border-left:1px solid var(--line); }
+  .h { font-size:11px; color:var(--mut); text-transform:none; margin:4px 0 6px; }
+  .node { padding:4px 6px; border-radius:6px; cursor:pointer; display:flex; gap:6px; align-items:center; }
+  .node:hover { background:#f2f4f8; }
+  .node.sel { background:var(--accbg); color:var(--acc); }
+  .node .b { margin-left:auto; font-size:11px; color:var(--mut); }
+  .node.child { padding-left:22px; }
+  .badge { font-size:10px; padding:1px 5px; border-radius:4px; background:#e9ecf2; color:#3c4455; }
+  .badge.milky { background:#e3edf6; } .badge.clear { background:#dcefff; color:#0d4b85; } .badge.led { background:#fff1cc; color:#7a5a12; }
+  /* 3D 뷰 */
+  .vp { position:relative; background:var(--vp); min-height:0; }
+  .vp svg { width:100%; height:100%; display:block; }
+  .vp .cube { position:absolute; right:12px; top:12px; display:grid; grid-template-columns:repeat(3,26px); gap:2px; }
+  .vp .cube span { font-size:10px; color:#cfd6e4; border:1px solid #3a4558; text-align:center; border-radius:3px; padding:2px 0; cursor:pointer; }
+  .vp .legend { position:absolute; left:12px; bottom:12px; color:#cfd6e4; font-size:11px; display:flex; gap:6px; align-items:center; }
+  .vp .legend .bar { width:120px; height:8px; border-radius:3px; background:linear-gradient(90deg,#20306e,#2a7bd5,#3fc17a,#f2d33c,#e0532a); }
+  .vp .pickhint { position:absolute; left:50%; top:10px; transform:translateX(-50%); background:rgba(31,111,209,.9); color:#fff; padding:3px 10px; border-radius:10px; font-size:12px; display:none; }
+  /* 속성 */
+  .row { display:flex; align-items:center; gap:6px; margin:6px 0; flex-wrap:wrap; }
+  .row label { color:var(--mut); min-width:70px; }
+  .row input[type=number] { width:64px; } .row select { min-width:110px; }
+  .props .group { border-top:1px solid var(--line); margin-top:10px; padding-top:8px; }
+  /* 모니터 띠 */
+  .mon { background:var(--panel); border-top:1px solid var(--line); }
+  .strip { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)) 1.4fr auto; gap:8px; padding:8px 10px; align-items:stretch; }
+  .card { background:#f6f7fa; border-radius:8px; padding:6px 10px; }
+  .card .l { font-size:11px; color:var(--mut); }
+  .card .v { font-size:20px; font-weight:600; }
+  .card .s { font-size:11px; color:var(--mut); }
+  .v.bad { color:var(--bad); } .v.ok { color:var(--ok); }
+  .rel .barw { height:6px; background:#e3e6ec; border-radius:3px; margin-top:6px; }
+  .rel .barf { height:6px; background:var(--acc); border-radius:3px; width:0%; transition:width .4s; }
+  .exp { border:1px solid var(--line); background:#fff; border-radius:6px; padding:0 10px; cursor:pointer; font:inherit; }
+  .drawer { display:none; grid-template-columns:1.2fr 1fr 1fr; gap:10px; padding:0 10px 10px; }
+  .drawer.open { display:grid; }
+  .drawer .card { background:#fff; border:1px solid var(--line); }
+  .chk { display:flex; gap:6px; align-items:center; margin:3px 0; }
+  .dot { width:8px; height:8px; border-radius:50%; } .dot.ok { background:var(--ok); } .dot.warn { background:var(--warn); } .dot.bad { background:var(--bad); }
+  canvas { width:100%; height:90px; display:block; }
+</style>
+</head>
+<body>
+<div class="app">
+  <div>
+    <div class="note">UI 시안(동작 흉내) — 실제 계산 없음. 트리·버튼·▲ 펼치기를 눌러 보세요. 값을 바꾸면 점진 계산이 다시 시작되는 모습을 흉내 냅니다.</div>
+    <div class="cmd">
+      <button>📂 기구 불러오기</button>
+      <button data-pick="led">💡 LED 지정</button>
+      <button data-pick="obs">👁 관측면</button>
+      <span class="sep"></span>
+      <button id="sec">✂ 단면(S)</button>
+      <button id="fit">⤢ 맞춤(F)</button>
+      <button>정면</button><button>위</button><button>옆</button>
+      <span class="sep"></span>
+      <button id="calcstate">⏸ 계산 중</button>
+      <span class="hint">Esc 선택 해제 · 휠 확대 · 우클릭 이동</span>
+    </div>
+  </div>
+
+  <div class="main">
+    <div class="tree">
+      <div class="h">피처 트리</div>
+      <div class="node" data-n="parts">▾ 부품 <span class="b">4</span></div>
+      <div class="node child" data-n="p1">하우징 <span class="badge">백색 85%</span></div>
+      <div class="node child sel" data-n="p2">커버 <span class="badge milky">Milky 3.0</span></div>
+      <div class="node child" data-n="p3">도광 바 <span class="badge clear">투명</span></div>
+      <div class="node child" data-n="p4">원기둥 <span class="badge">백색 85%</span></div>
+      <div class="node" data-n="light">▾ 광원 <span class="b">LED STEP</span></div>
+      <div class="node child" data-n="leds">LED ×10 <span class="badge led">피치 11.6</span></div>
+      <div class="node child" data-n="pcb">PCB <span class="badge">백색</span></div>
+      <div class="node" data-n="obs">▾ 관측면 <span class="b">1면</span></div>
+      <div class="node child" data-n="line">직선 116 × 16mm</div>
+      <div class="node" data-n="target">◎ 목표 <span class="b">0.80 / 0.80</span></div>
+      <div class="node" data-n="contacts">⧉ 접촉면 <span class="b">7</span></div>
+    </div>
+
+    <div class="vp">
+      <div class="pickhint" id="pickhint"></div>
+      <svg viewBox="0 0 800 460" preserveAspectRatio="xMidYMid meet">
+        <defs>
+          <linearGradient id="lumgrad" x1="0" x2="1" y1="0" y2="0">
+            <stop offset="0" stop-color="#2a7bd5"/><stop offset=".08" stop-color="#e0532a"/><stop offset=".14" stop-color="#3fc17a"/>
+            <stop offset=".2" stop-color="#e0532a"/><stop offset=".26" stop-color="#3fc17a"/><stop offset=".32" stop-color="#e0532a"/>
+            <stop offset=".38" stop-color="#3fc17a"/><stop offset=".44" stop-color="#f2d33c"/><stop offset=".5" stop-color="#3fc17a"/>
+            <stop offset=".56" stop-color="#f2d33c"/><stop offset=".62" stop-color="#3fc17a"/><stop offset=".68" stop-color="#e0532a"/>
+            <stop offset=".74" stop-color="#3fc17a"/><stop offset=".8" stop-color="#e0532a"/><stop offset=".86" stop-color="#3fc17a"/>
+            <stop offset=".92" stop-color="#e0532a"/><stop offset="1" stop-color="#2a7bd5"/>
+          </linearGradient>
+        </defs>
+        <polygon points="130,250 640,140 700,175 190,290" fill="#3a4252" stroke="#59627a"/>
+        <polygon points="190,290 700,175 700,215 190,330" fill="#2c3240" stroke="#59627a"/>
+        <polygon id="obsface" points="140,252 638,145 690,174 186,284" fill="url(#lumgrad)" opacity=".9"/>
+        <g fill="#f2c94c">
+          <circle cx="215" cy="268" r="2.5"/><circle cx="265" cy="257" r="2.5"/><circle cx="315" cy="246" r="2.5"/><circle cx="365" cy="235" r="2.5"/><circle cx="415" cy="224" r="2.5"/>
+          <circle cx="465" cy="213" r="2.5"/><circle cx="515" cy="202" r="2.5"/><circle cx="565" cy="191" r="2.5"/><circle cx="615" cy="180" r="2.5"/><circle cx="660" cy="170" r="2.5"/>
+        </g>
+        <g id="hot"><line x1="315" y1="200" x2="315" y2="238" stroke="#ff6b4a" stroke-width="2"/><text x="300" y="194" fill="#ff8a6e" font-size="12">핫스팟 s=42</text></g>
+        <g id="dark"><line x1="160" y1="300" x2="165" y2="262" stroke="#7fb2ff" stroke-width="2"/><text x="120" y="318" fill="#9cc3ff" font-size="12">암부 s=2</text></g>
+        <g id="chkmark" style="display:none"><circle cx="440" cy="300" r="9" fill="none" stroke="#ff5a36" stroke-width="2"/><text x="455" y="304" fill="#ff8a6e" font-size="12">간섭: LED 3 ↔ 도광 바</text></g>
+        <line id="secplane" x1="400" y1="110" x2="430" y2="360" stroke="#7fd3e0" stroke-dasharray="6 4" style="display:none"/>
+      </svg>
+      <div class="cube"><span>위</span><span>뒤</span><span>↻</span><span>왼</span><span>정면</span><span>오른</span><span>⟲</span><span>아래</span><span>⤢</span></div>
+      <div class="legend">휘도 <span>낮음</span><span class="bar"></span><span>높음</span></div>
+    </div>
+
+    <div class="props" id="props"></div>
+  </div>
+
+  <div class="mon">
+    <div class="strip">
+      <div class="card"><div class="l">길이 방향 U <span id="tl">목표 0.80</span></div><div class="v bad" id="ul">–</div><div class="s" id="ulj">계산 중…</div></div>
+      <div class="card"><div class="l">폭 방향 U <span>목표 0.80</span></div><div class="v bad" id="uw">–</div><div class="s" id="uwj">계산 중…</div></div>
+      <div class="card"><div class="l">광 효율</div><div class="v" id="eff">–</div><div class="s">LED 빛 중 관측면 출사</div></div>
+      <div class="card"><div class="l">평균 휘도</div><div class="v" id="lum">–</div><div class="s">광속 입력 시 cd/m²</div></div>
+      <div class="card rel"><div class="l">신뢰도(잡음)</div><div class="v" id="noise" style="font-size:16px">–</div><div class="barw"><div class="barf" id="barf"></div></div><div class="s" id="phot">광자 0</div></div>
+      <button class="exp" id="exp">▲ 펼치기</button>
+    </div>
+    <div class="drawer" id="drawer">
+      <div class="card"><div class="l">길이 방향 밝기 분포 (s)</div><canvas id="prof" width="600" height="120"></canvas></div>
+      <div class="card"><div class="l">위치</div>
+        <div class="chk">🔥 핫스팟 s = 42.0 mm (LED 4 위)</div>
+        <div class="chk">🌑 암부 s = 2.0 mm (끝단)</div>
+        <div class="chk">↔ 폭 최저 창 중심 s = 58.6 mm</div>
+      </div>
+      <div class="card"><div class="l">설계 점검</div>
+        <div class="chk" data-chk><span class="dot bad"></span>LED–부품 간섭 1건 (LED 3 ↔ 도광 바)</div>
+        <div class="chk"><span class="dot ok"></span>LED–커버 거리 6.5 mm · 도달 92%</div>
+        <div class="chk"><span class="dot warn"></span>살두께 최소 0.9 mm (커버 모서리)</div>
+        <div class="chk"><span class="dot ok"></span>빛 새는 틈 4% (기준 20%)</div>
+      </div>
+    </div>
+  </div>
+</div>
+<script>
+const $ = (s) => document.querySelector(s), $$ = (s) => document.querySelectorAll(s);
+const PROPS = {
+  p2: `<div class="h">속성 · 커버</div>
+    <div class="row"><label>부품 소재</label><select><option>Milky</option><option>투명</option><option>반투과 백색</option><option>불투명</option></select></div>
+    <div class="row"><label>소재 DB</label><select><option>추상 Milky</option><option>Makrolon DQ5122</option><option>Makrolon DQ5142</option></select></div>
+    <div class="row"><label>Milky</label><input type="range" min="0" max="9.9" step="0.1" value="3" id="milky"><b id="mv">3.0</b></div>
+    <div class="group"><div class="h">면 처리 (부품 기본)</div><div class="row"><select><option>광택</option><option>백색 확산 반사</option><option>금속 증착</option><option>흑색</option></select></div>
+    <div class="row" style="color:var(--mut)">3D 에서 면을 클릭하면 그 면만 다르게 지정</div></div>`,
+  p3: `<div class="h">속성 · 도광 바</div><div class="row"><label>부품 소재</label><select><option>투명</option></select></div><div class="row"><label>수지</label><select><option>PC</option><option>PMMA</option></select></div><div class="row"><label>투과율</label><input type="number" value="100">% @ <input type="number" value="2">mm</div>`,
+  p1: `<div class="h">속성 · 하우징</div><div class="row"><label>부품 소재</label><select><option>불투명</option></select></div><div class="row"><label>면 처리</label><select><option>백색 확산 반사</option></select> <input type="number" value="85">%</div>`,
+  p4: `<div class="h">속성 · 원기둥</div><div class="row"><label>부품 소재</label><select><option>불투명</option></select></div>`,
+  leds: `<div class="h">속성 · LED (LED STEP)</div>
+    <div class="row"><label>인식</label>10개 · 발광면 렌즈 윗면 · PCB 부품 1</div>
+    <div class="row"><button>LED 발광면 다시 지정</button><button>LED 제외/포함</button></div>
+    <div class="group"><div class="h">배광·발광면</div><div class="row"><label>배광</label><select><option>램버시안</option><option>가우시안</option></select> 지향각 <input type="number" value="120">°</div>
+    <div class="row"><label>광속</label><input type="number" value="0"> lm/개 (0 = 상대값)</div></div>
+    <div class="group"><div class="h">위치 보정</div><div class="row">x <input type="number" value="0"> y <input type="number" value="0"> z <input type="number" value="0"></div></div>`,
+  pcb: `<div class="h">속성 · PCB</div><div class="row"><label>솔더 색</label><select><option>백색</option><option>녹색</option><option>흑색</option></select></div>`,
+  light: `<div class="h">속성 · 광원</div><div class="row"><label>방식</label><select><option>LED STEP 불러오기</option><option>관측 라인 따라 직접 배치</option></select></div>`,
+  parts: `<div class="h">부품</div><div class="row" style="color:var(--mut)">트리에서 부품을 고르면 소재·면 처리를 편집합니다.</div>`,
+  obs: `<div class="h">속성 · 관측면</div><div class="row"><button>관측면 추가/제거 (클릭)</button></div><div class="row"><label>관측 방향</label>자동 (면 법선) <button>직접 입력</button></div><div class="row"><label>관측 원뿔</label><input type="number" value="90">° <span style="color:var(--mut)">90 = 출사도</span></div>`,
+  line: `<div class="h">속성 · 관측 라인</div><div class="row"><label>인식</label>직선 · 길이 116.0 · 폭 16.0 mm</div><div class="row"><label>s 구간</label><input placeholder="자동 1.2"> mm</div><div class="row"><label>w 구간</label><input placeholder="자동 2.0"> mm</div><div class="row"><label>폭 판정 창</label><input placeholder="자동 11.6"> mm</div><div class="row"><label>가장자리 제외</label><input type="number" value="0.5"> mm</div>`,
+  target: `<div class="h">속성 · 목표</div><div class="row"><label>길이 U</label><input type="number" value="0.8" step="0.05" id="tlen"></div><div class="row"><label>폭 U</label><input type="number" value="0.8" step="0.05"></div><div class="row"><label>잡음 목표</label><input type="number" value="2">% <span style="color:var(--mut)">도달하면 계산 자동 멈춤</span></div><div class="row"><label>최소 살두께</label><input type="number" value="0.8"> mm</div>`,
+  contacts: `<div class="h">속성 · 접촉면</div><div class="row" style="color:var(--mut)">체크 = 공기층 없음(이중사출·접착)</div>${['하우징 ↔ 커버 232','하우징 ↔ 커버 32','하우징 ↔ 도광 바 24','커버 ↔ 도광 바 464'].map(t=>`<div class="row"><input type="checkbox" checked> ${t} mm²</div>`).join('')}`,
+};
+function select(n) {
+  $$('.node').forEach((x) => x.classList.toggle('sel', x.dataset.n === n));
+  $('#props').innerHTML = PROPS[n] ?? '';
+  const m = $('#milky'); if (m) m.oninput = () => { $('#mv').textContent = (+m.value).toFixed(1); restart(); };
+  const t = $('#tlen'); if (t) t.oninput = () => { target = +t.value; $('#tl').textContent = '목표 ' + target.toFixed(2); judge(); };
+  $('#props').querySelectorAll('select,input').forEach((x) => { if (x.id !== 'milky' && x.id !== 'tlen') x.onchange = restart; });
+}
+$$('.node').forEach((x) => (x.onclick = () => select(x.dataset.n)));
+select('p2');
+$$('[data-pick]').forEach((b) => (b.onclick = () => {
+  const on = !b.classList.contains('on'); $$('[data-pick]').forEach((x) => x.classList.remove('on')); b.classList.toggle('on', on);
+  const h = $('#pickhint'); h.style.display = on ? 'block' : 'none';
+  h.textContent = b.dataset.pick === 'led' ? 'LED 지정: 기구물이 투시되고 LED 근처를 클릭하면 선택' : '관측면: 기구 면을 클릭해 추가/제거';
+}));
+$('#sec').onclick = () => { const s = $('#secplane'); s.style.display = s.style.display === 'none' ? '' : 'none'; $('#sec').classList.toggle('on'); };
+$('#exp').onclick = () => { const d = $('#drawer'); d.classList.toggle('open'); $('#exp').textContent = d.classList.contains('open') ? '▼ 접기' : '▲ 펼치기'; drawProf(); };
+document.querySelector('[data-chk]').onclick = () => { const c = $('#chkmark'); c.style.display = c.style.display === 'none' ? '' : 'none'; };
+// 점진 계산 흉내: 값이 참값으로 수렴하고 잡음이 줄어듦
+let target = 0.8, n = 0, timer = null, running = true;
+const TRUE = { ul: 0.62, uw: 0.21, eff: 16.4, lum: 0 };
+function judge() {
+  const cur = +$('#ul').dataset.v || 0, cw = +$('#uw').dataset.v || 0;
+  $('#ul').className = 'v ' + (cur >= target ? 'ok' : 'bad'); $('#uw').className = 'v ' + (cw >= 0.8 ? 'ok' : 'bad');
+  $('#ulj').textContent = cur >= target ? '합격' : `미달 (−${(target - cur).toFixed(2)})`; $('#uwj').textContent = cw >= 0.8 ? '합격' : `미달 (−${(0.8 - cw).toFixed(2)})`;
+}
+function tick() {
+  n++; const noise = 0.25 / Math.sqrt(n), r = () => (Math.random() - 0.5) * 2 * noise;
+  const ul = Math.max(0, TRUE.ul + r() * 0.6), uw = Math.max(0, TRUE.uw + r() * 0.4);
+  $('#ul').textContent = ul.toFixed(2); $('#ul').dataset.v = ul; $('#uw').textContent = uw.toFixed(2); $('#uw').dataset.v = uw;
+  $('#eff').textContent = (TRUE.eff * (1 + r() * 0.1)).toFixed(1) + '%'; $('#lum').textContent = '상대값';
+  const pct = noise * 100; $('#noise').textContent = '±' + pct.toFixed(1) + '%';
+  $('#barf').style.width = Math.min(100, (2 / pct) * 100) + '%'; $('#phot').textContent = '광자 ' + (n * 50000).toLocaleString();
+  $('#obsface').setAttribute('opacity', (0.5 + 0.4 * Math.min(1, n / 8)).toFixed(2));
+  judge();
+  if (pct <= 2) { stop('✓ 목표 잡음 도달 — 멈춤'); }
+}
+function stop(label) { clearInterval(timer); timer = null; running = false; $('#calcstate').textContent = label ?? '▶ 계산 재개'; }
+function restart() { n = 0; clearInterval(timer); running = true; $('#calcstate').textContent = '⏸ 계산 중'; ['#ul','#uw','#eff','#lum'].forEach((s) => ($(s).textContent = '…')); timer = setInterval(tick, 1000); }
+$('#calcstate').onclick = () => (running ? stop() : restart());
+function drawProf() {
+  const c = $('#prof'), g = c.getContext('2d'); g.clearRect(0, 0, c.width, c.height);
+  g.strokeStyle = '#1f6fd1'; g.lineWidth = 2; g.beginPath();
+  for (let i = 0; i <= 116; i++) { const y = 0.6 + 0.35 * Math.cos(((i - 7.8) / 11.6) * 2 * Math.PI) ** 2 - (i < 6 || i > 110 ? 0.25 : 0); const X = (i / 116) * c.width, Y = c.height - y * c.height * 0.9; i ? g.lineTo(X, Y) : g.moveTo(X, Y); }
+  g.stroke(); g.strokeStyle = '#c8402f'; g.setLineDash([5, 4]); g.beginPath(); g.moveTo(0, c.height * 0.28); g.lineTo(c.width, c.height * 0.28); g.stroke(); g.setLineDash([]);
+}
+restart();
+</script>
+</body>
+</html>
