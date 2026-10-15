@@ -112,22 +112,35 @@ function closestOnTri(p, a, b, c) {
   return [a[0] + ab[0] * v + ac[0] * w, a[1] + ab[1] * v + ac[1] * w, a[2] + ab[2] * v + ac[2] * w];
 }
 // LED 중심에서 PCB 메쉬 최근접점으로의 단위벡터 v (PCB 가 LED 를 어느 쪽에서 받치는가). 중심이 PCB 위면 null.
+const triBoxCache = new WeakMap();   // PCB 메쉬(불변 가정) → 삼각형별 AABB [minx,miny,minz,maxx,maxy,maxz]
 function towardLed(pcbMesh, p) {
-  const P = pcbMesh.positions, T = pcbMesh.triangles;
-  let best = Infinity, q = null;
-  for (let t = 0; t < T.length / 3; t++) {
-    const vtx = [0, 1, 2].map((j) => { const k = T[t * 3 + j] * 3; return [P[k], P[k + 1], P[k + 2]]; });
-    const c = closestOnTri(p, vtx[0], vtx[1], vtx[2]), d = len(sub(p, c));
-    if (d < best) { best = d; q = c; }
+  const P = pcbMesh.positions, T = pcbMesh.triangles, nT = T.length / 3;
+  let B = triBoxCache.get(pcbMesh);
+  if (!B) {
+    B = new Float32Array(nT * 6);
+    for (let t = 0; t < nT; t++) for (let a = 0; a < 3; a++) {
+      const x = P[T[t * 3] * 3 + a], y = P[T[t * 3 + 1] * 3 + a], z = P[T[t * 3 + 2] * 3 + a];
+      B[t * 6 + a] = Math.min(x, y, z); B[t * 6 + 3 + a] = Math.max(x, y, z);
+    }
+    triBoxCache.set(pcbMesh, B);
   }
-  return best > 1e-9 ? unit(sub(p, q)) : null;
+  let best2 = Infinity, q = null;
+  for (let t = 0; t < nT; t++) {
+    const o = t * 6;
+    const dx = Math.max(B[o] - p[0], 0, p[0] - B[o + 3]), dy = Math.max(B[o + 1] - p[1], 0, p[1] - B[o + 4]), dz = Math.max(B[o + 2] - p[2], 0, p[2] - B[o + 5]);
+    if (dx * dx + dy * dy + dz * dz >= best2) continue;   // 이 삼각형은 현재 최선보다 멀 수밖에 없음
+    const i0 = T[t * 3] * 3, i1 = T[t * 3 + 1] * 3, i2 = T[t * 3 + 2] * 3;
+    const c = closestOnTri(p, [P[i0], P[i0 + 1], P[i0 + 2]], [P[i1], P[i1 + 1], P[i1 + 2]], [P[i2], P[i2 + 1], P[i2 + 2]]), d = sub(p, c), d2 = dot(d, d);
+    if (d2 < best2) { best2 = d2; q = c; }
+  }
+  return best2 > 1e-18 ? unit(sub(p, q)) : null;
 }
 const INTO = -0.3, TIE = 0.1;
 
 // 기준 LED(ref)의 발광면(face) → 인식된 LED 들의 발광 위치·축·가로축. pcb(선택) = pcbIndex 결과.
 // PCB 방향 판정은 국소적: 각 LED 에서 PCB 최근접점으로의 방향 v 와 면 법선의 내적(n·v)이 INTO 미만이면 PCB 쪽 면.
-// 면 순서 일치 면은 PCB 쪽이 아니면 신뢰. 아니면 기술자 일치 면 중 n·v 최대를 고름.
-// 선택 면과 TIE 이내로 비슷한 후보가 또 있거나(대칭 형상), 최선이 PCB 쪽이면 추측하지 않고 needsCheck.
+// 면 순서 일치 면은 PCB 쪽이 아니면 그대로 신뢰. 아니면 기술자 일치 면 중 n·v 최대를 고름.
+// 재탐색에서 선택 면과 TIE 이내로 비슷한 후보가 또 있거나(대칭 형상), 최선이 PCB 쪽이면 추측하지 않고 needsCheck.
 export function findEmitters(parts, leds, ref, face, pcb = -1) {
   const sRef = meshStats(parts[ref]), fRef = faceInfo(parts[ref], face);
   if (!fRef) throw new Error('발광면 정보를 읽을 수 없음');
@@ -143,10 +156,10 @@ export function findEmitters(parts, leds, ref, face, pcb = -1) {
       for (let k = 0; k < parts[i].faceCount; k++) { const c = faceInfo(parts[i], k); if (match(st, c)) return good(k, c); }
       return bad;
     }
+    if (ok0 && dot(fi0.n, v) >= INTO) return good(face, fi0);   // 유효한 면 순서 일치는 그대로 신뢰(동점 규칙은 재탐색에만)
     const cand = [];
     for (let k = 0; k < parts[i].faceCount; k++) { const c = k === face ? fi0 : faceInfo(parts[i], k); if (match(st, c)) cand.push({ f: k, fi: c, sc: dot(c.n, v) }); }
-    let pick = ok0 ? cand.find((c) => c.f === face) : null;
-    if (!pick || pick.sc < INTO) pick = cand.reduce((b, c) => (!b || c.sc > b.sc ? c : b), null);
+    const pick = cand.reduce((b, c) => (!b || c.sc > b.sc ? c : b), null);
     if (!pick || pick.sc < INTO || cand.some((c) => c !== pick && c.sc >= pick.sc - TIE)) return bad;
     return good(pick.f, pick.fi);
   });

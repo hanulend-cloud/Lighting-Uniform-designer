@@ -72,6 +72,11 @@ const swapIds = (m, a, b) => ({ ...m, faceIds: Uint32Array.from(m.faceIds, (f) =
 const sym = boxMesh(-1, -1, 0, 2, 2, 1), pc2 = boxMesh(-20, -10, -1, 40, 20, 1);
 const emT = findEmitters([pc2, sym, swapIds(transformMesh(sym, [10, 0, 0.1], [0, 0, 0]), 0, 1)], [1, 2], 1, 1, 0);
 ok(!emT[1].needsCheck && emT[1].axis[2] > 0.99, '위발광 대칭 상자(상·하 id 교환) → 윗면');
-const emY = findEmitters([pc2, sym, swapIds(transformMesh(sym, [10, 0, 0.1], [0, 0, 0]), 4, 5)], [1, 2], 1, 5, 0);
-ok(emY[1].needsCheck, '옆발광 대칭 상자(±x id 교환) → needsCheck');
+const emY = findEmitters([pc2, sym, swapIds(transformMesh(sym, [10, 0, 0.1], [0, 0, 0]), 5, 0)], [1, 2], 1, 5, 0);   // 면 순서 일치 면이 기술자 불일치 → 재탐색, 사방 동점
+ok(emY[1].needsCheck, '옆발광 대칭 상자(면 순서 불일치, 재탐색 동점) → needsCheck');
+// 평범한 옆발광 상자 LED: 면 순서 일치 + ±x 동일 기술자여도 신뢰(동점 규칙은 재탐색에만)
+const sbox = boxMesh(-1.5, -1, 0, 3, 2, 0.8);
+const sb = [pcb100, ...[-40, 0, 40].map((x) => transformMesh(sbox, [x, 0, 0.1], [0, 0, 0]))];
+const emP = findEmitters(sb, [1, 2, 3], 2, 5, 0);
+ok(emP.every((e) => e.face === 5 && !e.needsCheck && e.axis[0] > 0.99), '평범한 옆발광 상자 LED x=−40/0/40 → 면 순서 일치 신뢰');
 done();
