@@ -23,10 +23,13 @@ export function createMech3dView(canvas, { onPick, gizmo = null }) {
   persp.up.set(0, 0, 1); ortho.up.set(0, 0, 1);
   // orthoHalf = 모델 외곽 구가 들어가는 정투영 반높이(가로가 좁으면 resize 에서 ÷ 가로세로비로 키움 — 시안의 aspect 맞춤)
   let camera = persp, viewName = 'iso', model = { c: new THREE.Vector3(), r: 10 }, orthoHalf = 10;
-  const aspect = () => (canvas.clientWidth || 1) / (canvas.clientHeight || 400);
+  // 숨은 캔버스(폭 0)에서는 1 — 이때 맞춤은 pendingFit 으로 미뤘다가 첫 표시(resize) 때 다시 한다
+  const aspect = () => (canvas.clientWidth > 0 ? canvas.clientWidth / (canvas.clientHeight || 400) : 1);
+  let pendingFit = false;
   scene.add(new THREE.HemisphereLight(0xffffff, 0x404050, 1.0));
   const sun = new THREE.DirectionalLight(0xffffff, 0.8); sun.position.set(1, -1, 2); scene.add(sun);
-  const axes = new THREE.AxesHelper(10); scene.add(axes);   // 원점 축: x 빨강 · y 초록 · z 파랑
+  // 원점 축: x 빨강 · y 초록 · z 파랑. CAD 관례대로 원점에 두고(모델 구석으로 옮기지 않음) 길이만 모델 크기(r)에 맞춘다
+  const axes = new THREE.AxesHelper(10); scene.add(axes);
   const controls = new OrbitControls(camera, canvas);
   controls.enableZoom = true;            // 휠 확대(OrbitControls 가 캔버스 wheel 을 직접 처리)
   controls.screenSpacePanning = true;    // 우클릭·Shift 드래그 = 화면 평면 이동
@@ -36,12 +39,12 @@ export function createMech3dView(canvas, { onPick, gizmo = null }) {
   let gz = null;
   if (gizmo) {
     const r = new THREE.WebGLRenderer({ canvas: gizmo, antialias: true, alpha: true }), s = new THREE.Scene(), c = new THREE.PerspectiveCamera(40, 1, 0.1, 100);
-    r.setPixelRatio(window.devicePixelRatio || 1);
     c.up.set(0, 0, 1); s.add(new THREE.AxesHelper(1.2));
     const lbl = (t, col, p) => {
       const cv = document.createElement('canvas'); cv.width = cv.height = 64;
       const x = cv.getContext('2d'); x.fillStyle = col; x.font = 'bold 44px sans-serif'; x.fillText(t, 16, 46);
-      const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(cv) })); sp.position.set(...p); sp.scale.set(0.5, 0.5, 0.5); s.add(sp);
+      const tex = new THREE.CanvasTexture(cv); tex.colorSpace = THREE.SRGBColorSpace;
+      const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex })); sp.position.set(...p); sp.scale.set(0.5, 0.5, 0.5); s.add(sp);
     };
     lbl('X', '#ff5555', [1.5, 0, 0]); lbl('Y', '#55dd55', [0, 1.5, 0]); lbl('Z', '#5599ff', [0, 0, 1.5]);
     gz = { r, s, c };
@@ -50,12 +53,23 @@ export function createMech3dView(canvas, { onPick, gizmo = null }) {
     renderer.render(scene, camera);
     if (gz) { gz.c.position.copy(camera.position).sub(controls.target).normalize().multiplyScalar(4); gz.c.up.copy(camera.up); gz.c.lookAt(0, 0, 0); gz.r.render(gz.s, gz.c); }
   };
-  controls.addEventListener('change', render);
+  // 원근 near/far 를 모델 둘레로 좁힌다(r≈700mm 같은 큰 모델에서 깊이 정밀도) — 카메라 ~ 모델 중심 거리 기준.
+  // (controls.target 은 이동(pan)으로 모델에서 멀어질 수 있어 모델 중심을 쓴다.) 정투영은 거리가 고정이라 setView 값 그대로
+  function fitDepth() {
+    if (!camera.isPerspectiveCamera) return;
+    const { c, r } = model, d = camera.position.distanceTo(c);
+    const near = Math.max(r / 1000, d - 1.5 * r), far = d + 1.5 * r;
+    if (near !== camera.near || far !== camera.far) { camera.near = near; camera.far = far; camera.updateProjectionMatrix(); }
+  }
+  controls.addEventListener('change', () => { fitDepth(); render(); });
 
   let meshes = [], partsRef = [], kinds = [], sel = null, obsSet = new Set(), overlay = null, obsMesh = null, markers = null;
 
   function resize() {
     if (canvas.clientWidth === 0) return;
+    if (pendingFit) { pendingFit = false; setView(viewName); return; }   // 숨김 중 미룬 맞춤 — setView 가 resize 를 다시 부른다
+    const dpr = window.devicePixelRatio || 1;
+    renderer.setPixelRatio(dpr); if (gz) gz.r.setPixelRatio(dpr);
     const w = canvas.clientWidth, h = canvas.clientHeight || 400, a = w / h, half = orthoHalf / Math.min(1, a);
     renderer.setSize(w, h, false);
     persp.aspect = a; persp.updateProjectionMatrix();
@@ -92,8 +106,10 @@ export function createMech3dView(canvas, { onPick, gizmo = null }) {
     camera.position.copy(c).addScaledVector(d, dist);
     camera.near = Math.max(1e-3, r / 100); camera.far = dist + r * 100;
     if (camera.isOrthographicCamera) { orthoHalf = r * 1.1; camera.zoom = 1; }
-    camera.updateProjectionMatrix();   // resize() 가 캔버스 숨김(폭 0)으로 건너뛰어도 near/far·zoom 반영
     controls.object = camera; controls.target.copy(c); camera.lookAt(c);
+    controls.minDistance = r * 0.02;
+    fitDepth(); camera.updateProjectionMatrix();   // resize() 가 숨김으로 건너뛰어도 near/far·zoom 반영
+    if (canvas.clientWidth === 0) pendingFit = true;   // 가로세로비를 모름 → 첫 표시 때 다시 맞춤
     resize(); controls.update(); render();
   }
   const fit = () => setView(viewName);
@@ -117,6 +133,7 @@ export function createMech3dView(canvas, { onPick, gizmo = null }) {
     const box = new THREE.Box3(); meshes.forEach((m) => box.expandByObject(m));
     model = { c: box.getCenter(new THREE.Vector3()), r: box.getSize(new THREE.Vector3()).length() / 2 || 10 };
     axes.scale.setScalar((model.r * 0.3) / 10);
+    liftObs();
     if (keepCamera) { render(); return; }
     setView(viewName);
   }
@@ -157,7 +174,15 @@ export function createMech3dView(canvas, { onPick, gizmo = null }) {
     if (sec) clip.push(new THREE.Plane(new THREE.Vector3(...SECTION_N[sec.axis]), sec.pos));
     render();
   }
-  // 관측면 색지도 덧그림(colormap.buildObsOverlay) — 모양은 격자가 바뀔 때만, 색은 setObsColors 로 자주
+  // 관측면 색지도 덧그림(colormap.buildObsOverlay) — 모양은 격자가 바뀔 때만, 색은 setObsColors 로 자주.
+  // geom = { positions, triangles, dir? }: buildObsOverlay 가 이미 0.05mm 띄웠으므로, 큰 모델(lift = max(0.05, r·1e-4))에서
+  // 모자라는 만큼만 관측 방향 dir 로 메쉬를 더 띄운다(dir 없으면 polygonOffset 만)
+  let obsDir = null;
+  function liftObs() {
+    if (!obsMesh) return;
+    const extra = Math.max(0.05, model.r * 1e-4) - 0.05;
+    if (obsDir && extra > 0) obsMesh.position.set(...obsDir).normalize().multiplyScalar(extra); else obsMesh.position.set(0, 0, 0);
+  }
   function setObsSurface(geom) {
     if (obsMesh) { scene.remove(obsMesh); obsMesh.geometry.dispose(); obsMesh.material.dispose(); obsMesh = null; }
     if (geom) {
@@ -167,6 +192,7 @@ export function createMech3dView(canvas, { onPick, gizmo = null }) {
       g.setIndex(new THREE.BufferAttribute(geom.triangles, 1));
       obsMesh = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide, clippingPlanes: clip, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 }));
       obsMesh.renderOrder = 1.5;
+      obsDir = geom.dir ?? null; liftObs();
       scene.add(obsMesh);
     }
     render();
@@ -175,7 +201,8 @@ export function createMech3dView(canvas, { onPick, gizmo = null }) {
     if (!obsMesh) return;
     const a = obsMesh.geometry.getAttribute('color'); a.array.set(colors); a.needsUpdate = true; render();
   }
-  // 설계 점검 표식: ring(원, 화면을 향함) · line(거리선) · tris(새는 면 강조). 깊이 무시(가려도 보임)
+  // 설계 점검 표식: ring(원, 화면을 향함) · line(거리선) · tris(새는 면 강조). 깊이 무시(가려도 보임).
+  // 단면 평면(clip)은 일부러 적용하지 않는다 — 잘린 쪽에 있는 문제 위치도 보여야 하므로
   const ringTex = new Map();
   function ringTexture(color) {
     if (!ringTex.has(color)) {
@@ -215,7 +242,9 @@ export function createMech3dView(canvas, { onPick, gizmo = null }) {
     down = null;
     const r = canvas.getBoundingClientRect();
     ray.setFromCamera(new THREE.Vector2(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1), camera);
-    const h = ray.intersectObjects(pickable ? meshes.filter((m) => pickable(m.userData.part)) : meshes, false)[0];
+    // 단면 중이면 잘려 안 보이는 쪽(평면 거리 < 0)의 교차는 건너뛰고 다음 교차를 쓴다(Raycaster 는 clipping 을 모름)
+    const hits = ray.intersectObjects(pickable ? meshes.filter((m) => pickable(m.userData.part)) : meshes, false);
+    const h = clip.length ? hits.find((x) => clip[0].distanceToPoint(x.point) >= 0) : hits[0];
     // 선택 모드(pickable 지정)에서는 클릭 광선도 넘긴다 — 빈 곳 클릭이어도 { part: null, face: null, ray } (가까운 LED 맞춤용)
     const rr = { o: ray.ray.origin.toArray(), d: ray.ray.direction.toArray() };
     // 클릭 깊이의 화소당 mm(LED 맞춤 반경용) — 정투영은 깊이와 무관
