@@ -1,0 +1,38 @@
+// 3D 계산 Worker 풀 — main.js(P3) 에서 옮김. 0번 Worker 는 라인 인식에도 쓴다. 필요한 만큼 늘리고 유지(L2 표 재적재 방지).
+// ports() = 점진 계산 제어기용 포트 [{ send(msg) → Promise<reply> }] (K = 코어 수 − 1, 1~8)
+const TIMEOUT = 10 * 60 * 1000;
+
+export function createPool({ dbLists, onStatus = () => {} }) {
+  const pending = new Map(), pool = [];
+  let reqId = 0;
+  function onMessage(e) {
+    const d = e.data;
+    if (d.id == null) { if (d.error) onStatus(`계산 Worker 초기화 실패: ${d.error}`); return; }
+    const p = pending.get(d.id);
+    if (p) { pending.delete(d.id); clearTimeout(p.timer); d.error ? p.rej(new Error(d.error)) : p.res(d); }
+  }
+  // Worker 를 풀에서 빼고 종료, 그 Worker 에 걸린 호출은 모두 실패 처리(다음 호출 때 새로 만든다)
+  function drop(w, msg) {
+    w.terminate();
+    const k = pool.indexOf(w); if (k >= 0) pool.splice(k, 1);
+    for (const [id, p] of pending) if (p.w === w) { pending.delete(id); clearTimeout(p.timer); p.rej(new Error(msg)); }
+  }
+  function killAll(msg) { for (const w of pool.slice()) drop(w, msg); }
+  function spawn() {
+    const w = new Worker(new URL('../../engine/mech3d/mc3d-worker.js', import.meta.url), { type: 'module' });
+    w.onmessage = onMessage;
+    w.onerror = (e) => { const msg = `계산 Worker 오류: ${e.message ?? e}`; onStatus(msg); drop(w, msg); };
+    w.postMessage({ type: 'init', l2Base: new URL('../../engine/l2/data/', import.meta.url).href, db: dbLists() });
+    return w;
+  }
+  const worker = (k = 0) => { while (pool.length <= k) pool.push(spawn()); return pool[k]; };
+  const call = (w, msg) => new Promise((res, rej) => {
+    const id = ++reqId;
+    const timer = setTimeout(() => { if (pending.has(id)) drop(w, '계산 시간 초과(10분) — 다시 시도하세요'); }, TIMEOUT);
+    pending.set(id, { res, rej, w, timer });
+    w.postMessage({ ...msg, id });
+  });
+  const size = () => Math.max(1, Math.min(8, (navigator.hardwareConcurrency ?? 4) - 1));
+  const ports = () => Array.from({ length: size() }, (_, k) => ({ send: (msg) => call(worker(k), msg) }));
+  return { worker, call, killAll, ports };
+}
