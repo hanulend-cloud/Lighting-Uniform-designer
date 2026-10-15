@@ -21,21 +21,24 @@ export function initialSession() {
 
 export function createStore(mspec, { persist = () => {}, delay = 300, timers = globalThis } = {}) {
   const subs = new Set();
-  let t = null;
+  let t = null, disposed = false;
+  // 저장 오류·구독자 오류는 삼키고 기록만 — 한 곳의 실패가 다른 구독자·update 호출자를 막지 않게
+  const save = () => { try { persist(); } catch (e) { console.error('[m3 store] 저장 실패', e); } };
   const store = {
     mspec, session: initialSession(),
     update(tag, fn) {
       if (!TAGS.includes(tag)) throw new Error(`알 수 없는 변경 태그: ${tag}`);
+      if (disposed) return;
       if (fn) fn(store.mspec, store.session);
       if (PERSIST.has(tag)) {
         if (t != null) timers.clearTimeout(t);
-        t = timers.setTimeout(() => { t = null; persist(); }, delay);
+        t = timers.setTimeout(() => { t = null; save(); }, delay);
       }
-      for (const f of [...subs]) f(tag);
+      for (const f of [...subs]) { try { f(tag); } catch (e) { console.error('[m3 store] 구독자 오류', e); } }
     },
     subscribe(f) { subs.add(f); return () => subs.delete(f); },
-    flush() { if (t != null) { timers.clearTimeout(t); t = null; persist(); } },
-    dispose() { store.flush(); subs.clear(); },
+    flush() { if (t != null) { timers.clearTimeout(t); t = null; save(); } },
+    dispose() { try { store.flush(); } finally { disposed = true; subs.clear(); } },
   };
   return store;
 }

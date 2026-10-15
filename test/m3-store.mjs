@@ -23,4 +23,23 @@ un(); st.update('light'); ok(seen.length === 5, `구독 해제 뒤 알림 없음
 ok(TAGS.length === 7 && ['material', 'light', 'observe', 'contacts'].every((t) => PHYSICS.has(t)) && !PHYSICS.has('target') && !PHYSICS.has('view') && !PHYSICS.has('session'), '물리 태그 = material·light·observe·contacts');
 ok(['material', 'light', 'observe', 'target'].every((t) => GEOM_CHECK.has(t)) && !GEOM_CHECK.has('contacts'), '기하 점검 태그 = material·light·observe·target(기준값)');
 st.dispose(); await T.advance(1000); ok(saved === 3, 'dispose → 남은 저장 실행(light 변경)');
+{   // 견고성: 구독자 격리 · 저장 오류 · dispose 뒤 갱신
+  const T2 = fakeTimers(), errs = [], cerr = console.error;
+  console.error = (...a) => errs.push(a);
+  let n2 = 0, got = 0, tries = 0;
+  const st2 = createStore({}, { persist: () => { tries++; throw new Error('디스크 가득'); }, delay: 300, timers: T2 });
+  st2.subscribe(() => { throw new Error('구독자 오류'); });
+  st2.subscribe(() => got++);
+  let threw = false; try { st2.update('material'); } catch { threw = true; }
+  ok(!threw && got === 1 && errs.length === 1, '구독자 하나가 던져도 update 는 던지지 않고 다른 구독자에게 알림');
+  let rej = false; try { await T2.advance(300); } catch { rej = true; }
+  ok(!rej && tries === 1 && errs.length === 2, '예약 저장이 던져도 예외가 새지 않음(console.error)');
+  st2.update('light'); let fl = false; try { st2.flush(); } catch { fl = true; }
+  ok(!fl && tries === 2, 'flush 저장 오류도 삼킴');
+  st2.update('light'); let dz = false; try { st2.dispose(); } catch { dz = true; }
+  ok(!dz && tries === 3, 'dispose 저장 오류도 삼킴');
+  st2.subscribe(() => n2++); st2.update('light'); await T2.advance(1000);
+  ok(tries === 3 && n2 === 0, 'dispose 뒤 update → 저장 예약·알림 없음');
+  console.error = cerr;
+}
 done();

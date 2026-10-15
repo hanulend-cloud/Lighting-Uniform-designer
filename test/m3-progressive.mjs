@@ -118,4 +118,50 @@ const OPT = { chunkN: 1000, bins: 10, debounceMs: 500, tickMs: 1000, maxPhotons:
     `판정 일치: 길이 U ${ref.Ulen.toFixed(4)}, 폭 U ${ref.Uwid?.toFixed(4)}, 잡음 ${(ref.relNoise * 100).toFixed(2)}%`);
   ok(Object.keys(J.ledger).every((k) => Math.abs(s.ledger[k] - J.ledger[k]) <= 1e-12 * Math.max(1, J.ledger[k])), '원장 합 일치(도착 순서 차이만)');
 }
+{   // 응답 없는 포트 → 제한 시간 뒤 error (장면 · 청크)
+  const T = fakeTimers(), hung = { log: [], send(m) { this.log.push(m); return new Promise(() => {}); } };
+  const P = createProgressive({ ports: [hung], timers: T, opts: { ...OPT, sceneTimeoutMs: 5000, chunkTimeoutMs: 3000 } });
+  P.restart(job(1)); await T.advance(500 + 4999);
+  ok(P.snapshot().state === 'starting', '장면 응답 대기 중(제한 시간 전)');
+  await T.advance(1);
+  ok(P.snapshot().state === 'error' && /Worker 응답 없음/.test(P.snapshot().error), `장면 응답 없음 → error (${P.snapshot().error})`);
+  const T2 = fakeTimers(), m = manualPort();
+  const Q = createProgressive({ ports: [m], timers: T2, opts: { ...OPT, chunkTimeoutMs: 3000 } });
+  Q.restart(job(1)); await T2.advance(500 + 2999);
+  ok(Q.snapshot().state === 'running', '청크 응답 대기 중(제한 시간 전)');
+  await T2.advance(1);
+  ok(Q.snapshot().state === 'error' && /Worker 응답 없음/.test(Q.snapshot().error), '청크 응답 없음 → error');
+}
+{   // 대기·시작 중 일시정지 → 시작하면 바로 paused, 재개하면 진행
+  const T = fakeTimers(), p = delayedPort(T);
+  const P = createProgressive({ ports: [p], timers: T, opts: OPT });
+  P.restart(job(1)); P.pause(); await T.advance(2000);
+  ok(P.snapshot().state === 'paused' && chunks(p).length === 0 && scenes(p).length === 1, '대기 중 일시정지: 장면만 보내고 paused, 청크 없음');
+  P.resume(); await T.advance(150);
+  ok(P.snapshot().state === 'running' && chunks(p).length > 0, '재개 → 청크 보냄');
+  P.cancel();
+  const T2 = fakeTimers(), q = delayedPort(T2);
+  const Q = createProgressive({ ports: [q], timers: T2, opts: OPT });
+  Q.restart(job(1)); Q.pause(); Q.resume(); await T2.advance(650);
+  ok(Q.snapshot().state === 'running' && chunks(q).length > 0, '대기 중 일시정지 후 재개 → 정상 시작');
+  Q.cancel();
+}
+{   // 장면 불일치(stale) 청크 번호는 다시 써서 시드가 이어짐
+  const T = fakeTimers(), a = manualPort();
+  const P = createProgressive({ ports: [a], timers: T, opts: OPT });
+  P.restart(job(1)); await T.advance(500);
+  a.pend.shift().res({ sceneKey: 's1', stale: true }); await T.advance(0);
+  ok(chunks(a)[1].seed === chunkSeed(1, 0), `stale 뒤 같은 청크 번호 다시 보냄 (seed ${chunks(a)[1].seed})`);
+  a.pend.shift().res(make(chunks(a)[1])); await T.advance(0);
+  ok(chunks(a)[2].seed === chunkSeed(1, 1) && P.snapshot().chunks === 1 && P.snapshot().ignored === 1, '다음 청크는 번호 1 — 구멍 없음');
+  P.cancel();
+}
+{   // dispose: 알림 없이 정리, 이후 호출 무시
+  const T = fakeTimers(), p = delayedPort(T), ups = [];
+  const P = createProgressive({ ports: [p], timers: T, onUpdate: (s) => ups.push(s.state), opts: OPT });
+  P.restart(job(1)); await T.advance(700);
+  const n = ups.length, nc = chunks(p).length;
+  P.dispose(); P.cancel(); P.restart(job(2)); await T.advance(2000);
+  ok(ups.length === n && chunks(p).length === nc && P.snapshot().state === 'idle', 'dispose 뒤 알림·청크 없음');
+}
 done();
