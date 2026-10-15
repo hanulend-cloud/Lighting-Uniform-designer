@@ -5,6 +5,7 @@ import { readStepParts } from '../src/engine/shape/step-import.js';
 import { setMech3dMesh, getMech3d, initialMech3dSpec } from '../src/engine/mech3d/runtime.js';
 import { setPartMaterial, setPartMaterialParam } from '../src/engine/mech3d/materials.js';
 import { findLeds, findEmitters, pcbIndex } from '../src/engine/mech3d/led-detect.js';
+import { transformMesh, transformEmitters } from '../src/engine/mech3d/xform.js';
 import { composeScene, runJob } from '../src/engine/mech3d/job.js';
 import { recognizeLine, obsDirection } from '../src/engine/mech3d/line.js';
 import { tallyGeometry, tallyStats } from '../src/engine/mech3d/tally.js';
@@ -24,6 +25,13 @@ ms.parts[2] = setPartMaterial(ms.parts[2], 'clear');                            
 const ref = 1, refFace = (() => { let best = -1, z = -Infinity; const m = ledParts[ref]; for (let t = 0; t < m.triangles.length / 3; t++) { const zc = (m.positions[m.triangles[t * 3] * 3 + 2] + m.positions[m.triangles[t * 3 + 1] * 3 + 2] + m.positions[m.triangles[t * 3 + 2] * 3 + 2]) / 3; if (zc > z) { z = zc; best = m.faceIds[t]; } } return best; })();
 const leds = findLeds(ledParts, ref), pcb = pcbIndex(ledParts, leds), em = findEmitters(ledParts, leds, ref, refFace, pcb);
 ok(leds.length === 10 && pcb === 0 && em.every((e) => !e.needsCheck && Math.abs(e.axis[2] - 1) < 1e-6 && Math.abs(e.pos[2] - 3.5) < 1e-6), `샘플 LED STEP: LED ${leds.length}개, PCB 부품 ${pcb}, 발광 z ${em[0].pos[2].toFixed(3)}`);
+{   // 변환: 원본 발광 → transformEmitters 가 변환된 메쉬에서 다시 찾은 발광과 같아야 함
+  const off = [5, 0, 0], rot = [0, 0, 90], tp = ledParts.map((m) => transformMesh(m, off, rot)), em2 = findEmitters(tp, findLeds(tp, ref), ref, refFace, pcbIndex(tp, findLeds(tp, ref))), em3 = transformEmitters(em, off, rot);
+  const d = (a, b) => Math.max(...a.map((v, i) => Math.abs(v - b[i])));
+  ok(em2.length === 10 && em2.every((e, i) => d(e.pos, em3[i].pos) < 1e-6 && d(e.axis, em3[i].axis) < 1e-6 && (e.xAxis ? d(e.xAxis, em3[i].xAxis) < 1e-6 : !em3[i].xAxis)), 'transformEmitters = 변환된 메쉬의 findEmitters (rot [0,0,90], offset [5,0,0])');
+}
+let thrown = false; try { composeScene({ rt: getMech3d(), mspec: { ...ms, light: { ...ms.light, kind: 'step' } }, ledParts: null, table, db: null, line: null }); } catch (e) { thrown = /LED STEP 메쉬가 없음/.test(e.message); }
+ok(thrown, 'step 인데 LED 메쉬가 없으면 오류');
 ms.light = { ...ms.light, kind: 'step', step: { name: 'led', offset: [0, 0, 0], rot: [0, 0, 0], ref: { part: ref, face: refFace }, leds, pcb, emitters: em } };
 // 관측면 = 커버(부품 1) 윗면: 법선 +z 이고 z 최대인 면
 const coverTop = (() => { const m = mech[1]; let best = -1, z = -Infinity; for (let t = 0; t < m.triangles.length / 3; t++) { const z3 = [0, 1, 2].map((k) => m.positions[m.triangles[t * 3 + k] * 3 + 2]); if (Math.max(...z3) - Math.min(...z3) > 1e-6) continue; if (z3[0] > z) { z = z3[0]; best = m.faceIds[t]; } } return best; })();

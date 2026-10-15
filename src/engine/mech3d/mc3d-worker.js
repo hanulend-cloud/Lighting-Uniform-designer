@@ -2,7 +2,8 @@
 //   { type:'init', l2Base, db } → L2 표·소재 DB 로드
 //   { type:'line', id, parts, faces, dir } → { id, lineData }  (전체 L.data — 래스터 포함. 메인이 tallyGeometry(G) 계산에 씀)
 //   { type:'run', id, mechParts, mspec, ledParts, lineData, G, obs, emitters, N, seed, batches } → { id, accs, cnts, ledger, ms } | { id, error }
-//     lineData = lightData(line)(래스터 mask/dt 제외), G = 메인이 계산한 tallyGeometry(line, obs)
+//     lineData = lightData(line)(래스터 mask/dt 제외), G = 메인이 전체 line 으로 계산한 tallyGeometry(line, obs)(pixOk 포함 — Worker 는 래스터 없이 집계)
+//     mechParts·ledParts 는 원본 메쉬, emitters 는 변환 적용 후 좌표(transformEmitters)
 import { initL2, l2State, browserLoader, setMaterialDb } from '../l2/runtime.js';
 import { createDb } from '../../model/materials-db.js';
 import { buildSceneMesh } from './runtime.js';

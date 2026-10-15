@@ -9,12 +9,13 @@ export function tallyGeometry(line, obs) {
   const ns = Math.max(1, Math.round(L / cell)), ds = L / ns;
   let dtMax = 0; for (let k = 0; k < R.mask.length; k++) if (R.mask[k] && R.dt[k] > dtMax) dtMax = R.dt[k];
   const wMax = Math.max(line.width / 2, dtMax * R.cell) + 2 * cell, nw = Math.ceil((2 * wMax) / cell), w0 = -nw * cell / 2;
-  const area = new Float64Array(ns * nw), pa = R.cell * R.cell;
+  const area = new Float64Array(ns * nw), pa = R.cell * R.cell, pixOk = new Uint8Array(R.nx * R.ny);
   for (let j = 0; j < R.ny; j++) for (let i = 0; i < R.nx; i++) {
     const k = j * R.nx + i;
     if (!R.mask[k] || (R.dt[k] - 0.5) * R.cell < edge - 1e-9) continue;
     const [s, w] = line.toSW(R.x0 + (i + 0.5) * R.cell, R.y0 + (j + 0.5) * R.cell);
     if (!line.closed && (s < edge || s > L - edge)) continue;
+    pixOk[k] = 1;
     let si = Math.floor(s / ds);
     if (line.closed) si = ((si % ns) + ns) % ns; else if (si < 0 || si >= ns) continue;
     const wj = Math.floor((w - w0) / cell);
@@ -23,12 +24,13 @@ export function tallyGeometry(line, obs) {
   }
   const valid = new Uint8Array(ns * nw);
   for (let k = 0; k < valid.length; k++) if (area[k] >= 0.5 * ds * cell) valid[k] = 1;
-  return { ns, nw, ds, cell, w0, valid, area, L, closed: line.closed };
+  // pixOk: 집계 가능한 래스터 픽셀(마스크 안, 경계에서 edgeExcl 이상, 열린 라인이면 끝 제외) — 집계기가 래스터 없이(Worker) 쓰도록 G 에 담음
+  return { ns, nw, ds, cell, w0, valid, area, L, closed: line.closed, pix: { x0: R.x0, y0: R.y0, cell: R.cell, nx: R.nx, ny: R.ny }, pixOk };
 }
 
 export function makeAccumulator(G, line, obs) {
-  const faces = new Set(obs.faces.map((f) => `${f.part}|${f.face}`)), d = obs.dir ?? line.frame.d, edge = obs.edgeExcl ?? 0.5, cosC = Math.cos(((obs.cone ?? 10) * Math.PI) / 180);
-  const R = line.data.raster, acc = new Float64Array(G.ns * G.nw), cnt = new Uint32Array(G.ns * G.nw);
+  const faces = new Set(obs.faces.map((f) => `${f.part}|${f.face}`)), d = obs.dir ?? line.frame.d, cosC = Math.cos(((obs.cone ?? 10) * Math.PI) / 180);
+  const R = G.pix, acc = new Float64Array(G.ns * G.nw), cnt = new Uint32Array(G.ns * G.nw);
   let lx = 0, ly = 0, lz = 0, has = false, lp = -1;
   return {
     acc, cnt,
@@ -39,8 +41,9 @@ export function makeAccumulator(G, line, obs) {
       has = false;
       if (dx * d[0] + dy * d[1] + dz * d[2] < cosC) return;
       // 점을 래스터 픽셀 중심으로 맞춘 뒤 분류 — 면적(area)을 픽셀 단위로 센 것과 같은 이산화라서 편향이 없다.
-      const [qx, qy] = line.to2D([lx, ly, lz]), px = R.x0 + (Math.floor((qx - R.x0) / R.cell) + 0.5) * R.cell, py = R.y0 + (Math.floor((qy - R.y0) / R.cell) + 0.5) * R.cell, [s, ww] = line.toSW(px, py);
-      if (line.boundaryDist(px, py) < edge - 1e-9 || (!G.closed && (s < edge || s > G.L - edge))) return;   // 면적(area)과 같은 규칙 — 제외 구역 광자는 세지 않음
+      const [qx, qy] = line.to2D([lx, ly, lz]), pi = Math.floor((qx - R.x0) / R.cell), pj = Math.floor((qy - R.y0) / R.cell);
+      if (pi < 0 || pj < 0 || pi >= R.nx || pj >= R.ny || !G.pixOk[pj * R.nx + pi]) return;   // 면적(area)과 같은 규칙 — 마스크 밖·제외 구역 광자는 세지 않음
+      const [s, ww] = line.toSW(R.x0 + (pi + 0.5) * R.cell, R.y0 + (pj + 0.5) * R.cell);
       let i = Math.floor(s / G.ds);
       if (G.closed) i = ((i % G.ns) + G.ns) % G.ns; else if (i < 0 || i >= G.ns) return;
       const j = Math.floor((ww - G.w0) / G.cell);

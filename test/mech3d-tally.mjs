@@ -1,6 +1,6 @@
 // 관측 집계: node test/mech3d-tally.mjs
 import { tallyGeometry, makeAccumulator, tallyStats } from '../src/engine/mech3d/tally.js';
-import { recognizeLine } from '../src/engine/mech3d/line.js';
+import { recognizeLine, lightData, lineFromData } from '../src/engine/mech3d/line.js';
 import { rng } from '../src/engine/l2/mc-slab.js';
 import { runMC3D } from '../src/engine/mech3d/mc3d.js';
 import { buildTraceScene } from '../src/engine/mech3d/scene3d.js';
@@ -82,5 +82,14 @@ ok(S.counted === 198 * 10 && S.noiseWarn === false, `집계 셀 ${S.counted}, �
   ok(sn.narrow === true && sn.Uwid === null, `좁은 띠(유효 열 <2): narrow, Uwid null`);
   const emptyG = tallyGeometry(nar, { ...obs, edgeExcl: 1 }), se = tallyStats(emptyG, [new Float64Array(emptyG.ns * emptyG.nw), new Float64Array(emptyG.ns * emptyG.nw)], obs);
   ok(se.empty === true && se.sWorst === null, '유효 셀 없음 → empty');
+}
+{   // Worker 경로: 래스터 없는 lightData 선으로 같은 집계 — G 는 메인에서 전체 선으로 만든 것
+  const light = lineFromData(structuredClone(lightData(line))), A = makeAccumulator(G, line, obs), Bq = makeAccumulator(G, light, obs), q = rng(5);
+  for (let k = 0; k < 20000; k++) {
+    const x = q() * 102 - 1, y = q() * 8 - 1, w = 0.5 + q(), p = k;   // 가장자리·영역 밖 포함
+    for (const a of [A, Bq]) { a.onExit(0, 1, x, y, 2, 0, 0, 1, w, p); a.onEscape(x, y, 3, 0, 0, 1, w, p); }
+  }
+  const sum = A.acc.reduce((x, y) => x + y, 0);
+  ok(sum > 0 && A.acc.every((v, k) => v === Bq.acc[k]) && A.cnt.every((v, k) => v === Bq.cnt[k]), `lightData 선 집계 = 전체 선 집계(합 ${sum.toFixed(1)})`);
 }
 done();

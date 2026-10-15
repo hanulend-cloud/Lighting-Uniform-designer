@@ -18,3 +18,9 @@ export function transformMesh(m, offset = [0, 0, 0], rot = [0, 0, 0]) {
   const { bvh, ...rest } = m;   // 위치가 바뀌었으므로 캐시된 BVH 는 버림
   return { ...rest, positions: P };
 }
+
+// 발광 위치·방향을 메쉬와 같은 강체 변환으로 옮긴다(위치 = 회전 뒤 이동, 방향 = 회전만). findEmitters(변환된 메쉬) 와 같은 결과.
+export function transformEmitters(emitters, offset = [0, 0, 0], rot = [0, 0, 0]) {
+  const R = eulerMatrix(rot);
+  return emitters.map((e) => ({ ...e, pos: applyPoint(R, e.pos, offset), axis: applyDir(R, e.axis), xAxis: e.xAxis ? applyDir(R, e.xAxis) : e.xAxis }));
+}
