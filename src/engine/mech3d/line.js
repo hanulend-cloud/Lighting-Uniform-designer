@@ -40,10 +40,10 @@ function project(parts, faces, F) {
   return { tris: Float64Array.from(tris), hMin };
 }
 
-function rasterize(tris) {
+function rasterize(tris, cellOverride = 0) {
   let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
   for (let i = 0; i < tris.length; i += 2) { x0 = Math.min(x0, tris[i]); x1 = Math.max(x1, tris[i]); y0 = Math.min(y0, tris[i + 1]); y1 = Math.max(y1, tris[i + 1]); }
-  const cell = Math.max(0.05, Math.max(x1 - x0, y1 - y0) / 2000);
+  const cell = cellOverride || Math.max(0.05, Math.max(x1 - x0, y1 - y0) / 2000);
   const bounds = [x0, y0, x1, y1];
   x0 -= 3 * cell; y0 -= 3 * cell;
   const nx = Math.ceil((x1 - x0) / cell) + 4, ny = Math.ceil((y1 - y0) / cell) + 4, mask = new Uint8Array(nx * ny);
@@ -86,11 +86,23 @@ function distanceTransform(R) {
 
 const ERR_SPLIT = '선택한 관측면이 서로 떨어져 있음 — 이어진 면만 선택하세요';
 const ERR_SHAPE = '관측면이 띠(라인) 모양이 아님 — 라인 형태의 면을 선택하세요';
+const ERR_SHORT = '관측면이 너무 짧거나 띠 모양이 아님 — 라인 형태의 면을 선택하세요';
+
+// 능선(dt 가 8 이웃 이상인 화소) dt 의 중앙값 × 2 = 대표 폭(mm). 작은 구멍·혹은 소수라 무시된다.
+function ridgeWidth(R, dt) {
+  const { nx, ny, mask, cell } = R, v = [];
+  for (let j = 1; j < ny - 1; j++) for (let i = 1; i < nx - 1; i++) {
+    const k = j * nx + i, d = dt[k]; if (!mask[k] || d < 1) continue;
+    if (d >= dt[k - 1] && d >= dt[k + 1] && d >= dt[k - nx] && d >= dt[k + nx] && d >= dt[k - nx - 1] && d >= dt[k - nx + 1] && d >= dt[k + nx - 1] && d >= dt[k + nx + 1]) v.push(d);
+  }
+  if (!v.length) return 2 * cell;
+  v.sort((a, b) => a - b); return 2 * v[v.length >> 1] * cell;
+}
 const N8 = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]];
 const N4 = [[1, 0], [-1, 0], [0, 1], [0, -1]];
 
 // 마스크 위상 정리: 전경 8-연결 성분(작은 조각 제거, 2개 이상이면 오류), 배경 4-연결로 구멍 수 계산(작은 구멍은 메움).
-// 반환: 의미 있는 구멍 수(0 = 열린 띠, 1 = 닫힌 고리)
+// 반환: { holes: [{ id, size(셀), ext(셀) }], lab(배경 성분 번호) } — 고리의 안쪽인지 작은 구멍인지는 폭을 안 뒤에 가른다
 function cleanTopology(R) {
   const { nx, ny, mask } = R, N = nx * ny, lab = new Int32Array(N).fill(-1), q = new Int32Array(N), MIN = 25;
   const flood = (seed, id, val, nbrs) => {
@@ -114,14 +126,16 @@ function cleanTopology(R) {
   const OUT = 0; let id = 1;
   for (let i = 0; i < nx; i++) for (const j of [0, ny - 1]) { const k = j * nx + i; if (!mask[k] && lab[k] < 0) flood(k, OUT, 0, N4); }
   for (let j = 0; j < ny; j++) for (const i of [0, nx - 1]) { const k = j * nx + i; if (!mask[k] && lab[k] < 0) flood(k, OUT, 0, N4); }
-  let holes = 0;
+  const holes = [];
   for (let k = 0; k < N; k++) {
     if (mask[k] || lab[k] >= 0) continue;
-    const s = flood(k, id++, 0, N4);
-    if (s < MIN) for (let h = 0; h < s; h++) mask[q[h]] = 1;   // 삼각분할 틈 같은 작은 구멍은 메움
-    else holes++;
+    const hid = id++, s = flood(k, hid, 0, N4);
+    if (s < MIN) { for (let h = 0; h < s; h++) mask[q[h]] = 1; continue; }   // 삼각분할 틈 같은 작은 구멍은 메움
+    let i0 = Infinity, i1 = -1, j0 = Infinity, j1 = -1;
+    for (let h = 0; h < s; h++) { const i = q[h] % nx, j = (q[h] / nx) | 0; i0 = Math.min(i0, i); i1 = Math.max(i1, i); j0 = Math.min(j0, j); j1 = Math.max(j1, j); }
+    holes.push({ id: hid, size: s, ext: Math.max(i1 - i0, j1 - j0) + 1 });
   }
-  return holes;
+  return { holes, lab };
 }
 
 // Zhang–Suen 세선화. 지울 수 있는 화소는 경계 화소뿐이므로 경계 후보 목록만 돈다(전체 주사와 결과 동일).
@@ -327,37 +341,72 @@ function recenter(pts, closed, R, dt) {
       if (s > 0) tP[i] = t; else tM[i] = t;
     }
   }
-  // 기대 폭 = 단면 길이의 이동 중앙값(혹·모서리 귀처럼 짧은 이상 구간을 무시)
+  // 기대 폭 = 단면 길이의 이동 중앙값. 창은 ±max(4·국소반폭, 6·전체 폭) — 혹·패드(≲ 6W)보다 넓어야 중앙값이 혹을 무시한다.
+  // 열린 경로는 창을 대칭으로 줄인다(테이퍼 끝에서 중앙값이 한쪽으로 치우치지 않게).
   const chord = Array.from({ length: n }, (_, i) => tP[i] + tM[i]), wExp = new Float64Array(n), bad = new Uint8Array(n);
+  const Wg = [...chord].sort((a, b) => a - b)[n >> 1];
   for (let i = 0; i < n; i++) {
-    const m = Math.max(8, Math.round((4 * hl[i]) / 0.25)), win = [];
-    for (let q = -m; q <= m; q++) { const j = i + q; if (closed) win.push(chord[((j % n) + n) % n]); else if (j >= 0 && j < n) win.push(chord[j]); }
+    let m = Math.max(8, Math.round(Math.max(4 * hl[i], 6 * Wg) / 0.25));
+    if (closed) m = Math.min(m, (n - 1) >> 1); else m = Math.min(m, i, n - 1 - i);
+    const win = []; for (let q = -m; q <= m; q++) win.push(chord[idx(i + q)]);
     win.sort((a, b) => a - b); wExp[i] = win[win.length >> 1];
-    bad[i] = chord[i] > 1.15 * wExp[i] + 2 * cell ? 1 : 0;
+    bad[i] = chord[i] > 1.05 * wExp[i] + 2 * cell ? 1 : 0;   // 5%: 꺾임 원호의 시작·끝(기운 단면)까지 잡는다
   }
   const out = new Array(2 * n), bnd = (i, s) => { const t = s > 0 ? tP[i] : -tM[i]; return [ox[i] + t * nX[i], oy[i] + t * nY[i]]; };
-  const nearGood = (i, d) => { for (let q = 1; q < n; q++) { const j = i + d * q; if (!closed && (j < 0 || j >= n)) return -1; const jj = ((j % n) + n) % n; if (!bad[jj]) return jj; } return -1; };
-  for (let i = 0; i < n; i++) {
-    let u = (tP[i] - tM[i]) / 2;   // 기본: 단면 중점
-    if (bad[i]) {
-      const jp = nearGood(i, -1), jn = nearGood(i, 1);
-      if (jp >= 0 || jn >= 0) {
-        const dev = (s) => {   // 이 점의 s쪽 경계가 앞뒤 정상 단면의 같은 쪽 경계선에서 벗어난 거리
-          const [bx, by] = bnd(i, s);
-          let [ax, ay] = bnd(jp >= 0 ? jp : jn, s), dx, dy;
-          if (jp >= 0 && jn >= 0) { const [cx, cy] = bnd(jn, s); dx = cx - ax; dy = cy - ay; } else { const j = jp >= 0 ? jp : jn; dx = nY[j]; dy = -nX[j]; }
-          const l = Math.hypot(dx, dy); return l < 1e-9 ? Math.hypot(bx - ax, by - ay) : Math.abs(dx * (by - ay) - dy * (bx - ax)) / l;
-        };
-        const s = dev(1) <= dev(-1) ? 1 : -1, tb = s > 0 ? tP[i] : -tM[i], thr = wExp[i] / (2 * cell) - 0.5;
-        let a = -1; const span = tP[i] + tM[i];
-        for (let d = 0; d <= span; d += step) { const t = tb - s * d; if (dtAt(ox[i] + t * nX[i], oy[i] + t * nY[i]) >= thr) { a = d; break; } }
-        if (a >= 0) {
-          let b = a; while (b + step <= span && dtAt(ox[i] + (tb - s * (b + step)) * nX[i], oy[i] + (tb - s * (b + step)) * nY[i]) >= thr) b += step;
-          u = tb - s * (a + Math.min((b - a) / 2, cell));
-        }
-      }
+  for (let i = 0; i < n; i++) { const u = (tP[i] - tM[i]) / 2; out[2 * i] = ox[i] + u * nX[i]; out[2 * i + 1] = oy[i] + u * nY[i]; }   // 기본: 단면 중점
+  // 넓어진 구간(연속한 bad 점들)을 한 덩어리로 처리
+  const runs = [];
+  if (bad.some((b) => !b)) {
+    const g0 = closed ? bad.findIndex((b) => !b) : 0;
+    for (let q = 0; q < n; q++) {
+      const i = closed ? (g0 + q) % n : q;
+      if (!bad[i]) continue;
+      if (runs.length && runs[runs.length - 1].last === (closed ? (i - 1 + n) % n : i - 1)) runs[runs.length - 1].last = i;
+      else runs.push({ first: i, last: i });
     }
-    out[2 * i] = ox[i] + u * nX[i]; out[2 * i + 1] = oy[i] + u * nY[i];
+  }
+  const hermite = (P0, T0, P1, T1, t) => { const t2 = t * t, t3 = t2 * t, h00 = 2 * t3 - 3 * t2 + 1, h10 = t3 - 2 * t2 + t, h01 = -2 * t3 + 3 * t2, h11 = t3 - t2; return [h00 * P0[0] + h10 * T0[0] + h01 * P1[0] + h11 * T1[0], h00 * P0[1] + h10 * T0[1] + h01 * P1[1] + h11 * T1[1]]; };
+  const bridges = [];
+  for (const { first, last } of runs) {
+    const cnt = closed ? ((last - first + n) % n) + 1 : last - first + 1;
+    const jp = closed || first > 0 ? idx(first - 1) : -1, jn = closed || last < n - 1 ? idx(last + 1) : -1;
+    if (jp < 0 && jn < 0) continue;
+    // 한쪽 경계만 앞뒤 정상 단면의 경계와 어긋나면(ㄱ자 바깥 귀, 한쪽 혹) 맞는 쪽을 참 경계로 쓴다
+    const dev = (i, s) => {
+      const [bx, by] = bnd(i, s);
+      let [ax, ay] = bnd(jp >= 0 ? jp : jn, s), dx, dy;
+      if (jp >= 0 && jn >= 0) { const [cx, cy] = bnd(jn, s); dx = cx - ax; dy = cy - ay; } else { const j = jp >= 0 ? jp : jn; dx = nY[j]; dy = -nX[j]; }
+      const l = Math.hypot(dx, dy); return l < 1e-9 ? Math.hypot(bx - ax, by - ay) : Math.abs(dx * (by - ay) - dy * (bx - ax)) / l;
+    };
+    const diffs = []; for (let q = 0; q < cnt; q++) { const i = idx(first + q); diffs.push(dev(i, 1) - dev(i, -1)); }
+    diffs.sort((a, b) => a - b);
+    const md = diffs[diffs.length >> 1];
+    if (Math.abs(md) > 2 * cell) {
+      const s = md < 0 ? 1 : -1;
+      for (let q = 0; q < cnt; q++) {
+        const i = idx(first + q), tb = s > 0 ? tP[i] : -tM[i], thr = wExp[i] / (2 * cell) - 0.5, span = tP[i] + tM[i];
+        let a = -1;
+        for (let d = 0; d <= span; d += step) { const t = tb - s * d; if (dtAt(ox[i] + t * nX[i], oy[i] + t * nY[i]) >= thr) { a = d; break; } }
+        if (a < 0) continue;
+        let b = a; while (b + step <= span && dtAt(ox[i] + (tb - s * (b + step)) * nX[i], oy[i] + (tb - s * (b + step)) * nY[i]) >= thr) b += step;
+        const u = tb - s * (a + Math.min((b - a) / 2, cell));
+        out[2 * i] = ox[i] + u * nX[i]; out[2 * i + 1] = oy[i] + u * nY[i];
+      }
+    } else if (jp >= 0 && jn >= 0) bridges.push([jp, jn, first, cnt]);   // 양쪽이 비슷하게 넓어짐(대칭 패드): 앞뒤 정상 중심선을 잇는다
+  }
+  // 이웃 점 사이 큰 가로 도약(긴 넓어짐의 시작·끝: 중점이 한 번에 옮겨감)도 폭 W 에 걸쳐 잇는다
+  const kW = Math.max(2, Math.round(Wg / 2 / 0.25));
+  for (let i = 1; i < (closed ? n + 1 : n); i++) {
+    const a = idx(i - 1), b = idx(i);
+    if (bad[a] || bad[b] || Math.hypot(out[2 * b] - out[2 * a], out[2 * b + 1] - out[2 * a + 1]) <= 0.25 + 4 * cell) continue;
+    if (!closed && (i - 1 - kW < 0 || i + kW >= n)) continue;
+    bridges.push([idx(i - 1 - kW), idx(i + kW), idx(i - kW), 2 * kW]);
+  }
+  for (const [jp, jn, first, cnt] of bridges) {
+    const P0 = [out[2 * jp], out[2 * jp + 1]], P1 = [out[2 * jn], out[2 * jn + 1]], ch = Math.hypot(P1[0] - P0[0], P1[1] - P0[1]);
+    const tan = (j, d) => { const a = idx(j - 2 * d), b = j; const tx = d * (out[2 * b] - out[2 * a]), ty = d * (out[2 * b + 1] - out[2 * a + 1]), l = Math.hypot(tx, ty) || 1; return [(tx / l) * ch, (ty / l) * ch]; };
+    const T0 = tan(jp, 1), T1 = tan(jn, -1);
+    for (let q = 0; q < cnt; q++) { const i = idx(first + q), [x, y] = hermite(P0, T0, P1, T1, (q + 1) / (cnt + 1)); out[2 * i] = x; out[2 * i + 1] = y; }
   }
   // 뒤로 가는 점(지그재그) 제거
   const res = [out[0], out[1]];
@@ -366,6 +415,53 @@ function recenter(pts, closed, R, dt) {
     if ((out[2 * i] - px) * tx + (out[2 * i + 1] - py) * ty > 0.02) res.push(out[2 * i], out[2 * i + 1]);
   }
   return res;
+}
+
+// 등간격 점열의 국소 2차 회귀(Savitzky–Golay, 대칭 창 ±m 점; 열린 경로 끝은 창을 대칭으로 줄임)
+function quadSmooth(pts, closed, m0) {
+  const n = pts.length / 2, out = pts.slice();
+  for (let i = 0; i < n; i++) {
+    let m = closed ? Math.min(m0, (n - 1) >> 1) : Math.min(m0, i, n - 1 - i);
+    if (m < 2) continue;
+    {   // 급히 꺾이는 곳(ㄱ자 모서리 원호 R≈W/2)은 창을 줄인다: 창 안에서 방향이 20° 넘게 돌면 ±2 점
+      const at = (q) => (closed ? (((i + q) % n) + n) % n : i + q), a = at(-m), b = at(-m + 1), c = at(m - 1), d = at(m);
+      const t1 = Math.atan2(pts[2 * b + 1] - pts[2 * a + 1], pts[2 * b] - pts[2 * a]), t2 = Math.atan2(pts[2 * d + 1] - pts[2 * c + 1], pts[2 * d] - pts[2 * c]);
+      if (Math.abs(Math.atan2(Math.sin(t2 - t1), Math.cos(t2 - t1))) > 0.35) m = 2;
+    }
+    let S0 = 0, S2 = 0, S4 = 0, X = 0, Y = 0, QX = 0, QY = 0;
+    for (let q = -m; q <= m; q++) { const j = closed ? (((i + q) % n) + n) % n : i + q, q2 = q * q; S0++; S2 += q2; S4 += q2 * q2; X += pts[2 * j]; Y += pts[2 * j + 1]; QX += q2 * pts[2 * j]; QY += q2 * pts[2 * j + 1]; }
+    const D = S0 * S4 - S2 * S2; out[2 * i] = (S4 * X - S2 * QX) / D; out[2 * i + 1] = (S4 * Y - S2 * QY) / D;
+  }
+  return out;
+}
+
+// 열린 경로 끝 구간(연장점 + 겹침 2mm)의 국소 선형 회귀(호 길이 ±1mm). 연장점은 마지막 평활 뒤에 붙으므로
+// 단면 중점의 ½셀 잡음이 그대로 남아 끝 선분을 수 도 기울인다 → 여기서 다듬는다(가운데 구간은 손대지 않음).
+function endSmooth(pts, k0, k1, h = 1) {
+  const n = pts.length / 2, cum = new Float64Array(n), out = pts.slice();
+  for (let i = 1; i < n; i++) cum[i] = cum[i - 1] + Math.hypot(pts[2 * i] - pts[2 * i - 2], pts[2 * i + 1] - pts[2 * i - 1]);
+  const det = (X) => X[0][0] * (X[1][1] * X[2][2] - X[1][2] * X[2][1]) - X[0][1] * (X[1][0] * X[2][2] - X[1][2] * X[2][0]) + X[0][2] * (X[1][0] * X[2][1] - X[1][1] * X[2][0]);
+  // 곡률 항(s²)은 넓은 창(±2.5h)의 2차 맞춤에서 얻고, 위치·기울기는 좁은 창(±h)의 1차 맞춤으로 얻는다:
+  // 1차만 쓰면 굽은 끝에서 가로로 치우쳐 구간 경계가 꺾이고, 2차만 쓰면 끝점 기울기가 잡음에 약하다.
+  const quad = (i, H) => {
+    const M = [0, 0, 0, 0, 0], bx = [0, 0, 0], by = [0, 0, 0];
+    for (let j = 0; j < n; j++) { const s = cum[j] - cum[i]; if (s < -H) continue; if (s > H) break; let p = 1; for (let e = 0; e < 5; e++) { M[e] += p; p *= s; } for (let e = 0, q = 1; e < 3; e++, q *= s) { bx[e] += q * pts[2 * j]; by[e] += q * pts[2 * j + 1]; } }
+    const A = [[M[0], M[1], M[2]], [M[1], M[2], M[3]], [M[2], M[3], M[4]]], D = det(A); if (M[0] < 5 || Math.abs(D) < 1e-12) return [0, 0];
+    const c2 = (b) => det([[A[0][0], A[0][1], b[0]], [A[1][0], A[1][1], b[1]], [A[2][0], A[2][1], b[2]]]) / D;
+    return [c2(bx), c2(by)];
+  };
+  const fit = (i) => {
+    // 곡률 항은 양쪽 창이 다 들어가는 가장 가까운 점에서 잰다(끝에서 한쪽 창 2차 맞춤은 잡음을 크게 키움)
+    let ic = i; while (ic < n - 1 && cum[ic] < 2.5 * h) ic++; while (ic > 0 && cum[n - 1] - cum[ic] < 2.5 * h) ic--;
+    const [cx, cy] = quad(ic, 2.5 * h);
+    let S = 0, Ss = 0, Sss = 0, Sx = 0, Sy = 0, Ssx = 0, Ssy = 0;
+    for (let j = 0; j < n; j++) { const s = cum[j] - cum[i]; if (s < -h) continue; if (s > h) break; const x = pts[2 * j] - cx * s * s, y = pts[2 * j + 1] - cy * s * s; S++; Ss += s; Sss += s * s; Sx += x; Sy += y; Ssx += s * x; Ssy += s * y; }
+    const D = S * Sss - Ss * Ss; if (S < 3 || Math.abs(D) < 1e-12) return;
+    out[2 * i] = (Sx * Sss - Ss * Ssx) / D; out[2 * i + 1] = (Sy * Sss - Ss * Ssy) / D;
+  };
+  for (let i = 0; i < Math.min(n, k0); i++) fit(i);
+  for (let i = Math.max(Math.min(n, k0), n - k1); i < n; i++) fit(i);
+  return out;
 }
 
 // ---- 직렬화 가능한 data → 함수 객체 ----
@@ -386,6 +482,8 @@ export function lineFromData(data) {
   const boundaryDist = (x, y) => { needR(); const i = Math.floor((x - R.x0) / R.cell), j = Math.floor((y - R.y0) / R.cell); if (i < 0 || j < 0 || i >= R.nx || j >= R.ny) return 0; return Math.max(0, (R.dt[j * R.nx + i] - 0.5) * R.cell); };
   // toSW 는 영역 밖 점에도 값을 낸다(가장 가까운 중심선 점 기준; 열린 경로는 s 를 [0,L] 로 자름). 영역 판정은 호출 쪽이 inside() 로 한다(tally 가 그렇게 함).
   // 꺾인 모서리 안쪽(오목한 쪽 꼭짓점에서 W/2 이내)은 여러 (s,w) 가 같은 점에 대응한다 → fromSW→toSW 왕복이 원래 (s,w) 로 돌아오지 않을 수 있다(가장 가까운 구간을 고름).
+  // 급한 굽힘(굽힘 반경 ≤ W: 머리핀, R10 S자 등)도 같다: 안쪽(곡률 중심 쪽) |w| 가 국소 굽힘 반경에 가까우면 법선들이 모여 s 가 모호해진다
+  // (|w| ≥ 0.8 × 국소 반경 영역은 (s,w) 정확도를 보장하지 않음). 바깥쪽과 |w| 가 작은 곳은 정상.
   let length, toSW, fromSW, tangentAt;
   if (kind === 'line') {
     const [ax, ay] = data.a, [tx, ty] = data.t; length = data.length;
@@ -449,29 +547,47 @@ export function lineFromData(data) {
 export function recognizeLine(parts, faces, dir) {
   const F = viewFrame(dir), { tris, hMin } = project(parts, faces, F);
   if (!tris.length) throw new Error('관측면이 선택되지 않음');
-  const R = rasterize(tris), holes = cleanTopology(R);
-  if (holes > 1) throw new Error(ERR_SHAPE);
-  const closed = holes === 1, dt = distanceTransform(R), cell = R.cell;
-  let area = 0, dtMax = 0; for (let k = 0; k < dt.length; k++) if (R.mask[k]) { area++; if (dt[k] > dtMax) dtMax = dt[k]; }
+  let R = rasterize(tris), topo = cleanTopology(R), dt = distanceTransform(R), W0 = ridgeWidth(R, dt);
+  {   // 셀 상한 W/60(폭 방향 60 셀 이상) — 단 래스터 ≤ 4M 셀
+    const want = Math.max(0.05, W0 / 60), ex = R.bounds[2] - R.bounds[0], ey = R.bounds[3] - R.bounds[1];
+    if (R.cell > want * 1.001 && (ex / want + 7) * (ey / want + 7) <= 4e6) { R = rasterize(tris, want); topo = cleanTopology(R); dt = distanceTransform(R); W0 = ridgeWidth(R, dt); }
+  }
+  const cell = R.cell;
+  // 구멍 가르기: 고리의 안쪽(넓이 > 4W² 또는 크기 > 3W)만 '닫힌 고리'로 센다. 더 작은 구멍(나사 보스 등)은 중심선용 마스크에서만 메우고
+  // (세선화·단면 중점), 원래 마스크는 inside()/boundaryDist() 에 그대로 둔다 → 집계는 구멍을 뺀다.
+  const maskC = Uint8Array.from(R.mask), small = new Set(); let openings = 0;
+  for (const h of topo.holes) { if (h.size * cell * cell > 4 * W0 * W0 || h.ext * cell > 3 * W0) openings++; else small.add(h.id); }
+  if (openings > 1) throw new Error(ERR_SHAPE);
+  if (small.size) for (let k = 0; k < maskC.length; k++) if (!maskC[k] && small.has(topo.lab[k])) maskC[k] = 1;
+  const closed = openings === 1, RC = small.size ? { ...R, mask: maskC } : R, dtC = small.size ? distanceTransform(RC) : dt;
+  let area = 0, dtMax = 0; for (let k = 0; k < dtC.length; k++) if (maskC[k]) { area++; if (dtC[k] > dtMax) dtMax = dtC[k]; }
   area *= cell * cell;
-  if (area / (2 * dtMax * cell) ** 2 < 2) throw new Error(ERR_SHAPE);   // 가로세로비 < 2: 판·덩어리(세선화 전에 거름)
-  const sk = thin(R);
+  if (area / (2 * dtMax * cell) ** 2 < 1.5) throw new Error(ERR_SHORT);   // 가로세로비 < 1.5: 판·덩어리·너무 짧은 조각(세선화 전에 거름)
+  const sk = thin(RC);
   minimal8(sk, R.nx, R.ny);
-  prune(sk, R.nx, R.ny, dt, 1.2, dtMax);
+  prune(sk, R.nx, R.ny, dtC, 1.2, dtMax);
   let { path, branched } = orderPath(sk, R.nx, R.ny, closed);
-  if (!closed) path = trimEnds(path, R.nx, dt);
-  const widths = path.map((k) => 2 * dt[k] * cell).sort((a, b) => a - b), width = widths[widths.length >> 1] ?? 0;
+  if (!closed) path = trimEnds(path, R.nx, dtC);
+  const widths = path.map((k) => 2 * dtC[k] * cell).sort((a, b) => a - b), width = widths[widths.length >> 1] ?? 0;
   const raw = []; for (const k of path) raw.push(R.x0 + ((k % R.nx) + 0.5) * cell, R.y0 + (((k / R.nx) | 0) + 0.5) * cell);
   let pts = smoothResample(raw, closed, 0.25 / cell, 0.25);
-  pts = smoothResample(recenter(pts, closed, R, dt), closed, 3, 0.25);   // ±0.75mm: 단면 중점의 ½셀 잡음이 접선(fromSW 의 w 방향)을 흔들지 않게
-  const { inside } = rasterOps(R, dt);
+  // 두 번: 첫 결과(골격보다 곧은 중심선)의 법선으로 다시 재면 넓어진 구간 가장자리의 기운 단면이 없어진다
+  // 마지막은 국소 2차 회귀(±1.5mm): 단면 중점의 ½셀 잡음을 지워 접선(toSW/fromSW 의 w 방향)을 안정시키되, 이동평균과 달리 호 반경을 줄이지 않는다
+  for (let pass = 0; pass < 2; pass++) pts = smoothResample(recenter(pts, closed, RC, dtC), closed, pass ? 1 : 3, 0.25);
+  pts = quadSmooth(pts, closed, 6);
+  const { inside } = rasterOps(RC, dtC);
   let ext0 = [], ext1 = [];
   if (!closed) {
     // 다듬은 끝에서 영역 끝까지 연장: 0.25mm 씩 나아가며 그 자리 단면 중점으로 다시 맞춘다(호·테이퍼의 휨을 따라감).
     // 단면이 띠 폭보다 뚜렷이 길면(끝 모서리 부근) 그 뒤로는 마지막 접선으로 곧게 간다. 마지막은 반 셀 단위로 경계까지.
     const midAt = (x, y, nx_, ny_, lim) => {
       const st = cell / 4, t = [0, 0];
-      for (const [q, s] of [[0, 1], [1, -1]]) { let u = 0; while (u + st <= lim && inside(x + s * (u + st) * nx_, y + s * (u + st) * ny_)) u += st; if (u + st > lim) return null; t[q] = u + st / 2; }
+      for (const [q, s] of [[0, 1], [1, -1]]) {
+        let u = 0; while (u + st <= lim && inside(x + s * (u + st) * nx_, y + s * (u + st) * ny_)) u += st;
+        if (u + st > lim) return null;
+        let lo = u, hi = u + st; for (let it = 0; it < 40; it++) { const m = (lo + hi) / 2; if (inside(x + s * m * nx_, y + s * m * ny_)) lo = m; else hi = m; }   // 경계(셀 모서리)까지 이분
+        t[q] = (lo + hi) / 2;
+      }
       return [t[0] + t[1], (t[0] - t[1]) / 2];
     };
     const extend = (back) => {
@@ -483,20 +599,28 @@ export function recognizeLine(parts, faces, dir) {
       for (let q = 0; q < 1e5; q++) {
         const x2 = x + 0.25 * tx, y2 = y + 0.25 * ty; if (!inside(x2, y2)) break;
         const c = midAt(x2, y2, -ty, tx, lim);
-        if (!c || c[0] > 1.15 * w0 + 2 * cell || Math.abs(c[1]) > Math.max(2 * cell, 0.1)) break;   // 단면이 끝면에 걸려 크게 꺾이면 멈춤
-        const x3 = x2 - c[1] * ty, y3 = y2 + c[1] * tx; if (!inside(x3, y3)) break;
+        if (!c || c[0] > 1.15 * w0 + 2 * cell || c[0] / 2 - Math.abs(c[1]) < 0.475 * w0 - cell) break;   // 단면이 끝면에 걸려 짧아지면(또는 끝 모서리에서 길어지면) 곧게
+        // 가로 보정은 한 걸음에 ±max(셀, 0.05) 로 제한: 끝면에 걸린 단면(크게 치우침)이나 가장자리 잡음이 방향을 꺾지 못하게
+        const cl = Math.max(cell, 0.05), u = Math.max(-cl, Math.min(cl, c[1]));
+        const x3 = x2 - u * ty, y3 = y2 + u * tx; if (!inside(x3, y3)) break;
         hist.push(x, y); x = x3; y = y3; add.push(x, y);
         // 단면 중점의 양자화 잡음(±½셀)이 방향을 흔들지 않도록 2mm 전 점과 이은 방향을 쓴다
-        const bx = hist[hist.length - 16] ?? hist[0], by = hist[hist.length - 15] ?? hist[1];
-        const ux = x - bx, uy = y - by; l = Math.hypot(ux, uy); if (l > 0.2) { tx = ux / l; ty = uy / l; }
+        // 끝 접선 = 최근 1mm 현의 방향 + 그 앞 1mm 현과의 차이의 절반(굽은 끝에서 현 방향이 뒤처지는 것 보정)
+        const H = hist.length, p1x = hist[H - 8], p1y = hist[H - 7], p2x = hist[H - 16], p2y = hist[H - 15];
+        if (p2x !== undefined) {
+          const a1 = Math.atan2(y - p1y, x - p1x), a2 = Math.atan2(p1y - p2y, p1x - p2x), d = Math.atan2(Math.sin(a1 - a2), Math.cos(a1 - a2)), th = a1 + d / 2;
+          tx = Math.cos(th); ty = Math.sin(th);
+        }
       }
-      for (let q = 0; q < 1e6; q++) { const x2 = x + (tx * cell) / 2, y2 = y + (ty * cell) / 2; if (!inside(x2, y2)) break; x = x2; y = y2; }
-      add.push(x + (tx * cell) / 2, y + (ty * cell) / 2);   // 셀 중심 기준 → 실제 경계는 반 셀 더 바깥
+      // 끝: 반 셀씩 나아간 뒤 마지막 안쪽~첫 바깥 사이를 이분해 마스크 경계(셀 모서리)를 찾는다 — 양 끝 같은 규칙
+      for (let q = 1; q < 1e6; q++) { const x2 = x + (tx * cell) / 2, y2 = y + (ty * cell) / 2; if (!inside(x2, y2)) break; x = x2; y = y2; if (q % Math.max(1, Math.round(0.5 / cell)) === 0) add.push(x, y); }
+      let lo = 0, hi = cell / 2; for (let it = 0; it < 40; it++) { const m = (lo + hi) / 2; if (inside(x + tx * m, y + ty * m)) lo = m; else hi = m; }
+      add.push(x + tx * hi, y + ty * hi);
       return add;
     };
     ext1 = extend(true); ext0 = extend(false);
     const rev = []; for (let i = ext0.length - 2; i >= 0; i -= 2) rev.push(ext0[i], ext0[i + 1]);
-    pts = [...rev, ...pts, ...ext1];
+    pts = endSmooth([...rev, ...pts, ...ext1], rev.length / 2 + 8, ext1.length / 2 + 8, 1);
   }
   const P = Float64Array.from(pts), n = P.length / 2;
   const data = { kind: 'path', closed, branched, frame: F, hMin, width, raster: { x0: R.x0, y0: R.y0, cell, nx: R.nx, ny: R.ny, mask: R.mask, dt, bounds: R.bounds }, pts: P };
@@ -505,8 +629,9 @@ export function recognizeLine(parts, faces, dir) {
     let mx = 0, my = 0; for (let i = 0; i < n; i++) { mx += P[2 * i]; my += P[2 * i + 1]; } mx /= n; my /= n;
     let sxx = 0, syy = 0, sxy = 0; for (let i = 0; i < n; i++) { const x = P[2 * i] - mx, y = P[2 * i + 1] - my; sxx += x * x; syy += y * y; sxy += x * y; }
     const th = 0.5 * Math.atan2(2 * sxy, sxx - syy), tx = Math.cos(th), ty = Math.sin(th);
-    let dev = 0; for (let i = 0; i < n; i++) dev = Math.max(dev, Math.abs(-ty * (P[2 * i] - mx) + tx * (P[2 * i + 1] - my)));
-    if (dev <= Math.max(0.05, cell)) {
+    let dev = 0, ss = 0; for (let i = 0; i < n; i++) { const e = Math.abs(-ty * (P[2 * i] - mx) + tx * (P[2 * i + 1] - my)); dev = Math.max(dev, e); ss += e * e; }
+    const tol = Math.max(0.05, cell);
+    if (Math.sqrt(ss / n) <= tol && dev <= 3 * tol) {   // RMS ≤ tol, 최대 ≤ 3·tol (가장자리 잡음에 견딤)
       const sgn = (P[2 * n - 2] - P[0]) * tx + (P[2 * n - 1] - P[1]) * ty >= 0 ? 1 : -1, t2 = [sgn * tx, sgn * ty];
       const s0 = (P[0] - mx) * t2[0] + (P[1] - my) * t2[1], s1 = (P[2 * n - 2] - mx) * t2[0] + (P[2 * n - 1] - my) * t2[1];
       result = lineFromData({ ...data, kind: 'line', a: [mx + s0 * t2[0], my + s0 * t2[1]], t: t2, length: s1 - s0 });
