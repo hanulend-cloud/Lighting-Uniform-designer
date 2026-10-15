@@ -1,10 +1,11 @@
 // LED 직접 배치 — spec 2026-10-14 §4.2. 관측 라인(line.js) 위 s 위치를 PCB(깊이 평면 또는 기구 부품 면)로 내린다.
 // pcb: { kind:'depth', depth }(관측면 최저점에서 관측 방향 반대로 depth mm) | { kind:'face', part, face }(rt.parts[part] BVH 로 투영)
+// 'face' 모드 + side 'direct': 발광 축 = 맞은 삼각형의 바깥 법선(관측 쪽으로 향하게 뒤집음) — 기울어진 PCB 면은 기울어진 채 발광.
 // side: 'direct'(관측 방향) | 'left' | 'right'(라인 진행 방향 기준 측면 발광) — xAxis 는 라인 접선(패키지 가로축).
 import { intersectRay } from './bvh.js';
 
 export function ledSPositions(line, count, pitch) {
-  if (!(count >= 1)) throw new Error('LED 개수는 1 이상');
+  if (!Number.isInteger(count) || count < 1) throw new Error('LED 개수는 1 이상의 정수');
   const L = line.length;
   if (line.closed) return Array.from({ length: count }, (_, i) => (i * L) / count);
   if (pitch > 0) {
@@ -15,21 +16,27 @@ export function ledSPositions(line, count, pitch) {
 }
 
 export function manualLeds(line, { count, pitch = 0, side = 'direct', pcb }, rt = null) {
+  if (pcb.kind === 'depth' && !(pcb.depth > 0)) throw new Error('PCB 깊이는 0 보다 커야 함');
   const F = line.frame, out = [];
   for (const s of ledSPositions(line, count, pitch)) {
     const [x, y] = line.fromSW(s, 0), [tx, ty] = line.tangentAt(s);
-    let pos;
+    let pos, hitN = null;
     if (pcb.kind === 'depth') pos = line.to3D(x, y, -pcb.depth);
     else {
       const top = line.to3D(x, y, 1e4), m = rt?.parts?.[pcb.part];
       if (!m) throw new Error('PCB 면 부품을 찾을 수 없음');
       const h = intersectRay(m.bvh, top[0], top[1], top[2], -F.d[0], -F.d[1], -F.d[2], 0, Infinity);
       if (!h || m.faceIds[h.tri] !== pcb.face) throw new Error(`s=${s.toFixed(1)}mm 아래에 선택한 PCB 면이 없음`);
+      const a = m.triangles[3 * h.tri] * 3, b = m.triangles[3 * h.tri + 1] * 3, c = m.triangles[3 * h.tri + 2] * 3, P = m.positions;
+      const e1 = [P[b] - P[a], P[b + 1] - P[a + 1], P[b + 2] - P[a + 2]], e2 = [P[c] - P[a], P[c + 1] - P[a + 1], P[c + 2] - P[a + 2]];
+      hitN = [e1[1] * e2[2] - e1[2] * e2[1], e1[2] * e2[0] - e1[0] * e2[2], e1[0] * e2[1] - e1[1] * e2[0]];
+      const nl = Math.hypot(...hitN) || 1, sg = hitN[0] * F.d[0] + hitN[1] * F.d[1] + hitN[2] * F.d[2] < 0 ? -1 : 1;
+      hitN = hitN.map((v) => (sg * v) / nl);
       pos = [top[0] - h.t * F.d[0], top[1] - h.t * F.d[1], top[2] - h.t * F.d[2]];
     }
     const T3 = [tx * F.u[0] + ty * F.v[0], tx * F.u[1] + ty * F.v[1], tx * F.u[2] + ty * F.v[2]];
     const left = [F.d[1] * T3[2] - F.d[2] * T3[1], F.d[2] * T3[0] - F.d[0] * T3[2], F.d[0] * T3[1] - F.d[1] * T3[0]];
-    const axis = side === 'left' ? left : side === 'right' ? left.map((v) => -v) : F.d.slice();
+    const axis = side === 'left' ? left : side === 'right' ? left.map((v) => -v) : hitN ?? F.d.slice();
     out.push({ s, pos, axis, xAxis: T3 });
   }
   return out;

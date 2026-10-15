@@ -33,4 +33,15 @@ const strip = recognizeLine([topFaceMesh(rectTris(0, 0, 100, 6), 12)], faces, [0
   const L = manualLeds(strip, { count: 3, pitch: 30, side: 'direct', pcb: { kind: 'face', part: 0, face: 1 } }, { parts: [{ ...board, bvh }] });
   ok(L.every((e) => Math.abs(e.pos[2] - 3) < 1e-6), `PCB 면 위 배치: z ${L.map((e) => e.pos[2].toFixed(3)).join()}`);
 }
+{   // 검증: 정수 개수·양의 깊이, 기울어진 PCB 면은 법선 방향으로 발광
+  const thr = (o) => { try { manualLeds(strip, o); return false; } catch { return true; } };
+  ok(thr({ count: 2.5, pitch: 0, side: 'direct', pcb: { kind: 'depth', depth: 10 } }) && thr({ count: 0, pitch: 0, side: 'direct', pcb: { kind: 'depth', depth: 10 } }), '개수가 정수 아니거나 0 → 오류');
+  ok(thr({ count: 2, pitch: 0, side: 'direct', pcb: { kind: 'depth', depth: 0 } }) && thr({ count: 2, pitch: 0, side: 'direct', pcb: { kind: 'depth', depth: -3 } }), '깊이 ≤ 0 → 오류');
+  const a = (10 * Math.PI) / 180, zt = (x) => 3 + Math.tan(a) * (x - 50);   // y 축 둘레 10° 기울어진 판(윗면 face 1)
+  const positions = Float32Array.from([-10, -10, zt(-10), 110, -10, zt(110), 110, 20, zt(110), -10, 20, zt(-10)]);
+  const tilt = { positions, triangles: Uint32Array.from([0, 1, 2, 0, 2, 3]), faceIds: Uint32Array.from([1, 1]), faceCount: 2 };
+  const L = manualLeds(strip, { count: 2, pitch: 30, side: 'direct', pcb: { kind: 'face', part: 0, face: 1 } }, { parts: [{ ...tilt, bvh: buildBvh(tilt.positions, tilt.triangles) }] });
+  const ang = L.map((e) => (Math.acos(Math.min(1, e.axis[2])) * 180) / Math.PI);
+  ok(ang.every((v) => Math.abs(v - 10) < 1e-3) && L.every((e) => Math.abs(Math.hypot(...e.axis) - 1) < 1e-9 && e.axis[2] > 0), `기울어진 PCB 면(10°) → 발광 축 = 면 법선: ${ang.map((v) => v.toFixed(3))}°`);
+}
 done();

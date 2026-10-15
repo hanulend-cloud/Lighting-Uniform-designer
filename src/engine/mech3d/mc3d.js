@@ -7,6 +7,7 @@
 // 수치: 사건 뒤 출발점을 옮기지 않고 직전 적중 삼각형을 다음 광선에서 제외하고 tMin = 1e-9 로 둔다(모서리 적중의 이웃 삼각형 t≈0 반복 방지). 체적 산란 뒤에는 제외 없음.
 // 비용: Milky 가 매우 높으면(≥ 9.5) 광자당 수 ms 가 든다 — P4 에서 사건 예산(event budget)을 둔다.
 // 편광: 광자마다 전기장 단위벡터 E ⟂ d 를 추적한다(Fresnel s/p 분리). 확산 반사·면 처리·체적 산란 뒤에는 무작위화.
+// (onExit/onEscape 마지막 인자 p = 광자 번호)
 // onExit(part, face, x,y,z, dx,dy,dz, w): 투과성 부품에서 공기로 나가는 **모든** 전이(내부 공기 틈 포함 — 이후 다른 부품에
 //   다시 들어갈 수 있음). onEscape(x,y,z, dx,dy,dz, w): 공기 중 무한 탈출 = 원거리장 총량.
 import { intersectRay, queryBox } from './bvh.js';
@@ -101,7 +102,7 @@ export function runMC3D(S, { source, N, seed = 1, onExit = null, onEscape = null
       const h = intersectRay(bvh, px, py, pz, dx, dy, dz, T_MIN, sFree, lastTri, lastTri2);
       if (!h && !Number.isFinite(sFree)) {
         if (cur >= 0) { L.lost += w; break; }   // 매질 안에서 교차 없음 = 열린 메쉬(진단)
-        L.escaped += w; if (onEscape) onEscape(px, py, pz, dx, dy, dz, w); break;
+        L.escaped += w; if (onEscape) onEscape(px, py, pz, dx, dy, dz, w, p); break;
       }
       const t = h ? h.t : sFree;
       px += t * dx; py += t * dy; pz += t * dz;
@@ -168,7 +169,7 @@ export function runMC3D(S, { source, N, seed = 1, onExit = null, onEscape = null
           if (!fresnel(nCur, nOf(other))) {
             stack.splice(stack.lastIndexOf(q), 1);
             if (other >= 0 && stack[stack.length - 1] !== other) stack.push(other);
-            if (!stack.length && onExit) onExit(q, face, px, py, pz, dir[0], dir[1], dir[2], w);
+            if (!stack.length && onExit) onExit(q, face, px, py, pz, dir[0], dir[1], dir[2], w, p);
           }
         }
         if (lost) { L.lost += w; break; }

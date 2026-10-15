@@ -2,7 +2,12 @@
 import { tallyGeometry, makeAccumulator, tallyStats } from '../src/engine/mech3d/tally.js';
 import { recognizeLine } from '../src/engine/mech3d/line.js';
 import { rng } from '../src/engine/l2/mc-slab.js';
-import { topFaceMesh, rectTris, ok, done } from './mech3d-util.mjs';
+import { runMC3D } from '../src/engine/mech3d/mc3d.js';
+import { buildTraceScene } from '../src/engine/mech3d/scene3d.js';
+import { setMech3dMesh, getMech3d } from '../src/engine/mech3d/runtime.js';
+import { defaultPart, setPartMaterial } from '../src/engine/mech3d/materials.js';
+import { loadTable } from './l2-util.mjs';
+import { topFaceMesh, rectTris, annulusTris, boxMesh, ok, done } from './mech3d-util.mjs';
 
 const line = recognizeLine([topFaceMesh(rectTris(0, 0, 100, 6), 2)], [{ part: 0, face: 1 }], [0, 0, 1]);
 const obs = { faces: [{ part: 0, face: 1 }], dir: [0, 0, 1], cone: 10, cell: 0.5, edgeExcl: 0.5, targetLen: 0.8, targetWid: 0.5 };
@@ -27,4 +32,55 @@ ok(S.Uwid > 0.7 && S.Uwid <= 1, `폭 방향 최저 U ${S.Uwid.toFixed(3)} @ s=${
 const rr = S.profile[150] / S.profile[50], r2 = Math.max(rr, 1 / rr), want2 = (20 + 75.25) / (20 + 25.25);   // 라인 진행 방향과 무관하게 비교
 ok(!S.passLen && S.profile.length === 200 && Math.abs(r2 / want2 - 1) < 0.03, `판정·프로파일(길이 ${S.passLen ? '합격' : '불합격'}, 75/25mm 비 ${r2.toFixed(3)} / 해석 ${want2.toFixed(3)})`);
 ok(S.counted === 198 * 10 && S.noiseWarn === false, `집계 셀 ${S.counted}, 잡음 경고 없음(목표와의 여유가 3σ 보다 큼)`);
+{   // 광자별 상태: 광자 0 이 관측면을 나간 뒤 사라지고, 광자 1 이 탈출해도 광자 0 의 지점에 집계되면 안 됨
+  const a = makeAccumulator(G, line, obs);
+  a.onExit(0, 1, 50, 3, 2, 0, 0, 1, 1, 0); a.onEscape(50, 3, 5, 0, 0, 1, 1, 1);
+  ok(a.acc.reduce((x, y) => x + y, 0) === 0, '다른 광자의 탈출은 집계 안 함');
+  a.onExit(0, 1, 50, 3, 2, 0, 0, 1, 1, 7); a.onEscape(50, 3, 5, 0, 0, 1, 1, 7);
+  ok(a.acc.reduce((x, y) => x + y, 0) === 1, '같은 광자는 집계');
+  const table = loadTable();
+  setMech3dMesh('t', [boxMesh(0, 0, 0, 10, 10, 2)]);
+  const S = buildTraceScene(getMech3d(), { name: 't', parts: [setPartMaterial(defaultPart(0, 'p0', 1), 'clear')], contacts: [] }, { table });
+  const ps = new Set(); let bad = 0;
+  runMC3D(S, { source: { flux: 1, sample: (r) => [4.5 + r(), 4.5 + r(), -1, 0, 0, 1] }, N: 200, seed: 5, onExit: (...v) => { if (!Number.isInteger(v[9])) bad++; ps.add(v[9]); }, onEscape: (...v) => { if (!Number.isInteger(v[7])) bad++; ps.add(v[7]); } });
+  ok(bad === 0 && ps.size > 100, `runMC3D 가 광자 번호 p 를 전달: 서로 다른 p ${ps.size}개`);
+}
+{   // 곡선 영역 셀 면적: 균일 면 발광 링(37–43) — 안쪽/바깥쪽 셀이 같은 밝기여야 함
+  const ringL = recognizeLine([topFaceMesh(annulusTris(0, 0, 37, 43), 2)], [{ part: 0, face: 1 }], [0, 0, 1]);
+  const ob = { faces: [{ part: 0, face: 1 }], dir: [0, 0, 1], cone: 10, cell: 0.5, edgeExcl: 0.5, targetLen: 0.8, targetWid: 0.8 };
+  const GR = tallyGeometry(ringL, ob), rr = rng(7), accs2 = [], cn = [];
+  for (let b = 0; b < 10; b++) {
+    const a = makeAccumulator(GR, ringL, ob);
+    for (let k = 0; k < 4000000; k++) {
+      const rad = Math.sqrt(37 * 37 + rr() * (43 * 43 - 37 * 37)), th = rr() * 2 * Math.PI, x = rad * Math.cos(th), y = rad * Math.sin(th);
+      a.onExit(0, 1, x, y, 2, 0, 0, 1, 1, k); a.onEscape(x, y, 3, 0, 0, 1, 1, k);
+    }
+    accs2.push(a.acc); cn.push(a.cnt);
+  }
+  const SR = tallyStats(GR, accs2, ob, cn);
+  const cols = []; for (let j = 0; j < GR.nw; j++) { let s = 0, c = 0; for (let i = 0; i < GR.ns; i++) if (GR.valid[i * GR.nw + j]) { s += SR.map[i * GR.nw + j]; c++; } if (c > GR.ns / 2) cols.push(s / c); }
+  ok(SR.Uwid >= 0.9 && Math.abs(cols[0] / cols[cols.length - 1] - 1) < 0.02, `링 균일 발광: 폭 U ${SR.Uwid.toFixed(3)}, 안/바깥 열 비 ${(cols[0] / cols[cols.length - 1]).toFixed(4)} (열 ${cols.length}개)`);
+}
+{   // 테이퍼 4→12: 영역 안 모든 픽셀이 w 격자 안
+  const tap = recognizeLine([topFaceMesh([[[0, -2], [100, -6], [100, 6]], [[0, -2], [100, 6], [0, 2]]], 2)], [{ part: 0, face: 1 }], [0, 0, 1]);
+  const GT = tallyGeometry(tap, { cell: 0.5, edgeExcl: 0.5 }), Rr = tap.data.raster; let out = 0, n = 0;
+  for (let j = 0; j < Rr.ny; j++) for (let i = 0; i < Rr.nx; i++) if (Rr.mask[j * Rr.nx + i]) {
+    n++; const [, w] = tap.toSW(Rr.x0 + (i + 0.5) * Rr.cell, Rr.y0 + (j + 0.5) * Rr.cell), jj = Math.floor((w - GT.w0) / GT.cell);
+    if (jj < 0 || jj >= GT.nw) out++;
+  }
+  ok(n > 0 && out === 0, `테이퍼 4→12: 격자 밖 픽셀 ${out}/${n}, w 열 ${GT.nw}`);
+}
+{   // 경계 처리
+  const e = tallyStats(G, [new Float64Array(G.ns * G.nw), new Float64Array(G.ns * G.nw)], obs);
+  ok(e.noiseWarn === true && e.counted === 0, '집계 0 → 잡음 경고');
+  const one = tallyStats(G, [new Float64Array(G.ns * G.nw).fill(1)], obs);
+  ok(one.noiseWarn === true, '배치 1개 → 잡음 경고');
+  const noDir = makeAccumulator(G, line, { ...obs, dir: null }); noDir.onExit(0, 1, 50, 3, 2, 0, 0, 1, 1, 0); noDir.onEscape(50, 3, 5, 0, 0, 1, 1, 0);
+  ok(noDir.acc.some((v) => v > 0), 'obs.dir null → 라인 관측 방향 사용');
+  const nar = recognizeLine([topFaceMesh(rectTris(0, 0, 100, 1.4), 2)], [{ part: 0, face: 1 }], [0, 0, 1]);
+  const GN = tallyGeometry(nar, obs), sn = tallyStats(GN, [new Float64Array(GN.ns * GN.nw).fill(1), new Float64Array(GN.ns * GN.nw).fill(1)], obs);
+  ok(sn.narrow === true && sn.Uwid === null, `좁은 띠(유효 열 <2): narrow, Uwid null`);
+  const emptyG = tallyGeometry(nar, { ...obs, edgeExcl: 1 }), se = tallyStats(emptyG, [new Float64Array(emptyG.ns * emptyG.nw), new Float64Array(emptyG.ns * emptyG.nw)], obs);
+  ok(se.empty === true && se.sWorst === null, '유효 셀 없음 → empty');
+}
 done();
