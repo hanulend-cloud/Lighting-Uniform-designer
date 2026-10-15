@@ -29,6 +29,12 @@ const same = (a, b) => a.length === b.length && a.every((v, k) => v === b[k]);
   const c = host.handle({ type: 'chunk', sceneKey: 'k1', seed: 3 * 7919, N: 2000 });
   ok(same(c.reply.acc, J.accs[0]) && c.transfer.length === 2 && c.reply.leak && Number.isFinite(c.reply.escObs), 'host 청크 = runJob 배치 0, 전송 버퍼 2개');
   ok(host.handle({ type: 'chunk', sceneKey: 'k0', seed: 1, N: 10 }).reply.stale === true, '다른 sceneKey 청크 → stale');
+  const rr = host.handle({ type: 'run' }).reply;
+  ok(typeof rr.error === 'string' && rr.error.includes('run 메시지는 제거됨'), '구 run 메시지 → error 응답');
+  ok(host.handle({ ...scene, mechParts: null }).reply.ready === true, '같은 sceneKey 장면 → 다시 만들지 않고 ready');
+  const be = host.handle({ ...scene, sceneKey: 'k2', mechParts: null }).reply;
+  ok(typeof be.error === 'string' && be.sceneKey === 'k2' && host.sceneKey === null, '장면 생성 오류 → {sceneKey, error}, 캐시 비움');
+  ok(host.handle({ type: 'chunk', sceneKey: 'k1', seed: 1, N: 10 }).reply.stale === true, '오류 후 이전 장면 청크 → stale');
   ok(host.handle({ type: 'line' }) === null, '모르는 메시지 → null(Worker 가 다른 처리기로)');
 }
 done();

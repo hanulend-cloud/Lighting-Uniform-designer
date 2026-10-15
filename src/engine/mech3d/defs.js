@@ -21,7 +21,9 @@ export function migrateMech3d(m) {
   if (!m) return m;
   m.light ??= defaultLight();
   m.observe ??= defaultObserve();
-  m.light.spec.fluxLm ??= 0;
+  m.light.spec ??= defaultLight().spec;
+  const f = Number(m.light.spec.fluxLm);
+  m.light.spec.fluxLm = Number.isFinite(f) && f > 0 ? f : 0;
   m.observe.targetLum ??= null;
   m.observe.targetNoise ??= 0.02;
   m.checks = { ...defaultChecks(), ...(m.checks ?? {}) };

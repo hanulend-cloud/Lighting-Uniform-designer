@@ -11,14 +11,18 @@ export function makeChunkHost({ getTable, getDb = () => null }) {
     get sceneKey() { return cache?.sceneKey ?? null; },
     // 반환 { reply, transfer } — 처리할 메시지가 아니면 null
     handle(m) {
+      if (m.type === 'run') return { reply: { error: 'run 메시지는 제거됨 — 점진 계산을 사용하세요' }, transfer: [] };   // 구 호출(main.js, Task 10 전)이 멈추지 않게
       if (m.type === 'scene') {
-        const table = getTable();
-        if (!table) throw new Error('L2 산란 응답표가 없음');
-        cache = null;   // 실패하면 이전 장면도 쓰지 않음
-        const rt = buildSceneMesh('mech', m.mechParts), line = lineFromData(m.lineData);
-        const S = composeScene({ rt, mspec: m.mspec, ledParts: m.ledParts, table, db: getDb(), line });
-        cache = { sceneKey: m.sceneKey, S, line, G: m.G, obs: m.obs, emitters: m.emitters, ledSpec: m.mspec.light.spec };
-        return { reply: { sceneKey: m.sceneKey, ready: true }, transfer: [] };
+        if (cache?.sceneKey === m.sceneKey) return { reply: { sceneKey: m.sceneKey, ready: true }, transfer: [] };   // 같은 장면 — 다시 만들지 않음
+        try {
+          const table = getTable();
+          if (!table) throw new Error('L2 산란 응답표가 없음');
+          cache = null;   // 실패하면 이전 장면도 쓰지 않음
+          const rt = buildSceneMesh('mech', m.mechParts), line = lineFromData(m.lineData);
+          const S = composeScene({ rt, mspec: m.mspec, ledParts: m.ledParts, table, db: getDb(), line });
+          cache = { sceneKey: m.sceneKey, S, line, G: m.G, obs: m.obs, emitters: m.emitters, ledSpec: m.mspec.light.spec };
+          return { reply: { sceneKey: m.sceneKey, ready: true }, transfer: [] };
+        } catch (e) { cache = null; return { reply: { sceneKey: m.sceneKey, error: String(e?.message ?? e) }, transfer: [] }; }
       }
       if (m.type === 'chunk') {
         if (!cache || cache.sceneKey !== m.sceneKey) return { reply: { sceneKey: m.sceneKey, stale: true }, transfer: [] };
