@@ -52,4 +52,26 @@ ok(findEmitters([cyl], [0], 0, 0)[0].needsCheck, 'degenerate 발광면 → needs
 const far = boxMesh(500, 500, 0, 100, 100, 100);
 ok(pcbIndex([far, ...parts.slice(0, 6)], [2, 3, 4, 5, 6]) === 1, 'PCB = LED 근처의 최대 부피(먼 큰 부품 제외)');
 ok(pcbIndex([far], []) === 0 && pcbIndex([parts[1]], [0]) === -1, 'pcbIndex: LED 없으면 최대 부피, 후보 없으면 -1');
+
+// --- 국소 PCB 방향 판정 ---
+// 비대칭 옆면 발광 LED: 몸체 + (−x 쪽 돌기). 발광면 = 몸체 +x 면(5), PCB(윗면 z=0) 와 수직
+const bump = (x0) => boxMesh(x0, -0.3, 0.2, 0.5, 0.6, 0.4);
+const sideLed = mergeMeshes([boxMesh(-1.5, -1, 0, 3, 2, 0.8), bump(-2.0)]);
+const sideMirror = mergeMeshes([boxMesh(-1.5, -1, 0, 3, 2, 0.8), bump(1.5)]);   // 발광 −x(면 4)
+const pcb100 = boxMesh(-50, -10, -1, 100, 20, 1);
+const sp = [pcb100, ...[0, -40, 40].map((x) => transformMesh(sideLed, [x, 0, 0.1], [0, 0, 0]))];
+const emS = findEmitters(sp, [1, 2, 3], 1, 5, 0);
+ok(emS.every((e) => e.face === 5 && !e.needsCheck && e.axis[0] > 0.99), `옆면 발광 LED x=0/−40/+40 → 기준 면 5, needsCheck 없음`);
+const emM = findEmitters([pcb100, sideLed, transformMesh(sideMirror, [40, 0, 0.1], [0, 0, 0])], [1, 2], 1, 5, 0);
+ok(emM[1].face === 4 && !emM[1].needsCheck && emM[1].axis[0] < -0.99, `거울상 LED(발광 −x) x=+40 → 면 ${emM[1].face}`);
+const big = boxMesh(-2500, -10, -1, 5000, 20, 1);
+const rotLed = transformMesh(led0, [2000, 0, 1.5], [10, 20, 30]);
+const emR = findEmitters([big, led0, rotLed], [1, 2], 1, 7, 0);
+ok(!emR[1].needsCheck && emR[1].face === 7, '5000mm PCB 위 x≈2000 회전 LED → needsCheck 없음');
+const swapIds = (m, a, b) => ({ ...m, faceIds: Uint32Array.from(m.faceIds, (f) => (f === a ? b : f === b ? a : f)) });
+const sym = boxMesh(-1, -1, 0, 2, 2, 1), pc2 = boxMesh(-20, -10, -1, 40, 20, 1);
+const emT = findEmitters([pc2, sym, swapIds(transformMesh(sym, [10, 0, 0.1], [0, 0, 0]), 0, 1)], [1, 2], 1, 1, 0);
+ok(!emT[1].needsCheck && emT[1].axis[2] > 0.99, '위발광 대칭 상자(상·하 id 교환) → 윗면');
+const emY = findEmitters([pc2, sym, swapIds(transformMesh(sym, [10, 0, 0.1], [0, 0, 0]), 4, 5)], [1, 2], 1, 5, 0);
+ok(emY[1].needsCheck, '옆발광 대칭 상자(±x id 교환) → needsCheck');
 done();

@@ -94,31 +94,60 @@ export function pcbIndex(parts, leds) {
   return best >= 0 ? best : nb;
 }
 
-// 기준 LED(ref)의 발광면(face) → 인식된 LED 들의 발광 위치·축·가로축. pcb(선택) = pcbIndex 결과:
-// 기술자 재탐색에서 일치 면이 여럿(대칭 형상)이면 PCB 에서 가장 멀어지는 방향 면을 고르고, PCB 쪽을 향하면 needsCheck.
+// 점 p 에서 삼각형 abc 까지 최근접점(Ericson, Real-Time Collision Detection)
+function closestOnTri(p, a, b, c) {
+  const ab = sub(b, a), ac = sub(c, a), ap = sub(p, a), d1 = dot(ab, ap), d2 = dot(ac, ap);
+  if (d1 <= 0 && d2 <= 0) return a;
+  const bp = sub(p, b), d3 = dot(ab, bp), d4 = dot(ac, bp);
+  if (d3 >= 0 && d4 <= d3) return b;
+  const vc = d1 * d4 - d3 * d2;
+  if (vc <= 0 && d1 >= 0 && d3 <= 0) { const v = d1 / (d1 - d3); return [a[0] + v * ab[0], a[1] + v * ab[1], a[2] + v * ab[2]]; }
+  const cp = sub(p, c), d5 = dot(ab, cp), d6 = dot(ac, cp);
+  if (d6 >= 0 && d5 <= d6) return c;
+  const vb = d5 * d2 - d1 * d6;
+  if (vb <= 0 && d2 >= 0 && d6 <= 0) { const w = d2 / (d2 - d6); return [a[0] + w * ac[0], a[1] + w * ac[1], a[2] + w * ac[2]]; }
+  const va = d3 * d6 - d5 * d4;
+  if (va <= 0 && d4 - d3 >= 0 && d5 - d6 >= 0) { const w = (d4 - d3) / ((d4 - d3) + (d5 - d6)); return [b[0] + w * (c[0] - b[0]), b[1] + w * (c[1] - b[1]), b[2] + w * (c[2] - b[2])]; }
+  const den = 1 / (va + vb + vc), v = vb * den, w = vc * den;
+  return [a[0] + ab[0] * v + ac[0] * w, a[1] + ab[1] * v + ac[1] * w, a[2] + ab[2] * v + ac[2] * w];
+}
+// LED 중심에서 PCB 메쉬 최근접점으로의 단위벡터 v (PCB 가 LED 를 어느 쪽에서 받치는가). 중심이 PCB 위면 null.
+function towardLed(pcbMesh, p) {
+  const P = pcbMesh.positions, T = pcbMesh.triangles;
+  let best = Infinity, q = null;
+  for (let t = 0; t < T.length / 3; t++) {
+    const vtx = [0, 1, 2].map((j) => { const k = T[t * 3 + j] * 3; return [P[k], P[k + 1], P[k + 2]]; });
+    const c = closestOnTri(p, vtx[0], vtx[1], vtx[2]), d = len(sub(p, c));
+    if (d < best) { best = d; q = c; }
+  }
+  return best > 1e-9 ? unit(sub(p, q)) : null;
+}
+const INTO = -0.3, TIE = 0.1;
+
+// 기준 LED(ref)의 발광면(face) → 인식된 LED 들의 발광 위치·축·가로축. pcb(선택) = pcbIndex 결과.
+// PCB 방향 판정은 국소적: 각 LED 에서 PCB 최근접점으로의 방향 v 와 면 법선의 내적(n·v)이 INTO 미만이면 PCB 쪽 면.
+// 면 순서 일치 면은 PCB 쪽이 아니면 신뢰. 아니면 기술자 일치 면 중 n·v 최대를 고름.
+// 선택 면과 TIE 이내로 비슷한 후보가 또 있거나(대칭 형상), 최선이 PCB 쪽이면 추측하지 않고 needsCheck.
 export function findEmitters(parts, leds, ref, face, pcb = -1) {
   const sRef = meshStats(parts[ref]), fRef = faceInfo(parts[ref], face);
   if (!fRef) throw new Error('발광면 정보를 읽을 수 없음');
-  const pc = pcb >= 0 ? meshStats(parts[pcb]).center : null;
   const dRef = len(sub(fRef.c, sRef.center)), aRef = dot(fRef.n, unit(sub(fRef.c, sRef.center)));
-  const match = (st, fi) => fi && close(fi.area, fRef.area, 0.02) && Math.abs(len(sub(fi.c, st.center)) - dRef) <= 0.05 && Math.abs(dot(fi.n, unit(sub(fi.c, st.center))) - aRef) <= 0.02;
-  const away = (fi) => dot(fi.n, sub(fi.c, pc));
+  const match = (st, fi) => fi && !fi.degenerate && close(fi.area, fRef.area, 0.02) && Math.abs(len(sub(fi.c, st.center)) - dRef) <= 0.05 && Math.abs(dot(fi.n, unit(sub(fi.c, st.center))) - aRef) <= 0.02;
   return leds.map((i) => {
-    const st = meshStats(parts[i]);
-    let f = face, fi = faceInfo(parts[i], face);
-    if (!match(st, fi) || (pc && !fi.degenerate && dot(fi.n, unit(sub(fi.c, pc))) < 0)) {   // 면 순서 일치가 PCB 쪽이면 재탐색
-      f = -1; fi = null;
-      let bs = -Infinity;
-      for (let k = 0; k < parts[i].faceCount; k++) {
-        const c = faceInfo(parts[i], k);
-        if (!match(st, c)) continue;
-        const sc = pc ? away(c) : 0;
-        if (sc > bs) { bs = sc; f = k; fi = c; }
-        if (!pc) break;
-      }
-      if (pc && bs <= 0) f = -1;
+    const st = meshStats(parts[i]), v = pcb >= 0 ? towardLed(parts[pcb], st.center) : null;
+    const fi0 = faceInfo(parts[i], face), ok0 = match(st, fi0);
+    const bad = { part: i, face: -1, needsCheck: true };
+    const good = (f, fi) => ({ part: i, face: f, pos: fi.c, axis: fi.n, xAxis: fi.xAxis, needsCheck: false });
+    if (!v) {   // PCB 정보 없음: 면 순서 일치 우선, 아니면 첫 기술자 일치 면
+      if (ok0) return good(face, fi0);
+      for (let k = 0; k < parts[i].faceCount; k++) { const c = faceInfo(parts[i], k); if (match(st, c)) return good(k, c); }
+      return bad;
     }
-    if (f < 0 || fi.degenerate || (pc && dot(fi.n, unit(sub(fi.c, pc))) < 0)) return { part: i, face: f, needsCheck: true };
-    return { part: i, face: f, pos: fi.c, axis: fi.n, xAxis: fi.xAxis, needsCheck: false };
+    const cand = [];
+    for (let k = 0; k < parts[i].faceCount; k++) { const c = k === face ? fi0 : faceInfo(parts[i], k); if (match(st, c)) cand.push({ f: k, fi: c, sc: dot(c.n, v) }); }
+    let pick = ok0 ? cand.find((c) => c.f === face) : null;
+    if (!pick || pick.sc < INTO) pick = cand.reduce((b, c) => (!b || c.sc > b.sc ? c : b), null);
+    if (!pick || pick.sc < INTO || cand.some((c) => c !== pick && c.sc >= pick.sc - TIE)) return bad;
+    return good(pick.f, pick.fi);
   });
 }
