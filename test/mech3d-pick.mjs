@@ -1,5 +1,5 @@
 // 가까운 LED 선택(작은 LED 를 정확히 못 눌러도 클릭 광선에서 가까운 LED·발광면으로 맞춤): node test/mech3d-pick.mjs
-import { pickLedNearRay, refineEmitterFace, findEmitters, faceInfo } from '../src/engine/mech3d/led-detect.js';
+import { pickLedNearRay, refineEmitterFace, snapRadius, findEmitters, faceInfo } from '../src/engine/mech3d/led-detect.js';
 import { transformMesh } from '../src/engine/mech3d/xform.js';
 import { boxMesh, mergeMeshes, ok, done } from './mech3d-util.mjs';
 
@@ -35,4 +35,9 @@ const emIn = findEmitters(parts, cands, 1, 1, 0);
 ok(emIn.every((e) => e.needsCheck), `발광 위치가 LED 솔리드 안 → 확인 필요(${emIn.filter((e) => e.needsCheck).length}/${emIn.length})`);
 const emOk = findEmitters(parts, cands, 1, 7, 0);
 ok(emOk.every((e) => !e.needsCheck), '렌즈 윗면 → 정상');
+// 화면 기준 맞춤 반경: max(5mm, 14px × 화소당 mm). 값이 없으면 5mm
+ok(snapRadius(0.1) === 5 && Math.abs(snapRadius(1) - 14) < 1e-9 && snapRadius(undefined) === 5 && snapRadius(NaN) === 5, `맞춤 반경 ${snapRadius(0.1)} / ${snapRadius(1)} / ${snapRadius(undefined)}`);
+// 멀리서 본 경우(화소당 1mm): 9.4mm 빗나간 클릭도 LED 선택(고정 5mm 면 없음)
+r = pickLedNearRay(parts, cands, [8, 5, 50], [0, 0, -1], snapRadius(1));
+ok(r && r.part === 1 && pickLedNearRay(parts, cands, [8, 5, 50], [0, 0, -1]) === null, `화소당 1mm → 9.4mm 빗나간 클릭도 LED ${r?.part}`);
 done();

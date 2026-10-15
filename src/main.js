@@ -23,7 +23,7 @@ import { setPartMaterial, setPartMaterialParam, setPartFinish } from './engine/m
 import { renderMech3dPanel } from './ui/mech3d-panel.js';
 import { setLedMesh, getLedMesh, clearLedMesh, saveLedIDB, loadLedIDB } from './engine/mech3d/runtime.js';
 import { migrateMech3d } from './engine/mech3d/defs.js';
-import { meshStats, findLeds, findEmitters, pcbIndex, pickLedNearRay, refineEmitterFace } from './engine/mech3d/led-detect.js';
+import { meshStats, findLeds, findEmitters, pcbIndex, pickLedNearRay, refineEmitterFace, snapRadius } from './engine/mech3d/led-detect.js';
 import { transformMesh } from './engine/mech3d/xform.js';
 import { lineFromData, lightData, obsDirection } from './engine/mech3d/line.js';
 import { manualLeds } from './engine/mech3d/placement.js';
@@ -249,7 +249,15 @@ function validateLedStep() {
   const lm = getLedMesh(), n = lm?.parts?.length ?? 0, inR = (i) => Number.isInteger(i) && i >= 0 && i < n;
   const ok = lm && lm.name === st.name && (st.leds ?? []).every(inR) && (st.pcb ?? -1) < n && (st.ref == null || inR(st.ref.part))
     && (st.emitters ?? []).every((e) => inR(e.part));
-  if (ok) return;
+  if (ok) {
+    // 저장된 발광 위치를 다시 검증: 기준 면을 가장 바깥 평행 면으로 보정하고 재인식(솔리드 안 발광 방지 포함)
+    if (st.ref) {
+      const parts = ledPartsNow(), face = refineEmitterFace(parts[st.ref.part], st.ref.face), changed = face !== st.ref.face;
+      try { applyStepRecognition(st, { part: st.ref.part, face }); if (changed) { m3status('LED 발광면을 렌즈 윗면으로 보정함'); persist(); } }
+      catch (e) { st.emitters = []; m3ledInfo = `LED 재인식 실패: ${e.message} — LED 발광면을 다시 클릭하세요`; }
+    }
+    return;
+  }
   if (lm && lm.name !== st.name) clearLedMesh();
   Object.assign(st, { ref: null, leds: [], excluded: [], pcb: -1, emitters: [] });
   m3ledInfo = '저장된 LED STEP 을 찾을 수 없음 — 다시 불러오세요';
@@ -308,7 +316,7 @@ function recognizeLeds(ref) {
   return { leds, pcb, emitters, info: `LED ${leds.length}개 인식${bad ? ` · ⚠ ${bad}개 발광면 확인 필요(제외됨)` : ''} · ${pcb >= 0 ? `PCB = LED STEP 부품 ${pcb + 1}` : 'PCB 없음'}` };
 }
 function applyStepRecognition(st, ref) {
-  const r = recognizeLeds(ref), same = st.ref && st.ref.part === ref.part && st.ref.face === ref.face;
+  const r = recognizeLeds(ref), same = st.ref && st.ref.part === ref.part;   // 같은 기준 LED(면만 보정)면 제외 목록 유지
   Object.assign(st, { ref, leds: r.leds, pcb: r.pcb, emitters: r.emitters, excluded: same ? (st.excluded ?? []).filter((i) => r.leds.includes(i)) : [] });
   m3ledInfo = r.info;
 }
@@ -378,7 +386,7 @@ function snapLedPick(s, nMech, needFace) {
   const vol = (i) => parts[i].volume ?? meshStats(parts[i]).volume;
   const big = parts.reduce((b, _, i) => (vol(i) > vol(b) ? i : b), 0), hit = s.part != null && s.part >= nMech ? s.part - nMech : null;
   if (hit != null && (hit !== big || parts.length < 2)) return direct(hit);
-  const r = pickLedNearRay(parts, parts.map((_, i) => i).filter((i) => i !== big), s.ray.o, s.ray.d);
+  const r = pickLedNearRay(parts, parts.map((_, i) => i).filter((i) => i !== big), s.ray.o, s.ray.d, snapRadius(s.worldPerPixel));   // 반경 = max(5mm, 14px)
   if (!r || (needFace && r.face < 0)) return null;
   return { ...r, snapped: true };
 }

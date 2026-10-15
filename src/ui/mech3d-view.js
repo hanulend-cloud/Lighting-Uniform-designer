@@ -1,5 +1,5 @@
 // 3D 기구 뷰 — spec 2026-10-14 §3. 부품을 소재 종류별 색으로 그리고, 선택 부품·면을 강조한다.
-// 클릭(드래그 아님) → onPick({ part, face, ray:{o,d} }) 또는 onPick(null)(선택 모드에선 { part:null, face:null, ray }). 회전·이동·확대는 OrbitControls(Z 위).
+// 클릭(드래그 아님) → onPick({ part, face, ray:{o,d}, worldPerPixel }) 또는 onPick(null)(선택 모드에선 { part:null, face:null, ray }). 회전·이동·확대는 OrbitControls(Z 위).
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
@@ -114,9 +114,12 @@ export function createMech3dView(canvas, { onPick }) {
     const h = ray.intersectObjects(pickable ? meshes.filter((m) => pickable(m.userData.part)) : meshes, false)[0];
     // 선택 모드(pickable 지정)에서는 클릭 광선도 넘긴다 — 빈 곳 클릭이어도 { part: null, face: null, ray } (가까운 LED 맞춤용)
     const rr = { o: ray.ray.origin.toArray(), d: ray.ray.direction.toArray() };
-    if (!h) { onPick(pickable ? { part: null, face: null, ray: rr } : null); return; }
+    // 클릭 깊이의 화소당 mm(LED 맞춤 반경용): 맞힌 점까지 거리, 없으면 회전 중심(controls.target)의 광선 방향 깊이
+    const depth = h ? h.distance : Math.max(camera.near, controls.target.clone().sub(ray.ray.origin).dot(ray.ray.direction));
+    const wpp = (2 * depth * Math.tan((camera.fov * Math.PI) / 360)) / (canvas.clientHeight || 400);
+    if (!h) { onPick(pickable ? { part: null, face: null, ray: rr, worldPerPixel: wpp } : null); return; }
     const part = h.object.userData.part;
-    onPick({ part, face: partsRef[part].faceIds[h.faceIndex], ray: rr });
+    onPick({ part, face: partsRef[part].faceIds[h.faceIndex], ray: rr, worldPerPixel: wpp });
   });
 
   return { setParts, setKinds, setSelection, setOverlay, setPickMode, render };

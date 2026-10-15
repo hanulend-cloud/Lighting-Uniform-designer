@@ -221,3 +221,8 @@ function insideOwn(m, p, dir) {
   }
   return hits % 2 === 1;
 }
+
+// 화면 기준 LED 맞춤 반경(mm): 클릭 지점 깊이의 화소당 mm × px, 최소 minMm. 값이 없으면 minMm
+export function snapRadius(worldPerPixel, minMm = 5, px = 14) {
+  return Number.isFinite(worldPerPixel) && worldPerPixel > 0 ? Math.max(minMm, px * worldPerPixel) : minMm;
+}
