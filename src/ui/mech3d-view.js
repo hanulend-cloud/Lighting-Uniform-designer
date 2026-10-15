@@ -3,9 +3,9 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
-const KIND_COLOR = { milky: 0xdfe9f2, clear: 0x8cc8ff, whiteTrans: 0xf2efe6, opaque: 0x8a909c };
-const KIND_OPACITY = { milky: 0.85, clear: 0.35, whiteTrans: 0.95, opaque: 1 };
-const SEL_TINT = new THREE.Color(0xffb020), FACE_COLOR = new THREE.Color(0xff5a36);
+const KIND_COLOR = { milky: 0xdfe9f2, clear: 0x8cc8ff, whiteTrans: 0xf2efe6, opaque: 0x8a909c, pcb: 0x2f6b3a, led: 0xffcf3f };
+const KIND_OPACITY = { milky: 0.85, clear: 0.35, whiteTrans: 0.95, opaque: 1, pcb: 1, led: 1 };
+const SEL_TINT = new THREE.Color(0xffb020), FACE_COLOR = new THREE.Color(0xff5a36), OBS_COLOR = new THREE.Color(0x29d3e0);
 
 export function createMech3dView(canvas, { onPick }) {
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
@@ -20,7 +20,7 @@ export function createMech3dView(canvas, { onPick }) {
   const render = () => renderer.render(scene, camera);
   controls.addEventListener('change', render);
 
-  let meshes = [], partsRef = [], kinds = [], sel = null;
+  let meshes = [], partsRef = [], kinds = [], sel = null, obsSet = new Set(), overlay = null;
 
   function resize() {
     if (canvas.clientWidth === 0) return;
@@ -35,7 +35,8 @@ export function createMech3dView(canvas, { onPick }) {
     const partCol = sel?.part === i ? base.clone().lerp(SEL_TINT, 0.45) : base;
     const T = p.triangles;
     for (let t = 0; t < T.length / 3; t++) {
-      const c = sel?.part === i && sel.face === p.faceIds[t] ? FACE_COLOR : partCol;
+      const isSel = sel?.part === i && sel.face === p.faceIds[t];
+      const c = isSel ? FACE_COLOR : obsSet.has(`${i}|${p.faceIds[t]}`) ? OBS_COLOR : partCol;
       for (let j = 0; j < 3; j++) col.setXYZ(T[t * 3 + j], c.r, c.g, c.b);
     }
     col.needsUpdate = true;
@@ -68,7 +69,31 @@ export function createMech3dView(canvas, { onPick }) {
     controls.update(); resize();
   }
 
-  function setKinds(kindsOf) { kinds = kindsOf.slice(); meshes.forEach((_, i) => colorize(i)); render(); }
+  // 바뀐 부품만 재착색
+  function setKinds(kindsOf) {
+    const old = kinds; kinds = kindsOf.slice();
+    meshes.forEach((_, i) => { if (old[i] !== kinds[i]) colorize(i); }); render();
+  }
+  // over = { obsFaces:[{part,face}], line3d: Float32Array(x,y,z...) | null, arrows:[{pos,axis}] } — 관측면 강조, 라인·LED 발광 화살표
+  function setOverlay(over) {
+    const prev = obsSet;
+    obsSet = new Set((over.obsFaces ?? []).map((f) => `${f.part}|${f.face}`));
+    if (overlay) { scene.remove(overlay); overlay.traverse((o) => { o.geometry?.dispose(); o.material?.dispose(); }); }
+    overlay = new THREE.Group();
+    if (over.line3d?.length) {
+      const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(over.line3d, 3));
+      const ln = new THREE.Line(g, new THREE.LineBasicMaterial({ color: 0x29d3e0, depthTest: false }));
+      ln.renderOrder = 2; overlay.add(ln);
+    }
+    for (const a of over.arrows ?? []) {
+      const ar = new THREE.ArrowHelper(new THREE.Vector3(...a.axis).normalize(), new THREE.Vector3(...a.pos), 4, 0xffcf3f, 1.2, 0.8);
+      ar.traverse((o) => { if (o.material) { o.material.depthTest = false; o.renderOrder = 2; } });
+      overlay.add(ar);
+    }
+    scene.add(overlay);
+    const touched = new Set([...prev, ...obsSet].map((k) => +k.split('|')[0]));
+    meshes.forEach((_, i) => { if (touched.has(i)) colorize(i); }); render();
+  }
   function setSelection(s) { sel = s; meshes.forEach((_, i) => colorize(i)); render(); }
 
   const ray = new THREE.Raycaster();
@@ -86,5 +111,5 @@ export function createMech3dView(canvas, { onPick }) {
     onPick({ part, face: partsRef[part].faceIds[h.faceIndex] });
   });
 
-  return { setParts, setKinds, setSelection, render };
+  return { setParts, setKinds, setSelection, setOverlay, render };
 }

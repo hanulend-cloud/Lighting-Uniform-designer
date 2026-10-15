@@ -279,3 +279,8 @@ main { flex: 1 1 auto; min-height: 0; display: grid;
 .m3-row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin: 4px 0; }
 .m3-row input[type=number] { width: 64px; }
 .m3-contacts label { display: block; font-size: 12px; margin: 2px 0; }
+.m3-row button.on { background: #29d3e0; color: #062a2e; }
+.m3-res { margin-top: 6px; padding: 6px; border-radius: 4px; background: rgba(41, 211, 224, 0.08); font-size: 12px; }
+.m3-res.err { background: rgba(255, 90, 54, 0.12); }
+.m3-res .warn { color: #c96a26; }
+#mech3d-light input[type=number] { width: 56px; }
