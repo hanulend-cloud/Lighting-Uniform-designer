@@ -54,9 +54,12 @@ export function checkInterference({ rt, emitters = [], bodies = [], tol = 0.02, 
     const c = lo.map((v, k) => (v + hi[k]) / 2), h = lo.map((v, k) => (hi[k] - v) / 2);
     rt.parts.forEach((part, p) => {
       const P = part.positions, T = part.triangles;
+      let hit = false;
       for (const t of queryBox(part.bvh, lo, hi, cand)) {
-        if (triBoxOverlap(c, h, vtx(P, T[3 * t]), vtx(P, T[3 * t + 1]), vtx(P, T[3 * t + 2]))) { items.push({ led: b.led, part: p, kind: 'overlap', pos: c }); break; }
+        if (triBoxOverlap(c, h, vtx(P, T[3 * t]), vtx(P, T[3 * t + 1]), vtx(P, T[3 * t + 2]))) { items.push({ led: b.led, part: p, kind: 'overlap', pos: c }); hit = true; break; }
       }
+      // 표면과 겹치지 않아도 몸체가 부품 솔리드에 완전히 파묻힌 경우(중심이 부품 안)
+      if (!hit && insidePart(part, c)) items.push({ led: b.led, part: p, kind: 'body-inside', pos: c });
     });
   }
   return { status: items.length ? 'bad' : 'ok', count: items.length, items };

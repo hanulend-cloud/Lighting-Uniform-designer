@@ -24,6 +24,11 @@ const mk = (meshes, kinds) => ({ rt: buildSceneMesh('t', meshes), mspec: { parts
   const g = checkInterference({ rt, emitters: [em[0]], bodies: [bodies[0]] });
   ok(g.status === 'ok' && g.count === 0, '정상 배치(바닥판에 맞닿음): 오탐 없음');
   ok(checkInterference({ rt, emitters: [], bodies: [] }).status === 'na', 'LED 없음 → na');
+  {   // 완전히 파묻힌 LED 몸체(발광점은 표면 위): 삼각형 겹침이 없어도 몸체 중심이 부품 안이면 간섭 1건
+    const solid = buildSceneMesh('t', [boxMesh(0, 0, 0, 40, 40, 10)]);
+    const b = checkInterference({ rt: solid, emitters: [{ pos: [20, 20, 10.5], axis: [0, 0, 1] }], bodies: [{ led: 0, lo: [18, 18, 3], hi: [22, 22, 5] }] });
+    ok(b.status === 'bad' && b.count === 1 && b.items[0].kind === 'body-inside' && b.items[0].part === 0, `완전히 파묻힌 몸체: ${b.items.map((x) => x.kind).join(',')} ${b.count}건`);
+  }
 }
 {   // ② 도달: 커버(20×20, z 10~12, 관측 부품 0), LED (10,10,0) +z 지향각 120°
   const cover = boxMesh(0, 0, 10, 20, 20, 2), em = [{ pos: [10, 10, 0], axis: [0, 0, 1] }], O = new Set([0]);
