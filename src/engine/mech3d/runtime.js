@@ -3,7 +3,7 @@ import { combineParts, bounds } from './mesh.js';
 import { buildBvh } from './bvh.js';
 import { findContacts } from './contacts.js';
 import { defaultPart } from './materials.js';
-import { defaultLight, defaultObserve } from './defs.js';
+import { defaultLight, defaultObserve, defaultChecks } from './defs.js';
 
 let scene = null;   // { name, parts: [{ positions, triangles, faceIds, faceCount, volume, bvh }], combined, bvh }
 
@@ -30,7 +30,7 @@ export function initialMech3dSpec() {
       return { ...defaultPart(i, `부품 ${i + 1}`, p.volume), size: [b[3] - b[0], b[4] - b[1], b[5] - b[2]] };
     }),
     contacts: findContacts(scene.parts).map((c) => ({ ...c, mode: 'contact' })),
-    light: defaultLight(), observe: defaultObserve(),
+    light: defaultLight(), observe: defaultObserve(), checks: defaultChecks(),
   };
 }
 

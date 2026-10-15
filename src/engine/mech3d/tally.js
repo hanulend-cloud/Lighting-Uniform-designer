@@ -63,7 +63,7 @@ export function makeAccumulator(G, line, obs) {
 export function tallyStats(G, accs, obs, cnts = null) {
   const B = accs.length, nCell = G.ns * G.nw, { ns, nw, ds, area, valid } = G;
   let nValid = 0; for (let k = 0; k < nCell; k++) if (valid[k]) nValid++;
-  const empty = { empty: true, profile: new Float64Array(ns).fill(NaN), map: new Float64Array(nCell), Ulen: 0, seLen: null, Uwid: null, seWid: null, sWorst: null, passLen: false, passWid: false, counted: 0, nbar: 0, relNoise: null, noiseWarn: true };
+  const empty = { empty: true, profile: new Float64Array(ns).fill(NaN), map: new Float64Array(nCell), Ulen: 0, seLen: null, Uwid: null, seWid: null, sWorst: null, passLen: false, passWid: false, counted: 0, nbar: 0, relNoise: null, noiseWarn: true, win: null };
   if (nValid === 0) return empty;
   // s 창 분할
   let i0 = 0, i1 = ns - 1;
@@ -102,8 +102,20 @@ export function tallyStats(G, accs, obs, cnts = null) {
   let nbar = 0; if (cnts) { let tot = 0; for (const c of cnts) for (let k = 0; k < nCell; k++) if (valid[k]) tot += c[k]; nbar = tot / nValid / B; }
   const tol = Math.min(Math.max(0.01, 1 - obs.targetLen), Math.max(0.01, 1 - obs.targetWid));
   return {
-    profile: main.p, map: mean, Ulen: main.Ulen, seLen, Uwid: main.Uwid, seWid, sWorst: narrow ? null : ((wins[main.iWin][0] + wins[main.iWin][1]) / 2) * ds, narrow, nbar, relNoise,
+    profile: main.p, map: mean, Ulen: main.Ulen, seLen, Uwid: main.Uwid, seWid, sWorst: narrow ? null : ((wins[main.iWin][0] + wins[main.iWin][1]) / 2) * ds, win: narrow ? null : wins[main.iWin], narrow, nbar, relNoise,
     passLen: main.Ulen >= obs.targetLen, passWid: narrow ? null : main.Uwid >= obs.targetWid, counted,
     noiseWarn: counted === 0 || B < 2 || relNoise === null || 3 * relNoise > tol,
   };
+}
+
+// 폭 방향 프로파일(창 평균) — tallyStats 의 폭 판정과 같은 규칙: s 칸 [s0, s1)(닫힌 경로는 순환) 의 w 칸별 Σ출사/Σ면적,
+// 창 안 면적이 가득 찬 값의 ≥ 50% 인 칸만(아니면 NaN). a: 합산 누적(Float64Array, ns·nw).
+export function windowProfile(G, a, s0, s1) {
+  const { ns, nw, ds, area } = G, out = new Float64Array(nw).fill(NaN);
+  for (let j = 0; j < nw; j++) {
+    let s = 0, ar = 0;
+    for (let i = s0; i < s1; i++) { const k = (i % ns) * nw + j; s += a[k]; ar += area[k]; }
+    if (ar >= 0.5 * (s1 - s0) * ds * G.cell) out[j] = s / ar;
+  }
+  return out;
 }

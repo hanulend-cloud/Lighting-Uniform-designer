@@ -1,5 +1,5 @@
 // 관측 집계: node test/mech3d-tally.mjs
-import { tallyGeometry, makeAccumulator, tallyStats } from '../src/engine/mech3d/tally.js';
+import { tallyGeometry, makeAccumulator, tallyStats, windowProfile } from '../src/engine/mech3d/tally.js';
 import { recognizeLine, lightData, lineFromData } from '../src/engine/mech3d/line.js';
 import { rng } from '../src/engine/l2/mc-slab.js';
 import { runMC3D } from '../src/engine/mech3d/mc3d.js';
@@ -100,5 +100,11 @@ ok(S.counted === nV && S.noiseWarn === false, `집계 셀 ${S.counted}, 잡음 �
   }
   const sum = A.acc.reduce((x, y) => x + y, 0);
   ok(sum > 0 && A.acc.every((v, k) => v === Bq.acc[k]) && A.cnt.every((v, k) => v === Bq.cnt[k]), `lightData 선 집계 = 전체 선 집계(합 ${sum.toFixed(1)})`);
+}
+{   // 폭 판정 창 프로파일: 최저 창의 min/max = tallyStats 의 폭 U
+  const sum = new Float64Array(G.ns * G.nw); for (const a of accs) for (let k = 0; k < sum.length; k++) sum[k] += a[k];
+  const wp = windowProfile(G, sum, S.win[0], S.win[1]), f = Array.from(wp).filter(Number.isFinite);
+  ok(Array.isArray(S.win) && wp.length === G.nw && f.length >= 2 && Math.abs(Math.min(...f) / Math.max(...f) - S.Uwid) < 1e-12,
+    `windowProfile: 창 [${S.win}] 유효 ${f.length}칸, min/max = Uwid ${S.Uwid.toFixed(4)}`);
 }
 done();
