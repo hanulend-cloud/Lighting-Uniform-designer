@@ -3,13 +3,18 @@ import { combineParts, bounds } from './mesh.js';
 import { buildBvh } from './bvh.js';
 import { findContacts } from './contacts.js';
 import { defaultPart } from './materials.js';
+import { defaultLight, defaultObserve } from './defs.js';
 
 let scene = null;   // { name, parts: [{ positions, triangles, faceIds, faceCount, volume, bvh }], combined, bvh }
 
-export function setMech3dMesh(name, rawParts) {
-  const parts = rawParts.map((p) => ({ ...p, bvh: buildBvh(p.positions, p.triangles) }));
+// 전역을 바꾸지 않는 장면 메쉬 생성(계산 작업용) — 부품별 BVH + 결합 메쉬 + 결합 BVH
+export function buildSceneMesh(name, rawParts) {
+  const parts = rawParts.map((p) => (p.bvh ? p : { ...p, bvh: buildBvh(p.positions, p.triangles) }));
   const combined = combineParts(parts);
-  scene = { name, parts, combined, bvh: buildBvh(combined.positions, combined.triangles) };
+  return { name, parts, combined, bvh: buildBvh(combined.positions, combined.triangles) };
+}
+export function setMech3dMesh(name, rawParts) {
+  scene = buildSceneMesh(name, rawParts);
   return scene;
 }
 export function getMech3d() { return scene; }
@@ -25,6 +30,7 @@ export function initialMech3dSpec() {
       return { ...defaultPart(i, `부품 ${i + 1}`, p.volume), size: [b[3] - b[0], b[4] - b[1], b[5] - b[2]] };
     }),
     contacts: findContacts(scene.parts).map((c) => ({ ...c, mode: 'contact' })),
+    light: defaultLight(), observe: defaultObserve(),
   };
 }
 
@@ -53,5 +59,24 @@ export async function loadMech3dIDB() {
     const d = await idb();
     const v = await new Promise((res, rej) => { const r = d.transaction(STORE).objectStore(STORE).get(KEY); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); });
     return v ? setMech3dMesh(v.name, v.parts) : null;
+  } catch { return null; }
+}
+
+// ---- LED STEP(PCB + LED) 메쉬 — 원본(변환 전) 보관, 위치 맞춤은 spec.mech3d.light.step.offset/rot ----
+let ledScene = null;   // { name, parts: [{ positions, triangles, faceIds, faceCount, volume }] }
+export function setLedMesh(name, parts) { ledScene = { name, parts }; return ledScene; }
+export function getLedMesh() { return ledScene; }
+export function clearLedMesh() { ledScene = null; }
+export async function saveLedIDB() {
+  if (typeof indexedDB === 'undefined' || !ledScene) return;
+  const d = await idb();
+  await new Promise((res, rej) => { const tx = d.transaction(STORE, 'readwrite'); tx.objectStore(STORE).put(ledScene, 'mech3d-led'); tx.oncomplete = res; tx.onerror = () => rej(tx.error); });
+}
+export async function loadLedIDB() {
+  if (typeof indexedDB === 'undefined') return null;
+  try {
+    const d = await idb();
+    const v = await new Promise((res, rej) => { const r = d.transaction(STORE).objectStore(STORE).get('mech3d-led'); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); });
+    return v ? setLedMesh(v.name, v.parts) : null;
   } catch { return null; }
 }
