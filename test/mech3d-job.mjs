@@ -40,11 +40,11 @@ const dir = obsDirection(mech, ms.observe.faces), line = recognizeLine(mech, ms.
 ok(line.kind === 'line' && Math.abs(line.length - 116) <= 0.2 && Math.abs(line.width - 16) <= 0.2, `관측 라인: ${line.kind} ${line.length.toFixed(2)}×${line.width.toFixed(2)}`);
 const S = composeScene({ rt: getMech3d(), mspec: ms, ledParts, table, db: null, line });
 ok(S.optics.length === mech.length + ledParts.length && !S.optics[mech.length].transmissive, `장면 합성: 부품 ${S.optics.length}개(기구 ${mech.length} + LED STEP ${ledParts.length})`);
-// 이 테스트는 판정 수치가 아니라 배선(장면·광원·집계)을 본다 — 잡음을 줄이려고 원뿔 60°·셀 1mm·15만 광자(셀 0.5mm·6만 광자에서는 가장자리 셀 0 카운트로 폭 U=0 이 나옴)
-const obs = { ...ms.observe, dir, cone: 60, cell: 1 }, G = tallyGeometry(line, obs);
+// 기본값(원뿔 90°, 자동 격자, 창 평균 폭 판정)으로 15만 광자 — 판정 수치가 아니라 배선을 본다(상대 잡음 ~10% → 잡음 경고가 정상)
+const obs = { ...ms.observe, dir }, G = tallyGeometry(line, obs);
 const t0 = Date.now(), r = runJob({ S, line, obs, G, emitters: em, ledSpec: ms.light.spec, N: 150000, seed: 1, batches: 10 });
 const st = tallyStats(G, r.accs, obs, r.cnts);
-ok(r.ledger.lost === 0 && st.counted > 1000 && st.Ulen > 0 && st.Ulen < 1 && st.Uwid > 0, `계산: ${((Date.now() - t0) / 1000).toFixed(1)}s, 길이 U ${st.Ulen.toFixed(3)}±${st.seLen.toFixed(3)}, 폭 최저 U ${st.Uwid.toFixed(3)} @ ${st.sWorst.toFixed(1)}mm, lost ${r.ledger.lost}`);
+ok(r.ledger.lost === 0 && st.counted > 300 && st.Ulen > 0 && st.Ulen < 1 && st.Uwid > 0, `계산: ${((Date.now() - t0) / 1000).toFixed(1)}s, 길이 U ${st.Ulen.toFixed(3)}±${st.seLen.toFixed(3)}, 폭 최저 U ${st.Uwid.toFixed(3)} @ ${st.sWorst.toFixed(1)}mm, lost ${r.ledger.lost}, relNoise ${st.relNoise?.toFixed(3)}, nbar ${st.nbar.toFixed(0)}, noiseWarn ${st.noiseWarn}`);
 // 대칭 점검: 기구·LED 가 x=60 대칭 → 길이 프로파일 좌·우 절반 합이 같아야 함(잡음 ~1%)
 const p = st.profile, n = p.length; let lh = 0, rh = 0;
 for (let i = 0; i < n; i++) if (Number.isFinite(p[i])) { if (i < n / 2) lh += p[i]; else rh += p[i]; }

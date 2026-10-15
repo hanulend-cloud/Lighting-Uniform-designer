@@ -11,7 +11,7 @@ export function defaultLight() {
   };
 }
 export function defaultObserve() {
-  return { faces: [], dir: null, cone: 30, cell: 0.5, edgeExcl: 0.5, targetLen: 0.8, targetWid: 0.8 };
+  return { faces: [], dir: null, cone: 90, cell: null, cellS: null, cellW: null, winS: null, edgeExcl: 0.5, targetLen: 0.8, targetWid: 0.8 };
 }
 export function migrateMech3d(m) {
   if (!m) return m;

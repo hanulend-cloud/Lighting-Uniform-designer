@@ -12,7 +12,7 @@ ok(Math.abs(meshVolume(t.positions, t.triangles) - 24) < 1e-4 && t.faceIds === m
 ok(transformMesh(m, [0, 0, 0], [0, 0, 0]).positions === m.positions, '항등 변환은 원본 재사용');
 const L = defaultLight(), O = defaultObserve();
 ok(L.kind === 'none' && L.solder === '백색' && L.manual.count === 10 && SOLDER_R['녹색'] === 0.3, '광원 기본값');
-ok(O.faces.length === 0 && O.cone === 30 && O.cell === 0.5 && O.edgeExcl === 0.5 && O.targetLen === 0.8, '관측 기본값');
+ok(O.faces.length === 0 && O.cone === 90 && O.cell == null && O.cellS == null && O.cellW == null && O.edgeExcl === 0.5 && O.targetLen === 0.8, '관측 기본값');
 const old = { name: 'x', parts: [], contacts: [] };
 ok(migrateMech3d(old).light.kind === 'none' && old.observe.faces.length === 0, '마이그레이션: 빠진 필드 채움');
 const mb = { ...m, bvh: { x: 1 } };

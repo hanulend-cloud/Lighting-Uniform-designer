@@ -10,28 +10,29 @@ import { loadTable } from './l2-util.mjs';
 import { topFaceMesh, rectTris, annulusTris, boxMesh, ok, done } from './mech3d-util.mjs';
 
 const line = recognizeLine([topFaceMesh(rectTris(0, 0, 100, 6), 2)], [{ part: 0, face: 1 }], [0, 0, 1]);
-const obs = { faces: [{ part: 0, face: 1 }], dir: [0, 0, 1], cone: 10, cell: 0.5, edgeExcl: 0.5, targetLen: 0.8, targetWid: 0.5 };
+const obs = { faces: [{ part: 0, face: 1 }], dir: [0, 0, 1], cone: 10, edgeExcl: 0.5, targetLen: 0.8, targetWid: 0.5 };
 const G = tallyGeometry(line, obs);
-ok(G.ns === 200 && G.valid.reduce((a, b) => a + b, 0) === (200 - 2) * 10, `격자: s ${G.ns}칸, 유효 셀 ${G.valid.reduce((a, b) => a + b, 0)} (가장자리 0.5mm 제외 → 198×10)`);
+const nV = G.valid.reduce((a, b) => a + b, 0);
+ok(G.ns === 100 && Math.abs(G.cell - 0.75) < 1e-9 && G.nw === 12 && nV === 100 * 6, `자동 격자: s ${G.ns}칸(1mm), w 칸 ${G.cell}mm ×${G.nw}, 유효 셀 ${nV} (끝 칸도 면적 ≥ 50% → 100×6)`);
 // 합성 출사: 밝기 ∝ (20 + x) — 길이 방향 선형 경사, 폭 방향 균일
 const r = rng(1), B = 10, accs = [];
 for (let b = 0; b < B; b++) {
   const a = makeAccumulator(G, line, obs);
   for (let k = 0; k < 200000; k++) {
     const x = r() * 100, y = r() * 6, w = (20 + x) / 120;
-    a.onExit(0, 1, x, y, 2, 0, 0, 1, w); a.onEscape(x, y, 2.5, 0, 0, 1, w);
-    a.onExit(0, 1, x, y, 2, 0.5, 0, Math.sqrt(0.75), w); a.onEscape(x, y, 3, 0.5, 0, Math.sqrt(0.75), w);   // 30° → 원뿔(10°) 밖
-    a.onExit(0, 0, x, y, 0, 0, 0, -1, w); a.onEscape(x, y, -1, 0, 0, 1, w);                                 // 관측면 아닌 면
-    a.onEscape(x, y, 5, 0, 0, 1, w);                                                                        // 관측면 출사 기록 없음
+    a.onExit(0, 1, x, y, 2, 0, 0, 1, w, k); a.onEscape(x, y, 2.5, 0, 0, 1, w, k);
+    a.onExit(0, 1, x, y, 2, 0.5, 0, Math.sqrt(0.75), w, k); a.onEscape(x, y, 3, 0.5, 0, Math.sqrt(0.75), w, k);   // 30° → 원뿔(10°) 밖
+    a.onExit(0, 0, x, y, 0, 0, 0, -1, w, k); a.onEscape(x, y, -1, 0, 0, 1, w, k);                                 // 관측면 아닌 면
+    a.onEscape(x, y, 5, 0, 0, 1, w, k + 1e9);                                                                        // 관측면 출사 기록 없음
   }
   accs.push(a.acc);
 }
-const S = tallyStats(G, accs, obs), want = (20 + 0.75) / (20 + 99.25);
+const S = tallyStats(G, accs, obs), want = (20 + 0.75) / (20 + 99.25);   // 끝 칸은 [0.5,1] 만 집계 → 무게중심 0.75 / 99.25
 ok(Math.abs(S.Ulen - want) < 0.01, `길이 방향 U ${S.Ulen.toFixed(4)} (해석 ${want.toFixed(4)}), σ ${S.seLen.toFixed(4)}`);
 ok(S.Uwid > 0.7 && S.Uwid <= 1, `폭 방향 최저 U ${S.Uwid.toFixed(3)} @ s=${S.sWorst.toFixed(1)}mm (균일 + 셀 잡음)`);
-const rr = S.profile[150] / S.profile[50], r2 = Math.max(rr, 1 / rr), want2 = (20 + 75.25) / (20 + 25.25);   // 라인 진행 방향과 무관하게 비교
-ok(!S.passLen && S.profile.length === 200 && Math.abs(r2 / want2 - 1) < 0.03, `판정·프로파일(길이 ${S.passLen ? '합격' : '불합격'}, 75/25mm 비 ${r2.toFixed(3)} / 해석 ${want2.toFixed(3)})`);
-ok(S.counted === 198 * 10 && S.noiseWarn === false, `집계 셀 ${S.counted}, 잡음 경고 없음(목표와의 여유가 3σ 보다 큼)`);
+const rr = S.profile[75] / S.profile[25], r2 = Math.max(rr, 1 / rr), want2 = (20 + 75.5) / (20 + 25.5);   // 라인 진행 방향과 무관하게 비교
+ok(!S.passLen && S.profile.length === 100 && Math.abs(r2 / want2 - 1) < 0.03, `판정·프로파일(길이 ${S.passLen ? '합격' : '불합격'}, 칸 75/25 비 ${r2.toFixed(3)} / 해석 ${want2.toFixed(3)})`);
+ok(S.counted === nV && S.noiseWarn === false, `집계 셀 ${S.counted}, 잡음 경고 없음(상대 잡음 ${S.relNoise.toFixed(4)})`);
 {   // 광자별 상태: 광자 0 이 관측면을 나간 뒤 사라지고, 광자 1 이 탈출해도 광자 0 의 지점에 집계되면 안 됨
   const a = makeAccumulator(G, line, obs);
   a.onExit(0, 1, 50, 3, 2, 0, 0, 1, 1, 0); a.onEscape(50, 3, 5, 0, 0, 1, 1, 1);
@@ -47,7 +48,7 @@ ok(S.counted === 198 * 10 && S.noiseWarn === false, `집계 셀 ${S.counted}, �
 }
 {   // 곡선 영역 셀 면적: 균일 면 발광 링(37–43) — 안쪽/바깥쪽 셀이 같은 밝기여야 함
   const ringL = recognizeLine([topFaceMesh(annulusTris(0, 0, 37, 43), 2)], [{ part: 0, face: 1 }], [0, 0, 1]);
-  const ob = { faces: [{ part: 0, face: 1 }], dir: [0, 0, 1], cone: 10, cell: 0.5, edgeExcl: 0.5, targetLen: 0.8, targetWid: 0.8 };
+  const ob = { faces: [{ part: 0, face: 1 }], dir: [0, 0, 1], cone: 10, edgeExcl: 0.5, targetLen: 0.8, targetWid: 0.8 };
   const GR = tallyGeometry(ringL, ob), rr = rng(7), accs2 = [], cn = [];
   for (let b = 0; b < 10; b++) {
     const a = makeAccumulator(GR, ringL, ob);
@@ -59,7 +60,7 @@ ok(S.counted === 198 * 10 && S.noiseWarn === false, `집계 셀 ${S.counted}, �
   }
   const SR = tallyStats(GR, accs2, ob, cn);
   const cols = []; for (let j = 0; j < GR.nw; j++) { let s = 0, c = 0; for (let i = 0; i < GR.ns; i++) if (GR.valid[i * GR.nw + j]) { s += SR.map[i * GR.nw + j]; c++; } if (c > GR.ns / 2) cols.push(s / c); }
-  ok(SR.Uwid >= 0.9 && Math.abs(cols[0] / cols[cols.length - 1] - 1) < 0.02, `링 균일 발광: 폭 U ${SR.Uwid.toFixed(3)}, 안/바깥 열 비 ${(cols[0] / cols[cols.length - 1]).toFixed(4)} (열 ${cols.length}개)`);
+  ok(SR.Uwid >= 0.95 && Math.abs(cols[0] / cols[cols.length - 1] - 1) < 0.02, `링 균일 발광: 창 평균 폭 U ${SR.Uwid.toFixed(3)} @ ${SR.sWorst.toFixed(0)}mm, 안/바깥 열 비 ${(cols[0] / cols[cols.length - 1]).toFixed(4)} (열 ${cols.length}개)`);
 }
 {   // 테이퍼 4→12: 영역 안 모든 픽셀이 w 격자 안
   const tap = recognizeLine([topFaceMesh([[[0, -2], [100, -6], [100, 6]], [[0, -2], [100, 6], [0, 2]]], 2)], [{ part: 0, face: 1 }], [0, 0, 1]);
@@ -69,6 +70,14 @@ ok(S.counted === 198 * 10 && S.noiseWarn === false, `집계 셀 ${S.counted}, �
     if (jj < 0 || jj >= GT.nw) out++;
   }
   ok(n > 0 && out === 0, `테이퍼 4→12: 격자 밖 픽셀 ${out}/${n}, w 열 ${GT.nw}`);
+}
+{   // 희박 데이터(합성 출사 2000개): 칸 잡음이 커서 경고를 내야 함
+  const r2 = rng(3), ac = [];
+  for (let b = 0; b < 10; b++) { const a = makeAccumulator(G, line, obs); for (let k = 0; k < 200; k++) { const x = r2() * 100, y = r2() * 6; a.onExit(0, 1, x, y, 2, 0, 0, 1, 1, k); a.onEscape(x, y, 3, 0, 0, 1, 1, k); } ac.push(a.acc); }
+  const sp = tallyStats(G, ac, obs);
+  ok(sp.noiseWarn === true && sp.relNoise > 0.1, `희박 데이터(2000개) → 잡음 경고, 상대 잡음 ${sp.relNoise.toFixed(2)}`);
+  const two = tallyStats(G, ac.slice(0, 2), obs);
+  ok(two.seLen === null && two.seWid === null, '배치 <3 → seLen/seWid null');
 }
 {   // 경계 처리
   const e = tallyStats(G, [new Float64Array(G.ns * G.nw), new Float64Array(G.ns * G.nw)], obs);
