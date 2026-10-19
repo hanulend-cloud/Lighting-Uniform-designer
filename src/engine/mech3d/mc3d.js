@@ -8,6 +8,7 @@
 // 비용: Milky 가 매우 높으면(≥ 9.5) 광자당 수 ms 가 든다 — P4 에서 사건 예산(event budget)을 둔다.
 // 편광: 광자마다 전기장 단위벡터 E ⟂ d 를 추적한다(Fresnel s/p 분리). 확산 반사·면 처리·체적 산란 뒤에는 무작위화.
 // (onExit/onEscape 마지막 인자 p = 광자 번호)
+// track = 부품 번호(기본 −1 = 끔): 광자가 그 부품을 현재 매질로 지난 경로 길이 tL·체적 산란 횟수 tK 를 세어 onEscape(…, p, tL, tK) 로 넘김(P4 Milky 재가중)
 // onExit(part, face, x,y,z, dx,dy,dz, w): 투과성 부품에서 공기로 나가는 **모든** 전이(내부 공기 틈 포함 — 이후 다른 부품에
 //   다시 들어갈 수 있음). onEscape(x,y,z, dx,dy,dz, w): 공기 중 무한 탈출 = 원거리장 총량.
 import { intersectRay, queryBox } from './bvh.js';
@@ -41,7 +42,7 @@ function coinFlags(S) {
   return flag;
 }
 
-export function runMC3D(S, { source, N, seed = 1, onExit = null, onEscape = null, wMinRel = 1e-3, maxEvents = 100000 }) {
+export function runMC3D(S, { source, N, seed = 1, onExit = null, onEscape = null, wMinRel = 1e-3, maxEvents = 100000, track = -1 }) {
   const t0 = typeof performance !== 'undefined' ? performance.now() : Date.now();
   const rnd = rng(seed), w0 = source.flux / N, wMin = w0 * wMinRel;
   const L = { emitted: 0, escaped: 0, absSurf: 0, absVol: 0, lost: 0, rrLoss: 0, rrGain: 0 };
@@ -94,6 +95,7 @@ export function runMC3D(S, { source, N, seed = 1, onExit = null, onEscape = null
     // 직전 짝 면 전이의 정확한 두 면 (부품, 면) — 같은 자리의 짝 면 적중만 통과(얇은 부품의 반대면은 통과하지 않음)
     let skipPA = -1, skipFA = -1, skipPB = -1, skipFB = -1, skipTol = 0, skipX = 0, skipY = 0, skipZ = 0, skipNx = 0, skipNy = 0, skipNz = 0;
     let lastTri = -1, lastTri2 = -1;   // 직전 적중 삼각형(+ 맞붙은 짝 삼각형) — 다음 광선에서 제외(출발점 이동 없음, tMin = 1e-9)
+    let tL = 0, tK = 0;   // track 부품 안 경로 길이·산란 횟수
     stack.length = 0;
     for (let e = 0; ; e++) {
       if (e > maxEvents) { L.lost += w; break; }
@@ -102,10 +104,11 @@ export function runMC3D(S, { source, N, seed = 1, onExit = null, onEscape = null
       const h = intersectRay(bvh, px, py, pz, dx, dy, dz, T_MIN, sFree, lastTri, lastTri2);
       if (!h && !Number.isFinite(sFree)) {
         if (cur >= 0) { L.lost += w; break; }   // 매질 안에서 교차 없음 = 열린 메쉬(진단)
-        L.escaped += w; if (onEscape) onEscape(px, py, pz, dx, dy, dz, w, p); break;
+        L.escaped += w; if (onEscape) { if (track >= 0) onEscape(px, py, pz, dx, dy, dz, w, p, tL, tK); else onEscape(px, py, pz, dx, dy, dz, w, p); } break;
       }
       const t = h ? h.t : sFree;
       px += t * dx; py += t * dy; pz += t * dz;
+      if (cur === track && track >= 0) { tL += t; if (!h) tK++; }   // 매질 안 이동(체적 산란으로 끝나면 산란 1회)
       if (med && med.mua > 0) { const a = w * (1 - Math.exp(-med.mua * t)); L.absVol += a; w -= a; }
       if (!h) {   // 체적 산란
         skipPA = -1; lastTri = -1; lastTri2 = -1;
