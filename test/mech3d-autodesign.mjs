@@ -62,6 +62,6 @@ const rowsOf = (ms, U = (m) => 0.5 + 0.12 * m) => ms.map((m) => ({ milky: m, Ule
   const G = { ns: 2, nw: 1, ds: 1, cell: 1, w0: -0.5, L: 2, closed: false, winS: 5, area: new Float64Array([1, 1]), valid: new Uint8Array([1, 1]) };
   const io = { basis: async () => ({ cand: [0, 1, 2], maps: [Float32Array.from([1, 0.1]), Float32Array.from([1, 0.1]), Float32Array.from([1, 0.1])], emitted: 1 }), verify: async () => ({ stats: { Ulen: 0.5, Uwid: null, empty: false }, eff: 0.5 }), progress() {}, cancelled: () => false };
   const r = await runAutoDesign({ stages: { leds: true }, obs: { targetLen: 0.9, targetWid: 0 }, current: { milky: 3, count: 1, pitch: 0 }, G, line: { length: 2, closed: false }, nMax: 2 }, io);
-  ok(r.unchanged && /현재안 유지 \(LED 최대 2개/.test(r.reason), `현재안 유지 + 단계 이유: ${r.reason}`); }
+  ok(r.unchanged && /LED 2개까지 늘려도 목표 미달/.test(r.reason), `현재안 유지 + 단계 이유: ${r.reason}`); }
 ok(halvingTotal(27) === 35 && halvingTotal(4) === 10 && halvingTotal(1) === 3, 'halving 평가 후보 수 합(진행률 분모)');
 done();
