@@ -36,13 +36,14 @@ const line = { length: 100, closed: false };
   // combineSources 는 광속을 더한다(LED 5개 = 방출 5배) → 단일 LED 지도 5개의 합 = 5개 직접 지도(나누기 없음)
   const sumB = Array.from({ length: B }, (_, b) => { const s = new Float64Array(nCell); for (const x of [10, 30, 50, 70, 90]) { const a = per([at(x)], b * 10 + x, N1); for (let k = 0; k < nCell; k++) s[k] += a[k]; } return s; });
   const dirB = Array.from({ length: B }, (_, b) => per(F.emitters, 1000 + b, N1));
-  let worst = 0;
-  for (let k = 0; k < nCell; k++) {
-    if (!F.G.valid[k]) continue;
-    const a = sumB.map((x) => x[k]), d = dirB.map((x) => x[k]);
-    const mean = (v) => v.reduce((s, x) => s + x, 0) / v.length, se = (v) => Math.sqrt(v.reduce((s, x) => s + (x - mean(v)) ** 2, 0) / (v.length - 1) / v.length);
-    if (mean(d) <= 0) continue;
-    worst = Math.max(worst, Math.abs(mean(a) - mean(d)) / Math.hypot(se(a), se(d)));
-  }
-  ok(worst < 4.5, `A-2 후보 합 = 다중 LED 직접: 셀 최대 ${worst.toFixed(2)}σ`); }
+  const mean = (v) => v.reduce((s, x) => s + x, 0) / v.length, se = (v) => Math.sqrt(v.reduce((s, x) => s + (x - mean(v)) ** 2, 0) / (v.length - 1) / v.length);
+  const zOf = (a, d) => { const s = Math.hypot(se(a), se(d)); return s > 0 ? Math.abs(mean(a) - mean(d)) / s : 0; };
+  // 셀 최대 z 는 약한 기준 → 총 관측 광량 z + 길이 프로파일(행 = Σ유효 acc / Σ면적) 최대 z (행 수 보정)
+  const total = (x) => { let t = 0; for (let k = 0; k < nCell; k++) if (F.G.valid[k]) t += x[k]; return t; };
+  const zTot = zOf(sumB.map(total), dirB.map(total));
+  const row = (j) => (x) => { let n = 0, ar = 0; for (let w = 0; w < F.G.nw; w++) { const k = j * F.G.nw + w; if (F.G.valid[k]) { n += x[k]; ar += F.G.area[k]; } } return ar > 0 ? n / ar : 0; };
+  let zRow = 0, nRows = 0;
+  for (let j = 0; j < F.G.ns; j++) { const f = row(j); if (!dirB.some((x) => f(x) > 0)) continue; nRows++; zRow = Math.max(zRow, zOf(sumB.map(f), dirB.map(f))); }
+  const lim = 3.5 + 0.5 * Math.log10(nRows);
+  ok(zTot < 3 && zRow < lim, `A-2 후보 합 = 다중 LED 직접: 총광량 z ${zTot.toFixed(2)} · 행 최대 z ${zRow.toFixed(2)} < ${lim.toFixed(2)} (행 ${nRows})`); }
 done();
