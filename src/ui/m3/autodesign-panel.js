@@ -141,7 +141,7 @@ export function compareHtml({ cur, best, feasible, reason, shape, stepLeds = nul
       ${tr('광 효율', `${f2(cur.eff * 100)}%`, `${f2(best.eff * 100)}%`)}
       ${shape || cur.shape ? tr('형상', curShape, shape ? shapeText(shape) : curShape) : ''}
       ${finish ? tr('케이스 면', finishText(finish.cur), finishText(finish.best ?? finish.cur)) : ''}
-      ${height ? tr('LED 높이', '현재', nz(height.dz) ? `${sg(height.dz)} mm${Number.isFinite(height.gap) ? ` (커버까지 ${(height.gap - height.dz).toFixed(1)} mm)` : ''}` : '현재') : ''}
+      ${height ? (() => { const now = Number.isFinite(height.gap) ? `현재 (커버까지 ${height.gap.toFixed(1)} mm)` : '현재'; return tr('LED 높이', now, nz(height.dz) ? `${sg(height.dz)} mm${Number.isFinite(height.gap) ? ` (커버까지 ${(height.gap - height.dz).toFixed(1)} mm)` : ''}` : now); })() : ''}
     </table>${profileSvg(cur.profile, best.profile)}${screen ? `<div class="m3-row mut">${esc(screenSummary(screen))}</div>` : ''}
     <div class="m3-row"><button type="button" data-ad="apply"${unchanged ? ' disabled title="현재안과 같음"' : ''}>적용</button><button type="button" data-ad="cancel">취소</button>${shape ? '<button type="button" data-ad="step">STEP 내보내기</button>' : ''}${canRevert ? '<button type="button" data-ad="revert">되돌리기</button>' : ''}</div>`;
 }

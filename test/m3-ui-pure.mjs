@@ -178,8 +178,8 @@ ok(clampCap(12) === 9.9 && clampCap(0.1) === 0.5 && clampCap(3) === 3 && clampCa
   const cur = { count: 5, pitch: 0, milky: 3, Ulen: 0.6, Uwid: 0.7, eff: 0.5 }, best = { ...cur, Ulen: 0.8 };
   const ch = compareHtml({ cur, best, feasible: true, reason: '', shape: null, finish: { cur: { kind: 'whiteDiffuse', R: 0.85 }, best: { kind: 'whiteDiffuse', R: 0.95 } }, height: { dz: 1.2, gap: 6.5 } });
   const c0 = compareHtml({ cur, best, feasible: true, reason: '', shape: null, height: { dz: -0.5, gap: NaN } }), c1 = compareHtml({ cur, best, feasible: true, reason: '', shape: null, height: { dz: 0, gap: 6.5 } });
-  ok(ch.includes('<tr><th>케이스 면</th><td>백색 85%</td><td class="chg">백색 95%</td></tr>') && ch.includes('<tr><th>LED 높이</th><td>현재</td><td class="chg">+1.20 mm (커버까지 5.3 mm)</td></tr>')
-    && c0.includes('<td class="chg">−0.50 mm</td>') && c1.includes('<th>LED 높이</th><td>현재</td><td class="">현재</td>') && !c1.includes('케이스 면') && !compareHtml({ cur, best, feasible: true, reason: '', shape: null }).includes('LED 높이'), `비교표: 케이스 면 · LED 높이 행`);
+  ok(ch.includes('<tr><th>케이스 면</th><td>백색 85%</td><td class="chg">백색 95%</td></tr>') && ch.includes('<tr><th>LED 높이</th><td>현재 (커버까지 6.5 mm)</td><td class="chg">+1.20 mm (커버까지 5.3 mm)</td></tr>')
+    && c0.includes('<td class="chg">−0.50 mm</td>') && c1.includes('<th>LED 높이</th><td>현재 (커버까지 6.5 mm)</td><td class="">현재 (커버까지 6.5 mm)</td>') && !c1.includes('케이스 면') && !compareHtml({ cur, best, feasible: true, reason: '', shape: null }).includes('LED 높이'), `비교표: 케이스 면 · LED 높이 행`);
   const S = { light: { kind: 'step', step: { offset: [1, 0, 0], rot: [0, 0, 0], emitters: [{ part: 1, pos: [0, 0, 1], axis: [0, 0, 1] }] } } };
   applyDz(S, 1.5, [0, 0, 1]);
   const D = { light: { kind: 'manual', manual: { pcb: { kind: 'depth', depth: 5 } } } }, Fc = { light: { kind: 'manual', manual: { pcb: { kind: 'face', part: 1, face: 2 } } } };
