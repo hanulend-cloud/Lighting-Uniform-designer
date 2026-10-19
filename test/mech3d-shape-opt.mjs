@@ -1,5 +1,5 @@
 // ③ LGP 형상: node test/mech3d-shape-opt.mjs
-import { frameHeights, deformPart, refineForBumps, bump, minThickness, shapeCandidates, isWatertight, refinedFor, heightsFor, memoStats } from '../src/engine/mech3d/shape-opt.js';
+import { frameHeights, deformPart, refineForBumps, bump, minThickness, shapeCandidates, isWatertight, refinedFor, heightsFor, memoStats, pathFromLine, swOnPath, endW, lineVarH, shapeVarRanges, gridCandidates } from '../src/engine/mech3d/shape-opt.js';
 import { meshVolume } from '../src/engine/mech3d/mesh.js';
 import { boxMesh, ok, done } from './mech3d-util.mjs';
 
@@ -75,4 +75,40 @@ const segD = (A, B, c) => { const ex = B[0] - A[0], ey = B[1] - A[1], l2 = ex * 
   ok(2 - Math.min(...zs) >= 0.05 - 1e-6 && Math.max(...zs) === 2, `Δt −5(두께 2): 두께 하한 0.05 (아랫면 z ${Math.min(...zs).toFixed(3)})`);
   ok(Math.abs(m.volume - meshVolume(m.positions, m.triangles)) < 1e-9 && Math.abs(m.volume - 40 * 10 * 0.05) < 1e-3, `부피 다시 셈 ${m.volume.toFixed(3)} = 20`);
   ok(Math.abs(minThickness(H, { dt: 0, h: 0.5, R: 0.3, centers: [[10, 5]] }) - 1.5) < 1e-6, '칸 중심이 아닌 LED 중심에서도 최소 두께(좁은 포켓 1.5)'); }
+// ---- ③ 길이·폭 형상 변수 e·c (spec §2.3a) ----
+const xPath = { path: Array.from({ length: 41 }, (_, i) => [i, 5]), halfW: 5, closed: false };
+{ const near = (a, b) => Math.abs(a[0] - b[0]) < 1e-9 && Math.abs(a[1] - b[1]) < 1e-9;
+  const q = [[12, 8, 12, 3], [12.5, 2, 12.5, -3], [0, 5, 0, 0], [40, 5, 40, 0], [-2, 6, -2, 1]];
+  ok(q.every(([x, y, s, w]) => near(swOnPath(xPath, x, y), [s, w])), `swOnPath: (12,8)→${swOnPath(xPath, 12, 8)} · (12.5,2)→${swOnPath(xPath, 12.5, 2)} · 끝 밖 (−2,6)→${swOnPath(xPath, -2, 6)}`);
+  const ln = { length: 40, closed: false, width: 10, fromSW: (s, w) => [s, 5 + w], to3D: (x, y, h) => [x, y, h] }, P = pathFromLine(ln, frame);
+  ok(P.path.length === 41 && P.halfW === 5 && P.closed === false && Math.abs(P.L - 40) < 1e-9 && near(P.path[12], [12, 5]), `pathFromLine: 1 mm 간격 ${P.path.length}점, L ${P.L}, 반폭 ${P.halfW}`);
+  const lc = { length: 2 * Math.PI * 3, closed: true, width: 2, fromSW: (s, w) => [20 + (3 - w) * Math.cos(s / 3), 5 + (3 - w) * Math.sin(s / 3)], to3D: (x, y, h) => [x, y, h] }, Pc = pathFromLine(lc, frame);
+  ok(Pc.closed && Pc.path.length === Math.ceil(lc.length) && Math.hypot(Pc.path[0][0] - Pc.path.at(-1)[0], Pc.path[0][1] - Pc.path.at(-1)[1]) > 0.5, `닫힌 라인: 끝점 중복 없음(${Pc.path.length}점)`);
+  ok(endW(0, 40, 8) === 1 && endW(40, 40, 8) === 1 && Math.abs(endW(4, 40, 8) - 0.5) < 1e-12 && endW(8, 40, 8) === 0 && endW(20, 40, 8) === 0 && endW(-3, 40, 8) === 1, 'endW: 끝 1 · ℓ/2 0.5 · ℓ 안쪽 0 · 끝 밖 1');
+  ok(endW(0, Pc.L, 8, true) === 0, '닫힌 경로 endW = 0');
+  const H = frameHeights(plate, frame, 0.5), m = deformPart(refineForBumps(plate, frame, [], 1, 1, { H, hBottom: 1 }), frame, H, { dt: 0, h: 0, R: 1, centers: [], e: 0.5, c: 0, ell: 8, ...Pc });
+  ok(Math.abs(m.volume - 800) < 1e-6, `닫힌 원 경로 + e 0.5: 부피 ${m.volume.toFixed(4)} = 800`); }
+{ const H = frameHeights(plate, frame, 0.5), t0 = performance.now(), ref = refineForBumps(plate, frame, [], 1, 1, { H, hBottom: 1 }), ms = performance.now() - t0;
+  const me = deformPart(ref, frame, H, { dt: 0, h: 0, R: 1, centers: [], e: 0.5, c: 0, ell: 8, ...xPath });
+  ok(Math.abs(me.volume / 840 - 1) < 0.005 && isWatertight(me), `e 0.5, ℓ 8: 부피 ${me.volume.toFixed(2)} ≈ 840 (±0.5%, 아랫면 세분 hBottom 1 → ${ref.triangles.length / 3}개, ${ms.toFixed(0)} ms)`);
+  const mc = deformPart(ref, frame, H, { dt: 0, h: 0, R: 1, centers: [], e: 0, c: -0.5, ell: 8, ...xPath });
+  ok(Math.abs(mc.volume / (800 - 0.5 * 40 * 10 / 3) - 1) < 0.005 && isWatertight(mc), `c −0.5: 부피 ${mc.volume.toFixed(2)} ≈ 733.33 (±0.5%)`);
+  ok(Math.abs(minThickness(H, { dt: 0, h: 0, R: 1, centers: [], e: 0, c: -0.5, ...xPath }) - 1.5) < 0.05, 'c −0.5: 최소 두께 ≈ 1.5(가장자리)');
+  const C = [[10.25, 5.25]], r0 = refineForBumps(plate, frame, C, 4, 0.5, { H });
+  const a = deformPart(r0, frame, H, { dt: 0.1, h: 0.3, R: 4, centers: C }), b = deformPart(r0, frame, H, { dt: 0.1, h: 0.3, R: 4, centers: C, e: 0, c: 0, ell: 8, ...xPath });
+  ok(a.positions.length === b.positions.length && a.positions.every((v, i) => Object.is(v, b.positions[i])) && a.volume === b.volume, 'e = c = 0 → 경로가 있어도 deformPart 결과 비트 동일');
+  ok(refineForBumps(plate, frame, C, 4, 0.5, { H, hBottom: 0 }).triangles.length === r0.triangles.length && refineForBumps(plate, frame, [], 4, 0.5, { H }) === plate, 'hBottom 0/없음 → 세분 기존과 같음');
+  ok(lineVarH({ R: 6, e: 0.2, c: 0 }) === 3 && lineVarH({ R: 1, e: 0, c: -0.1 }) === 2 && lineVarH({ R: 6, e: 0, c: 0 }) === 0 && lineVarH({ R: 6 }) === 0, 'lineVarH: e·c ≠ 0 일 때만 max(R/2, 2)'); }
+{ const r = shapeVarRanges({ t0: 2, pitch: 20, hasCenters: true }), r0 = shapeVarRanges({ t0: 2, pitch: 20, hasCenters: false });
+  ok(r.e.join() === '-1,1' && r.c.join() === '-1,1' && r.dt.join() === '-1,2' && r.R.join() === '6,16' && !r0.h && !r0.R && r0.e.join() === '-1,1', 'shapeVarRanges: e·c ∈ ±0.5t₀, h·R 은 LED 중심 있을 때만');
+  const G = gridCandidates(['e', 'c', 'R'], r), G1 = gridCandidates(['dt'], r0);
+  ok(G.length === 27 && G.some((g) => g.e === 0 && g.c === 0 && g.dt === 0 && g.h === 0) && G.every((g) => g.dt === 0 && g.h === 0) && G.some((g) => g.e === -1 && g.c === 1 && g.R === 16), `gridCandidates: 3³ = ${G.length}, 현재 형상 포함, 고르지 않은 변수 0`);
+  ok(G1.length === 3 && G1.map((g) => g.dt).join() === '-1,0,2' && G1.every((g) => g.e === 0 && g.c === 0 && g.h === 0 && g.R === 1), `gridCandidates(Δt, LED 없음): ${G1.map((g) => g.dt)}`);
+  ok(gridCandidates([], r).length === 1 && gridCandidates(['R'], r).map((g) => g.R).join() === '6,11,16', '빈 선택 → 현재 형상 1개 · R 은 {lo, mid, hi}'); }
+{ // 성능: 경로 2000점 × 정점 10만
+  const path = Array.from({ length: 2000 }, (_, i) => [i * 0.5 * Math.cos(i * 0.002), i * 0.5 * Math.sin(i * 0.002)]), P = { path, halfW: 5, closed: false };
+  const t0 = performance.now(); let acc = 0;
+  for (let k = 0; k < 100000; k++) { const i = (k * 7919) % 2000, [x, y] = path[i]; acc += swOnPath(P, x + 3 * Math.sin(k), y + 3 * Math.cos(k))[1]; }
+  const ms = performance.now() - t0;
+  ok(ms < 1500 && Number.isFinite(acc), `swOnPath 10만 점 × 경로 2000점: ${ms.toFixed(0)} ms`); }
 done();

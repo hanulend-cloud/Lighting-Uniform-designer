@@ -42,7 +42,84 @@ export function frameHeights(mesh, F, cell = 0.5) {
   return { at, hf, cx, cy, zmax, non25: hf.stats.non25DFrac, t0: (() => { let s = 0; for (const m of masked) s += hf.zt[m] - hf.zb[m]; return masked.length ? s / masked.length : 0; })() };
 }
 
-const disp = (x, y, { dt, h, R, centers }) => { let b = 0; for (const c of centers) b += bump(Math.hypot(x - c[0], y - c[1]) / R); return dt - h * b; };
+// ---- 라인 좌표 (s, w) — spec §2.3a. 중심선 폴리라인(관측 좌표 [x,y], 1 mm 간격)·반폭·닫힘은 shapeMod 에 저장 ----
+// 중심선 표본: line.fromSW(s,0) → line.to3D → 관측 좌표 [x,y]. 닫힌 라인은 끝점 중복 없이. L = 표본 폴리라인 길이
+export function pathFromLine(line, F, step = 1) {
+  const n = Math.max(1, Math.ceil(line.length / step)), path = [];
+  for (let i = 0; i < (line.closed ? n : n + 1); i++) {
+    const [x, y] = line.fromSW((line.length * i) / n, 0), q = toFrame(F, line.to3D(x, y, 0));
+    path.push([q[0], q[1]]);
+  }
+  return { path, halfW: line.width / 2, closed: !!line.closed, L: pathIndex(path, !!line.closed).L };
+}
+// 선분 격자 버킷(셀 2 mm) — 경로 배열별 메모(WeakMap)
+const PCELL = 2, pIdx = new WeakMap();
+function pathIndex(path, closed) {
+  let I = pIdx.get(path); if (I && I.closed === closed) return I;
+  const n = path.length, ns = closed ? n : n - 1, cum = new Float64Array(ns + 1);
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const [x, y] of path) { x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y); }
+  const nx = Math.max(1, Math.ceil((x1 - x0) / PCELL) + 1), ny = Math.max(1, Math.ceil((y1 - y0) / PCELL) + 1), cells = new Map();
+  for (let k = 0; k < ns; k++) {
+    const a = path[k], b = path[(k + 1) % n]; cum[k + 1] = cum[k] + Math.hypot(b[0] - a[0], b[1] - a[1]);
+    const i0 = Math.floor((Math.min(a[0], b[0]) - x0) / PCELL), i1 = Math.floor((Math.max(a[0], b[0]) - x0) / PCELL);
+    const j0 = Math.floor((Math.min(a[1], b[1]) - y0) / PCELL), j1 = Math.floor((Math.max(a[1], b[1]) - y0) / PCELL);
+    for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) { const c = j * nx + i, L = cells.get(c); if (L) L.push(k); else cells.set(c, [k]); }
+  }
+  I = { closed, n, ns, cum, L: cum[ns], x0, y0, nx, ny, cells }; pIdx.set(path, I);
+  return I;
+}
+// 최근접 선분 투영 → [s, w] (s = 누적 길이, w = 진행 방향 왼쪽 +). 열린 경로의 끝 밖은 첫·끝 선분 연장(s < 0 또는 > L)
+export function swOnPath(P, x, y) {
+  const path = P.path, I = pathIndex(path, !!P.closed);
+  if (!I.ns) return [0, 0];
+  const ci = Math.floor((x - I.x0) / PCELL), cj = Math.floor((y - I.y0) / PCELL);
+  const rMax = Math.max(Math.abs(ci), Math.abs(ci - I.nx + 1), Math.abs(cj), Math.abs(cj - I.ny + 1));
+  let best = Infinity, bk = -1, bt = 0;
+  const test = (k) => {
+    const a = path[k], b = path[(k + 1) % I.n], ex = b[0] - a[0], ey = b[1] - a[1], l2 = ex * ex + ey * ey;
+    const t = l2 > 0 ? Math.min(1, Math.max(0, ((x - a[0]) * ex + (y - a[1]) * ey) / l2)) : 0;
+    const d = Math.hypot(a[0] + t * ex - x, a[1] + t * ey - y);
+    if (d < best || (d === best && k < bk)) { best = d; bk = k; bt = t; }
+  };
+  for (let r = 0; r <= rMax; r++) {
+    for (let j = cj - r; j <= cj + r; j++) {
+      if (j < 0 || j >= I.ny) continue;
+      const step = j === cj - r || j === cj + r ? 1 : 2 * r;   // 고리 칸만
+      for (let i = ci - r; i <= ci + r; i += Math.max(1, step)) {
+        if (i < 0 || i >= I.nx) continue;
+        const L = I.cells.get(j * I.nx + i); if (L) for (const k of L) test(k);
+      }
+    }
+    if (best <= r * PCELL) break;   // 바깥 고리 선분은 r·셀 보다 멀다
+  }
+  const a = path[bk], b = path[(bk + 1) % I.n], ex = b[0] - a[0], ey = b[1] - a[1], l = Math.hypot(ex, ey);
+  if (!(l > 0)) return [I.cum[bk], 0];
+  const tr = ((x - a[0]) * ex + (y - a[1]) * ey) / (l * l), cr = (ex * (y - a[1]) - ey * (x - a[0])) / l;
+  if (!I.closed && ((bk === 0 && tr < 0) || (bk === I.ns - 1 && tr > 1))) return [I.cum[bk] + tr * l, cr];
+  return [I.cum[bk] + bt * l, cr < 0 ? -best : best];
+}
+// 끝단 창: 열린 경로 양 끝(길이 ell) 1 → 0 코사인. 닫힌 경로 0
+export function endW(s, L, ell, closed = false) {
+  if (closed || !(ell > 0)) return 0;
+  const t = Math.max(0, Math.min(s, L - s));
+  return t < ell ? 0.5 * (1 + Math.cos((Math.PI * t) / ell)) : 0;
+}
+// 아랫면 이동량 D = Δt − h·Σbump + e·endW(s) + c·min(1, (w/W½)²). e·c 가 0 이거나 경로가 없으면 (s,w) 생략(기존과 비트 동일)
+const disp = (x, y, prm) => {
+  const { dt, h, R, centers } = prm; let b = 0;
+  for (const c of centers) b += bump(Math.hypot(x - c[0], y - c[1]) / R);
+  let D = dt - h * b;
+  const e = prm.e ?? 0, cc = prm.c ?? 0;
+  if ((e || cc) && prm.path?.length) {
+    const [s, w] = swOnPath(prm, x, y);
+    if (e) D += e * endW(s, pathIndex(prm.path, !!prm.closed).L, prm.ell, prm.closed);
+    if (cc) D += cc * Math.min(1, (w / prm.halfW) ** 2);
+  }
+  return D;
+};
+// e·c 가 있으면 아랫면 세분 최대 변 max(R/2, 2 mm), 없으면 0(세분 안 함)
+export const lineVarH = (prm) => ((prm.e ?? 0) || (prm.c ?? 0) ? Math.max((prm.R ?? 0) / 2, 2) : 0);
 
 // 변형 메쉬(같은 삼각형·면 번호, 새 정점 위치). 부피는 다시 셈. 두께 하한 MIN_T(그 자리 D 를 자름)
 // 주의: zt·zb 는 높이맵 칸 값 — 기울어진 윗면은 칸 안 기울기만큼(≈ slope·cell/2t) 만 고정됨(평판 가정)
@@ -102,10 +179,12 @@ export function weld(P, tol = weldTol(P)) {
 // 닫힘: 표시 모서리를 가진 삼각형은 자기 가장 긴 모서리도 표시(안정될 때까지) → 분할은 늘 가장 긴 모서리부터. 최대 40 회.
 // 모서리·중점은 대표 정점(허용오차 합치기) 기준 — 1 ulp 어긋난 중복 정점도 중점 공유. 출력 정점은 (모서리, 면 번호)별로 따로(면별 정점 유지).
 // opts.H(frameHeights) 가 있으면 세 정점 모두 윗면(w=0)인 삼각형은 표시를 만들지 않음(닫힘 전파로만 나뉨).
+// opts.hBottom > 0 이면 (윗면 아닌) 삼각형의 가장 긴 모서리 > hBottom 도 표시 — e·c 항(넓고 매끈)용 고른 세분.
 const EK = 67108864;   // 2^26 — 정수 모서리 키 a·EK + b (a<b)
 const ekey = (a, b) => (a < b ? a * EK + b : b * EK + a);
 export function refineForBumps(mesh, F, centers, R, hMax, opts = {}) {
-  if (!centers.length) return mesh;
+  const hb2 = opts.hBottom > 0 ? opts.hBottom * opts.hBottom : Infinity;
+  if (!centers.length && hb2 === Infinity) return mesh;
   const P = Array.from(mesh.positions), W = weld(mesh.positions), cid = Array.from(W.id), C = W.rep;
   let T = Array.from(mesh.triangles), Fi = Array.from(mesh.faceIds);
   const Q = [];   // 대표 정점별 관측 좌표(x, y)·윗면 여부
@@ -156,7 +235,7 @@ export function refineForBumps(mesh, F, centers, R, hMax, opts = {}) {
         if (l > lmax) lmax = l;
         if (l > h2 && near2(a, b)) mark(ekey(a, b));
       }
-      if (lmax > h2 && centers.some((c) => inTri(v[0], v[1], v[2], c))) { const e = longest(v); mark(ekey(v[e], v[(e + 1) % 3])); }
+      if ((lmax > h2 && centers.some((c) => inTri(v[0], v[1], v[2], c))) || lmax > hb2) { const e = longest(v); mark(ekey(v[e], v[(e + 1) % 3])); }
     };
     if (fresh) for (const t of fresh) check(t); else for (let t = 0; t < nT; t++) check(t);
     if (!flag.size) break;
@@ -213,8 +292,8 @@ export const memoStats = () => ({ ...stats });
 export function heightsFor(mesh, F, cell = 0.5) {
   return lru(memoH, mesh, JSON.stringify([F.u, F.v, F.d, cell]), () => { stats.heights++; return frameHeights(mesh, F, cell); });
 }
-export function refinedFor(mesh, F, centers, R, hMax) {
-  return lru(memoR, mesh, JSON.stringify([F.u, F.v, F.d, centers, R, hMax]), () => { stats.refine++; return refineForBumps(mesh, F, centers, R, hMax, { H: heightsFor(mesh, F, 0.5) }); });
+export function refinedFor(mesh, F, centers, R, hMax, hBottom = 0) {
+  return lru(memoR, mesh, JSON.stringify([F.u, F.v, F.d, centers, R, hMax, hBottom]), () => { stats.refine++; return refineForBumps(mesh, F, centers, R, hMax, { H: heightsFor(mesh, F, 0.5), hBottom }); });
 }
 
 // 후보 27개(3×3×3) — 범위는 spec §2.3 기본. LED 중심이 없으면 Δt 만 3개
@@ -229,5 +308,21 @@ export function shapeCandidates({ t0, pitch, hasCenters, ranges = null }) {
     if (!hasCenters) { out.push({ dt, h: 0, R: 1 }); continue; }
     for (const h of withZero(r.h)) for (const R of lin(r.R)) out.push({ dt, h, R });
   }
+  return out;
+}
+
+// ③ 변수 범위(spec §2.3a) — h·R 은 LED 중심이 있을 때만
+export function shapeVarRanges({ t0, pitch, hasCenters }) {
+  const r = { dt: [-0.5 * t0, 1.0 * t0], e: [-0.5 * t0, 0.5 * t0], c: [-0.5 * t0, 0.5 * t0] };
+  if (hasCenters) { r.h = [-0.5 * t0, 0.5 * t0]; r.R = [0.3 * pitch, 0.8 * pitch]; }
+  return r;
+}
+// 고른 변수의 3^k 격자 — {lo, 0, hi}(R 은 {lo, mid, hi}). 고르지 않은 변수는 0, R 은 mid(범위 없으면 1). 현재 형상(전부 0) 포함
+export function gridCandidates(vars, ranges) {
+  const rd = (v) => Math.round(v * 1e4) / 1e4;
+  const Rm = ranges.R ? rd((ranges.R[0] + ranges.R[1]) / 2) : 1;
+  const vals = (k) => (k === 'R' ? [ranges.R[0], (ranges.R[0] + ranges.R[1]) / 2, ranges.R[1]].map(rd) : [...new Set([ranges[k][0], 0, ranges[k][1]].map(rd))].sort((a, b) => a - b));
+  let out = [{ dt: 0, h: 0, R: Rm, e: 0, c: 0 }];
+  for (const k of vars) { if (!ranges[k]) continue; const V = vals(k); out = out.flatMap((g) => V.map((v) => ({ ...g, [k]: v }))); }
   return out;
 }
