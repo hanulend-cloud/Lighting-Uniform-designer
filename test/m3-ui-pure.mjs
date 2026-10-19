@@ -6,7 +6,7 @@ import { checkLabels, statusWord, statusIcon, checkAria, isActivateKey, esc as e
 import { ramp, NO_DATA } from '../src/ui/m3/colormap.js';
 import { defaultLight, defaultObserve, defaultChecks } from '../src/engine/mech3d/defs.js';
 import { defaultPart, setPartMaterial, setPartMaterialParam } from '../src/engine/mech3d/materials.js';
-import { clearanceHtml } from '../src/ui/mech3d-panel.js';
+import { clearanceHtml, meshInfo, partHeaderText } from '../src/ui/mech3d-panel.js';
 import { stepLayoutRowHtml, clampVirtual, virtCountMax } from '../src/ui/mech3d-light-panel.js';
 import { ok, done } from './mech3d-util.mjs';
 import { stageAvailability, autoCardHtml, compareHtml, clampCap, overallFrac, etaText, profileSvg, shapeText, screenSummary, reusableCurrent } from '../src/ui/m3/autodesign-panel.js';
@@ -150,4 +150,12 @@ ok(clampCap(12) === 9.9 && clampCap(0.1) === 0.5 && clampCap(3) === 3 && clampCa
   const r = reusableCurrent(snap, G);
   ok(r && r.stats === stats && r.eff === 0.6, '수렴한 결과 → { stats, eff }');
   ok(reusableCurrent({ ...snap, state: 'paused' }, G) === null && reusableCurrent({ ...snap, stats: { ...stats, relNoise: 0.03 } }, G) === null && reusableCurrent(snap, { ns: 1 }) === null && reusableCurrent({ ...snap, sceneKey: null }, G) === null && reusableCurrent({ ...snap, photometry: null }, G) === null, '미수렴·다른 장면·결과 없음 → null'); }
+{ // 속성 머리: 실제 메쉬 외곽·부피(크기·위치·형상 반영) + 형상 변경 표시
+  const box = (a, b, c) => ({ positions: Float32Array.from([0,0,0, a,0,0, a,b,0, 0,b,0, 0,0,c, a,0,c, a,b,c, 0,b,c]), triangles: Uint32Array.from([0,2,1, 0,3,2, 4,5,6, 4,6,7, 0,1,5, 0,5,4, 1,2,6, 1,6,5, 2,3,7, 2,7,6, 3,0,4, 3,4,7]) });
+  const mi = meshInfo(box(40, 10, 2));
+  ok(mi.size.join() === '40,10,2' && Math.abs(mi.volume - 800) < 1e-6, `meshInfo: ${mi.size} · ${mi.volume}`);
+  const p = { name: 'a', size: [20, 5, 1], volume: 100, xform: { scale: [2, 2, 2] } };
+  ok(partHeaderText(p, mi) === '40.0×10.0×2.0mm · 800 mm³', `머리: ${partHeaderText(p, mi)}`);
+  ok(partHeaderText({ ...p, shapeMod: { dt: 0.2 } }, mi) === '40.0×10.0×2.0mm · 800 mm³ · 형상 변경됨', '형상 변경됨');
+  ok(partHeaderText(p, null) === '40.0×10.0×2.0mm · 800 mm³', '메쉬 없음 → 원본 × 배율'); }
 done();

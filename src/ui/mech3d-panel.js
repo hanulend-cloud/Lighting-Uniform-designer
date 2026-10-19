@@ -1,6 +1,7 @@
 // 3D 기구 — 부품 속성(소재·면 처리·선택 면 덮어쓰기) · 접촉면 편집기 (spec 2026-10-14 §3, 2026-10-15 m3-cad-ui: 피처 트리 노드별).
 // 상태는 갖지 않는다: m = spec.mech3d, sel = { part, face|null }, dbList = 실측소재 DB 목록, h = 이벤트 처리기.
 import { PART_KINDS, FINISH_KINDS, RESIN_N, resolveFinish } from '../engine/mech3d/materials.js';
+import { bounds, meshVolume } from '../engine/mech3d/mesh.js';
 
 const esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
 const XF_LOCK = new WeakMap();   // 패널 요소 → 비율 고정 체크(세션 동안)
@@ -99,13 +100,24 @@ export function xformEditor(p, info, lock = false) {
       <span class="mut">원본 ${z0.map((v) => v.toFixed(1)).join('×')}</span></div>`;
 }
 
+// 실제 장면 메쉬(크기·위치·형상 반영) 외곽 크기·부피
+export function meshInfo(mesh) {
+  const b = bounds(mesh.positions);
+  return { size: [0, 1, 2].map((k) => b[k + 3] - b[k]), volume: Math.abs(meshVolume(mesh.positions, mesh.triangles)) };
+}
+// 속성 머리 — info = meshInfo(실제 메쉬) | null(없으면 원본 × 배율). shapeMod 가 있으면 ' · 형상 변경됨'
+export function partHeaderText(p, info) {
+  const sc = p.xform?.scale ?? [1, 1, 1];
+  const size = info?.size ?? (p.size ?? []).map((v, k) => v * sc[k]), vol = info?.volume ?? (p.volume ?? 0) * sc[0] * sc[1] * sc[2];
+  return `${size.map((v) => v.toFixed(1)).join('×')}mm · ${vol.toFixed(0)} mm³${p.shapeMod ? ' · 형상 변경됨' : ''}`;
+}
+
 // 부품 노드 — sel = { part, face|null }, h = { onKind(part, kind), onMat(part, key, value), onFinish(part, face|null, finish|null) }
 export function renderPartProps(el, m, sel0, dbList, h) {
   const sel = { ...sel0, lock: XF_LOCK.get(el.ownerDocument ?? XF_LOCK) ?? false };   // 비율 고정: 기본 꺼짐(한 치수만 바꾸는 경우가 대부분), 켜면 다시 그려도 유지
   const p = m.parts[sel.part];
   if (!p) { el.innerHTML = '<div class="mut">부품을 찾을 수 없음</div>'; return; }
-  const sc = p.xform?.scale ?? [1, 1, 1];
-  el.innerHTML = `<div class="m3-h">속성 · ${esc(p.name)} <span class="mut">${(p.size ?? []).map((v, k) => (v * sc[k]).toFixed(1)).join('×')}mm · ${((p.volume ?? 0) * sc[0] * sc[1] * sc[2]).toFixed(0)} mm³</span></div>${partEditor(p, sel, dbList)}`;
+  el.innerHTML = `<div class="m3-h">속성 · ${esc(p.name)} <span class="mut">${esc(partHeaderText(p, sel.meshInfo ?? null))}</span></div>${partEditor(p, sel, dbList)}`;
   const i = sel.part;
   el.querySelector('[data-m3-kind]').onchange = (e) => h.onKind(i, e.target.value);
   el.querySelectorAll('[data-m3-mat]').forEach((x) => {
