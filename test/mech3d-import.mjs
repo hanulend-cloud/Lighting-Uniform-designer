@@ -9,7 +9,7 @@ import { buildSampleShapes, SAMPLE } from './fixtures/mech3d-sample.mjs';
 import { ok, done } from './mech3d-util.mjs';
 
 const oc = await initOpenCascade();
-const text = shapesToStepText(oc, buildSampleShapes(oc));
+const text = shapesToStepText(oc, buildSampleShapes(oc, { cylinder: true }));
 const t0 = performance.now();
 const parts = readStepParts(oc, text);
 ok(parts.length === 4, `부품 수 4: ${parts.length} (${(performance.now() - t0).toFixed(0)}ms)`);
