@@ -92,5 +92,7 @@ ok(judgeText(0.8004, 0.8009).cls === 'ok' && judgeText(0.7999, 0.8).cls === 'bad
   const c = compareHtml({ cur: { count: 5, pitch: 0, milky: 3, Ulen: 0.62, Uwid: 0.7, eff: 0.6 }, best: { count: 4, pitch: 0, milky: 3.5, Ulen: 0.81, Uwid: 0.72, eff: 0.55 }, feasible: true, reason: '', shape: null });
   ok(c.includes('LED') && c.includes('4') && c.includes('0.81') && c.includes('data-ad="apply"') && c.includes('data-ad="cancel"'), '비교표: 현재 | 최적 · 적용·취소');
   const cs = compareHtml({ cur: { count: 0, pitch: 0, milky: 2, Ulen: 0.6, Uwid: 0.7, eff: 0.5 }, best: { count: 0, pitch: 0, milky: 3, Ulen: 0.8, Uwid: 0.7, eff: 0.4 }, feasible: true, reason: '', shape: null, stepLeds: 10 });
-  ok((cs.match(/LED STEP 10개/g) ?? []).length === 2 && !cs.includes('균등'), '비교표: LED STEP 모드 = 두 열 모두 LED STEP 10개'); }
+  ok((cs.match(/LED STEP 10개/g) ?? []).length === 2 && !cs.includes('균등'), '비교표: LED STEP 모드 = 두 열 모두 LED STEP 10개');
+  const cu = compareHtml({ cur: { count: 5, pitch: 0, milky: 3, Ulen: 0.75, Uwid: 0.9, eff: 0.6 }, best: { count: 5, pitch: 0, milky: 3, Ulen: 0.75, Uwid: 0.9, eff: 0.6 }, feasible: false, reason: '현재안보다 나은 설계를 찾지 못함 — 현재안 유지', shape: null, unchanged: true });
+  ok(cu.includes('현재안 유지') && /data-ad="apply"[^>]*disabled/.test(cu) && !/data-ad="apply"[^>]*disabled/.test(c), '비교표: 현재안 유지 → 사유 표시 · 적용 비활성'); }
 done();

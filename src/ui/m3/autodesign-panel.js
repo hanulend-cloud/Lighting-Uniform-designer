@@ -26,10 +26,11 @@ export function autoCardHtml({ avail, sel, running, names = [], canRevert = fals
     ${running ? prog : `<div class="m3-row"><button type="button" data-ad="run"${any ? '' : ' disabled'}>▶ 실행</button>${canRevert ? '<button type="button" data-ad="revert" title="마지막 적용 전 값으로">↶ 되돌리기</button>' : ''}<button type="button" data-ad="close">닫기</button></div>`}`;
 }
 // 비교표 — cur/best = { count, pitch, milky, Ulen, Uwid, eff, lum? }, shape = { dt, h, R } | null, stepLeds = LED STEP 발광점 수(직접 배치면 null)
-export function compareHtml({ cur, best, feasible, reason, shape, stepLeds = null, canRevert = false }) {
+// unchanged = 최종안이 현재안 그대로(나은 설계 없음) → 사유 표시 · [적용] 비활성
+export function compareHtml({ cur, best, feasible, reason, shape, stepLeds = null, canRevert = false, unchanged = false }) {
   const tr = (label, a, b) => `<tr><th>${label}</th><td>${a}</td><td class="${a !== b ? 'chg' : ''}">${b}</td></tr>`;
   const led = (x) => (stepLeds != null ? `LED STEP ${stepLeds}개` : `${x.count}개 ${x.pitch > 0 ? `피치 ${x.pitch}` : '균등'}`);   // STEP 은 ② 불가 — 두 열 같음
-  return `<div class="m3-h">${feasible ? '최적안' : '가장 가까운 안'} <span class="mut">${esc(reason)}</span></div>
+  return `<div class="m3-h">${unchanged ? '현재안 유지' : feasible ? '최적안' : '가장 가까운 안'} <span class="mut">${esc(reason)}</span></div>
     <table class="m3-cmp"><tr><th></th><th>현재</th><th>최적</th></tr>
       ${tr('LED', led(cur), led(best))}
       ${tr('Milky', f2(cur.milky), f2(best.milky))}
@@ -37,7 +38,7 @@ export function compareHtml({ cur, best, feasible, reason, shape, stepLeds = nul
       ${tr('광 효율', `${f2(cur.eff * 100)}%`, `${f2(best.eff * 100)}%`)}
       ${shape ? tr('형상', '원본', `두께 ${shape.dt >= 0 ? '+' : ''}${f2(shape.dt)} · ${shape.h >= 0 ? '포켓' : '돌출'} ${f2(Math.abs(shape.h))} · R ${f2(shape.R)} mm`) : ''}
     </table>
-    <div class="m3-row"><button type="button" data-ad="apply">적용</button><button type="button" data-ad="cancel">취소</button>${shape ? '<button type="button" data-ad="step">STEP 내보내기</button>' : ''}${canRevert ? '<button type="button" data-ad="revert">되돌리기</button>' : ''}</div>`;
+    <div class="m3-row"><button type="button" data-ad="apply"${unchanged ? ' disabled title="현재안과 같음"' : ''}>적용</button><button type="button" data-ad="cancel">취소</button>${shape ? '<button type="button" data-ad="step">STEP 내보내기</button>' : ''}${canRevert ? '<button type="button" data-ad="revert">되돌리기</button>' : ''}</div>`;
 }
 
 // el 에 카드를 그리고 이벤트를 h 로 넘긴다. state = { avail, sel, running, result, names, canRevert }

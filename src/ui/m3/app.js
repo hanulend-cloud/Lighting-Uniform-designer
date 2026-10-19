@@ -374,7 +374,7 @@ async function adRun() {
       const r = await R.traceEach(adJob(Md, parts, { emitters: sets[0] }), sets, { N: 20000 });
       return { cand, maps: r.maps, emitted: r.emitted };
     },
-    async evalShapes(d, cands, N) {
+    async evalShapes(d, cands, N, maxMs = 2500) {   // 단계별 광자·시간 제한은 halving 일정(6만/20만/60만 · 2.5/4/6초)
       const out = [], base = adBaseMesh(sp), H = heightsFor(base, S.line.frame, 0.5);
       const others = getMech3d().parts.map((p, j) => (j === sp ? null : p)), lp = (M.light.kind === 'step' && L.ledPartsNow(M)) || [];
       const before = interferenceKeys(base, others, lp, []);
@@ -384,7 +384,7 @@ async function adRun() {
         const thin = minThickness(H, mod) < minWall;   // 칸 중심 + LED 중심
         const clash = !thin && [...interferenceKeys(parts[sp], others, lp, []).keys()].some((k) => !before.has(k));
         if (thin || clash) { out.push({ cand: c, ok: false, why: thin ? '살두께' : '간섭' }); continue; }
-        const r = await R.trace(adJob(Md, parts), { N, maxMs: 1500, minN: Math.min(N, 3e4), batches: 4 }), stt = tallyStats(G, r.batches, obs);
+        const r = await R.trace(adJob(Md, parts), { N, maxMs, minN: Math.min(N, 3e4), batches: 4 }), stt = tallyStats(G, r.batches, obs);
         out.push({ cand: c, ok: !stt.empty, stats: stt, eff: adEff(r) });
       }
       return out;
@@ -409,7 +409,7 @@ async function adRun() {
   if (res && !res.cancelled) {
     const C = res.current;   // 현재안 = 최종안과 같은 추정기
     let nStep = null; if (M.light.kind === 'step') { try { nStep = L.currentEmitters(M, S.line).length; } catch { nStep = 0; } }
-    st.result = { design: res.best, feasible: res.feasible, reason: res.reason, shape: res.best.shape ?? null, stepLeds: nStep,
+    st.result = { design: res.best, feasible: res.feasible, reason: res.reason, shape: res.best.shape ?? null, stepLeds: nStep, unchanged: !!res.unchanged,
       cur: { ...cur, Ulen: C?.stats?.Ulen, Uwid: C?.stats?.Uwid, eff: C?.eff ?? NaN },
       best: { ...res.best, Ulen: res.verified.stats.Ulen, Uwid: res.verified.stats.Uwid, eff: res.verified.eff } };
   }

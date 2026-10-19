@@ -6,14 +6,30 @@ import { pickMilky, margin } from './milky-search.js';
 import { searchLeds } from './basis.js';
 
 export const MILKY_STEP = 0.025, MILKY_ITERS = 8;
-export const shapeScore = (r, obs) => (!r.ok ? -Infinity : margin(r.stats, obs) >= 0 ? 1 + r.eff : Math.min(r.stats.Ulen / obs.targetLen, r.stats.Uwid == null ? Infinity : r.stats.Uwid / obs.targetWid));
+// 평활 길이 U — 길이 프로파일 3행 이동평균(NaN 행 제외)의 min/max. 한 칸 잡음 골짜기(min 통계 편향)에 덜 민감. profile 없으면 Ulen
+export function smoothU(stats) {
+  const p = stats?.profile;
+  if (!p || !p.length) return stats?.Ulen ?? 0;
+  let mn = Infinity, mx = -Infinity;
+  for (let i = 0; i < p.length; i++) {
+    if (!Number.isFinite(p[i])) continue;
+    let s = 0, n = 0;
+    for (let k = i - 1; k <= i + 1; k++) if (k >= 0 && k < p.length && Number.isFinite(p[k])) { s += p[k]; n++; }
+    const v = s / n; mn = Math.min(mn, v); mx = Math.max(mx, v);
+  }
+  return mx > 0 ? mn / mx : stats.Ulen ?? 0;
+}
+// 통과 판정은 margin(원래 Ulen) 그대로, 미달안 순위만 평활 길이 U
+export const shapeScore = (r, obs) => (!r.ok ? -Infinity : margin(r.stats, obs) >= 0 ? 1 + r.eff : Math.min(smoothU(r.stats) / obs.targetLen, r.stats.Uwid == null ? Infinity : r.stats.Uwid / obs.targetWid));
+export const SCORE_EPS = 0.01;   // 최종안이 현재안보다 이만큼은 나아야 추천
+const sameDesign = (a, b) => ['count', 'pitch', 'milky'].every((k) => (a?.[k] ?? null) === (b?.[k] ?? null)) && JSON.stringify(a?.shape ?? null) === JSON.stringify(b?.shape ?? null);
 
-// 단계적 압축: schedule = [[남길 수(첫 단계는 전체), 광자 수]…]. 각 단계 결과 점수로 다음 단계 후보를 줄임
-export async function halving(cands, evalFn, obs, schedule = [[27, 3e4], [6, 1e5], [2, 3e5]], cancelled = () => false) {
+// 단계적 압축: schedule = [[남길 수(첫 단계는 전체), 광자 수, 후보당 시간 제한 ms?]…]. 각 단계 결과 점수로 다음 단계 후보를 줄임
+export async function halving(cands, evalFn, obs, schedule = [[27, 6e4, 2500], [6, 2e5, 4000], [2, 6e5, 6000]], cancelled = () => false) {
   let pool = cands, last = null;
   for (let s = 0; s < schedule.length; s++) {
     if (cancelled()) return null;
-    const res = (await evalFn(pool, schedule[s][1])).filter((r) => r.ok).sort((a, b) => shapeScore(b, obs) - shapeScore(a, obs));
+    const res = (await evalFn(pool, schedule[s][1], schedule[s][2])).filter((r) => r.ok).sort((a, b) => shapeScore(b, obs) - shapeScore(a, obs));
     if (!res.length) return null;
     last = res[0];
     pool = res.slice(0, schedule[s + 1]?.[0] ?? 1).map((r) => r.cand);
@@ -76,7 +92,7 @@ export async function runAutoDesign(cfg, io) {
   }
   if (stages.shape && cfg.shapeCands?.length) {   // ③
     io.progress?.('shape', 0, `형상 후보 ${cfg.shapeCands.length}개 평가`);
-    const best = await halving(cfg.shapeCands, (cands, N) => io.evalShapes(d, cands, N), obs, cfg.schedule, stop);
+    const best = await halving(cfg.shapeCands, (cands, N, ms) => io.evalShapes(d, cands, N, ms), obs, cfg.schedule, stop);
     if (stop()) return { cancelled: true };
     steps.push({ stage: 'shape', best });
     if (best) {
@@ -87,6 +103,14 @@ export async function runAutoDesign(cfg, io) {
   }
   if (stop()) return { cancelled: true };
   io.progress?.('verify', 0, '최종안 정밀 재계산');
+  if (sameDesign(d, cfg.current)) return { feasible: feasible && margin(currentVerified.stats, obs) >= 0, best: { ...cfg.current }, steps, reason, verified: currentVerified, current: currentVerified, unchanged: true, cancelled: false };
   const verified = await io.verify(d);
+  // 잡음 방어(①②③ 공통): 검증값이 현재안보다 SCORE_EPS 이상 낫지 않으면 현재안 유지. 둘 다 통과면 LED 개수 감소도 이득
+  const sc = (v) => shapeScore({ ok: !v.stats.empty, stats: v.stats, eff: v.eff }, obs);
+  const fewer = margin(verified.stats, obs) >= 0 && margin(currentVerified.stats, obs) >= 0 && d.count < (cfg.current.count ?? 0);
+  if (!fewer && !(sc(verified) - sc(currentVerified) >= SCORE_EPS)) {
+    steps.push({ stage: 'guard', tried: d, triedVerified: verified, triedReason: reason });
+    return { feasible: margin(currentVerified.stats, obs) >= 0, best: { ...cfg.current }, steps, reason: '현재안보다 나은 설계를 찾지 못함 — 현재안 유지', verified: currentVerified, current: currentVerified, unchanged: true, cancelled: false };
+  }
   return { feasible, best: d, steps, reason, verified, current: currentVerified, cancelled: false };
 }
