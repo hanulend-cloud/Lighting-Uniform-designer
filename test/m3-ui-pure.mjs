@@ -8,7 +8,7 @@ import { defaultLight, defaultObserve, defaultChecks } from '../src/engine/mech3
 import { defaultPart, setPartMaterial, setPartMaterialParam } from '../src/engine/mech3d/materials.js';
 import { clearanceHtml } from '../src/ui/mech3d-panel.js';
 import { ok, done } from './mech3d-util.mjs';
-import { stageAvailability, autoCardHtml, compareHtml } from '../src/ui/m3/autodesign-panel.js';
+import { stageAvailability, autoCardHtml, compareHtml, clampCap, overallFrac, etaText, profileSvg } from '../src/ui/m3/autodesign-panel.js';
 
 const M = {
   name: 't', contacts: [{ a: 0, b: 1, mode: 'contact' }], checks: defaultChecks(),
@@ -95,4 +95,18 @@ ok(judgeText(0.8004, 0.8009).cls === 'ok' && judgeText(0.7999, 0.8).cls === 'bad
   ok((cs.match(/LED STEP 10개/g) ?? []).length === 2 && !cs.includes('균등'), '비교표: LED STEP 모드 = 두 열 모두 LED STEP 10개');
   const cu = compareHtml({ cur: { count: 5, pitch: 0, milky: 3, Ulen: 0.75, Uwid: 0.9, eff: 0.6 }, best: { count: 5, pitch: 0, milky: 3, Ulen: 0.75, Uwid: 0.9, eff: 0.6 }, feasible: false, reason: '현재안보다 나은 설계를 찾지 못함 — 현재안 유지', shape: null, unchanged: true });
   ok(cu.includes('현재안 유지') && /data-ad="apply"[^>]*disabled/.test(cu) && !/data-ad="apply"[^>]*disabled/.test(c), '비교표: 현재안 유지 → 사유 표시 · 적용 비활성'); }
+ok(clampCap(12) === 9.9 && clampCap(0.1) === 0.5 && clampCap(3) === 3 && clampCap(0) === null && clampCap(-2) === null && clampCap(NaN) === null, 'Milky 상한: 0.5~9.9 로 자름 · 0/음수/NaN = 기본');
+{ const all = { milky: true, leds: true, shape: true }, m = { milky: true };
+  ok(overallFrac(m, 'current', 0) === 0 && Math.abs(overallFrac(m, 'milky', 0) - 5 / 50) < 1e-12 && Math.abs(overallFrac(m, 'milky', 0.5) - 22.5 / 50) < 1e-12 && overallFrac(m, 'verify', 1) === 1, '전체 진행률: 켠 단계만 정규화(① 만 = 5+35+10)');
+  ok(Math.abs(overallFrac(all, 'shape', 0) - 75 / 135) < 1e-12 && overallFrac(all, 'shape', 2) <= 1 && overallFrac(m, 'shape', 0.5) === 0, '전체 진행률: 단계 순서·무게 · 꺼진 단계 = 0');
+  ok(etaText(5000, 0.05) === '' && etaText(10000, 0.5) === '남은 약 10초' && etaText(1000, 1) === '', `남은 시간: 10% 이후만 (${etaText(10000, 0.5)})`); }
+{ const s = profileSvg([1, 2, NaN, 4], [3, 3, 3, 3]);
+  ok((s.match(/<polyline/g) ?? []).length === 2 && s.includes('<svg') && profileSvg(null, [1]) === '' && profileSvg([], [1]) === '', '길이 프로파일 SVG: 선 2개 · 없으면 생략');
+  const base = { parts: [{ material: { kind: 'milky' } }], light: { kind: 'manual' }, observe: { faces: [] } }, a = stageAvailability(base, { non25: [0] });
+  const run = autoCardHtml({ avail: a, sel: { milky: true, shape: true, shapePart: 0 }, running: { frac: 0.4, text: 'x' }, names: ['LGP'], milkyPart: 0 });
+  ok(/data-ad="milky" checked disabled/.test(run) && /data-ad="milkyMax"[^>]*disabled/.test(run) && /data-ad="shapePart"[^>]*disabled/.test(run) && /role="progressbar"[^>]*aria-valuenow="40"/.test(run) && run.includes('① 대상: LGP'), '실행 중: 입력 비활성 · 진행 막대 aria · ① 대상 부품');
+  const nl = autoCardHtml({ avail: a, sel: { milky: true }, running: null, noLine: true });
+  ok(/data-ad="run" disabled title="관측 라인이 없음"/.test(nl) && /aria-label="Milky 상한"/.test(nl), '라인 없음 → 실행 비활성 · 상한 aria-label');
+  const c = compareHtml({ cur: { count: 5, pitch: 0, milky: 3, Ulen: 0.6, Uwid: 0.7, eff: 0.5, shape: { dt: 0, h: 0.2, R: 3 }, profile: [1, 2] }, best: { count: 5, pitch: 0, milky: 3, Ulen: 0.8, Uwid: 0.7, eff: 0.5, profile: [2, 2] }, feasible: true, reason: '', shape: null });
+  ok(c.includes('적용된 형상') && (c.match(/<polyline/g) ?? []).length === 2, '비교표: 적용된 형상 · 프로파일 SVG'); }
 done();

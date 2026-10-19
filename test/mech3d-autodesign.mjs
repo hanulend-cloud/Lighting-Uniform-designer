@@ -1,5 +1,5 @@
 // P4 단계 실행기(가짜 io): node test/mech3d-autodesign.mjs
-import { runAutoDesign, shapeScore, halving, smoothU } from '../src/engine/mech3d/autodesign.js';
+import { runAutoDesign, shapeScore, halving, smoothU, halvingTotal } from '../src/engine/mech3d/autodesign.js';
 import { ok, done } from './mech3d-util.mjs';
 
 const obs = { targetLen: 0.8, targetWid: 0.6 };
@@ -63,4 +63,5 @@ const rowsOf = (ms, U = (m) => 0.5 + 0.12 * m) => ms.map((m) => ({ milky: m, Ule
   const io = { basis: async () => ({ cand: [0, 1, 2], maps: [Float32Array.from([1, 0.1]), Float32Array.from([1, 0.1]), Float32Array.from([1, 0.1])], emitted: 1 }), verify: async () => ({ stats: { Ulen: 0.5, Uwid: null, empty: false }, eff: 0.5 }), progress() {}, cancelled: () => false };
   const r = await runAutoDesign({ stages: { leds: true }, obs: { targetLen: 0.9, targetWid: 0 }, current: { milky: 3, count: 1, pitch: 0 }, G, line: { length: 2, closed: false }, nMax: 2 }, io);
   ok(r.unchanged && /현재안 유지 \(LED 최대 2개/.test(r.reason), `현재안 유지 + 단계 이유: ${r.reason}`); }
+ok(halvingTotal(27) === 35 && halvingTotal(4) === 10 && halvingTotal(1) === 3, 'halving 평가 후보 수 합(진행률 분모)');
 done();

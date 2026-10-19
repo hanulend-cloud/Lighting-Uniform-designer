@@ -25,7 +25,10 @@ export const SCORE_EPS = 0.01;   // 최종안이 현재안보다 이만큼은 �
 const sameDesign = (a, b) => ['count', 'pitch', 'milky'].every((k) => (a?.[k] ?? null) === (b?.[k] ?? null)) && JSON.stringify(a?.shape ?? null) === JSON.stringify(b?.shape ?? null);
 
 // 단계적 압축: schedule = [[남길 수(첫 단계는 전체), 광자 수, 후보당 시간 제한 ms?]…]. 각 단계 결과 점수로 다음 단계 후보를 줄임
-export async function halving(cands, evalFn, obs, schedule = [[27, 6e4, 2500], [6, 2e5, 4000], [2, 6e5, 6000]], cancelled = () => false) {
+export const SHAPE_SCHEDULE = [[27, 6e4, 2500], [6, 2e5, 4000], [2, 6e5, 6000]];
+// 단계별 평가 후보 수 합(진행률 분모) — 실제로는 통과 후보가 적으면 더 적음
+export const halvingTotal = (n, schedule = SHAPE_SCHEDULE) => schedule.reduce((s, [keep], i) => { const k = i === 0 ? n : Math.min(keep, s.last); return { sum: s.sum + k, last: k }; }, { sum: 0, last: n }).sum;
+export async function halving(cands, evalFn, obs, schedule = SHAPE_SCHEDULE, cancelled = () => false) {
   let pool = cands, last = null;
   for (let s = 0; s < schedule.length; s++) {
     if (cancelled()) return null;

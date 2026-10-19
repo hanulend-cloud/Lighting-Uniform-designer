@@ -21,8 +21,8 @@ import { renderPropertyPanel } from './property-panel.js';
 import { createResultsPanel } from './results-panel.js';
 import { renderStatusBar } from './status-bar.js';
 import { createAdRunner } from './autodesign-run.js';
-import { renderAutoPanel, stageAvailability } from './autodesign-panel.js';
-import { runAutoDesign } from '../../engine/mech3d/autodesign.js';
+import { renderAutoPanel, stageAvailability, clampCap, overallFrac, etaText } from './autodesign-panel.js';
+import { runAutoDesign, halvingTotal } from '../../engine/mech3d/autodesign.js';
 import { milkyRows } from '../../engine/mech3d/milky-search.js';
 import { candidatePositions } from '../../engine/mech3d/basis.js';
 import { ledAtS } from '../../engine/mech3d/placement.js';
@@ -92,7 +92,8 @@ export async function mount(ctx) {
 export function unmount() {
   if (!A) return;
   const a = A; A = null;   // 먼저 비워서 cancel 의 onUpdate 가 그리지 않게
-  a.ad?.runner?.cancel();
+  a.ad?.runner?.cancel(); a.ad?.stepWorker?.terminate();
+  $('#m3-auto').hidden = true;
   a.prog.dispose(); a.unsub(); a.store.dispose();   // 풀은 유지(진행 중 청크는 ≤0.5초 — 끝나면 버려짐)
   window.removeEventListener('keydown', a.keydown);
   if (a.view) { a.view.setObsSurface(null); a.view.setCheckMarkers([]); a.view.setSection(null); }
@@ -103,6 +104,12 @@ export function unmount() {
 function onChange(tag) {
   if (!A) return;
   const M = A.store.mspec;
+  // 자동설계: 물리 편집이면 실행 중 = 중지(스냅샷과 어긋남), 결과 표시 중 = 결과 지움(옛 값 기준)
+  const ad = A.ad;
+  if (ad && PHYSICS.has(tag)) {
+    if (ad.running && ad.runner && !ad.runner.stopped) { ad.runner.cancel(); A.store.session.status = '편집으로 자동설계를 중지함'; }
+    else if (ad.result) { ad.result = null; A.meshShown = null; A.store.session.status = '값이 바뀌어 자동설계 결과를 지움'; }
+  }
   if (tag === 'observe' || tag === 'material') refreshLine();   // material: 부품 크기·위치가 바뀌면 라인도 다시(키가 같으면 건너뜀)
   if (PHYSICS.has(tag)) restartCalc();
   if (tag === 'target') A.prog.setJudge({ obs: M.observe, targetNoise: M.observe.targetNoise ?? 0.02, fluxLm: M.light.spec.fluxLm ?? 0 });
@@ -143,16 +150,17 @@ function geometry(obs) {
 }
 // 디바운스가 끝날 때 부르는 작업 생성기 — 라인·광원이 없으면 null(안내), 직접 배치 오류는 던짐(계산 실패로 표시)
 // 작업 생성(현재 또는 자동설계 후보 설계) — M: spec.mech3d(복사본 가능), mechParts: 기구 메쉬(형상 후보면 바뀐 부품 포함)
-export function jobFor(M, mechParts, { emitters = null } = {}) {
-  const S = A.store.session;
-  if (!S.line) return null;
-  const em = emitters ?? L.currentEmitters(M, S.line);
+// 자동설계는 실행 시작 때 스냅샷(line·G·obs)을 넘김 — 실행 중 라인이 바뀌어도 같은 기준
+export function jobFor(M, mechParts, { emitters = null, line = null, G = null, obs = null } = {}) {
+  const ln = line ?? A.store.session.line;
+  if (!ln) return null;
+  const em = emitters ?? L.currentEmitters(M, ln);
   if (!em.length) return null;
-  const obs = tallyObs(M.observe, M.observe.dir ?? S.line.frame.d), G = geometry(obs);
+  const o = obs ?? tallyObs(M.observe, M.observe.dir ?? ln.frame.d), g = G ?? geometry(o);
   const ledParts = M.light.kind === 'step' && getLedMesh() ? L.rawParts(getLedMesh().parts) : null;
   return {
-    sceneKey: `s${++sceneSeq}`, G, obs, nLeds: em.length, fluxLm: M.light.spec.fluxLm ?? 0,
-    scene: { mechParts: L.rawParts(mechParts), mspec: JSON.parse(JSON.stringify(M)), ledParts, lineData: lightData(S.line), G, obs, emitters: em },
+    sceneKey: `s${++sceneSeq}`, G: g, obs: o, nLeds: em.length, fluxLm: M.light.spec.fluxLm ?? 0,
+    scene: { mechParts: L.rawParts(mechParts), mspec: JSON.parse(JSON.stringify(M)), ledParts, lineData: lightData(ln), G: g, obs: o, emitters: em },
   };
 }
 function makeJob() { return A ? jobFor(A.store.mspec, getMech3d().parts) : null; }
@@ -293,29 +301,32 @@ function clearanceOf(i) {
 }
 
 // ---- 자동설계(P4) ----
-function adState() { return (A.ad ??= { open: false, sel: { milky: true, leds: false, shape: false, shapePart: -1, milkyMax: null }, running: null, result: null, undo: null, milkyPart: null, runner: null, info: null }); }
+function adState() { return (A.ad ??= { open: false, sel: { milky: true, leds: false, shape: false, shapePart: -1, milkyMax: null }, running: null, result: null, undo: null, milkyPart: null, runner: null, info: null, stepBusy: false, stepWorker: null }); }
 function adInfo() {   // 부품별 비 2.5D 비율(관측 방향) — 라인이 있을 때만. (기구·라인) 별 캐시(높이맵 계산이 무거움)
   const st = adState(), S = A.store.session, rt = getMech3d();
   if (!st.info || st.info.rt !== rt || st.info.line !== S.line) st.info = { rt, line: S.line, non25: S.line && rt ? rt.parts.map((p) => heightsFor(p, S.line.frame, 0.5).non25) : [] };
   return st.info;
 }
 const adMilkyPart = (M, avail) => (avail.milky.ok ? (avail.milky.parts.find((i) => M.observe.faces.some((f) => f.part === i)) ?? avail.milky.parts[0]) : null);
+const adClone = (x) => (x == null ? null : JSON.parse(JSON.stringify(x)));
 function renderAuto() {
   const el = $('#m3-auto'), st = adState();
   el.hidden = !st.open;
   if (!st.open) return;
   const M = A.store.mspec, avail = stageAvailability(M, adInfo());
-  if (st.sel.shapePart < 0 && avail.shape.ok) st.sel.shapePart = avail.shape.parts[0];
-  const mp = adMilkyPart(M, avail), sel = { ...st.sel, milkyMax: st.sel.milkyMax ?? Math.max(mp != null ? M.parts[mp].material.milky : 0, 5) };
-  renderAutoPanel(el, { avail, sel, running: st.running, result: st.result, names: M.parts.map((p) => p.name), canRevert: !!st.undo }, {
-    onSel: (k, v) => { st.sel[k] = v; renderAuto(); },
-    onAction: (k) => ({ run: adRun, stop: () => st.runner?.cancel(), close: () => { st.open = false; renderAuto(); }, apply: adApply, cancel: adCancel, revert: adRevert, step: adStep })[k]?.(),
+  if (!st.running && !avail.shape.parts?.includes(st.sel.shapePart)) st.sel.shapePart = avail.shape.ok ? avail.shape.parts[0] : -1;   // 부품 소재·형상이 바뀌어 대상이 빠지면 첫 후보로
+  const mp = st.running ? st.milkyPart : adMilkyPart(M, avail), sel = { ...st.sel, milkyMax: st.sel.milkyMax ?? Math.max(mp != null ? M.parts[mp].material.milky : 0, 5) };
+  renderAutoPanel(el, { avail, sel, running: st.running, result: st.result, names: M.parts.map((p) => p.name), canRevert: !!st.undo, noLine: !A.store.session.line, milkyPart: mp }, {
+    onSel: (k, v) => { if (st.running) return; st.sel[k] = k === 'milkyMax' ? clampCap(v) : v; renderAuto(); },
+    onAction: (k) => ({ run: adRun, stop: adStop, close: () => { st.open = false; renderAuto(); }, apply: adApply, cancel: adCancel, revert: adRevert, step: adStep })[k]?.(),
   });
 }
+function adStop() { const st = adState(); if (!st.running || !st.runner) return; st.runner.cancel(); setStatus('자동설계 중지됨'); }
+// 실행 문맥 = 시작 때 스냅샷 { M0: mspec 복사, line, G, obs, rt: 기구 런타임, mp: ① 대상 부품 } — 평가·미리보기·적용이 모두 이것 기준
 // 형상 원본 = 원본 메쉬 + 크기·위치 조절(이미 적용된 shapeMod 는 빼고 — 적용 때 shapeMod 를 바꿔 끼우므로 평가와 같게)
 // 같은 (원본, xform) 이면 같은 객체 — 세분·높이맵 메모(메쉬 객체 기준)가 맞도록
-function adBaseMesh(i) {
-  const rt = getMech3d(), raw = (rt.raw ?? rt).parts[i], xf = A.store.mspec.parts[i].xform;
+function adBaseMesh(i, ctx) {
+  const rt = ctx.rt, raw = (rt.raw ?? rt).parts[i], xf = ctx.M0.parts[i].xform;
   if (isIdentityXform(xf)) return raw;
   const st = adState(), k = JSON.stringify(xf), c = (st.base ??= [])[i];
   if (c && c.raw === raw && c.k === k) return c.mesh;
@@ -326,92 +337,102 @@ function adBaseMesh(i) {
 // 형상 후보 메쉬 — 세분은 메모(refinedFor: 후보 27개도 R 3개 → 세분 3번). hDiv = R/hMax(STEP 은 거칠게 3)
 const adShapeMesh = (base, mod, hDiv = 8) => deformPart(refinedFor(base, mod.frame, mod.centers, mod.R, Math.max(0.1, mod.R / hDiv)), mod.frame, heightsFor(base, mod.frame, mod.cell), mod);
 // 설계 → (mspec 복사본, 기구 메쉬) — 형상은 후보 메쉬로 바꾼 부품 포함
-function designScene(d) {
-  const M = JSON.parse(JSON.stringify(A.store.mspec)), S = A.store.session, rt = getMech3d(), mp = adState().milkyPart;
+function designScene(d, ctx) {
+  const M = adClone(ctx.M0), rt = ctx.rt, mp = ctx.mp;
   if (mp != null && d.milky != null) M.parts[mp] = setPartMaterialParam(M.parts[mp], 'milky', d.milky);
   if (M.light.kind === 'manual' && d.count != null) { M.light.manual.count = d.count; M.light.manual.pitch = d.pitch; }
   let parts = rt.parts;
   if (d.shape) {
-    const i = d.shape.part, mod = shapeModFor(d.shape, M), base = adBaseMesh(i);
+    const i = d.shape.part, mod = shapeModFor(d.shape, M, ctx.line), base = adBaseMesh(i, ctx);
     const mesh = adShapeMesh(base, mod);
     parts = rt.parts.map((p, j) => (j === i ? mesh : p)); M.parts[i].shapeMod = mod;
   }
-  return { M, parts, S };
+  return { M, parts };
 }
 // LED 중심 = 그 설계(M: ② 가 바꾼 개수·피치 반영)의 발광점을 관측 평면에 투영
-function shapeModFor({ dt, h, R }, M = A.store.mspec) {
-  const S = A.store.session, F = S.line.frame, em = L.currentEmitters(M, S.line);
+function shapeModFor({ dt, h, R }, M, line) {
+  const F = line.frame, em = L.currentEmitters(M, line);
   const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
   return { frame: { u: F.u, v: F.v, d: F.d }, dt, h, R, centers: em.map((e) => [dot(e.pos, F.u), dot(e.pos, F.v)]), cell: 0.5 };
 }
-const adJob = (M, parts, o) => { const j = jobFor(M, parts, o); if (!j) throw new Error('LED 가 없음'); return j; };
+const adJob = (M, parts, ctx, o = {}) => { const j = jobFor(M, parts, { line: ctx.line, G: ctx.G, obs: ctx.obs, ...o }); if (!j) throw new Error('LED 가 없음'); return j; };
 const adEff = (r) => { let t = 0; for (const b of r.batches) for (const v of b) t += v; return t / r.ledger.emitted; };
 async function adRun() {
-  const a = A, st = adState(), M = A.store.mspec, S = A.store.session;
+  const a = A, st = adState(), S = A.store.session;
   if (!S.line || st.running) return;
-  const avail = stageAvailability(M, adInfo()), stages = { milky: st.sel.milky && avail.milky.ok, leds: st.sel.leds && avail.leds.ok, shape: st.sel.shape && avail.shape.ok };
-  st.milkyPart = adMilkyPart(M, avail);
+  const M0 = adClone(A.store.mspec), line = S.line, rt = getMech3d();   // 실행 격리 — 편집은 실행을 중지시킴(onChange)
+  const avail = stageAvailability(M0, adInfo()), stages = { milky: st.sel.milky && avail.milky.ok, leds: st.sel.leds && avail.leds.ok, shape: st.sel.shape && avail.shape.ok && avail.shape.parts.includes(st.sel.shapePart) };
+  st.milkyPart = adMilkyPart(M0, avail);
+  const obs = tallyObs(M0.observe, M0.observe.dir ?? line.frame.d), G = geometry(obs), sp = st.sel.shapePart;
+  const ctx = { M0, line, G, obs, rt, mp: st.milkyPart };
   const R = (st.runner = createAdRunner({ ports: A.pool.ports() }));
   // 같은 Worker 를 쓰므로 점진 계산은 멈춤 — 대기(디바운스) 중이면 장면을 곧 보내므로 취소. 사용자 일시정지 여부는 기억(끝나고 그대로)
   const ps = A.prog.snapshot().state;
   st.userPaused = ps === 'paused'; st.deferred = ['paused', 'running', 'pending', 'starting'].includes(ps);
   if (ps === 'pending') A.prog.cancel(); else A.prog.pause();
   st.running = { frac: 0, text: '준비' }; st.result = null; A.meshShown = null; renderView(); renderAuto();
-  const cur = { milky: st.milkyPart != null ? M.parts[st.milkyPart].material.milky : null, count: M.light.manual?.count ?? 0, pitch: M.light.manual?.pitch ?? 0, shape: null };
-  const obs = tallyObs(M.observe, M.observe.dir ?? S.line.frame.d), G = geometry(obs), sp = st.sel.shapePart;
-  const minWall = { ...defaultChecks(), ...(M.checks ?? {}) }.minWall;
+  const cur = { milky: ctx.mp != null ? M0.parts[ctx.mp].material.milky : null, count: M0.light.manual?.count ?? 0, pitch: M0.light.manual?.pitch ?? 0, shape: null };
+  const minWall = { ...defaultChecks(), ...(M0.checks ?? {}) }.minWall, t0 = performance.now();
+  const shapeCands = stages.shape ? shapeCandidates({ t0: heightsFor(adBaseMesh(sp, ctx), line.frame, 0.5).t0, pitch: cur.count > 1 ? (cur.pitch > 0 ? cur.pitch : line.length / cur.count) : line.length, hasCenters: true }) : [];
+  const shapeTot = halvingTotal(shapeCands.length);
+  let shapeI = 0;
+  const progress = (stage, frac, text) => {   // 전체 진행률(단계 무게) + 남은 시간
+    if (A !== a || R.stopped) return;
+    const f = overallFrac(stages, stage, frac), eta = etaText(performance.now() - t0, f);
+    st.running = { frac: f, text: eta ? `${text} · ${eta}` : text }; renderAuto();
+  };
   const io = {
-    progress: (stage, frac, text) => { if (A !== a) return; st.running = { frac, text }; renderAuto(); },
+    progress,
     cancelled: () => R.stopped,
     async milkyRows(d, ms, { precise = false } = {}) {   // 재가중 기준 = 창 가운데. 시간 제한(Milky 4~5 는 광자당 ~10배) — 경계가 든 창은 정밀 재추적
-      const { M: Md, parts } = designScene({ ...d, milky: ms[Math.floor(ms.length / 2)] });
-      const r = await R.trace(adJob(Md, parts), { ...(precise ? { N: 3e6, maxMs: 6000 } : { N: 1.5e6, maxMs: 2500, minN: 2e5 }), rw: { part: st.milkyPart, milkies: ms } });
+      const { M: Md, parts } = designScene({ ...d, milky: ms[Math.floor(ms.length / 2)] }, ctx);
+      const r = await R.trace(adJob(Md, parts, ctx), { ...(precise ? { N: 3e6, maxMs: 6000 } : { N: 1.5e6, maxMs: 2500, minN: 2e5 }), rw: { part: ctx.mp, milkies: ms } });
       return milkyRows(G, obs, { milkies: ms, batches: r.rwBatches, ess: r.ess, emitted: r.ledger.emitted });
     },
     async basis(d) {   // ① 이 켜져 있으면 실행기가 d.milky = 상한으로 넘김
-      const { M: Md, parts } = designScene(d);
-      const cand = candidatePositions(S.line, 1), sets = cand.map((s) => [ledAtS(S.line, s, Md.light.manual, getMech3d())]);
-      const r = await R.traceEach(adJob(Md, parts, { emitters: sets[0] }), sets, { N: 20000 });
+      const { M: Md, parts } = designScene(d, ctx);
+      const cand = candidatePositions(line, 1), sets = cand.map((s) => [ledAtS(line, s, Md.light.manual, rt)]);
+      const r = await R.traceEach(adJob(Md, parts, ctx, { emitters: sets[0] }), sets, { N: 20000 });
       return { cand, maps: r.maps, emitted: r.emitted };
     },
     async evalShapes(d, cands, N, maxMs = 2500) {   // 단계별 광자·시간 제한은 halving 일정(6만/20만/60만 · 2.5/4/6초)
-      const out = [], base = adBaseMesh(sp), H = heightsFor(base, S.line.frame, 0.5);
-      const others = getMech3d().parts.map((p, j) => (j === sp ? null : p)), lp = (M.light.kind === 'step' && L.ledPartsNow(M)) || [];
+      const out = [], base = adBaseMesh(sp, ctx), H = heightsFor(base, line.frame, 0.5);
+      const others = rt.parts.map((p, j) => (j === sp ? null : p)), lp = (M0.light.kind === 'step' && L.ledPartsNow(M0)) || [];
       const before = interferenceKeys(base, others, lp, []);
       for (const c of cands) {
         if (R.stopped) break;
-        const { M: Md, parts } = designScene({ ...d, shape: { part: sp, ...c } }), mod = Md.parts[sp].shapeMod;
+        progress('shape', shapeI / shapeTot, `형상 후보 ${Math.min(shapeI + 1, shapeTot)}/${shapeTot}`); shapeI++;
+        const { M: Md, parts } = designScene({ ...d, shape: { part: sp, ...c } }, ctx), mod = Md.parts[sp].shapeMod;
         const thin = minThickness(H, mod) < minWall;   // 칸 중심 + LED 중심
         const clash = !thin && [...interferenceKeys(parts[sp], others, lp, []).keys()].some((k) => !before.has(k));
         if (thin || clash) { out.push({ cand: c, ok: false, why: thin ? '살두께' : '간섭' }); continue; }
-        const r = await R.trace(adJob(Md, parts), { N, maxMs, minN: Math.min(N, 3e4), batches: 4 }), stt = tallyStats(G, r.batches, obs);
+        const r = await R.trace(adJob(Md, parts, ctx), { N, maxMs, minN: Math.min(N, 3e4), batches: 4 }), stt = tallyStats(G, r.batches, obs);
         out.push({ cand: c, ok: !stt.empty, stats: stt, eff: adEff(r) });
       }
       return out;
     },
     async verify(d) {   // 정밀 재판정(현재안·최종안): 200만 광자 또는 6초(≥ 30만) — 잡음 ≈ ±2%
-      const { M: Md, parts } = designScene(d);
-      const r = await R.trace(adJob(Md, parts), { N: 2e6, maxMs: 6000, minN: 3e5, batches: 10 });
+      const { M: Md, parts } = designScene(d, ctx);
+      const r = await R.trace(adJob(Md, parts, ctx), { N: 2e6, maxMs: 6000, minN: 3e5, batches: 10 });
       return { stats: tallyStats(G, r.batches, obs), eff: adEff(r) };
     },
   };
-  const H0 = stages.shape ? heightsFor(adBaseMesh(sp), S.line.frame, 0.5) : null;
-  const pitchNow = cur.count > 1 ? (cur.pitch > 0 ? cur.pitch : S.line.length / cur.count) : S.line.length;
   let res = null;
   try {
     res = await runAutoDesign({
-      stages, obs, G, line: S.line, current: cur, milkyMax: st.sel.milkyMax ?? Math.max(cur.milky ?? 0, 5), nMax: Math.max(1, Math.min(60, Math.floor(S.line.length / 2))), pitchRange: null,
-      shapePart: sp, shapeCands: stages.shape ? shapeCandidates({ t0: H0.t0, pitch: pitchNow, hasCenters: true }) : [],
+      stages, obs, G, line, current: cur, milkyMax: st.sel.milkyMax ?? Math.max(cur.milky ?? 0, 5), nMax: Math.max(1, Math.min(60, Math.floor(line.length / 2))), pitchRange: null,
+      shapePart: sp, shapeCands,
     }, io);
   } catch (e) { if (A === a && !R.stopped) setStatus(`자동설계 실패: ${e.message}`); }
   if (A !== a) return;   // 그사이 이탈
   st.running = null; st.runner = null;
-  if (res && !res.cancelled) {
+  if (res && !res.cancelled && !R.stopped) {
     const C = res.current;   // 현재안 = 최종안과 같은 추정기
-    let nStep = null; if (M.light.kind === 'step') { try { nStep = L.currentEmitters(M, S.line).length; } catch { nStep = 0; } }
-    st.result = { design: res.best, feasible: res.feasible, reason: res.reason, shape: res.best.shape ?? null, stepLeds: nStep, unchanged: !!res.unchanged,
-      cur: { ...cur, Ulen: C?.stats?.Ulen, Uwid: C?.stats?.Uwid, eff: C?.eff ?? NaN },
-      best: { ...res.best, Ulen: res.verified.stats.Ulen, Uwid: res.verified.stats.Uwid, eff: res.verified.eff } };
+    let nStep = null; if (M0.light.kind === 'step') { try { nStep = L.currentEmitters(M0, line).length; } catch { nStep = 0; } }
+    const smI = sp >= 0 && M0.parts[sp]?.shapeMod ? sp : M0.parts.findIndex((p) => p.shapeMod), sm = smI >= 0 ? M0.parts[smI].shapeMod : null;   // 비교표 '현재' 열 — 이미 적용된 형상(표시만)
+    st.result = { design: res.best, feasible: res.feasible, reason: res.reason, shape: res.best.shape ?? null, stepLeds: nStep, unchanged: !!res.unchanged, ctx, stages,
+      cur: { ...cur, shape: sm ? { dt: sm.dt, h: sm.h, R: sm.R } : null, Ulen: C?.stats?.Ulen, Uwid: C?.stats?.Uwid, eff: C?.eff ?? NaN, profile: C?.stats?.profile ?? null },
+      best: { ...res.best, Ulen: res.verified.stats.Ulen, Uwid: res.verified.stats.Uwid, eff: res.verified.eff, profile: res.verified.stats.profile ?? null } };
   }
   // Worker 에 자동설계 장면이 올라가 있음 — 진행 중이던 계산·실행 중 편집은 다시 시작, 끝난 계산은 그대로.
   // restart 는 일시정지 상태를 이어가므로(wantPaused) 사용자가 멈춘 게 아니면 resume(대기 중 resume = 일시정지 요청 해제)
@@ -422,43 +443,51 @@ async function adRun() {
 function adPreview() {
   const r = A.ad?.result;
   if (!r) return null;
-  if (!r.preview) { const { M, parts } = designScene(r.design); r.preview = { M, parts, raw: getMech3d().raw }; }
+  if (!r.preview) { const { M, parts } = designScene(r.design, r.ctx); r.preview = { M, parts, raw: r.ctx.rt.raw }; }
   return r.preview;
 }
 function adCancel() { const st = adState(); st.result = null; A.meshShown = null; renderView(); renderAuto(); }
+// 적용 = 바뀐 항목만 씀(① Milky 값이 다르면 · ② 를 돌렸고 개수·피치가 다르면 · ③ 형상). 되돌리기용으로 그 항목의 전체 복사본을 남김
 function adApply() {
-  const st = adState(), d = st.result?.design;
-  if (!d) return;
-  const M = A.store.mspec, mod = d.shape ? adPreview().M.parts[d.shape.part].shapeMod : null;
-  st.undo = { milky: st.milkyPart != null ? [st.milkyPart, M.parts[st.milkyPart].material.milky] : null, manual: M.light.kind === 'manual' ? { ...M.light.manual } : null, shape: d.shape ? [d.shape.part, M.parts[d.shape.part].shapeMod ?? null] : null };
+  const st = adState(), r = st.result, d = r?.design;
+  if (!d || r.unchanged) return;
+  const M = A.store.mspec, mp = r.ctx.mp, Lm = M.light.manual;
+  const milkyCh = mp != null && d.milky != null && d.milky !== M.parts[mp].material.milky;
+  const lightCh = !!r.stages?.leds && M.light.kind === 'manual' && d.count != null && (d.count !== Lm.count || d.pitch !== Lm.pitch);
+  const mod = d.shape ? adPreview().M.parts[d.shape.part].shapeMod : null;
+  const undo = { milky: milkyCh ? [mp, adClone(M.parts[mp].material)] : null, manual: lightCh ? adClone(Lm) : null, shape: mod ? [d.shape.part, adClone(M.parts[d.shape.part].shapeMod ?? null)] : null };
   st.result = null; A.meshShown = null;
-  if (st.milkyPart != null && d.milky != null) A.store.update('material', (m) => { m.parts[st.milkyPart] = setPartMaterialParam(m.parts[st.milkyPart], 'milky', d.milky); });
-  if (M.light.kind === 'manual') A.store.update('light', (m) => { m.light.manual.count = d.count; m.light.manual.pitch = d.pitch; });
+  if (undo.milky || undo.manual || undo.shape) st.undo = undo;
+  if (milkyCh) A.store.update('material', (m) => { m.parts[mp] = setPartMaterialParam(m.parts[mp], 'milky', d.milky); });
+  if (lightCh) A.store.update('light', (m) => { m.light.manual.count = d.count; m.light.manual.pitch = d.pitch; });
   if (mod) A.store.update('material', (m) => { m.parts[d.shape.part].shapeMod = mod; applyPartMods(m.parts); m.contacts = redetectContacts(m.contacts); });
   renderAuto();
 }
+// 되돌리기 = 적용한 항목을 저장한 복사본으로 통째로 바꿈
 function adRevert() {
   const st = adState(), u = st.undo;
   if (!u) return;
-  st.undo = null; A.meshShown = null;
-  if (u.milky) A.store.update('material', (m) => { m.parts[u.milky[0]] = setPartMaterialParam(m.parts[u.milky[0]], 'milky', u.milky[1]); });
-  if (u.manual) A.store.update('light', (m) => { Object.assign(m.light.manual, u.manual); });
-  if (u.shape) A.store.update('material', (m) => { if (u.shape[1]) m.parts[u.shape[0]].shapeMod = u.shape[1]; else delete m.parts[u.shape[0]].shapeMod; applyPartMods(m.parts); m.contacts = redetectContacts(m.contacts); });
-  renderAuto();
+  st.undo = null; st.result = null; A.meshShown = null;
+  if (u.milky) A.store.update('material', (m) => { m.parts[u.milky[0]] = { ...m.parts[u.milky[0]], material: adClone(u.milky[1]) }; });
+  if (u.manual) A.store.update('light', (m) => { m.light.manual = adClone(u.manual); });
+  if (u.shape) A.store.update('material', (m) => { if (u.shape[1]) m.parts[u.shape[0]].shapeMod = adClone(u.shape[1]); else delete m.parts[u.shape[0]].shapeMod; applyPartMods(m.parts); m.contacts = redetectContacts(m.contacts); });
+  renderView(); renderAuto();
 }
 function adStep() {
-  const d = adState().result?.design;
-  if (!d?.shape) return;
-  const { M } = adPreview(), i = d.shape.part, name = M.parts[i].name;
-  const mesh = adShapeMesh(adBaseMesh(i), M.parts[i].shapeMod, 3), nTri = mesh.triangles.length / 3;   // 내보내기는 거친 세분(hMax = R/3) — 삼각형 수 줄임
+  const st = adState(), r = st.result, d = r?.design;
+  if (!d?.shape || st.stepBusy) return;   // 생성 중 반복 클릭 무시
+  const { M } = adPreview(), i = d.shape.part, name = M.parts[i].name, file = `${String(name ?? 'part').replace(/[/\\:*?"<>|]/g, '_')}-p4.stp`;
+  const mesh = adShapeMesh(adBaseMesh(i, r.ctx), M.parts[i].shapeMod, 3), nTri = mesh.triangles.length / 3;   // 내보내기는 거친 세분(hMax = R/3) — 삼각형 수 줄임
   const w = new Worker(new URL('../../export/mesh-step-worker.js', import.meta.url), { type: 'module' });
+  st.stepBusy = true; st.stepWorker = w;
+  const end = () => { w.terminate(); if (st.stepWorker === w) { st.stepWorker = null; st.stepBusy = false; } };
   setStatus(nTri > 30000 ? `STEP 생성 중… 삼각형 ${nTri}개 — 많아서 오래 걸리거나 실패할 수 있음` : 'STEP 생성 중…');
   w.onmessage = (ev) => {
-    if (ev.data.type === 'done') { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([ev.data.stepText], { type: 'application/step' })); a.download = `${name}-p4.stp`; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000); setStatus('STEP 내보내기 완료'); }
+    if (ev.data.type === 'done') { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([ev.data.stepText], { type: 'application/step' })); a.download = file; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000); setStatus('STEP 내보내기 완료'); }
     else setStatus(`STEP 실패: ${ev.data.message}`);
-    w.terminate();
+    end();
   };
-  w.onerror = (e) => { setStatus(`STEP 실패: ${e.message ?? e}`); w.terminate(); };
+  w.onerror = (e) => { setStatus(`STEP 실패: ${e.message ?? e}`); end(); };
   w.postMessage({ mesh: { positions: mesh.positions, triangles: mesh.triangles }, name });
 }
 
@@ -586,7 +615,8 @@ function cmdHandlers() {
     }),
     onFit: () => A.view?.fit(),
     onToggleCalc: () => {   // '⏸ 계산 중'(대기·장면 준비 포함) → 일시정지, 일시정지 → 재개, 그 밖(완료·오류·대기) → 다시 계산
-      if (A.ad?.running) { const st = A.ad; st.userPaused = !st.userPaused; st.deferred = true; setStatus(st.userPaused ? '자동설계가 끝나도 계산은 멈춰 둠' : '자동설계가 끝나면 계산 재개'); return; }
+      // 자동설계 중: 계산이 끝났거나 대기였으면(미룬 계산 없음) = 다시 계산 요청, 아니면 일시정지 여부를 뒤집음
+      if (A.ad?.running) { const st = A.ad; st.userPaused = st.deferred ? !st.userPaused : false; st.deferred = true; setStatus(st.userPaused ? '자동설계가 끝나도 계산은 멈춰 둠' : '자동설계가 끝나면 계산 재개'); return; }
       const s = A.prog.snapshot().state;
       if (s === 'running' || s === 'pending' || s === 'starting') A.prog.pause(); else if (s === 'paused') A.prog.resume(); else restartCalc();
     },
