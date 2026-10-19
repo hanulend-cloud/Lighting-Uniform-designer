@@ -25,12 +25,13 @@ export function autoCardHtml({ avail, sel, running, names = [] }) {
   return `<div class="m3-h">자동설계 <span class="mut">체크한 항목만 바꿈 · 순서 ②→①→③</span></div>${ITEMS.map(row).join('')}${cap}${part}
     ${running ? prog : `<div class="m3-row"><button type="button" data-ad="run"${any ? '' : ' disabled'}>▶ 실행</button><button type="button" data-ad="close">닫기</button></div>`}`;
 }
-// 비교표 — cur/best = { count, pitch, milky, Ulen, Uwid, eff, lum? }, shape = { dt, h, R } | null
-export function compareHtml({ cur, best, feasible, reason, shape, canRevert = false }) {
+// 비교표 — cur/best = { count, pitch, milky, Ulen, Uwid, eff, lum? }, shape = { dt, h, R } | null, stepLeds = LED STEP 발광점 수(직접 배치면 null)
+export function compareHtml({ cur, best, feasible, reason, shape, stepLeds = null, canRevert = false }) {
   const tr = (label, a, b) => `<tr><th>${label}</th><td>${a}</td><td class="${a !== b ? 'chg' : ''}">${b}</td></tr>`;
+  const led = (x) => (stepLeds != null ? `LED STEP ${stepLeds}개` : `${x.count}개 ${x.pitch > 0 ? `피치 ${x.pitch}` : '균등'}`);   // STEP 은 ② 불가 — 두 열 같음
   return `<div class="m3-h">${feasible ? '최적안' : '가장 가까운 안'} <span class="mut">${esc(reason)}</span></div>
     <table class="m3-cmp"><tr><th></th><th>현재</th><th>최적</th></tr>
-      ${tr('LED', `${cur.count}개 ${cur.pitch > 0 ? `피치 ${cur.pitch}` : '균등'}`, `${best.count}개 ${best.pitch > 0 ? `피치 ${best.pitch}` : '균등'}`)}
+      ${tr('LED', led(cur), led(best))}
       ${tr('Milky', f2(cur.milky), f2(best.milky))}
       ${tr('길이 U', f2(cur.Ulen), f2(best.Ulen))}${tr('폭 U', f2(cur.Uwid), f2(best.Uwid))}
       ${tr('광 효율', `${f2(cur.eff * 100)}%`, `${f2(best.eff * 100)}%`)}

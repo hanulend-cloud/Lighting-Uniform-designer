@@ -156,7 +156,11 @@ export function jobFor(M, mechParts, { emitters = null } = {}) {
   };
 }
 function makeJob() { return A ? jobFor(A.store.mspec, getMech3d().parts) : null; }
-function restartCalc() { A.timing = { start: 0, first: null, noise5: null }; A.prog.restart(makeJob); }
+// 자동설계 중이면 미룸 — 점진 계산이 공유 Worker 에 장면을 보내면 실행이 '장면이 바뀜' 으로 실패. 끝나면 adRun 이 다시 부름
+function restartCalc() {
+  if (A.ad?.running) { A.ad.deferred = true; return; }
+  A.timing = { start: 0, first: null, noise5: null }; A.prog.restart(makeJob);
+}
 function guidance(snap) {
   const M = A.store.mspec, S = A.store.session;
   if (snap.state === 'error') return `계산 실패: ${snap.error}`;
@@ -348,7 +352,10 @@ async function adRun() {
   const avail = stageAvailability(M, adInfo()), stages = { milky: st.sel.milky && avail.milky.ok, leds: st.sel.leds && avail.leds.ok, shape: st.sel.shape && avail.shape.ok };
   st.milkyPart = adMilkyPart(M, avail);
   const R = (st.runner = createAdRunner({ ports: A.pool.ports() }));
-  A.prog.pause();   // 같은 Worker 를 쓰므로 점진 계산은 멈춤(끝나면 장면을 다시 보냄)
+  // 같은 Worker 를 쓰므로 점진 계산은 멈춤 — 대기(디바운스) 중이면 장면을 곧 보내므로 취소. 사용자 일시정지 여부는 기억(끝나고 그대로)
+  const ps = A.prog.snapshot().state;
+  st.userPaused = ps === 'paused'; st.deferred = ['paused', 'running', 'pending', 'starting'].includes(ps);
+  if (ps === 'pending') A.prog.cancel(); else A.prog.pause();
   st.running = { frac: 0, text: '준비' }; st.result = null; A.meshShown = null; renderView(); renderAuto();
   const cur = { milky: st.milkyPart != null ? M.parts[st.milkyPart].material.milky : null, count: M.light.manual?.count ?? 0, pitch: M.light.manual?.pitch ?? 0, shape: null };
   const obs = tallyObs(M.observe, M.observe.dir ?? S.line.frame.d), G = geometry(obs), sp = st.sel.shapePart;
@@ -356,9 +363,9 @@ async function adRun() {
   const io = {
     progress: (stage, frac, text) => { if (A !== a) return; st.running = { frac, text }; renderAuto(); },
     cancelled: () => R.stopped,
-    async milkyRows(d, ms) {   // 재가중 기준 = 창 가운데
+    async milkyRows(d, ms, { precise = false } = {}) {   // 재가중 기준 = 창 가운데. 시간 제한(Milky 4~5 는 광자당 ~10배) — 경계가 든 창은 정밀 재추적
       const { M: Md, parts } = designScene({ ...d, milky: ms[Math.floor(ms.length / 2)] });
-      const r = await R.trace(adJob(Md, parts), { N: 1500000, rw: { part: st.milkyPart, milkies: ms } });   // ≈5초(15 Worker)
+      const r = await R.trace(adJob(Md, parts), { ...(precise ? { N: 3e6, maxMs: 6000 } : { N: 1.5e6, maxMs: 2500, minN: 2e5 }), rw: { part: st.milkyPart, milkies: ms } });
       return milkyRows(G, obs, { milkies: ms, batches: r.rwBatches, ess: r.ess, emitted: r.ledger.emitted });
     },
     async basis(d) {   // ① 이 켜져 있으면 실행기가 d.milky = 상한으로 넘김
@@ -377,14 +384,14 @@ async function adRun() {
         const thin = minThickness(H, mod) < minWall;   // 칸 중심 + LED 중심
         const clash = !thin && [...interferenceKeys(parts[sp], others, lp, []).keys()].some((k) => !before.has(k));
         if (thin || clash) { out.push({ cand: c, ok: false, why: thin ? '살두께' : '간섭' }); continue; }
-        const r = await R.trace(adJob(Md, parts), { N, batches: 4 }), stt = tallyStats(G, r.batches, obs);
+        const r = await R.trace(adJob(Md, parts), { N, maxMs: 1500, minN: Math.min(N, 3e4), batches: 4 }), stt = tallyStats(G, r.batches, obs);
         out.push({ cand: c, ok: !stt.empty, stats: stt, eff: adEff(r) });
       }
       return out;
     },
-    async verify(d) {   // 정밀 재판정: 고정 200만 광자(잡음 ≈ ±2%, 점진 계산 목표와 같은 수준)
+    async verify(d) {   // 정밀 재판정(현재안·최종안): 200만 광자 또는 6초(≥ 30만) — 잡음 ≈ ±2%
       const { M: Md, parts } = designScene(d);
-      const r = await R.trace(adJob(Md, parts), { N: 2000000, batches: 10 });
+      const r = await R.trace(adJob(Md, parts), { N: 2e6, maxMs: 6000, minN: 3e5, batches: 10 });
       return { stats: tallyStats(G, r.batches, obs), eff: adEff(r) };
     },
   };
@@ -400,13 +407,15 @@ async function adRun() {
   if (A !== a) return;   // 그사이 이탈
   st.running = null; st.runner = null;
   if (res && !res.cancelled) {
-    const C = A.store.session.calc;
-    st.result = { design: res.best, feasible: res.feasible, reason: res.reason, shape: res.best.shape ?? null,
-      cur: { ...cur, Ulen: C?.stats?.Ulen, Uwid: C?.stats?.Uwid, eff: C?.photometry?.eff ?? NaN },
+    const C = res.current;   // 현재안 = 최종안과 같은 추정기
+    let nStep = null; if (M.light.kind === 'step') { try { nStep = L.currentEmitters(M, S.line).length; } catch { nStep = 0; } }
+    st.result = { design: res.best, feasible: res.feasible, reason: res.reason, shape: res.best.shape ?? null, stepLeds: nStep,
+      cur: { ...cur, Ulen: C?.stats?.Ulen, Uwid: C?.stats?.Uwid, eff: C?.eff ?? NaN },
       best: { ...res.best, Ulen: res.verified.stats.Ulen, Uwid: res.verified.stats.Uwid, eff: res.verified.eff } };
   }
-  // Worker 에 자동설계 장면이 올라가 있음 — 진행 중이던(일시정지된) 계산은 다시 시작(사용자 일시정지는 유지), 끝난 계산은 그대로
-  if (A.prog.snapshot().state === 'paused' || A.prog.snapshot().state === 'running') restartCalc();
+  // Worker 에 자동설계 장면이 올라가 있음 — 진행 중이던 계산·실행 중 편집은 다시 시작, 끝난 계산은 그대로.
+  // restart 는 일시정지 상태를 이어가므로(wantPaused) 사용자가 멈춘 게 아니면 resume(대기 중 resume = 일시정지 요청 해제)
+  if (st.deferred) { st.deferred = false; restartCalc(); if (st.userPaused) A.prog.pause(); else A.prog.resume(); }
   A.meshShown = null; renderView(); renderAuto();
 }
 // 비교 중 3D 미리보기 — 결과마다 한 번 만들어 둠(meshKey 비교용 객체)
@@ -577,6 +586,7 @@ function cmdHandlers() {
     }),
     onFit: () => A.view?.fit(),
     onToggleCalc: () => {   // '⏸ 계산 중'(대기·장면 준비 포함) → 일시정지, 일시정지 → 재개, 그 밖(완료·오류·대기) → 다시 계산
+      if (A.ad?.running) { const st = A.ad; st.userPaused = !st.userPaused; st.deferred = true; setStatus(st.userPaused ? '자동설계가 끝나도 계산은 멈춰 둠' : '자동설계가 끝나면 계산 재개'); return; }
       const s = A.prog.snapshot().state;
       if (s === 'running' || s === 'pending' || s === 'starting') A.prog.pause(); else if (s === 'paused') A.prog.resume(); else restartCalc();
     },
