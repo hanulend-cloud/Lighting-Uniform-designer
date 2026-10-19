@@ -1,6 +1,6 @@
 // P4 자동설계 단계 실행기 — spec §1·§2. 순서 ② → ① → ③, 체크 안 한 항목은 현재 값 고정. 계산은 io 가 맡는다(Worker / 시험 가짜).
 // ① 재가중 창은 기준 ±0.25(ESS 한계, spec §2.1) — 창 밖은 이분 탐색으로 기준을 옮긴다. ② 는 Milky 상한에서 최소 개수를 구한 뒤 ① 이 낮춘다.
-// 결과 { feasible, best(design), steps:[{stage, …}], reason, verified, cancelled }
+// io.milkyRows(d, ms, { precise }) — precise = 경계가 든 창의 재추적(광자 많이). 결과 { feasible, best(design), steps:[{stage, …}], reason, verified, current(현재안 io.verify), cancelled }
 import { milkyAxis } from './reweight.js';
 import { pickMilky, margin } from './milky-search.js';
 import { searchLeds } from './basis.js';
@@ -27,8 +27,14 @@ async function searchMilky(d, cfg, io, steps, mCap) {
   for (let it = 0; it < MILKY_ITERS; it++) {
     if (io.cancelled?.()) return null;
     io.progress?.('milky', it / MILKY_ITERS, `Milky 재가중 (기준 ${m0.toFixed(2)})`);
-    const ms = milkyAxis(m0, MILKY_STEP, mCap), rows = await io.milkyRows(d, ms), pick = pickMilky(rows, cfg.obs);
-    steps.push({ stage: 'milky', base: m0, rows, pick });
+    const ms = milkyAxis(m0, MILKY_STEP, mCap);
+    let rows = await io.milkyRows(d, ms), pick = pickMilky(rows, cfg.obs), precise = false;
+    if (pick.feasible && pick.edge === null) {   // 창 안에 경계 — 같은 창을 광자를 늘려 다시(잡음으로 경계가 흔들리지 않게)
+      if (io.cancelled?.()) return null;
+      io.progress?.('milky', it / MILKY_ITERS, `Milky 경계 정밀 확인 (기준 ${m0.toFixed(2)})`);
+      rows = await io.milkyRows(d, ms, { precise: true }); pick = pickMilky(rows, cfg.obs); precise = true;
+    }
+    steps.push({ stage: 'milky', base: m0, rows, pick, precise });
     if (pick.feasible) {
       found = pick;
       if (pick.edge !== 'low' || ms[0] <= lo + 1e-9) break;   // 창 안에서 경계를 찾음 / 더 내려갈 곳 없음
@@ -48,6 +54,9 @@ export async function runAutoDesign(cfg, io) {
   const { stages, obs } = cfg, steps = [], mCap = cfg.milkyMax ?? Math.max(cfg.current?.milky ?? 0, 5);
   let d = { ...cfg.current }, feasible = true, reason = '';
   const stop = () => io.cancelled?.();
+  if (stop()) return { cancelled: true };
+  io.progress?.('current', 0, '현재안 계산');   // 비교표 '현재' 열 — 최종안과 같은 추정기(io.verify)
+  const currentVerified = await io.verify(d);
   if (stop()) return { cancelled: true };
   if (stages.leds) {   // ② — ① 이 켜져 있으면 Milky 상한(확산 최대)에서 최소 개수
     io.progress?.('leds', 0, 'LED 후보 위치 추적');
@@ -79,5 +88,5 @@ export async function runAutoDesign(cfg, io) {
   if (stop()) return { cancelled: true };
   io.progress?.('verify', 0, '최종안 정밀 재계산');
   const verified = await io.verify(d);
-  return { feasible, best: d, steps, reason, verified, cancelled: false };
+  return { feasible, best: d, steps, reason, verified, current: currentVerified, cancelled: false };
 }

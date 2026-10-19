@@ -7,14 +7,21 @@ const st = (Ulen, Uwid) => ({ Ulen, Uwid, empty: false });
 // 가짜 재가중 행: U(m) = 0.5 + 0.12·m → 목표 0.8 경계 = Milky 2.5 (창 = 기준 ±0.25)
 const rowsOf = (ms, U = (m) => 0.5 + 0.12 * m) => ms.map((m) => ({ milky: m, Ulen: U(m), Uwid: 0.9, eff: 1 - m / 20, ess: 1, trusted: true, margin: Math.min(U(m) - 0.8, 0.3) }));
 { // ① 만: 기준 3 → 창 전체 통과 → 이분 탐색으로 내려가 경계 2.5 를 찾음 → 최종 검증
-  const bases = [], calls = [];
-  const io = { milkyRows: async (d, ms) => { bases.push(ms[10]); return rowsOf(ms); }, verify: async (d) => { calls.push(d.milky); return { stats: st(0.81, 0.9), eff: 0.8 }; }, progress() {}, cancelled: () => false };
+  const bases = [], precise = [], calls = [];
+  const io = { milkyRows: async (d, ms, o) => { (o?.precise ? precise : bases).push(ms[10]); return rowsOf(ms); }, verify: async (d) => { calls.push(d.milky); return { stats: st(0.81, 0.9), eff: 0.8 }; }, progress() {}, cancelled: () => false };
   const r = await runAutoDesign({ stages: { milky: true }, obs, current: { milky: 3, count: 5, pitch: 0, shape: null }, milkyMax: 5 }, io);
-  ok(r.feasible && Math.abs(r.best.milky - 2.5) < 0.03 && calls.at(-1) === r.best.milky && bases.length <= 8 && bases[1] < bases[0], `① 이분 탐색: 기준 ${bases.map((b) => b.toFixed(2)).join(' → ')} → 최소 Milky ${r.best.milky}`); }
+  ok(r.feasible && Math.abs(r.best.milky - 2.5) < 0.03 && calls.at(-1) === r.best.milky && bases.length <= 8 && bases[1] < bases[0], `① 이분 탐색: 기준 ${bases.map((b) => b.toFixed(2)).join(' → ')} → 최소 Milky ${r.best.milky}`);
+  ok(precise.length === 1 && precise[0] === bases.at(-1) && r.steps.at(-1).precise, `경계가 든 창(기준 ${precise[0]?.toFixed(2)})만 정밀 재추적`);
+  ok(calls.length === 2 && calls[0] === 3 && r.current.stats.Ulen === 0.81, '현재안을 먼저 같은 추정기(verify)로 계산 → r.current'); }
 { // 상한까지 미달(U 가 천천히 오름) → 가장 가까운 안 = 상한 근처 + 상한 안내
   const io = { milkyRows: async (d, ms) => rowsOf(ms, (m) => 0.6 + 0.01 * m), verify: async () => ({ stats: st(0.6, 0.9), eff: 1 }), progress() {}, cancelled: () => false };
   const r = await runAutoDesign({ stages: { milky: true }, obs, current: { milky: 3 }, milkyMax: 5 }, io);
   ok(!r.feasible && /상한\(5\)/.test(r.reason) && r.best.milky >= 4.9, `불가: ${r.reason}`); }
+{ // 여유가 Milky 와 함께 오르지만 상한까지 미달 → 가장 가까운 안 = 모든 기준 중 여유 최대 행(상한 근처), 사유도 그 Milky
+  const io = { milkyRows: async (d, ms) => ms.map((m) => ({ milky: m, Ulen: 0.5 + 0.05 * m, Uwid: 0.9, eff: 1, ess: 1, trusted: true, margin: 0.05 * m - 0.3 })), verify: async () => ({ stats: st(0.7, 0.9), eff: 1 }), progress() {}, cancelled: () => false };
+  const r = await runAutoDesign({ stages: { milky: true }, obs, current: { milky: 2 }, milkyMax: 5 }, io);
+  const top = Math.max(...r.steps.flatMap((x) => x.rows.map((w) => w.milky)));
+  ok(!r.feasible && r.best.milky === top && top >= 4.9 && new RegExp(`Milky ${top}에서도`).test(r.reason), `가장 가까운 안 = 상한 근처 Milky ${r.best.milky}: ${r.reason}`); }
 { // ②+①: 후보 지도는 Milky 상한(5)에서 추적, 최소 개수 뒤 ① 이 Milky 를 낮춤
   let basisMilky = null;
   const G = { ns: 2, nw: 1, ds: 1, cell: 1, w0: -0.5, L: 2, closed: false, winS: 5, area: new Float64Array([1, 1]), valid: new Uint8Array([1, 1]) };

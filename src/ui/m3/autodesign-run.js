@@ -1,40 +1,63 @@
 // 자동설계 Worker io — spec P4 §2. 기존 scene/chunk 프로토콜(chunk-host.js)을 그대로 쓰고 rw·emitters 만 덧붙인다.
-// trace(job, {N, chunkN, batches, rw}) → 배치별 합 + 격자 지도 + ESS. traceEach(job, emitterSets, {N}) → 후보마다 지도(②).
+// trace(job, {N, maxMs, minN, chunkN, batches, rw}) → 배치별 합 + 격자 지도 + ESS + 실제 광자 수. traceEach(job, emitterSets, {N}) → 후보마다 지도(②).
+// 시간 제한(maxMs): N 에 닿거나 (경과 ≥ maxMs 이고 ≥ minN 광자·배치마다 청크 1개) 이면 새 청크를 멈추고 진행 중 청크만 마저 받음.
+//   이때 청크 크기는 Worker 마다 잰 속도로 ≈chunkMs 분량(Milky 가 높으면 광자당 비용이 ~10배 → 고정 청크면 제한이 안 먹음).
 import { essRatio } from '../../engine/mech3d/reweight.js';
 
-export function createAdRunner({ ports }) {
+const MIN_CHUNK = 1000;
+export function createAdRunner({ ports, now = () => globalThis.performance?.now?.() ?? Date.now() }) {
   let stopped = false, seed = 7001;
   const check = () => { if (stopped) throw new Error('자동설계 중지'); };
   async function prepare(job) {
     check();
     await Promise.all(ports.map((p) => p.send({ type: 'scene', sceneKey: job.sceneKey, ...job.scene })));
   }
+  const send = async (job, msg) => {
+    const r = await msg.p.send({ type: 'chunk', sceneKey: job.sceneKey, seed: seed++, ...msg.body });
+    if (r.stale) throw new Error('장면이 바뀜 — 다시 실행하세요');
+    return r;
+  };
   // 청크 목록을 Worker 들에 나눠 돌림(빈 Worker 가 다음 청크를 가져감)
   async function runAll(job, chunks, onReply) {
     let next = 0;
     await Promise.all(ports.map(async (p) => {
       while (next < chunks.length) {
         check();
-        const k = next++, r = await p.send({ type: 'chunk', sceneKey: job.sceneKey, seed: seed++, ...chunks[k] });
-        if (r.stale) throw new Error('장면이 바뀜 — 다시 실행하세요');
-        onReply(k, r);
+        const k = next++;
+        onReply(k, await send(job, { p, body: chunks[k] }));
       }
     }));
   }
   // chunkN 기본 = Worker 마다 청크 2개쯤(후보당 광자가 적어도 모든 Worker 가 일하게)
-  async function trace(job, { N, chunkN = Math.max(2000, Math.ceil(N / (2 * ports.length))), batches = 8, rw = null }) {
+  async function trace(job, { N, maxMs = Infinity, minN = 0, chunkN = Math.max(2000, Math.ceil(N / (2 * ports.length))), chunkMs = Math.min(500, maxMs / 5), batches = 8, rw = null }) {
     await prepare(job);
-    const nCell = job.scene.G.ns * job.scene.G.nw, nC = Math.max(1, Math.ceil(N / chunkN));
+    const nCell = job.scene.G.ns * job.scene.G.nw, timed = Number.isFinite(maxMs);
     const B = Array.from({ length: batches }, () => new Float64Array(nCell)), RB = rw ? Array.from({ length: batches }, () => new Float64Array(rw.milkies.length * nCell)) : null;
     const ledger = { emitted: 0, escaped: 0, absSurf: 0, absVol: 0, lost: 0, rrLoss: 0, rrGain: 0 }, sf = rw ? new Float64Array(rw.milkies.length) : null, sf2 = rw ? new Float64Array(rw.milkies.length) : null;
-    let n = 0;
-    await runAll(job, Array.from({ length: nC }, () => ({ N: Math.ceil(N / nC), ...(rw ? { rw } : {}) })), (k, r) => {
-      const b = k % batches;
-      for (let i = 0; i < nCell; i++) B[b][i] += r.acc[i];
-      for (const key in ledger) ledger[key] += r.ledger[key];
-      if (rw) { for (let i = 0; i < RB[b].length; i++) RB[b][i] += r.rw.acc[i]; for (let j = 0; j < sf.length; j++) { sf[j] += r.rw.sf[j]; sf2[j] += r.rw.sf2[j]; } n += r.rw.n; }
-    });
-    return { batches: B, rwBatches: RB, ledger, ess: rw ? essRatio(sf, sf2, n) : null };
+    const bIss = new Float64Array(batches), bDone = new Float64Array(batches);
+    let n = 0, issued = 0, k = 0;
+    const t0 = now(), more = () => issued < N && !(now() - t0 >= maxMs && issued >= minN && k >= batches);
+    // 시간 제한이면 첫 청크 = minN(없으면 N/10) 을 Worker 마다 2개로 — 그 뒤 잰 속도로 조절
+    const size0 = timed ? Math.min(chunkN, Math.max(MIN_CHUNK, Math.ceil(Math.max(minN, N / 10) / (2 * ports.length)))) : chunkN;
+    await Promise.all(ports.map(async (p) => {
+      let size = size0;
+      while (more()) {
+        check();
+        const m = Math.min(size, N - issued);
+        let b = 0; for (let i = 1; i < batches; i++) if (bIss[i] < bIss[b]) b = i;   // 보낸 광자가 가장 적은 배치(고정 청크면 k % batches 와 같음)
+        issued += m; bIss[b] += m; k++;
+        const t = now(), r = await send(job, { p, body: { N: m, ...(rw ? { rw } : {}) } });
+        if (timed) { const ms = r.ms > 0 ? r.ms : now() - t; if (ms > 0) size = Math.max(MIN_CHUNK, Math.min(chunkN, Math.round((m / ms) * chunkMs))); }
+        bDone[b] += m;
+        for (let i = 0; i < nCell; i++) B[b][i] += r.acc[i];
+        for (const key in ledger) ledger[key] += r.ledger[key];
+        if (rw) { for (let i = 0; i < RB[b].length; i++) RB[b][i] += r.rw.acc[i]; for (let j = 0; j < sf.length; j++) { sf[j] += r.rw.sf[j]; sf2[j] += r.rw.sf2[j]; } n += r.rw.n; }
+      }
+    }));
+    // 배치 무게가 다르면(청크 수·크기 차) 평균 광자 수로 정규화 — 합은 그대로(효율 = Σ/방출), 빈 배치는 뺌
+    const keep = [...bDone.keys()].filter((b) => bDone[b] > 0), ref = issued / keep.length;
+    const norm = (A) => keep.map((b) => { if (bDone[b] !== ref) { const s = ref / bDone[b]; for (let i = 0; i < A[b].length; i++) A[b][i] *= s; } return A[b]; });
+    return { batches: norm(B), rwBatches: RB ? norm(RB) : null, ledger, ess: rw ? essRatio(sf, sf2, n) : null, photons: issued, ms: now() - t0 };
   }
   // 후보마다 발광점 묶음 하나 → 지도(Float32, 격자면 격자 수 × 셀). emitted = 후보당 방출(모든 후보 같은 N)
   async function traceEach(job, emitterSets, { N = 20000, rw = null } = {}) {
