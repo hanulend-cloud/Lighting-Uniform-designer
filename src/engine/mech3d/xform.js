@@ -24,3 +24,16 @@ export function transformEmitters(emitters, offset = [0, 0, 0], rot = [0, 0, 0])
   const R = eulerMatrix(rot);
   return emitters.map((e) => ({ ...e, pos: applyPoint(R, e.pos, offset), axis: applyDir(R, e.axis), xAxis: e.xAxis ? applyDir(R, e.xAxis) : e.xAxis }));
 }
+
+// 부품 크기·위치 조절 — xf = { scale:[sx,sy,sz], offset:[tx,ty,tz] }, 원본 외곽 중심 c 기준: p' = c + s∘(p − c) + t
+// 배율은 양수만(면 방향 유지). 부피 = 원본 × sx·sy·sz
+export const isIdentityXform = (xf) => !xf || ((xf.scale ?? [1, 1, 1]).every((v) => v === 1) && (xf.offset ?? [0, 0, 0]).every((v) => v === 0));
+export function scaleMoveMesh(m, xf, c) {
+  if (isIdentityXform(xf)) return m;
+  const s = xf.scale ?? [1, 1, 1], t = xf.offset ?? [0, 0, 0];
+  if (!s.every((v) => v > 0)) throw new Error('배율은 0보다 커야 합니다');
+  const P = new Float32Array(m.positions.length);
+  for (let i = 0; i < P.length; i += 3) for (let k = 0; k < 3; k++) P[i + k] = c[k] + s[k] * (m.positions[i + k] - c[k]) + t[k];
+  const { bvh, ...rest } = m;
+  return { ...rest, positions: P, volume: m.volume != null ? m.volume * s[0] * s[1] * s[2] : m.volume };
+}

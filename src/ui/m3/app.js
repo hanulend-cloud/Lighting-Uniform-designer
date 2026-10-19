@@ -3,7 +3,7 @@
 // 저장 상태 = ctx.mspec(spec.mech3d), 세션 상태 = store.session. 흐름: store.update(tag) → onChange(tag)
 //   observe → 관측 라인 다시 인식 · 물리 태그 → 점진 계산 재시작 · 기하 점검 태그 → 점검 ①②③ · target → 판정만 다시. 모두 다시 그림.
 // 점진 계산 갱신(1초마다)은 store 알림 없이 결과 패널·상태 띠·색지도만 다시 그린다(입력 중 속성 패널이 다시 그려지지 않게).
-import { getMech3d, getLedMesh, setLedMesh, saveLedIDB } from '../../engine/mech3d/runtime.js';
+import { getMech3d, getLedMesh, setLedMesh, saveLedIDB, applyPartXforms, redetectContacts } from '../../engine/mech3d/runtime.js';
 import { setPartMaterial, setPartMaterialParam, setPartFinish } from '../../engine/mech3d/materials.js';
 import { lineFromData, lightData, obsDirection } from '../../engine/mech3d/line.js';
 import { tallyGeometry } from '../../engine/mech3d/tally.js';
@@ -57,6 +57,7 @@ export async function mount(ctx) {
   unmount();
   const pool = getPool(ctx);
   pool.setDb(ctx.dbLists()); pool.warm();   // 첫 작업 전에 Worker 를 띄워 L2 표를 적재(이미 떠 있으면 소재 DB 만 갱신)
+  applyPartXforms(ctx.mspec.parts.map((p) => p.xform));   // 저장된 부품 크기·위치 조절을 장면에 반영
   const store = createStore(ctx.mspec, { persist: ctx.persist });
   L.resetLedCaches();
   const v0 = L.validateLedStep(ctx.mspec, store.session);   // main.js:982 의 시작 시 검증을 여기서
@@ -90,7 +91,7 @@ export function unmount() {
 function onChange(tag) {
   if (!A) return;
   const M = A.store.mspec;
-  if (tag === 'observe') refreshLine();
+  if (tag === 'observe' || tag === 'material') refreshLine();   // material: 부품 크기·위치가 바뀌면 라인도 다시(키가 같으면 건너뜀)
   if (PHYSICS.has(tag)) restartCalc();
   if (tag === 'target') A.prog.setJudge({ obs: M.observe, targetNoise: M.observe.targetNoise ?? 0.02, fluxLm: M.light.spec.fluxLm ?? 0 });
   if (GEOM_CHECK.has(tag)) rerunGeomChecks();
@@ -104,7 +105,7 @@ function onKey(e) {
 
 // ---- 관측 라인 (main.js:266-282) — 관측면·방향이 바뀌면 Worker 0 에서 다시 인식 ----
 async function refreshLine() {
-  const st = A.store, O = st.mspec.observe, S = st.session, pool = A.pool, key = JSON.stringify([O.faces, O.dir]);
+  const st = A.store, O = st.mspec.observe, S = st.session, pool = A.pool, key = JSON.stringify([O.faces, O.dir, st.mspec.parts.map((p) => p.xform ?? null)]);
   if (key === A.lineKey) return;
   A.lineKey = key; S.line = null; S.lineErr = '';
   if (!O.faces.length) return;
@@ -271,6 +272,11 @@ function propHandlers() {
       return q;
     }),
     onFinish: (i, face, f) => part(i, (p) => setPartFinish(p, face, f)),
+    // 크기·위치 조절: 장면을 바꾸고 접촉면을 다시 찾는다(같은 면 쌍은 모드 유지). xf = null → 원래대로
+    onXform: (i, xf) => st.update('material', (m) => {
+      if (xf) m.parts[i].xform = xf; else delete m.parts[i].xform;
+      if (applyPartXforms(m.parts.map((p) => p.xform))) m.contacts = redetectContacts(m.contacts);
+    }),
     onContact: (i, mode) => st.update('contacts', (m) => { m.contacts[i] = { ...m.contacts[i], mode }; }),
     onLightKind: (k) => st.update('light', (m, x) => { m.light.kind = k; x.pick = null; }),
     onLedFile: (f) => importLedStep(f),
@@ -371,8 +377,8 @@ function renderView() {
   const kinds = [...M.parts.map((p) => p.material.kind), ...(lp ?? []).map((_, i) => (i === stp.pcb ? 'pcb' : ledSet.has(i) && !exSet.has(i) ? 'led' : 'opaque'))];
   const meshKey = [cur, lp];   // 기구·LED 메쉬(위치 보정 포함 — 캐시 객체)가 바뀌면 다시 그림. 카메라는 기구가 바뀔 때만 맞춤
   if (!A.meshShown || A.meshShown.some((x, i) => x !== meshKey[i])) {
-    const keepCamera = !!A.meshShown && A.meshShown[0] === cur;
-    if (A.meshShown?.[0] !== cur) { S.hidden = []; S.hideLeds = false; }   // 다른 기구를 불러오면 보기 상태 초기화
+    const keepCamera = !!A.meshShown && A.meshShown[0].raw === cur.raw;   // 크기·위치 조절만 바뀌면 카메라 유지
+    if (A.meshShown?.[0].raw !== cur.raw) { S.hidden = []; S.hideLeds = false; }   // 다른 기구를 불러오면 보기 상태 초기화
     A.meshShown = meshKey; v.setParts([...cur.parts, ...(lp ?? [])], kinds, { keepCamera });
   } else v.setKinds(kinds);
   const hid = new Set(S.hidden), nMech = M.parts.length;

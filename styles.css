@@ -287,6 +287,10 @@ main:has(#mech3d-wrap:not([hidden])) { grid-template-rows: minmax(0, 1fr); }
 .m3-node.sel { background: var(--m3-accbg); color: var(--m3-acc); }
 .m3-node .b { margin-left: auto; font-size: 11px; color: var(--m3-mut); }
 .m3-node.child { padding-left: 22px; }
+.m3-xf { display: grid; grid-template-columns: auto repeat(3, minmax(0, 1fr)); gap: 3px 4px; align-items: center; font-size: 12px; margin: 2px 0 4px; }
+.m3-xf b { font-weight: 600; text-align: center; color: var(--m3-mut); }
+.m3-xf input { width: 100%; min-width: 0; box-sizing: border-box; }
+.m3-xf .mut { text-align: center; }
 .m3-eye { width: 18px; text-align: center; font-size: 12px; cursor: pointer; border-radius: 4px; flex: none; }
 .m3-eye:hover, .m3-eye:focus-visible { background: #e3e8f2; }
 .m3-eye.off { color: var(--m3-mut); }
