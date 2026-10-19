@@ -291,6 +291,13 @@ main:has(#mech3d-wrap:not([hidden])) { grid-template-rows: minmax(0, 1fr); }
 .m3-xf b { font-weight: 600; text-align: center; color: var(--m3-mut); }
 .m3-xf input { width: 100%; min-width: 0; box-sizing: border-box; }
 .m3-xf .mut { text-align: center; }
+.m3-gaps { display: grid; gap: 1px; font-size: 12px; margin-bottom: 4px; }
+.m3-gap { display: flex; justify-content: space-between; gap: 8px; padding: 1px 4px; border-radius: 4px; }
+.m3-gap b { font-weight: 600; color: #18a0fb; white-space: nowrap; }
+.m3-gap.touch b { color: var(--m3-mut); }
+.m3-gap.bad { background: #fff0ef; } .m3-gap.bad b { color: #d92d20; }
+.m3-gap.led b { color: #1f9d45; }
+.m3-warn { font-size: 12px; color: #b54708; background: #fff6e5; border-radius: 4px; padding: 3px 6px; margin: 2px 0 4px; }
 .m3-eye { width: 18px; text-align: center; font-size: 12px; cursor: pointer; border-radius: 4px; flex: none; }
 .m3-eye:hover, .m3-eye:focus-visible { background: #e3e8f2; }
 .m3-eye.off { color: var(--m3-mut); }

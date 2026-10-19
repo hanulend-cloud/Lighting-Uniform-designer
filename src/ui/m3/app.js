@@ -16,6 +16,7 @@ import * as L from './leds.js';
 import { buildObsOverlay, cellColors, extractFaces } from './colormap.js';
 import { mountCommandBar } from './command-bar.js';
 import { renderFeatureTree, toggleVisibility } from './feature-tree.js';
+import { partClearance, limitXform, TOL } from '../../engine/mech3d/clearance.js';
 import { renderPropertyPanel } from './property-panel.js';
 import { createResultsPanel } from './results-panel.js';
 import { renderStatusBar } from './status-bar.js';
@@ -217,7 +218,41 @@ function renderMarkers() {
     const t = extractFaces(rt.parts[w.part], new Set([w.face]));
     out.push({ type: 'tris', positions: t.positions, triangles: t.triangles, color: 0xff8c1a, opacity: f === 'leak' ? 0.8 : 0.5 });
   }
+  // 선택 부품의 간격 치수선: 이웃 부품(하늘색, 간섭은 빨강) · 가장 가까운 LED(초록)
+  const cl = A.clrShown;
+  if (cl) {
+    for (const r of [...cl.rows, ...cl.leds]) {
+      if (r.depth > 0) out.push({ type: 'ring', pos: r.pa, color: 0xff3b30, size: 14 });
+      else if (r.gap > TOL) out.push({ type: 'line', a: r.pa, b: r.pb, color: 0x18a0fb });
+    }
+    if (cl.ledMin) out.push({ type: 'line', a: cl.ledMin.pa, b: cl.ledMin.pb, color: 0x2fbf4f });
+  }
   A.view.setCheckMarkers(out);
+}
+
+// 간섭 상대 이름 — 키 'p:j'(기구 부품) | 'l:j'(LED STEP 메쉬) | 'e:k'(발광점)
+function hitName(M, key) {
+  const [k, j] = [key[0], +key.slice(2)];
+  if (k === 'p') return M.parts[j]?.name ?? `부품 ${j + 1}`;
+  if (k === 'l') return j === M.light.step?.pcb ? 'PCB' : `LED ${j + 1}`;
+  return `LED ${j + 1} 발광점`;
+}
+// 선택 부품의 간격 표(캐시: 장면·부품·LED 가 같으면 재사용)
+function clearanceOf(i) {
+  const M = A.store.mspec, S = A.store.session, rt = getMech3d();
+  if (!rt?.parts[i]) return null;
+  const lp = (M.light.kind === 'step' && L.ledPartsNow(M)) || [];
+  let em = []; try { em = L.currentEmitters(M, S.line); } catch { em = []; }
+  const ek = JSON.stringify(em.map((e) => [e.pos, e.axis]));
+  if (A.clr && A.clr.rt === rt && A.clr.i === i && A.clr.lp === lp && A.clr.ek === ek) return A.clr.res;
+  const r = partClearance(rt.parts, i, { ledParts: lp, emitters: em });
+  const res = {
+    i, rows: r.parts.map((x) => ({ ...x, name: M.parts[x.part]?.name ?? `부품 ${x.part + 1}` })),
+    leds: r.leds.slice(0, 3).map((x) => ({ ...x, name: hitName(M, `l:${x.part}`) })),
+    ledMin: r.ledMin, ledAxial: r.ledAxial,
+  };
+  A.clr = { rt, i, lp, ek, res };
+  return res;
 }
 
 // ---- 3D 클릭 (main.js:393-425) — 기구 부품 수(nMech) 이상인 번호는 LED STEP 부품 ----
@@ -273,7 +308,16 @@ function propHandlers() {
     }),
     onFinish: (i, face, f) => part(i, (p) => setPartFinish(p, face, f)),
     // 크기·위치 조절: 장면을 바꾸고 접촉면을 다시 찾는다(같은 면 쌍은 모드 유지). xf = null → 원래대로
-    onXform: (i, xf) => st.update('material', (m) => {
+    // 새 간섭이 생기면 간섭 직전까지만 적용(limitXform). 직접 배치 LED 는 라인을 따라 다시 놓이므로 고정 LED(STEP)만 장애물
+    onXform: (i, want) => st.update('material', (m, x) => {
+      let xf = want;
+      x.xfMsg = null;
+      if (xf) {
+        const rt = getMech3d(), stp = m.light.kind === 'step';
+        let em = []; try { em = stp ? L.currentEmitters(m, x.line) : []; } catch { em = []; }
+        const r = limitXform(rt.raw.parts[i], m.parts[i].xform ?? null, xf, rt.parts.map((p, j) => (j === i ? null : p)), { ledParts: (stp && L.ledPartsNow(m)) || [], emitters: em });
+        if (r.limited) { xf = r.xf; x.xfMsg = { part: i, text: `${hitName(m, r.hit)}과(와) 간섭 — 간섭 직전(입력의 ${Math.round(r.t * 100)}%)까지만 적용` }; }
+      }
       if (xf) m.parts[i].xform = xf; else delete m.parts[i].xform;
       if (applyPartXforms(m.parts.map((p) => p.xform))) m.contacts = redetectContacts(m.contacts);
     }),
@@ -357,7 +401,9 @@ function renderAll(tag = 'all') {
     onNode: (id) => st.update('session', (_, x) => { x.node = id; x.sel = id.startsWith('part:') ? { part: +id.slice(5), face: null } : null; }),
     onEye: (id, only) => st.update('view', (m, x) => Object.assign(x, toggleVisibility(id, only, m.parts.length, x.hidden, x.hideLeds))),
   });
-  if (tag !== 'view') renderPropertyPanel($('#m3-props'), M, S, { dbList: A.ctx.materialDb()?.list() ?? [], auto: autoGrid(), dir: M.observe.dir ?? S.line?.frame.d, lineInfo: lineInfo() }, propHandlers());
+  const pi = S.node?.startsWith('part:') ? +S.node.slice(5) : -1, clr = pi >= 0 ? clearanceOf(pi) : null;
+  if (clr !== A.clrShown) { A.clrShown = clr; renderMarkers(); }
+  if (tag !== 'view') renderPropertyPanel($('#m3-props'), M, S, { dbList: A.ctx.materialDb()?.list() ?? [], auto: autoGrid(), dir: M.observe.dir ?? S.line?.frame.d, lineInfo: lineInfo(), clearance: clr, xfMsg: S.xfMsg?.part === pi ? S.xfMsg.text : '' }, propHandlers());
   if (tag === 'session' || tag === 'all') renderMarkers();
   A.cmd.update(S, S.calc);
   renderStatus();

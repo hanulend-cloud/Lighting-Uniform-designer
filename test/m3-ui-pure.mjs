@@ -6,6 +6,7 @@ import { checkLabels, statusWord, statusIcon, checkAria, isActivateKey, esc as e
 import { ramp, NO_DATA } from '../src/ui/m3/colormap.js';
 import { defaultLight, defaultObserve, defaultChecks } from '../src/engine/mech3d/defs.js';
 import { defaultPart, setPartMaterial, setPartMaterialParam } from '../src/engine/mech3d/materials.js';
+import { clearanceHtml } from '../src/ui/mech3d-panel.js';
 import { ok, done } from './mech3d-util.mjs';
 
 const M = {
@@ -51,6 +52,9 @@ ok(calcLabel({ state: 'running' }) === '⏸ 계산 중' && calcLabel({ state: 'p
   const tgt = (ds) => ({ closest: (q) => (q === '[data-eye]' ? (ds.eye ? { dataset: ds } : null) : { dataset: ds }) });
   el.listeners.click({ target: tgt({ eye: 'part:0', node: 'part:0' }), shiftKey: true, stopPropagation() {} });
   ok(eye?.[0] === 'part:0' && eye[1] === true && node === null, '눈 단추 클릭 → onEye(Shift), 노드 선택 안 함'); }
+{ const h = clearanceHtml({ rows: [{ name: '<b>', gap: 0, depth: 0.5 }, { name: '커버', gap: 0.01, depth: 0 }, { name: '가이드', gap: 1.234, depth: 0 }], leds: [], ledMin: { led: 2, dist: 3.5 }, ledAxial: null });
+  ok(h.includes('<b>간섭</b>') && h.includes('접촉') && h.includes('1.23 mm') && h.includes('LED 최소 거리 (LED 3)') && h.includes('&lt;b>') && !h.includes('LED 축'), '간격 표: 간섭·접촉·간격·LED·escape');
+  ok(clearanceHtml(null) === '' && clearanceHtml({ rows: [], leds: [], ledMin: null, ledAxial: null }).includes('20 mm 안에 다른 부품 없음'), '간격 표: 없음'); }
 ok(statusWord('ok') === '양호' && statusWord('warn') === '경고' && statusWord('bad') === '불량' && statusWord('na') === '미계산' && statusWord('?') === '미계산'
   && statusIcon('ok') === '✓' && statusIcon('warn') === '!' && statusIcon('bad') === '✕' && statusIcon('na') === '–' && checkAria({ text: '살두께 0.50 mm', st: 'warn' }) === '살두께 0.50 mm — 경고', '배지 상태 단어 · 기호');
 ok(isActivateKey({ key: 'Enter' }) && isActivateKey({ key: ' ' }) && !isActivateKey({ key: 'a' }) && !isActivateKey({ key: 'Tab' }), '활성화 키 = Enter/Space');

@@ -37,7 +37,8 @@ function partEditor(p, sel, dbList) {
     ${materialParams(p.material, dbList)}
     <div class="m3-sub">면 처리 (부품 기본)</div>
     ${finishRow(p.finish, 'part', false)}
-    ${xformEditor(p)}
+    ${xformEditor(p)}${sel.xfMsg ? `<div class="m3-warn" role="status">${esc(sel.xfMsg)}</div>` : ''}
+    ${clearanceHtml(sel.clearance)}
     ${face != null ? `<div class="m3-sub">선택한 면 #${face}${p.faceFinish[face] ? ' · 덮어씀' : ''}</div>${finishRow(p.faceFinish[face] ?? null, 'face', true)}` : '<div class="mut">3D 뷰에서 면을 클릭하면 그 면만 다르게 지정할 수 있습니다</div>'}
   </div>`;
 }
@@ -52,6 +53,16 @@ export function nextXform(xf, key, v, lock) {
     if (lock) { const r = nv / s[k]; for (let j = 0; j < 3; j++) s[j] = Math.min(10, Math.max(0.1, +(s[j] * r).toFixed(4))); s[k] = nv; } else s[k] = nv;
   }
   return o.every((x) => x === 0) && s.every((x) => x === 1) ? null : { offset: o, scale: s };
+}
+// 간격 표(순수) — c = app.js clearanceOf 결과: { rows, leds, ledMin, ledAxial }
+export function clearanceHtml(c) {
+  if (!c) return '';
+  const mm = (v) => `${v.toFixed(2)} mm`;
+  const row = (r) => `<div class="m3-gap ${r.depth > 0 ? 'bad' : r.gap <= 0.02 ? 'touch' : ''}"><span>${esc(r.name)}</span><b>${r.depth > 0 ? '간섭' : r.gap <= 0.02 ? '접촉' : mm(r.gap)}</b></div>`;
+  const led = c.ledMin ? `<div class="m3-gap led"><span>LED 최소 거리 (LED ${c.ledMin.led + 1})</span><b>${mm(c.ledMin.dist)}</b></div>` : '';
+  const ax = c.ledAxial ? `<div class="m3-gap led"><span>LED 축 방향 (LED ${c.ledAxial.led + 1})</span><b>${mm(c.ledAxial.dist)}</b></div>` : '';
+  return `<div class="m3-sub">간격 <span class="mut">(20 mm 안 · 3D 하늘색 선)</span></div>
+    <div class="m3-gaps">${c.rows.map(row).join('') || '<div class="mut">20 mm 안에 다른 부품 없음</div>'}${c.leds.map(row).join('')}${led}${ax}</div>`;
 }
 function xformEditor(p) {
   const o = p.xform?.offset ?? [0, 0, 0], s = p.xform?.scale ?? [1, 1, 1], sz = p.size ?? [0, 0, 0];
