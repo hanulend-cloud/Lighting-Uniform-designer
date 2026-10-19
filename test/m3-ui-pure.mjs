@@ -107,6 +107,8 @@ ok(clampCap(12) === 9.9 && clampCap(0.1) === 0.5 && clampCap(3) === 3 && clampCa
 { const all = { milky: true, leds: true, shape: true }, m = { milky: true };
   ok(overallFrac(m, 'current', 0) === 0 && Math.abs(overallFrac(m, 'milky', 0) - 5 / 50) < 1e-12 && Math.abs(overallFrac(m, 'milky', 0.5) - 22.5 / 50) < 1e-12 && overallFrac(m, 'verify', 1) === 1, '전체 진행률: 켠 단계만 정규화(① 만 = 5+35+10)');
   ok(Math.abs(overallFrac(all, 'shape', 0) - 75 / 135) < 1e-12 && overallFrac(all, 'shape', 2) <= 1 && overallFrac(m, 'shape', 0.5) === 0, '전체 진행률: 단계 순서·무게 · 꺼진 단계 = 0');
+  const hh = { leds: true, height: true, housing: true, milky: true };
+  ok(Math.abs(overallFrac(hh, 'height', 0) - 40 / 125) < 1e-12 && Math.abs(overallFrac(hh, 'housing', 0.5) - 70 / 125) < 1e-12 && Math.abs(overallFrac(hh, 'milky', 0) - 80 / 125) < 1e-12, '전체 진행률: ⑤ 높이·④ 케이스 면(각 20)은 ② 와 ① 사이');
   ok(etaText(5000, 0.05) === '' && etaText(10000, 0.5) === '남은 약 10초' && etaText(1000, 1) === '', `남은 시간: 10% 이후만 (${etaText(10000, 0.5)})`); }
 { const s = profileSvg([1, 2, NaN, 4], [3, 3, 3, 3]);
   ok((s.match(/<polyline/g) ?? []).length === 2 && s.includes('<svg') && profileSvg(null, [1]) === '' && profileSvg([], [1]) === '', '길이 프로파일 SVG: 선 2개 · 없으면 생략');

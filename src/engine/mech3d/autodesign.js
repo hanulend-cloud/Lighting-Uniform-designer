@@ -1,10 +1,11 @@
-// P4 자동설계 단계 실행기 — spec §1·§2. 순서 ② → ① → ③, 체크 안 한 항목은 현재 값 고정. 계산은 io 가 맡는다(Worker / 시험 가짜).
+// P4 자동설계 단계 실행기 — spec §1·§2. 순서 ② → ⑤ LED 높이 → ④ 케이스 면 → ① → ③(§2.3c), 체크 안 한 항목은 현재 값 고정. 계산은 io 가 맡는다(Worker / 시험 가짜).
 // ① 재가중 창은 기준 ±0.25(ESS 한계, spec §2.1) — 창 밖은 이분 탐색으로 기준을 옮긴다. ② 는 Milky 상한에서 최소 개수를 구한 뒤 ① 이 낮춘다.
 // io.milkyRows(d, ms, { precise }) — precise = 경계가 든 창의 재추적(광자 많이). 결과 { feasible, best(design), steps:[{stage, …}], reason, verified, current(현재안 io.verify), cancelled }
 import { milkyAxis } from './reweight.js';
 import { pickMilky, margin } from './milky-search.js';
 import { searchLeds } from './basis.js';
 import { gridCandidates } from './shape-opt.js';
+import { gradeOf, heightCandidates } from './housing-led.js';
 
 export const MILKY_STEP = 0.025, MILKY_ITERS = 8;
 // 평활 길이 U — 길이 프로파일 3행 이동평균(NaN 행 제외)의 min/max. 한 칸 잡음 골짜기(min 통계 편향)에 덜 민감. profile 없으면 Ulen
@@ -24,7 +25,10 @@ export function smoothU(stats) {
 export const shapeScore = (r, obs) => (!r.ok ? -Infinity : margin(r.stats, obs) >= 0 ? 1 + r.eff : Math.min(smoothU(r.stats) / obs.targetLen, r.stats.Uwid == null ? Infinity : r.stats.Uwid / obs.targetWid));
 export const SCORE_EPS = 0.01;   // 최종안이 현재안보다 이만큼은 나아야 추천
 // stepVirt = LED STEP 가상 배치 여부(② 가 STEP 에서 돌면 true, current 는 현재 배치가 가상인지) — 개수가 같아도 원래 ↔ 가상은 다른 설계
-export const sameDesign = (a, b) => ['count', 'pitch', 'milky'].every((k) => (a?.[k] ?? null) === (b?.[k] ?? null)) && !!a?.stepVirt === !!b?.stepVirt && JSON.stringify(a?.shape ?? null) === JSON.stringify(b?.shape ?? null);
+// dz = LED 높이 이동(mm, 없음 = 0), finish = ④ 케이스 면 { part, kind, R } | null
+const sameFinish = (f, g) => (!f && !g) || (!!f && !!g && f.part === g.part && f.kind === g.kind && (f.R ?? null) === (g.R ?? null));
+export const sameDesign = (a, b) => ['count', 'pitch', 'milky'].every((k) => (a?.[k] ?? null) === (b?.[k] ?? null)) && !!a?.stepVirt === !!b?.stepVirt && JSON.stringify(a?.shape ?? null) === JSON.stringify(b?.shape ?? null)
+  && Math.abs((a?.dz ?? 0) - (b?.dz ?? 0)) < 1e-6 && sameFinish(a?.finish ?? null, b?.finish ?? null);
 
 // 단계적 압축: schedule = [[남길 수(첫 단계는 전체), 광자 수, 후보당 시간 제한 ms?]…]. 각 단계 결과 점수로 다음 단계 후보를 줄임
 export const SHAPE_SCHEDULE = [[27, 6e4, 2500], [6, 2e5, 4000], [2, 6e5, 6000]];
@@ -63,6 +67,23 @@ export async function screenShapeVars(evalFn, ranges, obs, { N = 6e4, maxMs = 25
     if (vars.length < keep && cost <= left) { vars.push(v); left -= cost; }
   }
   return { vars, gains, results };
+}
+
+// ④⑤ 이산 후보 선택 — 1차 전체(N1) → 2차 keep 개 정밀(N2) → 규칙대로 하나. evalFn(cands, N, maxMs) → [{ cand, ok, stats, eff }]
+// lowestPassing: 2차 후보 = 1차 통과 중 등급 낮은 keep 개(통과 없으면 점수 상위), 2차 통과 중 등급 최저(같으면 점수 높은 쪽), 없으면 점수 최고. best: 점수 최고
+export async function pickVariant(cands, evalFn, obs, { prefer = 'best', keep = 2, N1 = 6e4, N2 = 3e5, maxMs1 = 2500, maxMs2 = 6000, grade = () => 0, cancelled = () => false, progress } = {}) {
+  const sc = (r) => shapeScore(r, obs), pass = (r) => r.ok && margin(r.stats, obs) >= 0, byScore = (a, b) => sc(b) - sc(a);
+  const byGrade = (a, b) => grade(a.cand) - grade(b.cand) || sc(b) - sc(a);
+  const results1 = await evalFn(cands, N1, maxMs1);
+  const ok1 = results1.filter((r) => r.ok);
+  if (!ok1.length || cancelled()) return { best: null, results1, results2: [] };
+  const p1 = prefer === 'lowestPassing' ? ok1.filter(pass).sort(byGrade) : [];
+  const pool = (p1.length ? p1 : [...ok1].sort(byScore)).slice(0, keep).map((r) => r.cand);
+  progress?.(cands.length / (cands.length + pool.length), `상위 ${pool.length}개 정밀 평가`);
+  const results2 = await evalFn(pool, N2, maxMs2), ok2 = results2.filter((r) => r.ok);
+  if (!ok2.length) return { best: null, results1, results2 };
+  const p2 = prefer === 'lowestPassing' ? ok2.filter(pass).sort(byGrade) : [];
+  return { best: p2[0] ?? [...ok2].sort(byScore)[0], results1, results2 };
 }
 
 // 다음 기준점: 마지막 두 기준의 (Milky, 여유) 할선 근이 (lo, hi) 안이면 그것, 아니면 이분
@@ -122,6 +143,29 @@ export async function runAutoDesign(cfg, io) {
     steps.push({ stage: 'leds', ...r });
     d = { ...d, count: r.n, pitch: r.pitch, stepVirt: !!cfg.stepMode };   // cfg.stepMode = LED STEP(② 는 가상 배치를 점수 매김)
     if (!r.feasible) { feasible = false; reason = r.reason; }
+  }
+  const evalV = (cands, N, ms) => io.evalVariants(d, cands, N, ms), uText = (s) => `길이 U ${s.Ulen.toFixed(2)}${s.Uwid == null ? '' : ` · 폭 U ${s.Uwid.toFixed(2)}`}`;
+  if (stages.height && cfg.heightRange) {   // ⑤ LED 높이 — 후보 { dz }(0 = 현재), 점수 최고
+    const cands = heightCandidates(cfg.heightRange, 7).map((dz) => ({ dz }));
+    io.progress?.('height', 0, `LED 높이 후보 ${cands.length}개 평가`);
+    const r = await pickVariant(cands, evalV, obs, { prefer: 'best', cancelled: stop, progress: (f, t) => io.progress?.('height', f, `LED 높이 ${t}`) });
+    if (stop()) return { cancelled: true };
+    steps.push({ stage: 'height', ...r });
+    if (r.best) {
+      d = { ...d, dz: r.best.cand.dz };
+      if (margin(r.best.stats, obs) < 0) { feasible = false; reason = `LED 높이 최적(${r.best.cand.dz >= 0 ? '+' : ''}${r.best.cand.dz} mm)에서도 목표 미달 — ${uText(r.best.stats)}`; }
+    }
+  }
+  if (stages.housing && cfg.finishCands?.length) {   // ④ 케이스 면 — 후보 { finish }(current = 현재 면 처리), 통과 중 최저 등급
+    const cands = cfg.finishCands.map(({ current, ...f }) => ({ finish: { part: cfg.housingPart ?? f.part, kind: f.kind, ...(f.R != null ? { R: f.R } : {}) }, current: !!current }));
+    io.progress?.('housing', 0, `케이스 면 후보 ${cands.length}개 평가`);
+    const r = await pickVariant(cands, evalV, obs, { prefer: 'lowestPassing', grade: (c) => gradeOf(c.finish), cancelled: stop, progress: (f, t) => io.progress?.('housing', f, `케이스 면 ${t}`) });
+    if (stop()) return { cancelled: true };
+    steps.push({ stage: 'housing', ...r });
+    if (r.best) {
+      d = { ...d, finish: r.best.cand.current ? (cfg.current?.finish ?? null) : r.best.cand.finish };
+      if (margin(r.best.stats, obs) < 0) { feasible = false; reason = `케이스 면 최고 등급에서도 목표 미달 — ${uText(r.best.stats)}`; }
+    }
   }
   if (stages.milky) {   // ① — (②가 고른 개수에서) 목표를 만족하는 최소 Milky
     const m = await searchMilky(d, cfg, io, steps, mCap);

@@ -1,5 +1,5 @@
 // P4 단계 실행기(가짜 io): node test/mech3d-autodesign.mjs
-import { runAutoDesign, shapeScore, halving, smoothU, halvingTotal, sameDesign, screenShapeVars, shapeTotal } from '../src/engine/mech3d/autodesign.js';
+import { runAutoDesign, shapeScore, halving, smoothU, halvingTotal, sameDesign, screenShapeVars, shapeTotal, pickVariant } from '../src/engine/mech3d/autodesign.js';
 import { shapeVarRanges, gridCandidates } from '../src/engine/mech3d/shape-opt.js';
 import { ok, done } from './mech3d-util.mjs';
 
@@ -119,4 +119,50 @@ const rowsOf = (ms, U = (m) => 0.5 + 0.12 * m) => ms.map((m) => ({ milky: m, Ule
   const b = await screenShapeVars(fake(g2), rg, obs);
   ok(b.vars.join() === 'c,e,dt' && gridCandidates(b.vars, rg).length <= 27, `h 가 예산 초과 → 건너뜀: ${b.vars}`); }
 ok(halvingTotal(27) === 35 && halvingTotal(4) === 10 && halvingTotal(1) === 3, 'halving 평가 후보 수 합(진행률 분모)');
+{ // pickVariant lowestPassing: 1차 전체(6만) → 2차 통과 후보 중 등급 낮은 2개(30만) → 통과 중 등급 최저
+  const seen = [], cands = [0, 1, 2, 3, 4, 5].map((g) => ({ g }));
+  const evalFn = async (cs, N, ms) => { seen.push([cs.map((c) => c.g).join(''), N, ms]); return cs.map((c) => ({ cand: c, ok: true, stats: st(0.7 + c.g * 0.04, 0.9), eff: 0.5 + c.g / 100 })); };
+  const r = await pickVariant(cands, evalFn, obs, { prefer: 'lowestPassing', grade: (c) => c.g });
+  ok(r.best.cand.g === 3 && seen[0][0] === '012345' && seen[0][1] === 6e4 && seen[1][1] === 3e5 && seen[1][0] === '34' && r.results1.length === 6 && r.results2.length === 2, `lowestPassing: 통과(g≥3) 중 최저 등급 g=${r.best.cand.g} (2차 ${seen[1][0]})`);
+  const evalNo = async (cs) => cs.map((c) => ({ cand: c, ok: c.g !== 5, stats: st(0.5 + c.g * 0.04, 0.9), eff: 0.5 }));
+  const r2 = await pickVariant(cands, evalNo, obs, { prefer: 'lowestPassing', grade: (c) => c.g });
+  ok(r2.best.cand.g === 4, `통과 없음 → 점수 최고(제약 위반 제외): g=${r2.best.cand.g}`);
+  const r3 = await pickVariant(cands, evalFn, obs, { prefer: 'best' });
+  ok(r3.best.cand.g === 5, `best → 점수 최고(통과면 효율): g=${r3.best.cand.g}`);
+  const r4 = await pickVariant(cands, async (cs) => cs.map((c) => ({ cand: c, ok: false })), obs, { prefer: 'best' });
+  ok(r4.best === null, '전부 제약 위반 → null'); }
+{ // sameDesign: dz(|Δ|<1e-6, 없음 = 0)·finish(part/kind/R)
+  const b = { count: 5, pitch: 0, milky: 3 };
+  ok(sameDesign({ ...b, dz: 0 }, b) && sameDesign({ ...b, dz: 1e-8 }, { ...b, dz: 0 }) && !sameDesign({ ...b, dz: 0.5 }, b), 'sameDesign: dz');
+  const f = { part: 1, kind: 'whiteDiffuse', R: 0.85 };
+  ok(sameDesign({ ...b, finish: f }, { ...b, finish: { ...f } }) && sameDesign({ ...b, finish: null }, b) && !sameDesign({ ...b, finish: f }, b)
+    && !sameDesign({ ...b, finish: f }, { ...b, finish: { ...f, R: 0.9 } }) && !sameDesign({ ...b, finish: f }, { ...b, finish: { ...f, part: 2 } }) && !sameDesign({ ...b, finish: f }, { ...b, finish: { ...f, kind: 'metal' } }), 'sameDesign: finish'); }
+{ // 실행 순서 ② → ⑤ → ④ → ① → ③ (가짜 io 호출 순서), ⑤ 는 best · ④ 는 통과 중 최저 등급, d 에 반영
+  const G = { ns: 2, nw: 1, ds: 1, cell: 1, w0: -0.5, L: 2, closed: false, winS: 5, area: new Float64Array([1, 1]), valid: new Uint8Array([1, 1]) }, log = [], prog = [];
+  const fins = [{ kind: 'whiteDiffuse', R: 0.85, current: true }, { kind: 'whiteDiffuse', R: 0.9 }, { kind: 'whiteDiffuse', R: 0.95 }];
+  const io = {
+    basis: async () => { log.push('leds'); return { cand: [0, 1, 2], maps: [0, 1, 2].map(() => Float32Array.from([1, 1])), emitted: 1 }; },
+    evalVariants: async (d, cs, N) => { const k = 'dz' in cs[0] ? 'height' : 'housing'; if (N === 6e4) log.push(k);
+      return cs.map((c) => k === 'height' ? { cand: c, ok: true, stats: st(0.85, 0.9), eff: 0.5 - Math.abs(c.dz - 1.5) / 10 } : { cand: c, ok: true, stats: st(c.finish.R >= 0.9 ? 0.85 : 0.7, 0.9), eff: c.finish.R }); },
+    milkyRows: async (d, ms) => { if (!log.includes('milky')) log.push('milky'); return rowsOf(ms); },
+    evalShapes: async (d, cs) => { if (!log.includes('shape')) log.push('shape'); return cs.map((c) => ({ cand: c, stats: st(0.9, 0.9), eff: 0.6, ok: true })); },
+    verify: async (d) => ({ stats: st(d.dz ? 0.95 : 0.6, 0.9), eff: 0.6 }), progress: (s) => { if (prog.at(-1) !== s) prog.push(s); }, cancelled: () => false };
+  const r = await runAutoDesign({ stages: { leds: true, height: true, housing: true, milky: true, shape: true }, obs: { targetLen: 0.8, targetWid: 0 }, current: { milky: 3, count: 5, pitch: 0, shape: null, finish: null, dz: 0 },
+    milkyMax: 5, G, line: { length: 2, closed: false }, nMax: 4, heightRange: [-1, 3], finishCands: fins, housingPart: 1, shapePart: 0, shapeCands: [{ dt: 0.2, h: 0, R: 2.75, e: 0, c: 0 }] }, io);
+  ok(log.join() === 'leds,height,housing,milky,shape', `호출 순서: ${log.join()}`);
+  ok(prog.join() === 'current,leds,height,housing,milky,shape,verify', `진행 단계: ${prog.join()}`);
+  ok(r.best.dz === 1.5 && r.best.finish?.part === 1 && r.best.finish.R === 0.9 && r.best.finish.kind === 'whiteDiffuse', `⑤ dz=${r.best.dz} · ④ ${JSON.stringify(r.best.finish)}(통과 중 최저 등급)`);
+  ok(r.steps.some((x) => x.stage === 'height' && x.results1.length === 7) && r.steps.some((x) => x.stage === 'housing'), 'steps 에 height(후보 7개)·housing'); }
+{ // ④ 현재 면 처리(current)가 뽑히면 finish = 현재 값(null) · ⑤ 0 이면 dz 0 → 같은 설계 → 현재안 그대로
+  const fins = [{ kind: 'whiteDiffuse', R: 0.85, current: true }, { kind: 'whiteDiffuse', R: 0.9 }], calls = [];
+  const io = { evalVariants: async (d, cs) => cs.map((c) => ({ cand: c, ok: true, stats: st(0.9, 0.9), eff: 'dz' in c ? 0.5 - Math.abs(c.dz) : 0.5 })),
+    verify: async (d) => { calls.push(d); return { stats: st(0.9, 0.9), eff: 0.5 }; }, progress() {}, cancelled: () => false };
+  const r = await runAutoDesign({ stages: { height: true, housing: true }, obs, current: { milky: 3, count: 5, pitch: 0, finish: null, dz: 0 }, heightRange: [-1, 1], finishCands: fins, housingPart: 1 }, io);
+  ok(r.unchanged && r.best.finish === null && r.best.dz === 0 && calls.length === 1, `현재 후보 선택 → 현재안 그대로 (verify ${calls.length}회)`); }
+{ // 가드: ⑤ 가 dz 를 골랐지만 검증에서 이득 없음 → 현재안 유지
+  const io = { evalVariants: async (d, cs) => cs.map((c) => ({ cand: c, ok: true, stats: st(0.7 + c.dz / 100, 0.9), eff: 0.5 })),
+    verify: async (d) => ({ stats: st(0.7, 0.9), eff: 0.5 }), progress() {}, cancelled: () => false };
+  const r = await runAutoDesign({ stages: { height: true }, obs, current: { milky: 3, count: 5, pitch: 0, dz: 0 }, heightRange: [0, 3] }, io);
+  const g = r.steps.find((x) => x.stage === 'guard');
+  ok(r.unchanged && r.best.dz === 0 && g?.tried.dz === 3 && /현재안 유지/.test(r.reason), `⑤ 이득 없음 → 현재안 유지 (시도 dz ${g?.tried.dz})`); }
 done();
