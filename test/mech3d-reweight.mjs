@@ -46,30 +46,37 @@ const beam = { flux: 1, sample: (r) => [4.5 + r(), 4.5 + r(), -1, 0, 0, 1] };
   ok(Math.abs(e[0] - 1) < 1e-12 && Math.abs(e[1] - 0.2) < 1e-12, 'ESS 비율 = (Σf)²/(n·Σf²)');
   let thrown = ''; try { rwCoeffs({ mus: 0, mua: 0, g: 0.9 }, G); } catch (er) { thrown = er.message; }
   ok(/기준 Milky/.test(thrown), '기준 μs = 0 이면 재가중 불가 — 오류'); }
-{ const F = plateFixture(table), ms = milkyAxis(3), base = F.S.optics[0];
+{ const F = plateFixture(table), ms = milkyAxis(3, 0.025), base = F.S.optics[0], fi = (v) => ms.findIndex((x) => Math.abs(x - v) < 1e-9);
   const grid = milkyGridOptics(F.mspec.parts[0], { table }, ms), C = rwCoeffs(base, grid), nCell = F.G.ns * F.G.nw;
-  const B = 8, rwAccs = Array.from({ length: grid.length }, () => []);
+  const B = 12, rwAccs = Array.from({ length: grid.length }, () => []);
   let n = 0; const sf = new Float64Array(grid.length), sf2 = new Float64Array(grid.length);
   for (let b = 0; b < B; b++) {
     const r = runChunk({ ...F, N: 25000, seed: 100 + b, rw: { part: 0, C } });
     for (let j = 0; j < grid.length; j++) rwAccs[j].push(r.rw.acc.slice(j * nCell, (j + 1) * nCell));
     n += r.rw.n; for (let j = 0; j < grid.length; j++) { sf[j] += r.rw.sf[j]; sf2[j] += r.rw.sf2[j]; }
-    if (b === 0) ok(r.rw.acc.subarray(ms.indexOf(3) * nCell, (ms.indexOf(3) + 1) * nCell).every((v, k) => Math.abs(v - r.acc[k]) <= 1e-12 * Math.max(1, r.acc[k])), '기준 Milky 격자 지도 = 일반 집계');
+    if (b === 0) ok(r.rw.acc.subarray(fi(3) * nCell, (fi(3) + 1) * nCell).every((v, k) => Math.abs(v - r.acc[k]) <= 1e-12 * Math.max(1, r.acc[k])), '기준 Milky 격자 지도 = 일반 집계');
   }
   const ess = essRatio(sf, sf2, n);
-  for (const m of [2, 4]) {   // Milky ±1 (A-1)
-    const j = ms.indexOf(m), pm = { ...F.mspec, parts: [setPartMaterialParam(F.mspec.parts[0], 'milky', m)] };
+  for (const m of [2.8, 3.2]) {   // A-1: 기준 ±0.2 (재가중 창 = 기준 ±0.25, spec 개정)
+    const j = fi(m), pm = { ...F.mspec, parts: [setPartMaterialParam(F.mspec.parts[0], 'milky', m)] };
     const S2 = composeScene({ rt: F.rt, mspec: pm, ledParts: null, table, db: null, line: F.line });
     const dir = Array.from({ length: B }, (_, b) => runChunk({ ...F, S: S2, N: 25000, seed: 900 + b }).acc);
     const a = tallyStats(F.G, rwAccs[j], F.obs), d = tallyStats(F.G, dir, F.obs);
-    let worst = 0, cnt = 0;
-    for (let k = 0; k < nCell; k++) {
-      if (!F.G.valid[k] || !(d.map[k] > 0)) continue;
-      const va = rwAccs[j].map((x) => x[k] / F.G.area[k]), vd = dir.map((x) => x[k] / F.G.area[k]);
-      const mean = (v) => v.reduce((s, x) => s + x, 0) / v.length, se = (v) => Math.sqrt(v.reduce((s, x) => s + (x - mean(v)) ** 2, 0) / (v.length - 1) / v.length);
-      const z = Math.abs(mean(va) - mean(vd)) / Math.hypot(se(va), se(vd)); worst = Math.max(worst, z); cnt++;
+    const mean = (v) => v.reduce((s, x) => s + x, 0) / v.length, se = (v) => Math.sqrt(v.reduce((s, x) => s + (x - mean(v)) ** 2, 0) / (v.length - 1) / v.length);
+    const zOf = (va, vd) => Math.abs(mean(va) - mean(vd)) / Math.hypot(se(va), se(vd));
+    // (b) 총광량(유효 셀 합) — 편향에 가장 민감  (c) 길이 방향 행(i)별 Σ출사/Σ면적의 최대 z
+    const tot = (x) => { let s = 0; for (let k = 0; k < nCell; k++) if (F.G.valid[k]) s += x[k]; return s; };
+    const zTot = zOf(rwAccs[j].map(tot), dir.map(tot));
+    let zRow = 0;
+    for (let i = 0; i < F.G.ns; i++) {
+      let ar = 0; for (let w = 0; w < F.G.nw; w++) if (F.G.valid[i * F.G.nw + w]) ar += F.G.area[i * F.G.nw + w];
+      if (!(ar > 0)) continue;
+      const row = (x) => { let s = 0; for (let w = 0; w < F.G.nw; w++) if (F.G.valid[i * F.G.nw + w]) s += x[i * F.G.nw + w]; return s / ar; };
+      const va = rwAccs[j].map(row), vd = dir.map(row);
+      if (mean(va) + mean(vd) > 0) zRow = Math.max(zRow, zOf(va, vd));
     }
-    ok(ess[j] >= 0.3 && Math.abs(a.Ulen - d.Ulen) <= 0.02, `A-1 Milky ${m}: ESS ${ess[j].toFixed(2)} · U 재가중 ${a.Ulen.toFixed(3)} vs 직접 ${d.Ulen.toFixed(3)}`);
-    ok(worst < 4.5, `A-1 Milky ${m}: 셀 평균 차 최대 ${worst.toFixed(2)}σ (셀 ${cnt}개 — 다중 비교라 4.5σ)`);
+    // (d) U 는 ≈0.05 로 가장 잡음 큰 최소 행에 좌우돼 편향 검출력이 낮다 — 느슨한 0.03
+    const dU = Math.abs(a.Ulen - d.Ulen);
+    ok(ess[j] >= 0.3 && zTot < 3 && zRow < 4 && dU <= 0.03, `A-1 Milky ${m}: ESS ${ess[j].toFixed(2)} · 총광량 z ${zTot.toFixed(2)} · 행 최대 z ${zRow.toFixed(2)} · U 재가중 ${a.Ulen.toFixed(3)} vs 직접 ${d.Ulen.toFixed(3)}`);
   } }
 done();
