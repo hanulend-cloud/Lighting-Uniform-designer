@@ -30,4 +30,26 @@ const fakePorts = (log, delay = 0) => Array.from({ length: 3 }, (_, w) => ({ sen
   ok(Math.abs(tot - chunks) < 1e-9 && w.every((v) => Math.abs(v - chunks / 4) < 1e-9), '배치 무게 정규화(합은 그대로)');
   const r2 = await R.trace(job, { N: 1e7, maxMs: 1, minN: 60000, chunkN: 2000, batches: 4 });
   ok(r2.photons >= 60000 && r2.photons < 70000, `minN 이 시간보다 우선: ${r2.photons}`); }
+{ // 응답 없는 Worker → 시간 제한 오류(작게 주입)
+  const hang = [{ send: async (m) => (m.type === 'scene' ? { ready: true } : new Promise(() => {})) }];
+  const R = createAdRunner({ ports: hang, chunkTimeoutMs: 30, sceneTimeoutMs: 30 }), t = Date.now();
+  let msg = ''; try { await R.trace({ sceneKey: 'h', scene: { G: { ns: 2, nw: 2 } } }, { N: 5000 }); } catch (e) { msg = e.message; }
+  ok(/응답 없음 \(chunk/.test(msg) && Date.now() - t < 1000, `멈춘 Worker → 시간 제한 오류: ${msg}`);
+  const R2 = createAdRunner({ ports: [{ send: () => new Promise(() => {}) }], sceneTimeoutMs: 20 });
+  msg = ''; try { await R2.trace({ sceneKey: 'h2', scene: { G: { ns: 2, nw: 2 } } }, { N: 5000 }); } catch (e) { msg = e.message; }
+  ok(/응답 없음 \(scene/.test(msg), `장면 응답 없음 → 오류: ${msg}`); }
+{ // 한 Worker 실패 → 다른 Worker 도 새 청크를 보내지 않음, 첫 오류를 던짐
+  const log = [], good = fakePorts(log, 5).slice(0, 2);
+  const bad = { send: async (m) => { if (m.type === 'scene') return { ready: true }; log.push('bad:chunk'); throw new Error('Worker 고장'); } };
+  const R = createAdRunner({ ports: [...good, bad] });
+  let msg = ''; try { await R.trace({ sceneKey: 'f', scene: { G: { ns: 2, nw: 2 } } }, { N: 1e6, chunkN: 1000, batches: 4 }); } catch (e) { msg = e.message; }
+  await new Promise((res) => setTimeout(res, 30));
+  const n = log.filter((x) => x.endsWith('chunk')).length;
+  ok(msg === 'Worker 고장' && n <= 3, `실패 Worker → 첫 오류 · 나머지 중단(청크 ${n}개만 보냄)`); }
+{ // 기다리는 중 cancel → 바로 '중지'
+  const R = createAdRunner({ ports: [{ send: async (m) => (m.type === 'scene' ? { ready: true } : new Promise(() => {})) }] });
+  const p = R.trace({ sceneKey: 'c', scene: { G: { ns: 2, nw: 2 } } }, { N: 5000 }).catch((e) => e.message);
+  await new Promise((res) => setTimeout(res, 10)); const t = Date.now(); R.cancel();
+  const msg = await p;
+  ok(/중지/.test(msg) && Date.now() - t < 200, `대기 중 cancel → 즉시 중지: ${msg}`); }
 done();

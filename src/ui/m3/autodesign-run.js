@@ -5,28 +5,41 @@
 import { essRatio } from '../../engine/mech3d/reweight.js';
 
 const MIN_CHUNK = 1000;
-export function createAdRunner({ ports, now = () => globalThis.performance?.now?.() ?? Date.now() }) {
-  let stopped = false, seed = 7001;
-  const check = () => { if (stopped) throw new Error('자동설계 중지'); };
+// 응답 시간 제한(progressive.js 와 같음): 장면 60초 · 청크 30초. cancel() = 기다리던 send 도 바로 '중지' 로 끝냄
+// 한 Worker 루프가 실패하면 같은 호출의 다른 루프도 새 청크를 보내지 않고 첫 오류를 다시 던짐
+export function createAdRunner({ ports, now = () => globalThis.performance?.now?.() ?? Date.now(), sceneTimeoutMs = 60000, chunkTimeoutMs = 30000, timers = globalThis }) {
+  let stopped = false, seed = 7001, onStop = null;
+  const stopP = new Promise((_, rej) => { onStop = () => rej(new Error('자동설계 중지')); });
+  stopP.catch(() => {});
+  const check = (ctl) => { if (stopped) throw new Error('자동설계 중지'); if (ctl?.err) throw ctl.err; };
+  const withTimeout = (pr, what, ms) => {
+    let id;
+    const to = new Promise((_, rej) => { id = timers.setTimeout(() => rej(new Error(`Worker 응답 없음 (${what} ${ms / 1000}초)`)), ms); });
+    return Promise.race([pr, to, stopP]).finally(() => timers.clearTimeout(id));
+  };
+  // Worker 루프 하나 — 오류면 ctl.err 를 세워 다른 루프가 멈추게
+  const guard = (ctl, fn) => async (p) => { try { await fn(p); } catch (e) { ctl.err ??= e; throw e; } };
   async function prepare(job) {
     check();
-    await Promise.all(ports.map((p) => p.send({ type: 'scene', sceneKey: job.sceneKey, ...job.scene })));
+    const ctl = { err: null };
+    await Promise.all(ports.map(guard(ctl, (p) => withTimeout(p.send({ type: 'scene', sceneKey: job.sceneKey, ...job.scene }), 'scene', sceneTimeoutMs))));
   }
   const send = async (job, msg) => {
-    const r = await msg.p.send({ type: 'chunk', sceneKey: job.sceneKey, seed: seed++, ...msg.body });
+    const r = await withTimeout(msg.p.send({ type: 'chunk', sceneKey: job.sceneKey, seed: seed++, ...msg.body }), 'chunk', chunkTimeoutMs);
     if (r.stale) throw new Error('장면이 바뀜 — 다시 실행하세요');
     return r;
   };
   // 청크 목록을 Worker 들에 나눠 돌림(빈 Worker 가 다음 청크를 가져감)
   async function runAll(job, chunks, onReply) {
     let next = 0;
-    await Promise.all(ports.map(async (p) => {
+    const ctl = { err: null };
+    await Promise.all(ports.map(guard(ctl, async (p) => {
       while (next < chunks.length) {
-        check();
+        check(ctl);
         const k = next++;
         onReply(k, await send(job, { p, body: chunks[k] }));
       }
-    }));
+    })));
   }
   // chunkN 기본 = Worker 마다 청크 2개쯤(후보당 광자가 적어도 모든 Worker 가 일하게)
   async function trace(job, { N, maxMs = Infinity, minN = 0, chunkN = Math.max(2000, Math.ceil(N / (2 * ports.length))), chunkMs = Math.min(500, maxMs / 5), batches = 8, rw = null }) {
@@ -39,10 +52,11 @@ export function createAdRunner({ ports, now = () => globalThis.performance?.now?
     const t0 = now(), more = () => issued < N && !(now() - t0 >= maxMs && issued >= minN && k >= batches);
     // 시간 제한이면 첫 청크 = minN(없으면 N/10) 을 Worker 마다 2개로 — 그 뒤 잰 속도로 조절
     const size0 = timed ? Math.min(chunkN, Math.max(MIN_CHUNK, Math.ceil(Math.max(minN, N / 10) / (2 * ports.length)))) : chunkN;
-    await Promise.all(ports.map(async (p) => {
+    const ctl = { err: null };
+    await Promise.all(ports.map(guard(ctl, async (p) => {
       let size = size0;
       while (more()) {
-        check();
+        check(ctl);
         const m = Math.min(size, N - issued);
         let b = 0; for (let i = 1; i < batches; i++) if (bIss[i] < bIss[b]) b = i;   // 보낸 광자가 가장 적은 배치(고정 청크면 k % batches 와 같음)
         issued += m; bIss[b] += m; k++;
@@ -53,7 +67,7 @@ export function createAdRunner({ ports, now = () => globalThis.performance?.now?
         for (const key in ledger) ledger[key] += r.ledger[key];
         if (rw) { for (let i = 0; i < RB[b].length; i++) RB[b][i] += r.rw.acc[i]; for (let j = 0; j < sf.length; j++) { sf[j] += r.rw.sf[j]; sf2[j] += r.rw.sf2[j]; } n += r.rw.n; }
       }
-    }));
+    })));
     // 배치 무게가 다르면(청크 수·크기 차) 평균 광자 수로 정규화 — 합은 그대로(효율 = Σ/방출), 빈 배치는 뺌
     const keep = [...bDone.keys()].filter((b) => bDone[b] > 0), ref = issued / keep.length;
     const norm = (A) => keep.map((b) => { if (bDone[b] !== ref) { const s = ref / bDone[b]; for (let i = 0; i < A[b].length; i++) A[b][i] *= s; } return A[b]; });
@@ -70,5 +84,5 @@ export function createAdRunner({ ports, now = () => globalThis.performance?.now?
     });
     return { maps, emitted };
   }
-  return { trace, traceEach, cancel() { stopped = true; }, get stopped() { return stopped; } };
+  return { trace, traceEach, cancel() { if (!stopped) { stopped = true; onStop(); } }, get stopped() { return stopped; } };
 }
