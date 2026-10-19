@@ -4,20 +4,34 @@ import { getMech3d, getLedMesh, clearLedMesh } from '../../engine/mech3d/runtime
 import { meshStats, findLeds, findEmitters, pcbIndex, pickLedNearRay, refineEmitterFace, snapRadius } from '../../engine/mech3d/led-detect.js';
 import { transformMesh } from '../../engine/mech3d/xform.js';
 import { manualLeds } from '../../engine/mech3d/placement.js';
+import { stepLayoutOf } from '../../engine/mech3d/virtual-leds.js';
 import { bounds } from '../../engine/mech3d/mesh.js';
 
-let ledCache = null, manCache = null;
-export function resetLedCaches() { ledCache = null; manCache = null; }
+let ledCache = null, manCache = null, layCache = [];
+export function resetLedCaches() { ledCache = null; manCache = null; layCache = []; }
 export const rawParts = (parts) => parts.map(({ positions, triangles, faceIds, faceCount, volume }) => ({ positions, triangles, faceIds, faceCount, volume }));
 
 // LED STEP 부품(위치 보정 적용 — 화면·인식용, (메쉬, offset, rot) 별 캐시). Worker 에는 원본을 보내고 composeScene 이 같은 변환을 한다
-export function ledPartsNow(M) {
+function stepPartsNow(M) {
   const st = M?.light?.step, lm = getLedMesh();
   if (!st || !lm?.parts?.length || lm.name !== st.name) return null;
   const key = JSON.stringify([st.offset, st.rot]);
   if (!ledCache || ledCache.raw !== lm || ledCache.key !== key) ledCache = { raw: lm, key, parts: lm.parts.map((m) => transformMesh(m, st.offset, st.rot)) };
   return ledCache.parts;
 }
+// 원래/가상 배치 하나로(spec P4 §2.2a) → { parts, leds, pcb, excluded, emitters, virtual, err? } | null.
+// 입력이 같으면 같은 객체(화면 meshKey 비교용). 캐시 2칸(원래·가상). line 이 없으면 원래 배치
+export function stepLayout(M, line = null) {
+  const st = M?.light?.step, parts = stepPartsNow(M);
+  if (!st || !parts) return null;
+  const v = st.virtual && line ? st.virtual : null, ln = v ? line : null;
+  const key = JSON.stringify([st.leds, st.pcb, st.excluded, (st.emitters ?? []).map((e) => [e.part, e.pos, e.axis, e.xAxis, !!e.needsCheck]), v]);
+  let c = layCache.find((x) => x.parts === parts && x.line === ln && x.key === key);
+  if (!c) { c = { parts, line: ln, key, res: stepLayoutOf({ parts, step: { ...st, virtual: v }, line: ln }) }; layCache = [c, ...layCache].slice(0, 2); }
+  return c.res;
+}
+// 화면·간섭용 LED STEP 부품: line 을 주면 가상 배치 반영, 없으면 원래(인식·클릭 맞춤은 STEP 번호 기준이라 원래)
+export function ledPartsNow(M, line = null) { return line ? stepLayout(M, line)?.parts ?? null : stepPartsNow(M); }
 // 기준 LED 발광면 → LED·PCB·발광 위치 인식(변환된 메쉬 기준 → 월드 좌표). 상태는 바꾸지 않고 결과만 돌려준다
 export function recognizeLeds(M, ref) {
   const parts = ledPartsNow(M);
@@ -72,7 +86,11 @@ export function snapLedPick(M, s, nMech, needFace) {
 // 계산에 쓸 발광점: LED STEP = 인식된 것 중 확인 필요·제외 뺀 것, 직접 배치 = 관측 라인 위 배치((라인, 설정, 기구) 별 캐시). 오류는 던진다
 export function currentEmitters(M, line) {
   const L = M.light;
-  if (L.kind === 'step') { const ex = new Set(L.step?.excluded ?? []); return (L.step?.emitters ?? []).filter((e) => !e.needsCheck && !ex.has(e.part)); }
+  if (L.kind === 'step') {
+    const lay = stepLayout(M, line);
+    if (lay) return lay.emitters;
+    const ex = new Set(L.step?.excluded ?? []); return (L.step?.emitters ?? []).filter((e) => !e.needsCheck && !ex.has(e.part));   // 메쉬 없음
+  }
   if (L.kind === 'manual' && line) {
     const key = JSON.stringify(L.manual);
     if (!manCache || manCache.line !== line || manCache.key !== key || manCache.rt !== getMech3d()) {
@@ -85,10 +103,10 @@ export function currentEmitters(M, line) {
   }
   return [];
 }
-// LED 몸체 외곽 상자(점검 ① 간섭) — LED STEP 의 인식된 LED 중 제외하지 않은 것
-export function ledBodies(M) {
-  const st = M.light.step, parts = M.light.kind === 'step' ? ledPartsNow(M) : null;
-  if (!st || !parts) return [];
-  const ex = new Set(st.excluded ?? []);
-  return (st.leds ?? []).filter((i) => !ex.has(i) && parts[i]).map((i) => { const b = bounds(parts[i].positions); return { led: i, lo: b.slice(0, 3), hi: b.slice(3) }; });
+// LED 몸체 외곽 상자(점검 ① 간섭) — 배치(원래/가상)의 LED 중 제외하지 않은 것
+export function ledBodies(M, line = null) {
+  const lay = M.light.kind === 'step' ? stepLayout(M, line) : null;
+  if (!lay) return [];
+  const ex = new Set(lay.excluded);
+  return lay.leds.filter((i) => !ex.has(i) && lay.parts[i]).map((i) => { const b = bounds(lay.parts[i].positions); return { led: i, lo: b.slice(0, 3), hi: b.slice(3) }; });
 }

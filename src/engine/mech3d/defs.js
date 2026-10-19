@@ -27,5 +27,10 @@ export function migrateMech3d(m) {
   m.observe.targetLum ??= null;
   m.observe.targetNoise ??= 0.02;
   m.checks = { ...defaultChecks(), ...(m.checks ?? {}) };
+  const st = m.light.step;   // LED STEP 가상 배치(spec P4 §2.2a): { count 정수 ≥ 1, pitch ≥ 0 } | null
+  if (st) {
+    const v = st.virtual, c = Math.round(Number(v?.count)), p = Number(v?.pitch);
+    st.virtual = v && typeof v === 'object' ? { count: Number.isFinite(c) && c >= 1 ? c : 1, pitch: Number.isFinite(p) && p > 0 ? p : 0 } : null;
+  }
   return m;
 }

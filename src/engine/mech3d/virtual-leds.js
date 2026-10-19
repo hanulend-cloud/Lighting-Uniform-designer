@@ -36,3 +36,15 @@ export function virtualLayout({ parts, step, line, count, pitch = 0 }) {
   }
   return out;
 }
+
+// 원래/가상 배치를 하나로(순수) — step.virtual = { count, pitch } | null. line 이 없으면 원래 배치로 대신.
+// 가상인데 기준 LED 가 없으면 원래 배치 + err. 반환 { parts, leds, pcb, excluded, emitters, virtual, ref?, err? }
+export function stepLayoutOf({ parts, step, line }) {
+  const ex = new Set(step.excluded ?? []), v = step.virtual ?? null;
+  const orig = () => ({ parts, leds: step.leds ?? [], pcb: step.pcb ?? -1, excluded: step.excluded ?? [], emitters: (step.emitters ?? []).filter((e) => !e.needsCheck && !ex.has(e.part)), virtual: null });
+  if (!v || !line) return orig();
+  try {
+    const r = virtualLayout({ parts, step, line, count: v.count, pitch: v.pitch });
+    return { parts: r.parts, leds: r.leds, pcb: r.pcb, excluded: [], emitters: r.emitters, virtual: v, ref: r.ref };
+  } catch (e) { return { ...orig(), err: e.message }; }
+}

@@ -20,4 +20,10 @@ ok(old.light.spec.fluxLm === 0 && old.observe.targetNoise === 0.02 && old.observ
   const good = { light: { spec: { fluxLm: 12.5 } }, observe: {} }; migrateMech3d(good);
   ok(bad.every((v) => v === 0) && good.light.spec.fluxLm === 12.5, 'fluxLm: 음수·비수·무한 → 0, 정상값 유지');
 }
+{ // LED STEP 가상 배치 정리
+  const mk = (v) => { const m = { light: { spec: {}, step: { name: 'a', ...(v === undefined ? {} : { virtual: v }) } }, observe: {} }; migrateMech3d(m); return m.light.step.virtual; };
+  const a = mk(undefined), b = mk({ count: 6.4, pitch: 15 }), c = mk({ count: 0, pitch: -3 }), d = mk({ count: 'x', pitch: NaN }), e = mk('bad');
+  ok(a === null && b.count === 6 && b.pitch === 15 && c.count === 1 && c.pitch === 0 && d.count === 1 && d.pitch === 0 && e === null, `step.virtual 정리: ${JSON.stringify([a, b, c, d, e])}`);
+  const n = { light: { spec: {}, step: null }, observe: {} }; migrateMech3d(n);
+  ok(n.light.step === null, 'step 없음 → 그대로'); }
 done();

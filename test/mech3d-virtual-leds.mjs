@@ -1,5 +1,5 @@
 // LED STEP 가상 배치: node test/mech3d-virtual-leds.mjs
-import { virtualLayout, rotateAbout } from '../src/engine/mech3d/virtual-leds.js';
+import { virtualLayout, rotateAbout, stepLayoutOf } from '../src/engine/mech3d/virtual-leds.js';
 import { ledSPositions } from '../src/engine/mech3d/placement.js';
 import { recognizeLine } from '../src/engine/mech3d/line.js';
 import { bounds } from '../src/engine/mech3d/mesh.js';
@@ -25,4 +25,13 @@ const step = { leds: [1, 2], pcb: 0, excluded: [], emitters: [{ part: 1, pos: [2
   const em = { part: 1, pos: [40, 0, 2.5], axis: [0, 0, 1], xAxis: [0, 1, 0] }, P = [pcb, boxMesh(39, -1, 1, 2, 2, 1.5)];
   const v = virtualLayout({ parts: P, step: { leds: [1], pcb: 0, excluded: [], emitters: [em] }, line: ring, count: 4, pitch: 0 });
   ok(v.emitters.every((e) => Math.abs(Math.hypot(e.pos[0], e.pos[1]) - 40) < 0.2 && Math.abs(e.xAxis[0] * e.pos[0] + e.xAxis[1] * e.pos[1]) < 0.05 * 40), '원 라인: 반경 유지, xAxis ⟂ 반지름(접선)'); }
+{ // stepLayoutOf: 원래/가상 하나로
+  const o = stepLayoutOf({ parts, step: { ...step, excluded: [2], virtual: null }, line: strip });
+  ok(o.parts === parts && o.virtual === null && o.leds.join() === '1,2' && o.excluded.join() === '2' && o.emitters.length === 1 && o.emitters[0].part === 1 && o.pcb === 0, '원래 배치: 부품 그대로 · 제외 뺀 발광점');
+  const n = stepLayoutOf({ parts, step: { ...step, virtual: { count: 3, pitch: 0 } }, line: null });
+  ok(n.virtual === null && n.parts === parts, '라인 없음 → 원래 배치');
+  const v = stepLayoutOf({ parts, step: { ...step, excluded: [1], virtual: { count: 3, pitch: 10 } }, line: strip });
+  ok(v.virtual?.count === 3 && v.parts.length === 5 && v.leds.join() === '2,3,4' && v.excluded.length === 0 && v.emitters.length === 3 && v.ref === 2 && v.pcb === 0, '가상 배치: 복사 3개 · 제외 없음');
+  const e = stepLayoutOf({ parts, step: { ...step, emitters: [], virtual: { count: 3, pitch: 0 } }, line: strip });
+  ok(e.virtual === null && e.err && e.emitters.length === 0, '기준 LED 없음 → 원래 배치 + 오류 문구'); }
 done();

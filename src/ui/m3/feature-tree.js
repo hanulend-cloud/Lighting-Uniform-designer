@@ -19,8 +19,10 @@ export function treeNodes(M, S) {
   M.parts.forEach((p, i) => node(`part:${i}`, p.name, partBadge(p), true, p.material.kind, hid.has(i) ? 'off' : 'on'));
   node('light', '▾ 광원', { none: '지정 안 함', step: 'LED STEP', manual: '직접 배치' }[L.kind]);
   if (L.kind !== 'none') {
-    const ex = L.step?.excluded ?? [], n = L.kind === 'step' ? (L.step?.leds ?? []).filter((i) => !ex.includes(i)).length : L.manual.count;
-    node('leds', `LED ×${n}`, L.kind === 'manual' ? (L.manual.pitch > 0 ? `피치 ${+(+L.manual.pitch).toFixed(1)}` : '균등') : `${L.spec.beam}°`, true, 'led', L.kind === 'step' ? (S.hideLeds ? 'off' : 'on') : undefined);
+    const ex = L.step?.excluded ?? [], vt = L.kind === 'step' ? L.step?.virtual : null;
+    const n = vt ? vt.count : L.kind === 'step' ? (L.step?.leds ?? []).filter((i) => !ex.includes(i)).length : L.manual.count;
+    const pit = (p) => (p > 0 ? `피치 ${+(+p).toFixed(1)}` : '균등');
+    node('leds', `LED ×${n}`, L.kind === 'manual' ? pit(L.manual.pitch) : vt ? `가상 ${vt.count}개 ${pit(vt.pitch)}` : `${L.spec.beam}°`, true, 'led', L.kind === 'step' ? (S.hideLeds ? 'off' : 'on') : undefined);
   }
   const ln = S.line;
   node('obs', '▾ 관측면', ln ? `${LINE_KIND[ln.kind] ?? ln.kind} ${ln.length.toFixed(0)}×${ln.width.toFixed(0)}` : O.faces.length ? '인식 중' : '미지정');

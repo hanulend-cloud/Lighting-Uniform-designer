@@ -44,18 +44,28 @@ export function renderLightProps(el, m, ui, h) {
   on(el, '[data-lp-man]', 'change', (x) => { const k = x.dataset.lpMan; if (k === 'pcbKind' || k === 'side') h.onManual(k, x.value); else { const v = readNum(x); if (v != null) h.onManual(k, v); } });
 }
 
-// LED 노드: 인식 상태 · 배광 · 지향각 · 발광면 크기 · 광속(lm/개, 0 = 상대값) · PCB 색
-// ui = { pick, ledInfo }, h = { onLedSpec(key,val), onSolder(v), onPick(mode|null) }
+// LED STEP "배치" 행(순수 HTML): [STEP 원래 위치 | 가상 배치] + 가상이면 개수·피치·[원래 STEP 위치로] (spec P4 §2.2a)
+export function stepLayoutRowHtml(st) {
+  const v = st.virtual, can = !!st.emitters?.length;
+  const radio = (val, label, chk, dis) => `<label><input type="radio" name="lp-vmode" value="${val}" data-lp-vmode ${chk ? 'checked' : ''} ${dis ? 'disabled title="LED 발광면을 먼저 지정하세요"' : ''}> ${label}</label>`;
+  return `<div class="m3-row"><label>배치</label>${radio('orig', 'STEP 원래 위치', !v, false)} ${radio('virt', '가상 배치', !!v, !can && !v)}</div>
+    ${v ? `<div class="m3-row">개수<input type="number" min="1" step="1" value="${v.count}" data-lp-virt="count"> 피치<input type="number" min="0" step="0.5" value="${v.pitch}" data-lp-virt="pitch">mm <span class="mut">(0 = 균등)</span> <button data-lp-vorig>원래 STEP 위치로</button></div>
+    <div class="m3-row mut">기준 LED 의 몸체·발광점을 관측 라인을 따라 복사 — 원래 STEP 은 그대로</div>` : ''}`;
+}
+// LED 노드: 인식 상태 · (LED STEP) 배치 · 배광 · 지향각 · 발광면 크기 · 광속(lm/개, 0 = 상대값) · PCB 색
+// ui = { pick, ledInfo }, h = { onLedSpec(key,val), onSolder(v), onPick(mode|null), onStepVirtual(v|null) }
 export function renderLedProps(el, m, ui, h) {
   const L = m.light;
   if (L.kind === 'none') { el.innerHTML = '<div class="m3-h">속성 · LED</div><div class="mut">광원 노드에서 방식을 먼저 고르세요</div>'; return; }
-  const st = L.step;
+  const st = L.step, v = L.kind === 'step' ? st?.virtual : null;
+  const nLed = (st?.leds ?? []).filter((i) => !(st.excluded ?? []).includes(i)).length;
   const status = L.kind === 'step'
-    ? (st?.emitters?.length ? `LED ${st.leds.length}개 인식${st.excluded?.length ? ` · 제외 ${st.excluded.length}개` : ''}` : '<span class="mut">LED 발광면을 아직 지정하지 않음</span>')
+    ? (st?.emitters?.length ? `LED ${st.leds.length}개 인식${st.excluded?.length ? ` · 제외 ${st.excluded.length}개` : ''}${v ? ` · 가상 배치 ${v.count}개` : ''}` : '<span class="mut">LED 발광면을 아직 지정하지 않음</span>')
     : `직접 배치 ${L.manual.count}개`;
   el.innerHTML = `<div class="m3-h">속성 · LED</div>
     <div class="m3-row">${status}</div>
-    ${L.kind === 'step' && st ? `<div class="m3-row">${pickBtn(ui, 'led', 'LED 발광면 클릭')} ${pickBtn(ui, 'ledx', 'LED 제외/포함 클릭')}</div>` : ''}
+    ${L.kind === 'step' && st ? stepLayoutRowHtml(st) : ''}
+    ${L.kind === 'step' && st ? (v ? '<div class="m3-row mut">가상 배치 중에는 발광면·제외 지정을 쓰지 않음(원래 STEP 위치에서 지정)</div>' : `<div class="m3-row">${pickBtn(ui, 'led', 'LED 발광면 클릭')} ${pickBtn(ui, 'ledx', 'LED 제외/포함 클릭')}</div>`) : ''}
     ${ui.ledInfo ? `<div class="m3-row mut">${esc(ui.ledInfo)}</div>` : ''}
     <div class="m3-row"><label>배광</label><select data-lp-spec="model"><option value="lambertian" ${sel(L.spec.model, 'lambertian')}>램버시안</option><option value="gaussian" ${sel(L.spec.model, 'gaussian')}>가우시안</option></select>
       지향각<input type="number" min="10" max="170" step="5" value="${L.spec.beam}" data-lp-spec="beam">°</div>
@@ -70,6 +80,10 @@ export function renderLedProps(el, m, ui, h) {
     if (v != null) h.onLedSpec(k, v); else if (k === 'fluxLm') h.onLedSpec(k, 0);   // 광속 빈칸 = 0(상대값)
   });
   on(el, '[data-lp-solder]', 'change', (x) => h.onSolder(x.value));
+  // 배치 전환: 처음 가상으로 = 현재 LED 수·피치 0(균등)
+  on(el, '[data-lp-vmode]', 'change', (x) => { if (!x.checked) return; if (x.value === 'virt') { if (!v) h.onStepVirtual({ count: Math.max(1, nLed), pitch: 0 }); } else if (v) h.onStepVirtual(null); });
+  on(el, '[data-lp-virt]', 'change', (x) => { const n = readNum(x); if (n != null && v) h.onStepVirtual({ ...v, [x.dataset.lpVirt]: x.dataset.lpVirt === 'count' ? Math.max(1, Math.round(n)) : n }); });
+  on(el, '[data-lp-vorig]', 'click', () => h.onStepVirtual(null));
 }
 
 // 관측면 노드: 면 클릭(추가/제거) · 라인 인식 결과 · 관측 방향 · 원뿔 · 집계 격자 · 가장자리 제외

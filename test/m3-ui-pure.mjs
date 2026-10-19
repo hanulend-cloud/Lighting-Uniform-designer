@@ -7,6 +7,7 @@ import { ramp, NO_DATA } from '../src/ui/m3/colormap.js';
 import { defaultLight, defaultObserve, defaultChecks } from '../src/engine/mech3d/defs.js';
 import { defaultPart, setPartMaterial, setPartMaterialParam } from '../src/engine/mech3d/materials.js';
 import { clearanceHtml } from '../src/ui/mech3d-panel.js';
+import { stepLayoutRowHtml } from '../src/ui/mech3d-light-panel.js';
 import { ok, done } from './mech3d-util.mjs';
 import { stageAvailability, autoCardHtml, compareHtml, clampCap, overallFrac, etaText, profileSvg } from '../src/ui/m3/autodesign-panel.js';
 
@@ -109,4 +110,14 @@ ok(clampCap(12) === 9.9 && clampCap(0.1) === 0.5 && clampCap(3) === 3 && clampCa
   ok(/data-ad="run" disabled title="관측 라인이 없음"/.test(nl) && /aria-label="Milky 상한"/.test(nl), '라인 없음 → 실행 비활성 · 상한 aria-label');
   const c = compareHtml({ cur: { count: 5, pitch: 0, milky: 3, Ulen: 0.6, Uwid: 0.7, eff: 0.5, shape: { dt: 0, h: 0.2, R: 3 }, profile: [1, 2] }, best: { count: 5, pitch: 0, milky: 3, Ulen: 0.8, Uwid: 0.7, eff: 0.5, profile: [2, 2] }, feasible: true, reason: '', shape: null });
   ok(c.includes('적용된 형상') && (c.match(/<polyline/g) ?? []).length === 2, '비교표: 적용된 형상 · 프로파일 SVG'); }
+{ // LED STEP 가상 배치: 배지 · 배치 행
+  const st = { name: 'a.stp', offset: [0, 0, 0], rot: [0, 0, 0], leds: [1, 2, 3], excluded: [3], pcb: 0, emitters: [{ part: 1 }], virtual: null };
+  const node = (s) => treeNodes({ ...M, light: { ...defaultLight(), kind: 'step', step: s } }, { node: null, line: null }).find((n) => n.id === 'leds');
+  ok(node(st).label === 'LED ×2' && node(st).badge === '120°', `원래 위치 배지: ${node(st).label} ${node(st).badge}`);
+  const a = node({ ...st, virtual: { count: 6, pitch: 15 } }), b = node({ ...st, virtual: { count: 4, pitch: 0 } });
+  ok(a.label === 'LED ×6' && a.badge === '가상 6개 피치 15' && b.badge === '가상 4개 균등', `가상 배지: ${a.label} ${a.badge} / ${b.badge}`);
+  const h0 = stepLayoutRowHtml(st), h1 = stepLayoutRowHtml({ ...st, virtual: { count: 6, pitch: 15 } }), h2 = stepLayoutRowHtml({ ...st, emitters: [] });
+  ok(/value="orig" data-lp-vmode checked/.test(h0) && !/data-lp-virt/.test(h0) && !/data-lp-vorig/.test(h0), '배치 행: 원래 위치 선택 · 개수·피치 없음');
+  ok(/value="virt" data-lp-vmode checked/.test(h1) && /value="6" data-lp-virt="count"/.test(h1) && /value="15" data-lp-virt="pitch"/.test(h1) && h1.includes('원래 STEP 위치로'), '배치 행: 가상 → 개수·피치·원래 위치로');
+  ok(/value="virt" data-lp-vmode\s+disabled/.test(h2), '발광면 미지정 → 가상 배치 비활성'); }
 done();
