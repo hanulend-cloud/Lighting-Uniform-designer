@@ -144,6 +144,32 @@ export function deformPart(mesh, F, H, prm) {
   return { ...rest, positions: out, volume: meshVolume(out, mesh.triangles) };
 }
 
+// 변형 아랫면 z_b'(x,y) = zb − D (deformPart 의 w = 1 정점과 같은 식, 두께 하한 포함)
+export function bottomAt(H, prm) {
+  return (x, y) => { const { zt, zb } = H.at(x, y); return zb - Math.max(MIN_T - (zt - zb), disp(x, y, prm)); };
+}
+// ③ STEP 곡면 입력 — 외곽 직사각형(관측 좌표 높이맵 채움률 ≥ 0.98)·윗면 평평(zt 편차 ≤ 0.01)·비 2.5D 0 일 때만, 아니면 null.
+// 격자 간격 ≤ R/4(없으면 1 mm), 긴 축 ≤ 120·짧은 축 ≤ 60 점. 바깥으로 한 칸씩 더 표본(곡면이 외곽 상자보다 넓게 — 옆면은 상자가 자름)
+export function splineInput(base, H, prm) {
+  const F = prm.frame, P = base.positions, { hf, cx, cy, zmax } = H;
+  if (H.non25 > 0) return null;
+  let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+  for (let i = 0; i < P.length; i += 3) { const q = toFrame(F, [P[i], P[i + 1], P[i + 2]]); x0 = Math.min(x0, q[0]); x1 = Math.max(x1, q[0]); y0 = Math.min(y0, q[1]); y1 = Math.max(y1, q[1]); }
+  let all = 0, fill = 0, zlo = Infinity, zhi = -Infinity;
+  for (let j = 0; j < hf.ny; j++) for (let i = 0; i < hf.nx; i++) {
+    const k = j * hf.nx + i, x = cx + hf.x0 + (i + 0.5) * hf.cell, y = cy + hf.y0 + (j + 0.5) * hf.cell;
+    if (hf.mask[k]) { zlo = Math.min(zlo, hf.zt[k]); zhi = Math.max(zhi, hf.zt[k]); }
+    if (x < x0 || x > x1 || y < y0 || y > y1) continue;
+    all++; if (hf.mask[k]) fill++;
+  }
+  if (!all || fill / all < 0.98 || zhi - zlo > 0.01) return null;
+  const W = x1 - x0, L = y1 - y0, s = prm.R > 0 ? prm.R / 4 : 1, cap = (a, b) => (a >= b ? 120 : 60);
+  const ix = Math.max(2, Math.min(cap(W, L) - 3, Math.ceil(W / s))), iy = Math.max(2, Math.min(cap(L, W) - 3, Math.ceil(L / s)));
+  const nx = ix + 3, ny = iy + 3, dx = W / ix, dy = L / iy, gx = x0 - dx, gy = y0 - dy, z = new Float64Array(nx * ny), B = bottomAt(H, prm);
+  for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) z[j * nx + i] = B(gx + i * dx, gy + j * dy);
+  return { frame: { u: [...F.u], v: [...F.v], d: [...F.d] }, rect: [x0, x1, y0, y1], zTop: zhi + zmax, grid: { nx, ny, x0: gx, dx, y0: gy, dy, z } };
+}
+
 // 최소 두께(관측 좌표, 마스크 칸 중심 + LED 중심) — 제약 점검용
 export function minThickness(H, prm) {
   const { hf, cx, cy } = H; let mn = Infinity;

@@ -29,7 +29,7 @@ import { milkyRows } from '../../engine/mech3d/milky-search.js';
 import { candidatePositions } from '../../engine/mech3d/basis.js';
 import { ledAtS } from '../../engine/mech3d/placement.js';
 import { virtualEmittersAt } from '../../engine/mech3d/virtual-leds.js';
-import { heightsFor, deformPart, refinedFor, minThickness, shapeVarRanges, pathFromLine, swOnPath, ledEll, lineVarH } from '../../engine/mech3d/shape-opt.js';
+import { heightsFor, deformPart, refinedFor, minThickness, shapeVarRanges, pathFromLine, swOnPath, ledEll, lineVarH, splineInput } from '../../engine/mech3d/shape-opt.js';
 import { interferenceKeys } from '../../engine/mech3d/clearance.js';
 import { scaleMoveMesh, isIdentityXform } from '../../engine/mech3d/xform.js';
 import { defaultChecks } from '../../engine/mech3d/defs.js';
@@ -518,18 +518,19 @@ function adStep() {
   const st = adState(), r = st.result, d = r?.design;
   if (!d?.shape || st.stepBusy) return;   // 생성 중 반복 클릭 무시
   const { M } = adPreview(), i = d.shape.part, name = M.parts[i].name, file = `${String(name ?? 'part').replace(/[/\\:*?"<>|]/g, '_')}-p4.stp`;
-  const mesh = adShapeMesh(adBaseMesh(i, r.ctx), M.parts[i].shapeMod, 3), nTri = mesh.triangles.length / 3;   // 내보내기는 거친 세분(hMax = R/3) — 삼각형 수 줄임
+  const base = adBaseMesh(i, r.ctx), mod = M.parts[i].shapeMod, mesh = adShapeMesh(base, mod, 3), nTri = mesh.triangles.length / 3;   // 내보내기는 거친 세분(hMax = R/3) — 삼각형 수 줄임
+  let spline = null; try { spline = splineInput(base, heightsFor(base, mod.frame, mod.cell), mod); } catch { /* 메쉬 경로 */ }   // 직사각형·평평한 윗면이면 B-스플라인 곡면 솔리드
   const w = new Worker(new URL('../../export/mesh-step-worker.js', import.meta.url), { type: 'module' });
   st.stepBusy = true; st.stepWorker = w;
   const end = () => { w.terminate(); if (st.stepWorker === w) { st.stepWorker = null; st.stepBusy = false; } };
-  setStatus(nTri > 30000 ? `STEP 생성 중… 삼각형 ${nTri}개 — 많아서 오래 걸리거나 실패할 수 있음` : 'STEP 생성 중…');
+  setStatus(spline ? 'STEP 생성 중… (곡면)' : nTri > 30000 ? `STEP 생성 중… 삼각형 ${nTri}개 — 많아서 오래 걸리거나 실패할 수 있음` : 'STEP 생성 중…');
   w.onmessage = (ev) => {
-    if (ev.data.type === 'done') { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([ev.data.stepText], { type: 'application/step' })); a.download = file; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000); setStatus('STEP 내보내기 완료'); }
+    if (ev.data.type === 'done') { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([ev.data.stepText], { type: 'application/step' })); a.download = file; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000); setStatus(ev.data.note ? `STEP 내보내기 완료 — ${ev.data.note}` : 'STEP 내보내기 완료'); }
     else setStatus(`STEP 실패: ${ev.data.message}`);
     end();
   };
   w.onerror = (e) => { setStatus(`STEP 실패: ${e.message ?? e}`); end(); };
-  w.postMessage({ mesh: { positions: mesh.positions, triangles: mesh.triangles }, name });
+  w.postMessage({ mesh: { positions: mesh.positions, triangles: mesh.triangles }, spline, name });
 }
 
 // ---- 3D 클릭 (main.js:393-425) — 기구 부품 수(nMech) 이상인 번호는 LED STEP 부품 ----
