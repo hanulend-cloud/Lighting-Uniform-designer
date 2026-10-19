@@ -264,13 +264,67 @@ main { flex: 1 1 auto; min-height: 0; display: grid;
 .shape-info.busy { color: #2f6fd6; }
 .shape-info.err, .shape-info .warn { color: #c96a26; }
 
-/* 3D 기구 모드 (spec 2026-10-14) */
-#mech3d-wrap { grid-column: 1 / -1; display: grid; grid-template-columns: minmax(280px, 360px) 1fr; gap: 8px; min-height: 70vh; }
+/* --- 3D 기구 모드(CAD식) — spec 2026-10-15 m3-cad-ui, 시안 docs/mockups/m3-ui-mockup.html --- */
+main:has(#mech3d-wrap:not([hidden])) { grid-template-rows: minmax(0, 1fr); }
+#mech3d-wrap { --m3-line: #d9dde5; --m3-mut: #6b7385; --m3-acc: #1f6fd1; --m3-accbg: #e4effc; --m3-ok: #2e8b57; --m3-bad: #c8402f; --m3-warn: #b7791f;
+  grid-column: 1 / -1; display: grid; grid-template-rows: auto minmax(0, 1fr) auto; min-height: 0; background: #fff;
+  border: 1px solid var(--m3-line); border-radius: 8px; overflow: hidden; font-size: 13px; }
 #mech3d-wrap[hidden] { display: none; }
-#pane-mech3d-view { height: 70vh; min-height: 0; overflow: hidden; }
-#pane-mech3d-view canvas { width: 100%; height: 100%; display: block; }
-.m3-hd { display: flex; gap: 8px; align-items: center; margin-bottom: 6px; }
-.m3-hd button { margin-left: auto; }
+.m3-cmd { display: flex; gap: 4px; align-items: center; padding: 6px 10px; border-bottom: 1px solid var(--m3-line); flex-wrap: wrap; }
+.m3-cmd button, .m3-cmd .m3-btn { border: 1px solid var(--m3-line); background: #fff; border-radius: 6px; padding: 5px 10px; cursor: pointer; font: inherit; }
+.m3-cmd button.on { background: var(--m3-accbg); border-color: var(--m3-acc); color: var(--m3-acc); }
+.m3-sep { width: 1px; height: 22px; background: var(--m3-line); margin: 0 4px; }
+.m3-hint { margin-left: auto; color: var(--m3-mut); font-size: 12px; }
+.m3-main { display: grid; grid-template-columns: 260px minmax(0, 1fr) 430px; min-height: 0; }
+.m3-left { border-right: 1px solid var(--m3-line); display: grid; grid-template-rows: auto minmax(0, 1fr); min-height: 0; }
+.m3-tree { padding: 10px; border-bottom: 1px solid var(--m3-line); overflow: auto; max-height: 42vh; }
+.m3-props { padding: 10px; overflow: auto; }
+.m3-props input[type=number] { width: 60px; }
+.m3-props .m3-row label { color: var(--m3-mut); min-width: 66px; }
+.m3-h { font-size: 11px; color: var(--m3-mut); margin: 2px 0 6px; }
+.m3-node { padding: 3px 6px; border-radius: 6px; cursor: pointer; display: flex; gap: 6px; align-items: center; }
+.m3-node:hover { background: #f2f4f8; }
+.m3-node.sel { background: var(--m3-accbg); color: var(--m3-acc); }
+.m3-node .b { margin-left: auto; font-size: 11px; color: var(--m3-mut); }
+.m3-node.child { padding-left: 22px; }
+.m3-badge { margin-left: auto; font-size: 10px; padding: 1px 5px; border-radius: 4px; background: #e9ecf2; color: #3c4455; }
+.m3-badge.k-milky { background: #e3edf6; } .m3-badge.k-clear { background: #dcefff; color: #0d4b85; } .m3-badge.k-led { background: #fff1cc; color: #7a5a12; }
+.m3-vp { position: relative; background: #141a26; min-height: 0; overflow: hidden; }
+.m3-vp #mech3d-canvas { width: 100%; height: 100%; display: block; }
+.m3-views { position: absolute; right: 10px; top: 10px; display: flex; flex-direction: column; gap: 4px; }
+.m3-views button { background: rgba(255,255,255,.08); color: #dbe3f0; border: 1px solid #3a4558; border-radius: 5px; padding: 4px 8px; cursor: pointer; font: inherit; font-size: 12px; }
+.m3-views button.on { background: var(--m3-acc); border-color: var(--m3-acc); color: #fff; }
+.m3-section { position: absolute; left: 10px; top: 10px; background: rgba(20,26,38,.85); color: #dbe3f0; padding: 6px 8px; border-radius: 6px; font-size: 12px; display: flex; gap: 6px; align-items: center; }
+.m3-section[hidden] { display: none; }
+#m3-axes { position: absolute; left: 10px; bottom: 30px; width: 90px; height: 90px; pointer-events: none; }
+.m3-legend { position: absolute; left: 10px; bottom: 10px; color: #cfd6e4; font-size: 11px; display: flex; gap: 6px; align-items: center; }
+.m3-legend[hidden] { display: none; }
+.m3-legend .bar { width: 110px; height: 8px; border-radius: 3px; background: linear-gradient(90deg, #20306e, #2a7bd5, #3fc17a, #f2d33c, #e0532a); }
+.m3-res { border-left: 1px solid var(--m3-line); overflow: auto; padding: 10px; display: flex; flex-direction: column; gap: 10px; }
+.m3-msg { background: #fff8e5; border: 1px solid #f0dca8; color: #7a5a12; border-radius: 6px; padding: 6px 8px; }
+.m3-msg[hidden] { display: none; }
+.m3-blk { border: 1px solid var(--m3-line); border-radius: 8px; padding: 8px; }
+.m3-blk.dim { opacity: .45; }
+.m3-t { font-size: 12px; font-weight: 600; margin-bottom: 4px; display: flex; justify-content: space-between; gap: 6px; }
+.m3-t span { font-weight: 400; color: var(--m3-mut); }
+.m3-withm { display: grid; grid-template-columns: minmax(0, 1fr) 112px; gap: 8px; align-items: stretch; }
+canvas.m3-g { width: 100%; display: block; border-radius: 4px; background: #fafbfc; }
+.m3-m { background: #f6f7fa; border-radius: 6px; padding: 5px 8px; display: flex; flex-direction: column; justify-content: center; }
+.m3-m .l { font-size: 11px; color: var(--m3-mut); } .m3-m .v { font-size: 20px; font-weight: 600; } .m3-m .v.sm { font-size: 16px; } .m3-m .s { font-size: 11px; color: var(--m3-mut); }
+.m3-m .v.bad { color: var(--m3-bad); } .m3-m .v.ok { color: var(--m3-ok); }
+.m3-gauge { height: 6px; background: #e3e6ec; border-radius: 3px; position: relative; margin-top: 3px; }
+.m3-gauge[hidden] { display: none; }
+.m3-gauge .f { height: 6px; border-radius: 3px; background: var(--m3-bad); }
+.m3-gauge .tg { position: absolute; top: -3px; width: 2px; height: 12px; background: #1d2330; }
+.m3-status { border-top: 1px solid var(--m3-line); display: flex; gap: 14px; align-items: center; padding: 5px 12px; font-size: 12px; flex-wrap: wrap; }
+.m3-rel { display: flex; align-items: center; gap: 6px; }
+.m3-barw { width: 140px; height: 6px; background: #e3e6ec; border-radius: 3px; display: inline-block; }
+.m3-barf { height: 6px; background: var(--m3-acc); border-radius: 3px; display: block; transition: width .4s; }
+.m3-chk { display: flex; gap: 5px; align-items: center; cursor: pointer; }
+.m3-chk.on { text-decoration: underline; font-weight: 600; }
+.m3-dot { width: 8px; height: 8px; border-radius: 50%; background: #c3c8d2; }
+.m3-dot.ok { background: var(--m3-ok); } .m3-dot.warn { background: var(--m3-warn); } .m3-dot.bad { background: var(--m3-bad); }
+.m3-stxt { margin-left: auto; color: var(--m3-mut); }
 .m3-part { padding: 4px 6px; border-radius: 4px; cursor: pointer; }
 .m3-part.on { background: rgba(255, 176, 32, 0.18); }
 .m3-kind { display: inline-block; min-width: 64px; font-size: 11px; padding: 1px 4px; border-radius: 3px; background: #2a3242; color: #e8edf5; }
@@ -280,9 +334,6 @@ main { flex: 1 1 auto; min-height: 0; display: grid;
 .m3-row input[type=number] { width: 64px; }
 .m3-contacts label { display: block; font-size: 12px; margin: 2px 0; }
 .m3-row button.on { background: #29d3e0; color: #062a2e; }
-.m3-res { margin-top: 6px; padding: 6px; border-radius: 4px; background: rgba(41, 211, 224, 0.08); font-size: 12px; }
-.m3-res.err { background: rgba(255, 90, 54, 0.12); }
-.m3-res .warn { color: #c96a26; }
-#mech3d-light input[type=number] { width: 56px; }
+.m3-row .warn, .m3-props .warn { color: #c96a26; }
 
 #inputbar[hidden] { display: none; }

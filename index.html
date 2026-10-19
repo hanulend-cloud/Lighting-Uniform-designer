@@ -85,8 +85,19 @@
       </div>
     </section>
     <section id="mech3d-wrap" hidden>
-      <div class="pane col" id="pane-mech3d-panel"><div id="mech3d-panel"></div><div id="mech3d-light"></div><div id="mech3d-status" class="muted"></div></div>
-      <div class="pane" id="pane-mech3d-view"><canvas id="mech3d-canvas"></canvas></div>
+      <div id="m3-cmd" class="m3-cmd"></div>
+      <div class="m3-main">
+        <div class="m3-left"><div id="m3-tree" class="m3-tree"></div><div id="m3-props" class="m3-props"></div></div>
+        <div class="m3-vp">
+          <canvas id="mech3d-canvas"></canvas>
+          <div id="m3-views" class="m3-views"></div>
+          <div id="m3-section" class="m3-section" hidden></div>
+          <canvas id="m3-axes"></canvas>
+          <div id="m3-legend" class="m3-legend" hidden>광량 <span>낮음</span><span class="bar"></span><span>높음</span></div>
+        </div>
+        <div id="m3-res" class="m3-res"></div>
+      </div>
+      <div id="m3-status" class="m3-status"></div>
     </section>
   </main>
 

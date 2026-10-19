@@ -18,15 +18,9 @@ import { drawPlan } from './ui/plan.js';
 import { drawHeatmap } from './ui/heatmap.js';
 import { buildLevels, updateLevels, renderVerdict, drawProfiles } from './ui/analysis.js';
 import { exportStep } from './export/step-ui.js';
-import { setMech3dMesh, getMech3d, initialMech3dSpec, saveMech3dIDB, loadMech3dIDB } from './engine/mech3d/runtime.js';
-import { setPartMaterial, setPartMaterialParam, setPartFinish, PART_KINDS } from './engine/mech3d/materials.js';
-import { renderPartProps, renderContactsProps } from './ui/mech3d-panel.js';
-import { setLedMesh, saveLedIDB, loadLedIDB } from './engine/mech3d/runtime.js';
+import { setMech3dMesh, getMech3d, initialMech3dSpec, saveMech3dIDB, loadMech3dIDB, loadLedIDB } from './engine/mech3d/runtime.js';
 import { migrateMech3d } from './engine/mech3d/defs.js';
-import { lineFromData, obsDirection } from './engine/mech3d/line.js';
-import { createPool } from './ui/m3/pool.js';
-import { rawParts, ledPartsNow, applyStepRecognition, validateLedStep as validateLedStepM, snapLedPick, currentEmitters } from './ui/m3/leds.js';
-import { renderLightProps, renderLedProps, renderObserveProps, renderTargetProps } from './ui/mech3d-light-panel.js';
+import * as m3app from './ui/m3/app.js';
 
 const LS_KEY = 'uds.spec.v11';
 
@@ -124,7 +118,7 @@ function buildForm() {
     }
     form.appendChild(grp);
   }
-  $('#btn-reset').onclick = () => { spec = structuredClone(DEFAULT_SPEC); markSoloReset(); mount(); resetM3State(); applyMode(); schedule(); };
+  $('#btn-reset').onclick = () => { spec = structuredClone(DEFAULT_SPEC); markSoloReset(); mount(); m3app.unmount(); applyMode(); schedule(); };
   $('#btn-mech3d-show').onclick = () => { spec.mode = 'mech3d'; persist(); applyMode(); };
   $('#file-mech3d').onchange = (e) => { const f = e.target.files?.[0]; if (f) importMech3d(f); e.target.value = ''; };
   $('#btn-step').onclick = () => {
@@ -189,39 +183,13 @@ function clearShape() {
   clearBody(); syncBody(); markSoloReset(); schedule();
 }
 
-// ---- 3D 기구 모드 (spec 2026-10-14 §3) ----
-let m3sel = null, m3view = null, m3viewP = null, m3meshShown = null;
-// 광원·관측·계산 (P3) — m3pick = 클릭 모드('obs'|'led'|'ledx'|'pcb'|null), m3line = 인식된 관측 라인(전체 data), m3G = 집계 격자 캐시
-// m3calcToken: 입력이 바뀌면 증가 → 진행 중 계산 결과는 버림. m3busyRun: 진행 중 계산 번호(0 = 없음) — 버튼 잠금
-let m3pick = null, m3line = null, m3lineKey = '', m3lineErr = '', m3calc = null, m3ledInfo = '', m3G = null;
-let m3calcToken = 0, m3busyRun = 0;
-const m3status = (t) => { $('#mech3d-status').textContent = t; };
-function resetM3State() {
-  if (m3busyRun) m3pool.killAll('초기화로 중단됨');
-  m3sel = null; m3pick = null; m3line = null; m3lineKey = ''; m3lineErr = ''; m3calc = null; m3G = null; m3ledInfo = '';
-  m3calcToken++; m3busyRun = 0;   // leds.js 캐시는 (메쉬·설정·라인) 키로 스스로 무효화됨
-}
-// Worker 풀 · LED 도우미는 ui/m3/pool.js · ui/m3/leds.js 로 옮김. m3S = leds.js 의 S(store.session) 자리(Task 13 까지 임시)
-const m3pool = createPool({ dbLists, onStatus: m3status });
-const m3S = { get ledInfo() { return m3ledInfo; }, set ledInfo(v) { m3ledInfo = v; } };
-function validateLedStep() { const r = validateLedStepM(spec.mech3d, m3S); if (r.status) { m3status(r.status); persist(); } }
-// 관측 라인: 관측면·방향이 바뀌면 Worker 에서 다시 인식(3D 모드일 때만 — 평판 모드에서는 Worker 를 띄우지 않음)
-async function refreshLine() {
-  const O = spec.mech3d?.observe;
-  if (!O || !getMech3d() || spec.mode !== 'mech3d') return;
-  const key = JSON.stringify([O.faces, O.dir]);
-  if (key === m3lineKey) return;
-  m3lineKey = key; m3line = null; m3G = null; m3lineErr = '';
-  if (!O.faces.length) { renderMech3d(); return; }
-  renderMech3d();
-  const parts = rawParts(getMech3d().parts);
-  try {
-    const dir = O.dir ?? obsDirection(parts, O.faces);
-    const r = await m3pool.call(m3pool.worker(), { type: 'line', parts, faces: O.faces, dir });
-    if (key === m3lineKey) { m3line = lineFromData(r.lineData); renderMech3d(); }
-  } catch (e) {
-    if (key === m3lineKey) { m3line = null; m3lineErr = `라인 인식 실패: ${e.message}`; renderMech3d(); }
-  }
+// ---- 3D 기구 모드 (spec 2026-10-14 §3, 2026-10-15 m3-cad-ui) — 화면·계산은 src/ui/m3/app.js ----
+function m3ctx() {
+  return {
+    mspec: spec.mech3d, persist, dbLists, materialDb, l2Table: () => l2State().table, milkyFromMusR,
+    onImportMech3d: importMech3d,
+    onExit: () => { spec.mode = 'flat'; persist(); applyMode(); schedule(); },
+  };
 }
 function applyMode() {
   const m3 = spec.mode === 'mech3d' && !!spec.mech3d && !!getMech3d();
@@ -230,180 +198,32 @@ function applyMode() {
   $('#results-wrap').hidden = m3;
   $('#inputbar').hidden = m3;
   $('#btn-mech3d-show').hidden = m3 || !(spec.mech3d && getMech3d());
-  if (m3) { renderMech3d(); refreshLine(); }
+  if (m3) m3app.mount(m3ctx()).catch((e) => m3app.setStatus(`3D 화면 오류: ${e.message ?? e}`));
+  else m3app.unmount();
 }
-const getView = () => m3viewP ??= import('./ui/mech3d-view.js').then(({ createMech3dView }) => (m3view = createMech3dView($('#mech3d-canvas'), { onPick: (s) => onM3Pick(s) })));
-async function renderMech3d() {
-  try { await renderMech3dInner(); } catch (e) { m3status(`3D 뷰 오류: ${e.message ?? e}`); }
-}
-async function renderMech3dInner() {
-  await getView();
-  if (!spec.mech3d || !getMech3d()) return;
-  const cur = getMech3d(), M = spec.mech3d, st = M.light.kind === 'step' ? M.light.step : null;
-  const lp = st ? ledPartsNow(spec.mech3d) : null, ledSet = new Set(st?.leds ?? []), exSet = new Set(st?.excluded ?? []);   // 제외된 LED 는 회색(불투명) — 발광 화살표도 빠짐
-  const kinds = [...M.parts.map((p) => p.material.kind), ...(lp ?? []).map((_, i) => (i === st.pcb ? 'pcb' : ledSet.has(i) && !exSet.has(i) ? 'led' : 'opaque'))];
-  const meshKey = [cur, lp];   // 기구·LED 메쉬(위치 보정 포함 — 캐시 객체)가 바뀌면 다시 그림. 카메라는 기구가 바뀔 때만 맞춤
-  if (!m3meshShown || m3meshShown.some((v, i) => v !== meshKey[i])) {
-    const keepCamera = !!m3meshShown && m3meshShown[0] === cur;
-    m3meshShown = meshKey; m3view.setParts([...cur.parts, ...(lp ?? [])], kinds, { keepCamera });
-  } else m3view.setKinds(kinds);
-  m3view.setSelection(m3sel);
-  // 임시(Task 13 에서 m3/app.js 의 피처 트리·속성 패널로 대체): 부품 목록 + 노드별 편집기를 옛 패널 자리에 이어 그린다
-  const pe = $('#mech3d-panel'), m3esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
-  pe.innerHTML = `<div class="m3-hd">3D 기구 <b>${m3esc(M.name)}</b> <button data-m3-exit>평판 모드로</button></div>
-    <div class="m3-parts">${M.parts.map((q, i) => `<div class="m3-part ${i === m3sel?.part ? 'on' : ''}" data-m3-part="${i}">
-      <span class="m3-kind k-${q.material.kind}">${PART_KINDS[q.material?.kind]?.label ?? '?'}</span> ${m3esc(q.name)} <span class="mut">${(q.size ?? []).map((v) => v.toFixed(1)).join('×')}mm · ${(q.volume ?? 0).toFixed(0)} mm³</span></div>`).join('')}</div>
-    <div data-m3-node="part"></div><div data-m3-node="contacts"></div>`;
-  pe.querySelector('[data-m3-exit]').onclick = () => { spec.mode = 'flat'; m3sel = null; m3pick = null; persist(); applyMode(); schedule(); };
-  pe.querySelectorAll('[data-m3-part]').forEach((d) => { d.onpointerdown = () => { m3sel = { part: +d.dataset.m3Part, face: null }; renderMech3d(); }; });
-  const partEl = pe.querySelector('[data-m3-node="part"]');
-  if (m3sel?.part != null && M.parts[m3sel.part]) renderPartProps(partEl, M, m3sel, materialDb()?.list() ?? [], {
-    onKind: (i, k) => updPart(i, (p) => setPartMaterial(p, k)),
-    onMat: (i, key, v) => updPart(i, (p) => {
-      let q = setPartMaterialParam(p, key, v);
-      // DB 소재 선택: Milky 칸을 그 소재의 피팅 μs' 에 해당하는 값으로(Milky = 농도 — 이후 사용자가 조절)
-      const ent = key === 'dbId' && v ? materialDb()?.get(v) : null, tbl = l2State().table;
-      if (ent && tbl) q = setPartMaterialParam(q, 'milky', Math.round(milkyFromMusR(tbl, ent.fitted.musR) * 100) / 100);
-      return q;
-    }),
-    onFinish: (i, face, f) => updPart(i, (p) => setPartFinish(p, face, f)),
-  });
-  else partEl.innerHTML = '<div class="mut">부품을 목록이나 3D 뷰에서 클릭하세요</div>';
-  renderContactsProps(pe.querySelector('[data-m3-node="contacts"]'), M, {
-    onContact: (i, mode) => { spec.mech3d.contacts[i] = { ...spec.mech3d.contacts[i], mode }; m3calcToken++; m3calc = null; persist(); },
-  });
-  let arrows = [];
-  try { arrows = currentEmitters(spec.mech3d, m3line).map((e) => ({ pos: e.pos, axis: e.axis })); } catch { arrows = []; }
-  let line3d = null;
-  if (m3line) {
-    const out = [], K = 200;
-    for (let k = 0; k <= K; k++) { const s = (k / K) * m3line.length, [x, y] = m3line.fromSW(m3line.closed && k === K ? 0 : s, 0); out.push(...m3line.to3D(x, y, 0.3)); }
-    line3d = Float32Array.from(out);
-  }
-  m3view.setOverlay({ obsFaces: M.observe.faces, line3d, arrows });
-  // 선택 모드: LED 발광면/제외 → LED STEP 부품만 클릭되고 기구물은 투시, 관측면·PCB 면 → 기구 부품만 클릭
-  { const nM = cur.parts.length, led = m3pick === 'led' || m3pick === 'ledx', mech = m3pick === 'obs' || m3pick === 'pcb';
-    m3view.setPickMode(led ? (i) => i >= nM : mech ? (i) => i < nM : null, led ? (i) => i < nM : null); }
-  const li = m3line ? `라인: ${{ line: '직선', circle: '원', path: '곡선' }[m3line.kind]}${m3line.closed ? '(닫힘)' : ''} · 길이 ${m3line.length.toFixed(1)}mm · 폭 ${m3line.width.toFixed(1)}mm${m3line.branched ? ' · ⚠ 갈래 있음(가장 긴 경로 사용)' : ''}` : (M.observe.faces.length && !m3lineErr ? '라인 인식 중…' : '');
-  // 자동 격자 값(표시용 — tally.js 규칙과 같음. w 칸은 최대 국소 폭 대신 라인 폭으로 근사)
-  const auto = m3line ? { cellS: Math.max(1, m3line.length / 100), cellW: Math.max(0.5, m3line.width / 8), winS: Math.max(5, m3line.length / 10) } : null;
-  // 임시(Task 13 에서 대체): 광원 · LED · 관측면 · 목표 노드 편집기를 이어 그린다. 계산 버튼은 없어짐(점진 계산은 Task 12)
-  const le = $('#mech3d-light'), lh = m3LightHandlers(), lui = { pick: m3pick, ledInfo: m3ledInfo };
-  le.innerHTML = '<div data-m3-node="light"></div><div data-m3-node="led"></div><div data-m3-node="observe"></div><div data-m3-node="target"></div>';
-  const node = (k) => le.querySelector(`[data-m3-node="${k}"]`);
-  renderLightProps(node('light'), M, lui, lh);
-  renderLedProps(node('led'), M, lui, lh);
-  renderObserveProps(node('observe'), M, { pick: m3pick, lineInfo: li, lineErr: m3lineErr, auto, dir: M.observe.dir ?? m3line?.frame.d }, lh);
-  renderTargetProps(node('target'), M, lh);
-}
-// 3D 뷰 클릭 — 기구 부품 수(nMech) 이상인 번호는 LED STEP 부품
-function onM3Pick(s) {
-  const nMech = getMech3d().parts.length, M = spec.mech3d;
-  if (s && s.part == null && m3pick !== 'led' && m3pick !== 'ledx') s = null;   // 선택 모드 빈 곳 클릭(광선만) — LED 모드에서만 씀
-  if ((m3pick === 'led' || m3pick === 'ledx') && s && s.part != null && s.part < nMech) { m3status('LED STEP 부품(PCB·LED)을 클릭하세요 — 기구 부품은 이 모드에서 선택되지 않음'); return; }
-  if (m3pick === 'obs' && s && s.part < nMech) {
-    const k = M.observe.faces.findIndex((f) => f.part === s.part && f.face === s.face);
-    if (k >= 0) M.observe.faces.splice(k, 1); else M.observe.faces.push({ part: s.part, face: s.face });
-    m3calcToken++; m3calc = null; persist(); refreshLine(); renderMech3d(); return;
-  }
-  if (m3pick === 'led' && s && M.light.step) {
-    const p = snapLedPick(M, s, nMech, true);
-    if (!p) { m3status('가까운 LED 를 찾지 못함 — LED 가까이를 클릭하세요'); return; }
-    try {
-      applyStepRecognition(M, m3S, M.light.step, { part: p.part, face: p.face });
-      if (p.snapped) m3ledInfo += ' (가까운 LED · 윗면 발광으로 가정 — 측면 발광 LED 는 확대해서 발광면을 직접 클릭)';
-      m3pick = null; m3status('');
-    } catch (e) { m3ledInfo = `LED 인식 실패: ${e.message}`; }
-    m3calcToken++; m3calc = null; persist(); renderMech3d(); return;
-  }
-  if (m3pick === 'ledx' && s && M.light.step) {
-    const p = snapLedPick(M, s, nMech, false);
-    if (!p) { m3status('가까운 LED 를 찾지 못함 — LED 가까이를 클릭하세요'); return; }
-    const st = M.light.step, i = p.part; st.excluded ??= []; m3status('');
-    const k = st.excluded.indexOf(i); if (k >= 0) st.excluded.splice(k, 1); else if (st.leds.includes(i)) st.excluded.push(i);
-    m3calcToken++; m3calc = null; persist(); renderMech3d(); return;
-  }
-  if (m3pick === 'pcb' && s && s.part < nMech) {
-    M.light.manual.pcb = { kind: 'face', part: s.part, face: s.face };
-    m3pick = null; m3calcToken++; m3calc = null; persist(); renderMech3d(); return;
-  }
-  m3sel = s && s.part < nMech ? s : null;   // LED STEP 부품은 소재 편집 대상이 아님
-  renderMech3d();
-}
-function m3LightHandlers() {
-  const M = spec.mech3d, L = M.light, upd = () => { m3calcToken++; m3calc = null; persist(); renderMech3d(); };
-  return {
-    onLightKind: (k) => { L.kind = k; m3pick = null; upd(); },
-    onLedFile: (f) => importLedStep(f),
-    onPick: (mode) => { m3pick = mode; renderMech3d(); },
-    onStep: (key, v) => {
-      const st = L.step; (key[0] === 'o' ? st.offset : st.rot)['xyz'.indexOf(key[1])] = v;
-      if (st.ref) { try { applyStepRecognition(M, m3S, st, st.ref); } catch (e) { st.emitters = []; m3ledInfo = `LED 인식 실패: ${e.message}`; } }
-      upd();
-    },
-    onManual: (key, v) => {
-      if (key === 'pcbKind') { L.manual.pcb = v === 'depth' ? { kind: 'depth', depth: 10 } : { kind: 'face' }; if (m3pick === 'pcb') m3pick = null; }
-      else if (key === 'depth') L.manual.pcb.depth = v;
-      else L.manual[key] = key === 'count' ? Math.max(1, Math.round(v)) : v;
-      upd();
-    },
-    onSolder: (v) => { L.solder = v; upd(); },
-    onLedSpec: (key, v) => { L.spec[key] = v; upd(); },
-    onObs: (key, v) => { M.observe[key] = v; upd(); },
-    onClearObs: () => { M.observe.faces = []; upd(); refreshLine(); },
-    onObsDir: (v) => { M.observe.dir = v ? (() => { const l = Math.hypot(...v); return v.map((x) => x / l); })() : null; upd(); refreshLine(); },
-    onRetryLine: () => { m3lineKey = ''; refreshLine(); },
-    onTarget: (key, v) => { M.observe[key] = v; upd(); },
-    onCheckParam: (key, v) => { M.checks[key] = v; upd(); },
-  };
-}
-function importLedStep(file) {
-  m3ledInfo = `${file.name} 읽는 중…`; renderMech3d();
-  file.text().then((text) => {
-    const w = new Worker(new URL('./engine/mech3d/mech3d-worker.js', import.meta.url), { type: 'module' });
-    w.onmessage = (m) => {
-      if (m.data.stage) { m3ledInfo = m.data.stage; renderMech3d(); return; }
-      w.terminate();
-      if (m.data.error) { m3ledInfo = `불러오기 실패: ${m.data.error}`; renderMech3d(); return; }
-      if (!spec.mech3d) return;
-      setLedMesh(file.name, m.data.parts); saveLedIDB().catch(() => {});
-      spec.mech3d.light.step = { name: file.name, offset: [0, 0, 0], rot: [0, 0, 0], ref: null, leds: [], excluded: [], pcb: -1, emitters: [] };
-      m3ledInfo = `부품 ${m.data.parts.length}개 — LED 하나의 발광면을 클릭하세요`; m3pick = 'led'; m3calcToken++; m3calc = null;
-      persist(); renderMech3d();
-    };
-    w.onerror = (e) => { w.terminate(); m3ledInfo = `불러오기 실패: ${e.message ?? e}`; renderMech3d(); };
-    w.postMessage({ text });
-  }).catch((e) => { m3ledInfo = `불러오기 실패: ${e.message}`; renderMech3d(); });
-}
-function updPart(i, fn) {
-  spec.mech3d.parts[i] = fn(spec.mech3d.parts[i]);
-  persist(); renderMech3d();
-}
+// 기구 STEP 불러오기(평판·3D 모드 공통) — spec.mech3d 를 새로 만들고 3D 모드로
 function importMech3d(file) {
-  const st = $('#mech3d-status');
-  $('#mech3d-wrap').hidden = false; $('#design-wrap').hidden = true; $('#results-wrap').hidden = true;
-  st.textContent = `${file.name} 읽는 중…`;
+  const say = (t) => { if (m3app.isMounted()) m3app.setStatus(t); else $('#timing').textContent = t; };
+  say(`${file.name} 읽는 중…`);
   file.text().then((text) => {
     const w = new Worker(new URL('./engine/mech3d/mech3d-worker.js', import.meta.url), { type: 'module' });
     w.onmessage = (m) => {
-      if (m.data.stage) { st.textContent = m.data.stage; return; }
+      if (m.data.stage) { say(m.data.stage); return; }
       w.terminate();
-      if (m.data.error) { st.textContent = `불러오기 실패: ${m.data.error}`; applyMode(); return; }
+      if (m.data.error) { say(`불러오기 실패: ${m.data.error}`); return; }
       try {
+        m3app.unmount();
         setMech3dMesh(file.name, m.data.parts);
         const ms = initialMech3dSpec();
-        spec.mech3d = ms;
-        spec.mode = 'mech3d';
-        resetM3State();
+        spec.mech3d = ms; spec.mode = 'mech3d';
         saveMech3dIDB().catch(() => {});
-        persist();
-        st.textContent = `불러옴: ${file.name} · 부품 ${m.data.parts.length}개 · 접촉면 ${ms.contacts.length}개 — Milky 부품부터 지정하세요`;
-        applyMode();
-      } catch (e) { st.textContent = `불러오기 실패: ${e.message ?? e}`; applyMode(); }
+        persist(); applyMode();
+        m3app.setStatus(`불러옴: ${file.name} · 부품 ${m.data.parts.length}개 · 접촉면 ${ms.contacts.length}개 — Milky 부품부터 지정하세요`);
+      } catch (e) { say(`불러오기 실패: ${e.message ?? e}`); }
     };
-    w.onerror = (e) => { w.terminate(); st.textContent = `불러오기 실패: ${e.message ?? e}`; applyMode(); };
+    w.onerror = (e) => { w.terminate(); say(`불러오기 실패: ${e.message ?? e}`); };
     w.postMessage({ text });
-  }).catch((e) => { st.textContent = `불러오기 실패: ${e.message ?? e}`; applyMode(); });
+  }).catch((e) => say(`불러오기 실패: ${e.message ?? e}`));
 }
 
 // 실측소재 선택 — 소재의 μs'·g·μa 를 쓰고, Milky 입력칸에는 그 소재의 Milky(파생값)를 보여 준다
@@ -773,7 +593,7 @@ function importJson(e) {
   r.onload = () => { try { spec = JSON.parse(r.result); migrate(spec);
     if (spec.mech3d && !(getMech3d() && spec.mech3d.parts.length === getMech3d().parts.length)) { spec.mode = 'flat'; spec.mech3d = null; }
     if (spec.mode === 'mech3d' && !spec.mech3d) spec.mode = 'flat';
-    mount(); resetM3State(); validateLedStep(); applyMode(); schedule(); } catch { alert('JSON 파싱 실패'); } };
+    mount(); m3app.unmount(); applyMode(); schedule(); } catch { alert('JSON 파싱 실패'); } };
   r.readAsText(f);
 }
 
@@ -856,7 +676,7 @@ if (spec.body.shape.source === 'step' && !(await loadBodyIDB({ flipZ: spec.body.
 }
 // 3D 기구 복원(IndexedDB) — 메쉬가 없으면 평판 모드로
 if (spec.mode === 'mech3d' && !(spec.mech3d && await loadMech3dIDB())) { spec.mode = 'flat'; spec.mech3d = null; }
-if (spec.mech3d?.light?.step) { await loadLedIDB(); validateLedStep(); }
+if (spec.mech3d?.light?.step) await loadLedIDB();   // 검증은 m3app.mount 에서
 // 계산 Worker 시작 — L2 응답표·소재 DB·불러온 몸체를 Worker 쪽에도 싣는다(메인은 L2 카드 표시용으로 따로 보유)
 solver = new Worker(new URL('./engine/solve-worker.js', import.meta.url), { type: 'module' });
 solver.onmessage = onSolverMessage;
@@ -877,6 +697,9 @@ mount();
 setupZoom();
 setupHeatPick();
 window.addEventListener('resize', schedule);
+// 3D 모드 디바운스 저장 마저 쓰기(탭 닫기·새로고침·모바일 백그라운드)
+window.addEventListener('pagehide', () => m3app.flush());
+window.addEventListener('beforeunload', () => m3app.flush());
 forceHeatOnNextRun = true;   // 첫 계산에 히트맵 포함
 applyMode();
 schedule();
