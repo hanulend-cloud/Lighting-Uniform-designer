@@ -26,7 +26,7 @@ import { runAutoDesign } from '../../engine/mech3d/autodesign.js';
 import { milkyRows } from '../../engine/mech3d/milky-search.js';
 import { candidatePositions } from '../../engine/mech3d/basis.js';
 import { ledAtS } from '../../engine/mech3d/placement.js';
-import { frameHeights, deformPart, refineForBumps, minThickness, shapeCandidates } from '../../engine/mech3d/shape-opt.js';
+import { heightsFor, deformPart, refinedFor, minThickness, shapeCandidates } from '../../engine/mech3d/shape-opt.js';
 import { interferenceKeys } from '../../engine/mech3d/clearance.js';
 import { scaleMoveMesh, isIdentityXform } from '../../engine/mech3d/xform.js';
 import { defaultChecks } from '../../engine/mech3d/defs.js';
@@ -292,7 +292,7 @@ function clearanceOf(i) {
 function adState() { return (A.ad ??= { open: false, sel: { milky: true, leds: false, shape: false, shapePart: -1, milkyMax: null }, running: null, result: null, undo: null, milkyPart: null, runner: null, info: null }); }
 function adInfo() {   // 부품별 비 2.5D 비율(관측 방향) — 라인이 있을 때만. (기구·라인) 별 캐시(높이맵 계산이 무거움)
   const st = adState(), S = A.store.session, rt = getMech3d();
-  if (!st.info || st.info.rt !== rt || st.info.line !== S.line) st.info = { rt, line: S.line, non25: S.line && rt ? rt.parts.map((p) => frameHeights(p, S.line.frame, 0.5).non25) : [] };
+  if (!st.info || st.info.rt !== rt || st.info.line !== S.line) st.info = { rt, line: S.line, non25: S.line && rt ? rt.parts.map((p) => heightsFor(p, S.line.frame, 0.5).non25) : [] };
   return st.info;
 }
 const adMilkyPart = (M, avail) => (avail.milky.ok ? (avail.milky.parts.find((i) => M.observe.faces.some((f) => f.part === i)) ?? avail.milky.parts[0]) : null);
@@ -309,12 +309,18 @@ function renderAuto() {
   });
 }
 // 형상 원본 = 원본 메쉬 + 크기·위치 조절(이미 적용된 shapeMod 는 빼고 — 적용 때 shapeMod 를 바꿔 끼우므로 평가와 같게)
+// 같은 (원본, xform) 이면 같은 객체 — 세분·높이맵 메모(메쉬 객체 기준)가 맞도록
 function adBaseMesh(i) {
   const rt = getMech3d(), raw = (rt.raw ?? rt).parts[i], xf = A.store.mspec.parts[i].xform;
   if (isIdentityXform(xf)) return raw;
-  const b = bounds(raw.positions);
-  return scaleMoveMesh(raw, xf, [(b[0] + b[3]) / 2, (b[1] + b[4]) / 2, (b[2] + b[5]) / 2]);
+  const st = adState(), k = JSON.stringify(xf), c = (st.base ??= [])[i];
+  if (c && c.raw === raw && c.k === k) return c.mesh;
+  const b = bounds(raw.positions), mesh = scaleMoveMesh(raw, xf, [(b[0] + b[3]) / 2, (b[1] + b[4]) / 2, (b[2] + b[5]) / 2]);
+  st.base[i] = { raw, k, mesh };
+  return mesh;
 }
+// 형상 후보 메쉬 — 세분은 메모(refinedFor: 후보 27개도 R 3개 → 세분 3번). hDiv = R/hMax(STEP 은 거칠게 3)
+const adShapeMesh = (base, mod, hDiv = 8) => deformPart(refinedFor(base, mod.frame, mod.centers, mod.R, Math.max(0.1, mod.R / hDiv)), mod.frame, heightsFor(base, mod.frame, mod.cell), mod);
 // 설계 → (mspec 복사본, 기구 메쉬) — 형상은 후보 메쉬로 바꾼 부품 포함
 function designScene(d) {
   const M = JSON.parse(JSON.stringify(A.store.mspec)), S = A.store.session, rt = getMech3d(), mp = adState().milkyPart;
@@ -323,7 +329,7 @@ function designScene(d) {
   let parts = rt.parts;
   if (d.shape) {
     const i = d.shape.part, mod = shapeModFor(d.shape, M), base = adBaseMesh(i);
-    const mesh = deformPart(refineForBumps(base, mod.frame, mod.centers, mod.R, Math.max(0.1, mod.R / 8)), mod.frame, frameHeights(base, mod.frame, mod.cell), mod);
+    const mesh = adShapeMesh(base, mod);
     parts = rt.parts.map((p, j) => (j === i ? mesh : p)); M.parts[i].shapeMod = mod;
   }
   return { M, parts, S };
@@ -362,13 +368,13 @@ async function adRun() {
       return { cand, maps: r.maps, emitted: r.emitted };
     },
     async evalShapes(d, cands, N) {
-      const out = [], base = adBaseMesh(sp), H = frameHeights(base, S.line.frame, 0.5);
+      const out = [], base = adBaseMesh(sp), H = heightsFor(base, S.line.frame, 0.5);
       const others = getMech3d().parts.map((p, j) => (j === sp ? null : p)), lp = (M.light.kind === 'step' && L.ledPartsNow(M)) || [];
       const before = interferenceKeys(base, others, lp, []);
       for (const c of cands) {
         if (R.stopped) break;
         const { M: Md, parts } = designScene({ ...d, shape: { part: sp, ...c } }), mod = Md.parts[sp].shapeMod;
-        const thin = minThickness(H, mod) < minWall;
+        const thin = minThickness(H, mod) < minWall;   // 칸 중심 + LED 중심
         const clash = !thin && [...interferenceKeys(parts[sp], others, lp, []).keys()].some((k) => !before.has(k));
         if (thin || clash) { out.push({ cand: c, ok: false, why: thin ? '살두께' : '간섭' }); continue; }
         const r = await R.trace(adJob(Md, parts), { N, batches: 4 }), stt = tallyStats(G, r.batches, obs);
@@ -382,7 +388,7 @@ async function adRun() {
       return { stats: tallyStats(G, r.batches, obs), eff: adEff(r) };
     },
   };
-  const H0 = stages.shape ? frameHeights(adBaseMesh(sp), S.line.frame, 0.5) : null;
+  const H0 = stages.shape ? heightsFor(adBaseMesh(sp), S.line.frame, 0.5) : null;
   const pitchNow = cur.count > 1 ? (cur.pitch > 0 ? cur.pitch : S.line.length / cur.count) : S.line.length;
   let res = null;
   try {
@@ -434,9 +440,10 @@ function adRevert() {
 function adStep() {
   const d = adState().result?.design;
   if (!d?.shape) return;
-  const { parts, M } = adPreview(), mesh = parts[d.shape.part], name = M.parts[d.shape.part].name;
+  const { M } = adPreview(), i = d.shape.part, name = M.parts[i].name;
+  const mesh = adShapeMesh(adBaseMesh(i), M.parts[i].shapeMod, 3), nTri = mesh.triangles.length / 3;   // 내보내기는 거친 세분(hMax = R/3) — 삼각형 수 줄임
   const w = new Worker(new URL('../../export/mesh-step-worker.js', import.meta.url), { type: 'module' });
-  setStatus('STEP 생성 중…');
+  setStatus(nTri > 30000 ? `STEP 생성 중… 삼각형 ${nTri}개 — 많아서 오래 걸리거나 실패할 수 있음` : 'STEP 생성 중…');
   w.onmessage = (ev) => {
     if (ev.data.type === 'done') { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([ev.data.stepText], { type: 'application/step' })); a.download = `${name}-p4.stp`; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000); setStatus('STEP 내보내기 완료'); }
     else setStatus(`STEP 실패: ${ev.data.message}`);

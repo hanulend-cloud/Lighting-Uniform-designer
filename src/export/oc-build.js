@@ -41,6 +41,31 @@ export function sewToSolid(oc, faces) {
   return solid;
 }
 
+// 메쉬 면(삼각형 다수) → 봉합 → 솔리드(껍질 여럿이면 모두 담음, ShapeFix_Solid 로 방향 맞춤) → 같은 평면 면 합치기(UnifySameDomain).
+// 껍질이 없으면 봉합 결과 그대로. 각 단계가 실패하면 앞 단계 결과로 물러남. faces 는 여기서 지움
+export function sewMeshFaces(oc, faces) {
+  const sewing = new oc.BRepBuilderAPI_Sewing(1e-6, true, true, true, false), pr = new oc.Message_ProgressRange_1();
+  for (const f of faces) sewing.Add(f);
+  sewing.Perform(pr);
+  let shape = sewing.SewedShape();
+  sewing.delete(); pr.delete();
+  for (const f of faces) f.delete();
+  const E = oc.TopAbs_ShapeEnum, shells = [];
+  for (const ex = new oc.TopExp_Explorer_2(shape, E.TopAbs_SHELL, E.TopAbs_SHAPE); ex.More(); ex.Next()) shells.push(oc.TopoDS.Shell_1(ex.Current()));
+  if (shells.length) {
+    try {
+      let solid;
+      if (shells.length === 1 && oc.ShapeFix_Solid_1) { const fx = new oc.ShapeFix_Solid_1(); solid = fx.SolidFromShell(shells[0]); fx.delete(); }
+      else { const mk = new oc.BRepBuilderAPI_MakeSolid_1(); for (const s of shells) mk.Add(s); solid = mk.Solid(); mk.delete(); }
+      shape = solid;
+    } catch { /* 봉합 결과 그대로 */ }
+  }
+  if (oc.ShapeUpgrade_UnifySameDomain_2) {
+    try { const u = new oc.ShapeUpgrade_UnifySameDomain_2(shape, true, true, false); u.Build(); shape = u.Shape(); u.delete(); } catch { /* 합치기 없이 */ }
+  }
+  return shape;
+}
+
 export function box(oc, dx, dy, dz) {
   const mk = new oc.BRepPrimAPI_MakeBox_2(dx, dy, dz);
   const shape = mk.Shape();
