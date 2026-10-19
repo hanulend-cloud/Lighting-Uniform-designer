@@ -291,6 +291,7 @@ main:has(#mech3d-wrap:not([hidden])) { grid-template-rows: minmax(0, 1fr); }
 .m3-xf b { font-weight: 600; text-align: center; color: var(--m3-mut); }
 .m3-xf input { width: 100%; min-width: 0; box-sizing: border-box; }
 .m3-xf .mut { text-align: center; }
+.m3-xf .m3-lim { font-size: 10.5px; color: var(--m3-mut); text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .m3-gaps { display: grid; gap: 1px; font-size: 12px; margin-bottom: 4px; }
 .m3-gap { display: flex; justify-content: space-between; gap: 8px; padding: 1px 4px; border-radius: 4px; }
 .m3-gap b { font-weight: 600; color: #18a0fb; white-space: nowrap; }

@@ -16,7 +16,7 @@ import * as L from './leds.js';
 import { buildObsOverlay, cellColors, extractFaces } from './colormap.js';
 import { mountCommandBar } from './command-bar.js';
 import { renderFeatureTree, toggleVisibility } from './feature-tree.js';
-import { partClearance, limitXform, TOL } from '../../engine/mech3d/clearance.js';
+import { partClearance, limitXform, axisLimits, TOL } from '../../engine/mech3d/clearance.js';
 import { renderPropertyPanel } from './property-panel.js';
 import { createResultsPanel } from './results-panel.js';
 import { renderStatusBar } from './status-bar.js';
@@ -237,6 +237,26 @@ function hitName(M, key) {
   if (k === 'l') return j === M.light.step?.pcb ? 'PCB' : `LED ${j + 1}`;
   return `LED ${j + 1} 발광점`;
 }
+// 선택 부품의 크기·위치 가능 범위(캐시: 장면·부품·LED 가 같으면 재사용) — 표시·입력 제한용으로 여유 TOL 을 뺀다
+function xformInfoOf(i) {
+  const M = A.store.mspec, S = A.store.session, rt = getMech3d();
+  if (!rt?.raw?.parts[i]) return null;
+  const stp = M.light.kind === 'step', lp = (stp && L.ledPartsNow(M)) || [];
+  let em = []; try { em = stp ? L.currentEmitters(M, S.line) : []; } catch { em = []; }
+  const ek = JSON.stringify(em.map((e) => e.pos));
+  if (A.xli && A.xli.rt === rt && A.xli.i === i && A.xli.lp === lp && A.xli.ek === ek) return A.xli.res;
+  const raw = rt.raw.parts[i], r = axisLimits(raw, M.parts[i].xform ?? null, rt.parts.map((p, j) => (j === i ? null : p)), { ledParts: lp, emitters: em });
+  const cut = (v, sg) => (Number.isFinite(v) ? sg * Math.max(0, Math.abs(v) - TOL) : v);   // 0 쪽으로 TOL 만큼
+  const s = M.parts[i].xform?.scale ?? [1, 1, 1], big = Math.max(...r.size0.map((v, k) => v * s[k]));
+  const lim = {
+    move: r.move.map(([lo, hi]) => [cut(lo, -1), cut(hi, 1)]),
+    size: r.size.map((v, k) => (Number.isFinite(v) ? Math.max(r.size0[k] * s[k], v - 2 * TOL) : v)),
+    uniform: Number.isFinite(r.uniform) ? Math.max(1, r.uniform - (2 * TOL) / big) : r.uniform,
+  };
+  const res = { center0: r.center0, size0: r.size0, lim };
+  A.xli = { rt, i, lp, ek, res };
+  return res;
+}
 // 선택 부품의 간격 표(캐시: 장면·부품·LED 가 같으면 재사용)
 function clearanceOf(i) {
   const M = A.store.mspec, S = A.store.session, rt = getMech3d();
@@ -309,9 +329,9 @@ function propHandlers() {
     onFinish: (i, face, f) => part(i, (p) => setPartFinish(p, face, f)),
     // 크기·위치 조절: 장면을 바꾸고 접촉면을 다시 찾는다(같은 면 쌍은 모드 유지). xf = null → 원래대로
     // 새 간섭이 생기면 간섭 직전까지만 적용(limitXform). 직접 배치 LED 는 라인을 따라 다시 놓이므로 고정 LED(STEP)만 장애물
-    onXform: (i, want) => st.update('material', (m, x) => {
+    onXform: (i, want, note = '') => st.update('material', (m, x) => {
       let xf = want;
-      x.xfMsg = null;
+      x.xfMsg = note ? { part: i, text: note } : null;
       if (xf) {
         const rt = getMech3d(), stp = m.light.kind === 'step';
         let em = []; try { em = stp ? L.currentEmitters(m, x.line) : []; } catch { em = []; }
@@ -403,7 +423,7 @@ function renderAll(tag = 'all') {
   });
   const pi = S.node?.startsWith('part:') ? +S.node.slice(5) : -1, clr = pi >= 0 ? clearanceOf(pi) : null;
   if (clr !== A.clrShown) { A.clrShown = clr; renderMarkers(); }
-  if (tag !== 'view') renderPropertyPanel($('#m3-props'), M, S, { dbList: A.ctx.materialDb()?.list() ?? [], auto: autoGrid(), dir: M.observe.dir ?? S.line?.frame.d, lineInfo: lineInfo(), clearance: clr, xfMsg: S.xfMsg?.part === pi ? S.xfMsg.text : '' }, propHandlers());
+  if (tag !== 'view') renderPropertyPanel($('#m3-props'), M, S, { dbList: A.ctx.materialDb()?.list() ?? [], auto: autoGrid(), dir: M.observe.dir ?? S.line?.frame.d, lineInfo: lineInfo(), clearance: clr, xfInfo: pi >= 0 ? xformInfoOf(pi) : null, xfMsg: S.xfMsg?.part === pi ? S.xfMsg.text : '' }, propHandlers());
   if (tag === 'session' || tag === 'all') renderMarkers();
   A.cmd.update(S, S.calc);
   renderStatus();

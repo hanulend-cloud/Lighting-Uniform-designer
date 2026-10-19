@@ -1,5 +1,5 @@
 // 부품 간격·간섭·제한: node test/mech3d-clearance.mjs
-import { closestOnTri, meshGap, meshPenetration, partClearance, interferenceKeys, limitXform } from '../src/engine/mech3d/clearance.js';
+import { closestOnTri, meshGap, meshPenetration, partClearance, interferenceKeys, limitXform, axisLimits, travelDistance } from '../src/engine/mech3d/clearance.js';
 import { boxMesh, ok, done } from './mech3d-util.mjs';
 
 const near = (a, b, e = 1e-6) => Math.abs(a - b) < e;
@@ -36,4 +36,14 @@ const A = boxMesh(0, 0, 0, 10, 10, 2);
   // 원래 겹쳐 있던 것은 막지 않음
   const pre = limitXform(boxMesh(0, 0, 1.5, 10, 10, 2), null, { offset: [1, 0, 0], scale: [1, 1, 1] }, [A, null]);
   ok(!pre.limited, '원래 있던 간섭은 그대로 허용(새 간섭만 막음)'); }
+{ // 상자 안 칸(바닥 0..1, 벽 x=0..1·x=19..20) 에 블록(x 5..9, z 1..3) — 바닥에 접촉
+  const floor = boxMesh(0, 0, 0, 20, 10, 1), wl = boxMesh(0, 0, 1, 1, 10, 5), wr = boxMesh(19, 0, 1, 1, 10, 5), blk = boxMesh(5, 2, 1, 4, 6, 2);
+  ok(Math.abs(travelDistance(blk, [floor, wl, wr], [1, 0, 0], 1000) - 10) < 0.06, `+X 로 10mm 가면 오른 벽: ${travelDistance(blk, [floor, wl, wr], [1, 0, 0], 1000)}`);
+  const L = axisLimits(blk, null, [floor, wl, wr]);
+  ok(Math.abs(L.move[0][0] + 4) < 0.05 && Math.abs(L.move[0][1] - 10) < 0.05, `X 범위 −4 ~ +10: ${L.move[0]}`);
+  ok(Math.abs(L.move[2][0]) < 0.05 && L.move[2][1] === Infinity && L.move[1][0] === -Infinity, `Z: 아래 0(바닥 접촉), 위 무한 · Y 무한: ${L.move[2]} ${L.move[1]}`);
+  ok(Math.abs(L.size[0] - 12) < 0.1 && L.size[2] === 2 + 0 || Math.abs(L.size[2] - 2) < 0.05, `X 최대 크기 4+2·4=12 · Z 는 바닥 접촉이라 2: ${L.size}`);
+  ok(Math.abs(L.uniform - 1) < 0.02, `비율 고정: 바닥에 닿아 더 못 키움: ${L.uniform}`);
+  const L2 = axisLimits(blk, { offset: [0, 0, 1], scale: [1, 1, 1] }, [floor, wl, wr]);
+  ok(Math.abs(L2.size[2] - 4) < 0.1 && Math.abs(L2.uniform - 2) < 0.05, `1mm 띄우면 Z 최대 4 · 비율 고정 2배(높이 반 1mm = 바닥까지 1mm): ${L2.size[2]} ${L2.uniform}`); }
 done();

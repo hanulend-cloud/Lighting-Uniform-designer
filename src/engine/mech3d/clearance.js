@@ -194,3 +194,70 @@ export function limitXform(raw, oldXf, newXf, others, { ledParts = [], emitters 
   const xf = lerpXf(oldXf, newXf, lo);
   return { xf: isIdentityXform(xf) ? null : xf, limited: true, hit, t: lo };
 }
+
+// ---- 축별 한계(입력 전에 보여 주는 가능 범위) ----
+// 움직이는 부품 표본: 삼각형 중심 + 세 꼭짓점을, 안쪽 법선 방향과 삼각형 중심 방향으로 INSET 씩 들인 점.
+// 맞닿은 면을 따라 미끄러질 때 면과 같은 평면 위 광선(스침 교차)을 피한다(STEP 메쉬는 면마다 정점을 따로 가짐)
+const MOVE = new WeakMap();
+function moveSamplesOf(m) {
+  let s = MOVE.get(m);
+  if (s) return s;
+  const P = m.positions, T = m.triangles, sd = insetSides(m), pts = [];
+  for (let t = 0; t < sd.length; t++) {
+    if (!sd[t]) continue;
+    const { c, n } = triCN(P, T, t), q = c.map((v, k) => v - sd[t] * INSET * n[k]);
+    pts.push(...q);
+    for (let j = 0; j < 3; j++) {
+      const v = vtx(P, T[3 * t + j]), w = [c[0] - v[0], c[1] - v[1], c[2] - v[2]], l = Math.hypot(...w) || 1;
+      for (let k = 0; k < 3; k++) pts.push(v[k] - sd[t] * INSET * n[k] + (Math.min(INSET, l / 2) * w[k]) / l);
+    }
+  }
+  s = Float64Array.from(pts);
+  MOVE.set(m, s);
+  return s;
+}
+// mov 를 방향 d(단위)로 옮길 때 처음 닿는 거리(≤ maxD) — 양방향 광선: mov 표본 → 장애물, 장애물 표본 → mov(−d), 발광점 → mov(−d)
+export function travelDistance(mov, obstacles, d, maxD, emitters = []) {
+  let best = maxD;
+  const mb = boxOf(mov), Ms = solid(mov);
+  const sweep = [0, 1, 2].map((k) => Math.min(mb[k], mb[k] + d[k] * maxD)).concat([0, 1, 2].map((k) => Math.max(mb[k + 3], mb[k + 3] + d[k] * maxD)));
+  const ms = moveSamplesOf(mov);
+  for (const o of obstacles) {
+    if (!o || boxBoxDist(sweep, boxOf(o)) > 0) continue;
+    const Os = solid(o), os = moveSamplesOf(o);
+    for (let i = 0; i < ms.length; i += 3) { const h = intersectRay(Os.bvh, ms[i], ms[i + 1], ms[i + 2], d[0], d[1], d[2], 1e-6, best); if (h && h.t < best) best = h.t; }
+    for (let i = 0; i < os.length; i += 3) { const h = intersectRay(Ms.bvh, os[i], os[i + 1], os[i + 2], -d[0], -d[1], -d[2], 1e-6, best); if (h && h.t < best) best = h.t; }
+  }
+  for (const e of emitters) { const h = intersectRay(Ms.bvh, e.pos[0], e.pos[1], e.pos[2], -d[0], -d[1], -d[2], 1e-6, best); if (h && h.t < best) best = h.t; }
+  return best;
+}
+// 현재 xf 에서 축별로 간섭 없이 갈 수 있는 범위 — 반환 { move: [[−, +] ×3](mm, 이동량), size: [최대 크기 mm ×3], uniform: 비율 고정 최대 배수 }
+// 장애물이 없으면 Infinity. 광선 후보 → limitXform 으로 확인·되물림(표본 사이로 빠지는 경우 보정)
+export function axisLimits(raw, xf, others, { ledParts = [], emitters = [], maxD = 1000, tol = TOL } = {}) {
+  const b = boxOf(raw), c = [(b[0] + b[3]) / 2, (b[1] + b[4]) / 2, (b[2] + b[5]) / 2], size0 = [b[3] - b[0], b[4] - b[1], b[5] - b[2]];
+  const X = { offset: [...(xf?.offset ?? [0, 0, 0])], scale: [...(xf?.scale ?? [1, 1, 1])] };
+  const cur = scaleMoveMesh(raw, isIdentityXform(X) ? null : X, c);
+  const base = interferenceKeys(cur, others, ledParts, emitters, tol);   // 원래 겹친 상대는 장애물에서 뺀다
+  const obs = [...others.map((m, j) => (m && !base.has(`p:${j}`) ? m : null)), ...ledParts.map((m, j) => (base.has(`l:${j}`) ? null : m))];
+  const ems = emitters.filter((_, k) => !base.has(`e:${k}`));
+  const opt = { ledParts, emitters, tol };
+  const confirm = (to) => limitXform(raw, X, to, others, opt);
+  const move = [0, 1, 2].map((k) => [-1, 1].map((sg) => {
+    const d = [0, 0, 0]; d[k] = sg;
+    const D = travelDistance(cur, obs, d, maxD, ems);
+    if (D >= maxD) return sg * Infinity;
+    const to = { offset: X.offset.map((v, j) => (j === k ? v + sg * D : v)), scale: X.scale };
+    return sg * D * confirm(to).t;
+  }));
+  const free = move.map(([lo, hi]) => Math.min(-lo, hi));   // 축 양쪽 중 가까운 쪽 — 중심 기준으로 양쪽이 같이 커짐
+  const size = [0, 1, 2].map((k) => {
+    const s = size0[k] * X.scale[k];
+    if (!Number.isFinite(free[k])) return Infinity;
+    const to = { offset: X.offset, scale: X.scale.map((v, j) => (j === k ? (s + 2 * free[k]) / size0[k] : v)) };
+    const t = confirm(to).t;
+    return s + 2 * free[k] * t;
+  });
+  const fr = Math.min(...[0, 1, 2].map((k) => (Number.isFinite(free[k]) ? 1 + (2 * free[k]) / (size0[k] * X.scale[k]) : Infinity)));
+  const uniform = Number.isFinite(fr) ? 1 + (fr - 1) * confirm({ offset: X.offset, scale: X.scale.map((v) => v * fr) }).t : Infinity;
+  return { move, size, uniform, center0: c, size0 };
+}

@@ -2,7 +2,7 @@
 import { transformMesh, eulerMatrix, applyPoint, scaleMoveMesh, isIdentityXform } from '../src/engine/mech3d/xform.js';
 import { setMech3dMesh, getMech3d, applyPartXforms, redetectContacts, clearMech3d } from '../src/engine/mech3d/runtime.js';
 import { bounds } from '../src/engine/mech3d/mesh.js';
-import { nextXform } from '../src/ui/mech3d-panel.js';
+import { xformFromInput, xformEditor } from '../src/ui/mech3d-panel.js';
 import { defaultLight, defaultObserve, migrateMech3d, SOLDER_R } from '../src/engine/mech3d/defs.js';
 import { meshVolume } from '../src/engine/mech3d/mesh.js';
 import { boxMesh, ok, done } from './mech3d-util.mjs';
@@ -38,6 +38,16 @@ ok(!('bvh' in transformMesh(mb, [1, 0, 0], [0, 0, 0])), '변환 사본은 캐시
   applyPartXforms([null, null]);
   ok(getMech3d() === raw, '원래대로 → 원본 장면');
   clearMech3d(); }
-ok(nextXform(null, 's0', 2, true)?.scale.join() === '2,2,2' && nextXform(null, 's1', 2, false)?.scale.join() === '1,2,1' && nextXform(null, 'o2', 3, true)?.offset.join() === '0,0,3'
-  && nextXform({ offset: [0, 0, 0], scale: [2, 1, 1] }, 's0', 1, false) === null && nextXform(null, 's0', 100, false).scale[0] === 10 && nextXform(null, 's0', NaN, false) === null, 'nextXform: 비율 고정·축별·이동·항등 → null·상한·NaN');
+{ const info = { center0: [10, 5, 1], size0: [20, 10, 2], lim: { move: [[-3, 4], [-Infinity, Infinity], [0, 6]], size: [24, Infinity, 2], uniform: 1.2 } };
+  const F = (xf, key, v, lock = false) => xformFromInput(xf, key, v, lock, info);
+  ok(F(null, 'c0', 12).xf.offset.join() === '2,0,0' && !F(null, 'c0', 12).clamped, '중심 X 10 → 12 = 이동 +2');
+  ok(F(null, 'c0', 20).xf.offset[0] === 4 && F(null, 'c0', 20).clamped && F(null, 'c2', 0).xf === null && F(null, 'c2', 0).clamped, '범위 밖 → 한계값(+4) · 아래로는 0 에서 막힘');
+  ok(F(null, 'c1', -100).xf.offset[1] === -105 && !F(null, 'c1', -100).clamped, '장애물 없는 축은 제한 없음');
+  ok(F(null, 'z0', 22).xf.scale.join() === '1.1,1,1' && F(null, 'z0', 30).xf.scale[0] === 1.2 && F(null, 'z0', 30).clamped, '크기 X 22mm → 배율 1.1 · 30 → 최대 24(1.2)');
+  ok(F(null, 'z2', 3).clamped && F(null, 'z2', 3).xf === null && F(null, 'z2', 1).xf.scale[2] === 0.5, '크기 Z 최대 2(접촉) · 줄이기는 가능');
+  const u = F(null, 'z0', 30, true);
+  ok(u.clamped && u.xf.scale.every((v) => Math.abs(v - 1.2) < 1e-9), '비율 고정: 최대 1.2배');
+  ok(F(null, 'c0', NaN).xf === null && !F(null, 'c0', NaN).clamped, 'NaN 무시');
+  const h = xformEditor({ size: [20, 10, 2], xform: { offset: [2, 0, 0], scale: [1, 1, 1] } }, info, false);
+  ok(h.includes('value="12.00"') && h.includes('min="9.00"') && h.includes('max="16.00"') && h.includes('9.00 ~ 16.00') && h.includes('— ~ —') && h.includes('24.00'), '편집기: 현재 중심·가능 범위·최대 크기 표시'); }
 done();
