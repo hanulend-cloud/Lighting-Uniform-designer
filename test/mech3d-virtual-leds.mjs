@@ -1,5 +1,5 @@
 // LED STEP 가상 배치: node test/mech3d-virtual-leds.mjs
-import { virtualLayout, rotateAbout, stepLayoutOf } from '../src/engine/mech3d/virtual-leds.js';
+import { virtualLayout, virtualEmittersAt, rotateAbout, stepLayoutOf } from '../src/engine/mech3d/virtual-leds.js';
 import { ledSPositions } from '../src/engine/mech3d/placement.js';
 import { recognizeLine } from '../src/engine/mech3d/line.js';
 import { bounds } from '../src/engine/mech3d/mesh.js';
@@ -18,6 +18,14 @@ const step = { leds: [1, 2], pcb: 0, excluded: [], emitters: [{ part: 1, pos: [2
   ok([0, 1, 2, 3, 4, 5].every((i) => Math.abs(bk[i] - b0[i] - (i % 3 === 0 ? strip.fromSW(s[2], 0)[0] - 20 : 0)) < 1e-5), '몸체 복사 = 기준 몸체를 s 차이만큼 이동(직선)'); }
 { const v = virtualLayout({ parts, step: { ...step, excluded: [1] }, line: strip, count: 2, pitch: 30 });
   ok(Math.abs(Math.abs(v.emitters[1].pos[0] - v.emitters[0].pos[0]) - 30) < 1e-6 && v.ref === 2, '제외된 LED 는 기준이 안 됨 → 다음 LED 가 기준, 피치 30'); }
+{ // count 0 = LED 몸체 없음(PCB·기타만) · 발광점 위치 지정(자동설계 ② 후보)
+  const z = virtualLayout({ parts, step, line: strip, count: 0 });
+  ok(z.parts.length === 2 && z.leds.length === 0 && z.emitters.length === 0 && z.pcb === 0 && z.parts[1] === screw, 'count 0: LED 몸체 없이 PCB·기타만');
+  const full = virtualLayout({ parts, step, line: strip, count: 3, pitch: 10 }), s3 = full.emitters.map((e) => e.s);
+  const at = virtualEmittersAt({ parts, step, line: strip, positions: s3 });
+  ok(at.length === 3 && at.every((e, k) => e.part === null && e.pos.every((c, j) => Math.abs(c - full.emitters[k].pos[j]) < 1e-9) && e.axis.every((c, j) => Math.abs(c - full.emitters[k].axis[j]) < 1e-9)), 'virtualEmittersAt: 같은 s 면 전체 배치의 발광점과 같음(몸체 없음)');
+  const p1 = virtualLayout({ parts, step, line: strip, positions: [s3[1]] });
+  ok(p1.leds.length === 1 && p1.parts.length === 3 && Math.abs(p1.emitters[0].pos[0] - full.emitters[1].pos[0]) < 1e-9, 'positions: 지정한 s 에만 복사'); }
 { const r = rotateAbout([1, 0, 0], [0, 0, 0], [0, 0, 1], Math.PI / 2);
   ok(Math.abs(r[0]) < 1e-12 && Math.abs(r[1] - 1) < 1e-12, 'rotateAbout: d 축 90°'); }
 { // 원 라인: 기준 LED 를 라인 위 다른 각으로 옮기면 xAxis 가 접선을 따라 돈다

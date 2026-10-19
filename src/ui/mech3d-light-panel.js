@@ -49,7 +49,7 @@ export function stepLayoutRowHtml(st) {
   const v = st.virtual, can = !!st.emitters?.length;
   const radio = (val, label, chk, dis) => `<label><input type="radio" name="lp-vmode" value="${val}" data-lp-vmode ${chk ? 'checked' : ''} ${dis ? 'disabled title="LED 발광면을 먼저 지정하세요"' : ''}> ${label}</label>`;
   return `<div class="m3-row"><label>배치</label>${radio('orig', 'STEP 원래 위치', !v, false)} ${radio('virt', '가상 배치', !!v, !can && !v)}</div>
-    ${v ? `<div class="m3-row">개수<input type="number" min="1" step="1" value="${v.count}" data-lp-virt="count"> 피치<input type="number" min="0" step="0.5" value="${v.pitch}" data-lp-virt="pitch">mm <span class="mut">(0 = 균등)</span> <button data-lp-vorig>원래 STEP 위치로</button></div>
+    ${v ? `<div class="m3-row">개수<input type="number" min="1" step="1" value="${v.count}" data-lp-virt="count" aria-label="가상 배치 LED 개수"> 피치<input type="number" min="0" step="0.5" value="${v.pitch}" data-lp-virt="pitch" aria-label="가상 배치 피치 mm">mm <span class="mut">(0 = 균등)</span> <button data-lp-vorig>원래 STEP 위치로</button></div>
     <div class="m3-row mut">기준 LED 의 몸체·발광점을 관측 라인을 따라 복사 — 원래 STEP 은 그대로</div>` : ''}`;
 }
 // LED 노드: 인식 상태 · (LED STEP) 배치 · 배광 · 지향각 · 발광면 크기 · 광속(lm/개, 0 = 상대값) · PCB 색

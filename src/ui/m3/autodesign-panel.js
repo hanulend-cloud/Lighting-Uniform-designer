@@ -30,13 +30,15 @@ export function profileSvg(cur, best, W = 200, H = 48) {
   return `<div class="m3-row"><span class="mut">길이 프로파일(각 최대 = 1) · 회색 현재 · 색 최적</span></div><svg class="m3-ad-prof" viewBox="0 0 ${W} ${H}" width="100%" height="${H}" preserveAspectRatio="none" role="img" aria-label="길이 프로파일 현재 대 최적">${a}${b}</svg>`;
 }
 
+// 가상 배치 기준 LED(virtualLayout 과 같은 규칙: 확인 필요·제외가 아닌 첫 발광점)
+const stepRefEmitter = (st) => { const ex = new Set(st?.excluded ?? []); return (st?.emitters ?? []).find((e) => !e.needsCheck && !ex.has(e.part)) ?? null; };
 // M = spec.mech3d, info.non25[i] = 부품 i 의 비 2.5D 비율(관측 방향, app 이 frameHeights 로 계산)
 export function stageAvailability(M, info) {
   const milkyParts = M.parts.map((p, i) => (p.material.kind === 'milky' ? i : -1)).filter((i) => i >= 0);
   const shapeParts = M.parts.map((p, i) => (p.material.kind !== 'opaque' && (info.non25?.[i] ?? 1) <= 0.02 ? i : -1)).filter((i) => i >= 0);
   return {
     milky: milkyParts.length ? { ok: true, parts: milkyParts } : { ok: false, why: 'Milky 부품이 없음 — 부품 소재를 Milky 로 지정하세요' },
-    leds: M.light.kind === 'manual' ? { ok: true } : { ok: false, why: M.light.kind === 'step' ? 'LED STEP 은 위치가 고정 — 직접 배치에서만 쓸 수 있음' : '광원을 직접 배치로 지정하세요' },
+    leds: M.light.kind === 'manual' ? { ok: true } : M.light.kind === 'step' ? (stepRefEmitter(M.light.step) ? { ok: true, note: 'LED STEP — 기준 LED 를 복사해 가상 배치' } : { ok: false, why: 'LED STEP — 기준이 될 LED 가 없음 · LED 발광면을 먼저 지정하세요' }) : { ok: false, why: '광원을 직접 배치로 지정하세요' },
     shape: shapeParts.length ? { ok: true, parts: shapeParts } : { ok: false, why: '관측 방향으로 2.5D 인 투과 부품이 없음' },
   };
 }
@@ -50,7 +52,7 @@ export function autoCardHtml({ avail, sel, running, names = [], canRevert = fals
   const dis = running ? ' disabled' : '', pname = (i) => esc(names[i] ?? `부품 ${i + 1}`);
   const row = ([k, label]) => {
     const a = avail[k];
-    return `<label class="m3-ad-item${a.ok ? '' : ' off'}"><input type="checkbox" data-ad="${k}"${sel[k] && a.ok ? ' checked' : ''}${a.ok ? dis : ' disabled'}> ${label}${a.ok ? '' : ` <span class="mut">— ${esc(a.why)}</span>`}</label>`;
+    return `<label class="m3-ad-item${a.ok ? '' : ' off'}"><input type="checkbox" data-ad="${k}"${sel[k] && a.ok ? ' checked' : ''}${a.ok ? dis : ' disabled'}> ${label}${a.ok ? (a.note ? ` <span class="mut">— ${esc(a.note)}</span>` : '') : ` <span class="mut">— ${esc(a.why)}</span>`}</label>`;
   };
   const mTarget = sel.milky && avail.milky.ok && milkyPart != null ? `<div class="m3-row mut">① 대상: ${pname(milkyPart)}</div>` : '';
   const cap = (sel.milky && avail.milky.ok) || (sel.leds && avail.leds.ok) ? `<div class="m3-row">Milky 상한 <input type="number" min="0.5" max="9.9" step="0.5" value="${sel.milkyMax ?? 5}" data-ad="milkyMax" aria-label="Milky 상한"${dis}> <span class="mut">② 는 이 값(확산 최대)에서 개수를 정하고 ① 이 낮춤</span></div>` : '';
@@ -62,10 +64,11 @@ export function autoCardHtml({ avail, sel, running, names = [], canRevert = fals
 }
 const shapeText = (s) => `두께 ${s.dt >= 0 ? '+' : ''}${f2(s.dt)} · ${s.h >= 0 ? '포켓' : '돌출'} ${f2(Math.abs(s.h))} · R ${f2(s.R)} mm`;
 // 비교표 — cur/best = { count, pitch, milky, Ulen, Uwid, eff, profile? }, shape = { dt, h, R } | null, cur.shape = 이미 적용된 형상(없으면 원본)
-// stepLeds = LED STEP 발광점 수(직접 배치면 null) · unchanged = 최종안이 현재안 그대로(나은 설계 없음) → 사유 표시 · [적용] 비활성
+// stepLeds = LED STEP 발광점 수(직접 배치면 null) · STEP 이면 열마다 stepOrig(true = 원래 위치, false = 가상 배치) · unchanged = 최종안이 현재안 그대로(나은 설계 없음) → 사유 표시 · [적용] 비활성
 export function compareHtml({ cur, best, feasible, reason, shape, stepLeds = null, canRevert = false, unchanged = false }) {
   const tr = (label, a, b) => `<tr><th>${label}</th><td>${a}</td><td class="${a !== b ? 'chg' : ''}">${b}</td></tr>`;
-  const led = (x) => (stepLeds != null ? `LED STEP ${stepLeds}개` : `${x.count}개 ${x.pitch > 0 ? `피치 ${x.pitch}` : '균등'}`);   // STEP 은 ② 불가 — 두 열 같음
+  const lay = (x) => `${x.count}개 ${x.pitch > 0 ? `피치 ${x.pitch}` : '균등'}`;
+  const led = (x) => (stepLeds == null ? lay(x) : x.stepOrig === false ? `가상 ${lay(x)}` : `LED STEP 원래 ${x.count ?? stepLeds}개`);   // STEP: stepOrig = 원래 STEP 위치
   const curShape = cur.shape ? `적용된 형상 · ${shapeText(cur.shape)}` : '원본';
   return `<div class="m3-h">${unchanged ? '현재안 유지' : feasible ? '최적안' : '가장 가까운 안'} <span class="mut">${esc(reason)}</span></div>
     <table class="m3-cmp"><tr><th></th><th>현재</th><th>최적</th></tr>

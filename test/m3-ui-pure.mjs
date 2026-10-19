@@ -86,14 +86,21 @@ ok(judgeText(0.8004, 0.8009).cls === 'ok' && judgeText(0.7999, 0.8).cls === 'bad
   const a = stageAvailability(base, { non25: [0, 0.5] });
   ok(a.milky.ok && a.leds.ok && a.shape.ok && a.shape.parts.join() === '0', '가능: Milky 부품 있음 · 직접 배치 · 2.5D 부품만 ③ 대상');
   const b = stageAvailability({ ...base, light: { kind: 'step' }, parts: [{ material: { kind: 'clear' } }] }, { non25: [0.5] });
-  ok(!b.milky.ok && /Milky 부품/.test(b.milky.why) && !b.leds.ok && /LED STEP/.test(b.leds.why) && !b.shape.ok, '불가 이유: Milky 없음 · LED STEP 위치 고정 · 2.5D 아님');
+  ok(!b.milky.ok && /Milky 부품/.test(b.milky.why) && !b.leds.ok && /LED STEP/.test(b.leds.why) && /기준/.test(b.leds.why) && !b.shape.ok, '불가 이유: Milky 없음 · LED STEP 기준 LED 없음 · 2.5D 아님');
+  const stepL = (emitters, excluded = []) => stageAvailability({ ...base, light: { kind: 'step', step: { leds: [1, 2], excluded, emitters } } }, { non25: [0, 0.5] }).leds;
+  const s1 = stepL([{ part: 1 }, { part: 2 }]), s2 = stepL([{ part: 1, needsCheck: true }, { part: 2 }], [2]), s3 = stepL([{ part: 2 }], [1]);
+  ok(s1.ok && s1.note === 'LED STEP — 기준 LED 를 복사해 가상 배치' && !s2.ok && /기준/.test(s2.why) && s3.ok, 'LED STEP ②: 기준 발광점(확인 필요·제외 아님) 있으면 가능, 없으면 이유');
+  ok(autoCardHtml({ avail: { ...a, leds: s1 }, sel: { leds: true }, running: null }).includes('기준 LED 를 복사해 가상 배치'), '카드: LED STEP ② 안내 문구');
   const h = autoCardHtml({ avail: a, sel: { milky: true, leds: false, shape: false, shapePart: 0 }, running: null });
   ok(h.includes('data-ad="milky" checked') && h.includes('data-ad="run"') && !h.includes('disabled data-ad="milky"'), '카드: 체크 상태·실행 버튼');
   ok(autoCardHtml({ avail: a, sel: { milky: true }, running: null, canRevert: true }).includes('data-ad="revert"') && !h.includes('data-ad="revert"'), '카드: 적용 뒤에만 되돌리기');
   const c = compareHtml({ cur: { count: 5, pitch: 0, milky: 3, Ulen: 0.62, Uwid: 0.7, eff: 0.6 }, best: { count: 4, pitch: 0, milky: 3.5, Ulen: 0.81, Uwid: 0.72, eff: 0.55 }, feasible: true, reason: '', shape: null });
   ok(c.includes('LED') && c.includes('4') && c.includes('0.81') && c.includes('data-ad="apply"') && c.includes('data-ad="cancel"'), '비교표: 현재 | 최적 · 적용·취소');
-  const cs = compareHtml({ cur: { count: 0, pitch: 0, milky: 2, Ulen: 0.6, Uwid: 0.7, eff: 0.5 }, best: { count: 0, pitch: 0, milky: 3, Ulen: 0.8, Uwid: 0.7, eff: 0.4 }, feasible: true, reason: '', shape: null, stepLeds: 10 });
-  ok((cs.match(/LED STEP 10개/g) ?? []).length === 2 && !cs.includes('균등'), '비교표: LED STEP 모드 = 두 열 모두 LED STEP 10개');
+  const cs = compareHtml({ cur: { count: 10, pitch: 0, stepOrig: true, milky: 2, Ulen: 0.6, Uwid: 0.7, eff: 0.5 }, best: { count: 10, pitch: 0, stepOrig: true, milky: 3, Ulen: 0.8, Uwid: 0.7, eff: 0.4 }, feasible: true, reason: '', shape: null, stepLeds: 10 });
+  ok((cs.match(/LED STEP 원래 10개/g) ?? []).length === 2 && !cs.includes('균등'), '비교표: LED STEP 원래 위치 유지 = 두 열 모두 LED STEP 원래 10개');
+  const cv = compareHtml({ cur: { count: 10, pitch: 0, stepOrig: true, milky: 2, Ulen: 0.6, Uwid: 0.7, eff: 0.5 }, best: { count: 8, pitch: 14, stepOrig: false, milky: 2, Ulen: 0.8, Uwid: 0.7, eff: 0.5 }, feasible: true, reason: '', shape: null, stepLeds: 10 });
+  const cg = compareHtml({ cur: { count: 6, pitch: 0, stepOrig: false, milky: 2, Ulen: 0.6, Uwid: 0.7, eff: 0.5 }, best: { count: 5, pitch: 0, stepOrig: false, milky: 2, Ulen: 0.8, Uwid: 0.7, eff: 0.5 }, feasible: true, reason: '', shape: null, stepLeds: 6 });
+  ok(cv.includes('<td>LED STEP 원래 10개</td>') && cv.includes('가상 8개 피치 14') && cg.includes('가상 6개 균등') && cg.includes('가상 5개 균등'), '비교표: LED STEP 원래 → 가상 개수·피치(0 = 균등)');
   const cu = compareHtml({ cur: { count: 5, pitch: 0, milky: 3, Ulen: 0.75, Uwid: 0.9, eff: 0.6 }, best: { count: 5, pitch: 0, milky: 3, Ulen: 0.75, Uwid: 0.9, eff: 0.6 }, feasible: false, reason: '현재안보다 나은 설계를 찾지 못함 — 현재안 유지', shape: null, unchanged: true });
   ok(cu.includes('현재안 유지') && /data-ad="apply"[^>]*disabled/.test(cu) && !/data-ad="apply"[^>]*disabled/.test(c), '비교표: 현재안 유지 → 사유 표시 · 적용 비활성'); }
 ok(clampCap(12) === 9.9 && clampCap(0.1) === 0.5 && clampCap(3) === 3 && clampCap(0) === null && clampCap(-2) === null && clampCap(NaN) === null, 'Milky 상한: 0.5~9.9 로 자름 · 0/음수/NaN = 기본');
@@ -119,5 +126,6 @@ ok(clampCap(12) === 9.9 && clampCap(0.1) === 0.5 && clampCap(3) === 3 && clampCa
   const h0 = stepLayoutRowHtml(st), h1 = stepLayoutRowHtml({ ...st, virtual: { count: 6, pitch: 15 } }), h2 = stepLayoutRowHtml({ ...st, emitters: [] });
   ok(/value="orig" data-lp-vmode checked/.test(h0) && !/data-lp-virt/.test(h0) && !/data-lp-vorig/.test(h0), '배치 행: 원래 위치 선택 · 개수·피치 없음');
   ok(/value="virt" data-lp-vmode checked/.test(h1) && /value="6" data-lp-virt="count"/.test(h1) && /value="15" data-lp-virt="pitch"/.test(h1) && h1.includes('원래 STEP 위치로'), '배치 행: 가상 → 개수·피치·원래 위치로');
-  ok(/value="virt" data-lp-vmode\s+disabled/.test(h2), '발광면 미지정 → 가상 배치 비활성'); }
+  ok(/value="virt" data-lp-vmode\s+disabled/.test(h2), '발광면 미지정 → 가상 배치 비활성');
+  ok(/data-lp-virt="count" aria-label="가상 배치 LED 개수"/.test(h1) && /data-lp-virt="pitch" aria-label="가상 배치 피치 mm"/.test(h1), '배치 행: 개수·피치 입력 aria-label'); }
 done();

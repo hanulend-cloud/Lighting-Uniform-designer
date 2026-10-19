@@ -13,7 +13,8 @@ export function rotateAbout(p, c, k, a) {
 const rotDir = (d, k, a) => rotateAbout(d, [0, 0, 0], k, a);
 const angle = (line, s) => { const [tx, ty] = line.tangentAt(s); return Math.atan2(ty, tx); };
 
-export function virtualLayout({ parts, step, line, count, pitch = 0 }) {
+// count 0 = LED 몸체 없는 부품만(자동설계 ② 후보 지도). positions = s 목록을 직접(개수·피치 대신), bodies false = 발광점만(part null)
+export function virtualLayout({ parts, step, line, count, pitch = 0, positions = null, bodies = true }) {
   const ex = new Set(step.excluded ?? []), em = (step.emitters ?? []).find((e) => !e.needsCheck && !ex.has(e.part));
   if (!em) throw new Error('가상 배치: 기준이 될 LED 가 없음 — LED 발광면을 먼저 지정하세요');
   const ref = em.part, body = parts[ref], F = line.frame;
@@ -22,8 +23,9 @@ export function virtualLayout({ parts, step, line, count, pitch = 0 }) {
   const ledSet = new Set(step.leds ?? []), keep = [], idx = new Map();
   parts.forEach((m, i) => { if (!ledSet.has(i)) { idx.set(i, keep.length); keep.push(m); } });
   const out = { parts: keep.slice(), leds: [], pcb: step.pcb >= 0 && idx.has(step.pcb) ? idx.get(step.pcb) : -1, emitters: [], ref };
-  for (const s of ledSPositions(line, count, pitch)) {
-    const [x, y] = line.fromSW(s, w0), p = line.to3D(x, y, h0), da = angle(line, s) - a0;
+  for (const s of positions ?? (count === 0 ? [] : ledSPositions(line, count, pitch))) {
+    const [x, y] = line.fromSW(s, w0), p = line.to3D(x, y, h0), da = angle(line, s) - a0, e = { s, pos: p, axis: rotDir(em.axis, F.d, da), xAxis: em.xAxis ? rotDir(em.xAxis, F.d, da) : em.xAxis };
+    if (!bodies) { out.emitters.push({ part: null, ...e }); continue; }
     const P = body.positions, Q = new Float32Array(P.length);
     for (let i = 0; i < P.length; i += 3) {
       const r = rotateAbout([P[i], P[i + 1], P[i + 2]], em.pos, F.d, da);
@@ -32,10 +34,13 @@ export function virtualLayout({ parts, step, line, count, pitch = 0 }) {
     const { bvh, ...rest } = body, k = out.parts.length;
     out.parts.push({ ...rest, positions: Q });
     out.leds.push(k);
-    out.emitters.push({ part: k, s, pos: p, axis: rotDir(em.axis, F.d, da), xAxis: em.xAxis ? rotDir(em.xAxis, F.d, da) : em.xAxis });
+    out.emitters.push({ part: k, ...e });
   }
   return out;
 }
+
+// 기준 LED 발광점을 라인 위치 s 들로 옮긴 것(몸체 없음) — 자동설계 ② 후보마다 광원 하나
+export const virtualEmittersAt = ({ parts, step, line, positions }) => virtualLayout({ parts, step, line, positions, bodies: false }).emitters;
 
 // 원래/가상 배치를 하나로(순수) — step.virtual = { count, pitch } | null. line 이 없으면 원래 배치로 대신.
 // 가상인데 기준 LED 가 없으면 원래 배치 + err. 반환 { parts, leds, pcb, excluded, emitters, virtual, ref?, err? }

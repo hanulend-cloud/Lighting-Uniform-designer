@@ -26,6 +26,7 @@ import { runAutoDesign, halvingTotal } from '../../engine/mech3d/autodesign.js';
 import { milkyRows } from '../../engine/mech3d/milky-search.js';
 import { candidatePositions } from '../../engine/mech3d/basis.js';
 import { ledAtS } from '../../engine/mech3d/placement.js';
+import { virtualEmittersAt } from '../../engine/mech3d/virtual-leds.js';
 import { heightsFor, deformPart, refinedFor, minThickness, shapeCandidates } from '../../engine/mech3d/shape-opt.js';
 import { interferenceKeys } from '../../engine/mech3d/clearance.js';
 import { scaleMoveMesh, isIdentityXform } from '../../engine/mech3d/xform.js';
@@ -342,11 +343,14 @@ function adBaseMesh(i, ctx) {
 }
 // 형상 후보 메쉬 — 세분은 메모(refinedFor: 후보 27개도 R 3개 → 세분 3번). hDiv = R/hMax(STEP 은 거칠게 3)
 const adShapeMesh = (base, mod, hDiv = 8) => deformPart(refinedFor(base, mod.frame, mod.centers, mod.R, Math.max(0.1, mod.R / hDiv)), mod.frame, heightsFor(base, mod.frame, mod.cell), mod);
+// LED STEP: 설계 d 가 가상 배치인가 — 현재가 원래 위치이고 개수·피치가 그대로면 원래(①·③ 만 돌리면 가상으로 바꾸지 않음)
+const adStepVirt = (d, cur) => !(cur?.stepOrig && d.count === cur.count && d.pitch === cur.pitch);
 // 설계 → (mspec 복사본, 기구 메쉬) — 형상은 후보 메쉬로 바꾼 부품 포함
 function designScene(d, ctx) {
   const M = adClone(ctx.M0), rt = ctx.rt, mp = ctx.mp;
   if (mp != null && d.milky != null) M.parts[mp] = setPartMaterialParam(M.parts[mp], 'milky', d.milky);
   if (M.light.kind === 'manual' && d.count != null) { M.light.manual.count = d.count; M.light.manual.pitch = d.pitch; }
+  if (M.light.kind === 'step' && M.light.step && d.count != null && adStepVirt(d, ctx.cur)) M.light.step.virtual = { count: d.count, pitch: d.pitch };
   let parts = rt.parts;
   if (d.shape) {
     const i = d.shape.part, mod = shapeModFor(d.shape, M, ctx.line), base = adBaseMesh(i, ctx);
@@ -377,7 +381,11 @@ async function adRun() {
   st.userPaused = ps === 'paused'; st.deferred = ['paused', 'running', 'pending', 'starting'].includes(ps);
   if (ps === 'pending') A.prog.cancel(); else A.prog.pause();
   st.running = { frac: 0, text: '준비' }; st.result = null; A.meshShown = null; renderView(); renderAuto();
-  const cur = { milky: ctx.mp != null ? M0.parts[ctx.mp].material.milky : null, count: M0.light.manual?.count ?? 0, pitch: M0.light.manual?.pitch ?? 0, shape: null };
+  // LED STEP: 현재 = 가상이면 그 개수·피치, 아니면 현재 발광점 수·0(stepOrig = 원래 위치)
+  const stp = M0.light.kind === 'step', sv = stp ? M0.light.step?.virtual ?? null : null;
+  let nOrig = 0; if (stp && !sv) { try { nOrig = L.currentEmitters(M0, line).length; } catch { nOrig = 0; } }
+  const cur = { milky: ctx.mp != null ? M0.parts[ctx.mp].material.milky : null, count: stp ? (sv ? sv.count : nOrig) : M0.light.manual?.count ?? 0, pitch: stp ? sv?.pitch ?? 0 : M0.light.manual?.pitch ?? 0, shape: null, ...(stp ? { stepOrig: !sv } : {}) };
+  ctx.cur = cur;
   const minWall = { ...defaultChecks(), ...(M0.checks ?? {}) }.minWall, t0 = performance.now();
   const shapeCands = stages.shape ? shapeCandidates({ t0: heightsFor(adBaseMesh(sp, ctx), line.frame, 0.5).t0, pitch: cur.count > 1 ? (cur.pitch > 0 ? cur.pitch : line.length / cur.count) : line.length, hasCenters: true }) : [];
   const shapeTot = halvingTotal(shapeCands.length);
@@ -396,14 +404,18 @@ async function adRun() {
       return milkyRows(G, obs, { milkies: ms, batches: r.rwBatches, ess: r.ess, emitted: r.ledger.emitted });
     },
     async basis(d) {   // ① 이 켜져 있으면 실행기가 d.milky = 상한으로 넘김
-      const { M: Md, parts } = designScene(d, ctx);
-      const cand = candidatePositions(line, 1), sets = cand.map((s) => [ledAtS(line, s, Md.light.manual, rt)]);
+      const { M: Md, parts } = designScene(d, ctx), cand = candidatePositions(line, 1);
+      let sets;
+      if (Md.light.kind === 'step') {   // 기준 LED 발광점을 후보 위치로 · 장면은 LED 몸체 없이(PCB·기타만 = 가상 0개)
+        sets = virtualEmittersAt({ parts: L.ledPartsNow(Md), step: Md.light.step, line, positions: cand }).map((e) => [e]);
+        Md.light.step.virtual = { count: 0, pitch: 0 };
+      } else sets = cand.map((s) => [ledAtS(line, s, Md.light.manual, rt)]);
       const r = await R.traceEach(adJob(Md, parts, ctx, { emitters: sets[0] }), sets, { N: 20000 });
       return { cand, maps: r.maps, emitted: r.emitted };
     },
     async evalShapes(d, cands, N, maxMs = 2500) {   // 단계별 광자·시간 제한은 halving 일정(6만/20만/60만 · 2.5/4/6초)
       const out = [], base = adBaseMesh(sp, ctx), H = heightsFor(base, line.frame, 0.5);
-      const others = rt.parts.map((p, j) => (j === sp ? null : p)), lp = (M0.light.kind === 'step' && L.ledPartsNow(M0, ctx.line)) || [];
+      const others = rt.parts.map((p, j) => (j === sp ? null : p)), lp = (M0.light.kind === 'step' && L.ledPartsNow(designScene(d, ctx).M, ctx.line)) || [];   // ② 가 바꾼 가상 배치 몸체 포함
       const before = interferenceKeys(base, others, lp, []);
       for (const c of cands) {
         if (R.stopped) break;
@@ -438,7 +450,7 @@ async function adRun() {
     const smI = sp >= 0 && M0.parts[sp]?.shapeMod ? sp : M0.parts.findIndex((p) => p.shapeMod), sm = smI >= 0 ? M0.parts[smI].shapeMod : null;   // 비교표 '현재' 열 — 이미 적용된 형상(표시만)
     st.result = { design: res.best, feasible: res.feasible, reason: res.reason, shape: res.best.shape ?? null, stepLeds: nStep, unchanged: !!res.unchanged, ctx, stages,
       cur: { ...cur, shape: sm ? { dt: sm.dt, h: sm.h, R: sm.R } : null, Ulen: C?.stats?.Ulen, Uwid: C?.stats?.Uwid, eff: C?.eff ?? NaN, profile: C?.stats?.profile ?? null },
-      best: { ...res.best, Ulen: res.verified.stats.Ulen, Uwid: res.verified.stats.Uwid, eff: res.verified.eff, profile: res.verified.stats.profile ?? null } };
+      best: { ...res.best, ...(stp ? { stepOrig: !adStepVirt(res.best, cur) } : {}), Ulen: res.verified.stats.Ulen, Uwid: res.verified.stats.Uwid, eff: res.verified.eff, profile: res.verified.stats.profile ?? null } };
   }
   // Worker 에 자동설계 장면이 올라가 있음 — 진행 중이던 계산·실행 중 편집은 다시 시작, 끝난 계산은 그대로.
   // restart 는 일시정지 상태를 이어가므로(wantPaused) 사용자가 멈춘 게 아니면 resume(대기 중 resume = 일시정지 요청 해제)
@@ -453,19 +465,22 @@ function adPreview() {
   return r.preview;
 }
 function adCancel() { const st = adState(); st.result = null; A.meshShown = null; renderView(); renderAuto(); }
-// 적용 = 바뀐 항목만 씀(① Milky 값이 다르면 · ② 를 돌렸고 개수·피치가 다르면 · ③ 형상). 되돌리기용으로 그 항목의 전체 복사본을 남김
+// 적용 = 바뀐 항목만 씀(① Milky 값이 다르면 · ② 를 돌렸고 개수·피치가 다르면(LED STEP = step.virtual) · ③ 형상). 되돌리기용으로 그 항목의 전체 복사본을 남김
 function adApply() {
   const st = adState(), r = st.result, d = r?.design;
   if (!d || r.unchanged) return;
   const M = A.store.mspec, mp = r.ctx.mp, Lm = M.light.manual;
   const milkyCh = mp != null && d.milky != null && d.milky !== M.parts[mp].material.milky;
   const lightCh = !!r.stages?.leds && M.light.kind === 'manual' && d.count != null && (d.count !== Lm.count || d.pitch !== Lm.pitch);
+  const sv = M.light.kind === 'step' ? M.light.step?.virtual ?? null : null;   // LED STEP: 가상 배치로 바뀌었고 이전과 다르면
+  const stepCh = !!r.stages?.leds && M.light.kind === 'step' && !!M.light.step && d.count != null && adStepVirt(d, r.ctx.cur) && (!sv || sv.count !== d.count || sv.pitch !== d.pitch);
   const mod = d.shape ? adPreview().M.parts[d.shape.part].shapeMod : null;
-  const undo = { milky: milkyCh ? [mp, adClone(M.parts[mp].material)] : null, manual: lightCh ? adClone(Lm) : null, shape: mod ? [d.shape.part, adClone(M.parts[d.shape.part].shapeMod ?? null)] : null };
+  const undo = { milky: milkyCh ? [mp, adClone(M.parts[mp].material)] : null, manual: lightCh ? adClone(Lm) : null, stepVirt: stepCh ? { v: adClone(sv) } : null, shape: mod ? [d.shape.part, adClone(M.parts[d.shape.part].shapeMod ?? null)] : null };
   st.result = null; A.meshShown = null;
-  if (undo.milky || undo.manual || undo.shape) st.undo = undo;
+  if (undo.milky || undo.manual || undo.stepVirt || undo.shape) st.undo = undo;
   if (milkyCh) A.store.update('material', (m) => { m.parts[mp] = setPartMaterialParam(m.parts[mp], 'milky', d.milky); });
   if (lightCh) A.store.update('light', (m) => { m.light.manual.count = d.count; m.light.manual.pitch = d.pitch; });
+  if (stepCh) A.store.update('light', (m, x) => { m.light.step.virtual = { count: d.count, pitch: d.pitch }; if (x.pick === 'led' || x.pick === 'ledx') x.pick = null; });   // 가상 중엔 발광면·제외 클릭 끔
   if (mod) A.store.update('material', (m) => { m.parts[d.shape.part].shapeMod = mod; applyPartMods(m.parts); m.contacts = redetectContacts(m.contacts); });
   renderAuto();
 }
@@ -476,6 +491,7 @@ function adRevert() {
   st.undo = null; st.result = null; A.meshShown = null;
   if (u.milky) A.store.update('material', (m) => { m.parts[u.milky[0]] = { ...m.parts[u.milky[0]], material: adClone(u.milky[1]) }; });
   if (u.manual) A.store.update('light', (m) => { m.light.manual = adClone(u.manual); });
+  if (u.stepVirt) A.store.update('light', (m) => { m.light.step.virtual = adClone(u.stepVirt.v); });   // null(원래 위치) 또는 이전 가상 값
   if (u.shape) A.store.update('material', (m) => { if (u.shape[1]) m.parts[u.shape[0]].shapeMod = adClone(u.shape[1]); else delete m.parts[u.shape[0]].shapeMod; applyPartMods(m.parts); m.contacts = redetectContacts(m.contacts); });
   renderView(); renderAuto();
 }
