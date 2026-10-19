@@ -114,8 +114,8 @@ const beam = { flux: 1, sample: (r) => [4.5 + r(), 4.5 + r(), -1, 0, 0, 1] };
 { // 투명 판(두께 2) 수직 통과: 직진 탈출 광자의 L = 2, k = 0
   const S = scene([boxMesh(0, 0, 0, 10, 10, 2)], [part(0, 'clear', { T: 0.99 })]);
   let bad = 0, n = 0;
-  runMC3D(S, { source: beam, N: 2000, seed: 3, track: 0, onEscape: (x, y, z, dx, dy, dz, w, p, tL, tK) => { if (dz > 0.999) { n++; if (Math.abs(tL - 2) > 1e-9 || tK !== 0) bad++; } } });
-  ok(n > 1500 && bad === 0, `투명 판 직진: L=2·k=0 (${n}개, 불일치 ${bad})`);
+  runMC3D(S, { source: beam, N: 2000, seed: 3, track: 0, onEscape: (x, y, z, dx, dy, dz, w, p, tL, tK) => { if (dz > 0.999) { n++; if (Math.abs(((tL - 2) % 4)) > 1e-9 || tK !== 0) bad++;   // 내부 Fresnel 왕복 m 회 → L = 2 + 4m } } });
+  ok(n > 1500 && bad === 0, `투명 판 직진: L=2+4m·k=0 (${n}개, 불일치 ${bad})`);
 }
 { // Milky 판: 산란은 μs 포아송 과정 → E[k] = μs·E[L]
   const S = scene([boxMesh(0, 0, 0, 10, 10, 2)], [part(0, 'milky', { milky: 3 })]);
@@ -223,7 +223,7 @@ import { partOptics } from './optics.js';
 import { MILKY_UI_MAX } from '../l2/material.js';
 
 // 기준 m0 주변 n 점(간격 step). 범위 [step, MILKY_UI_MAX] 를 넘으면 창 전체를 안쪽으로 민다(점 수 유지)
-export function milkyAxis(m0, step = 0.25, max = MILKY_UI_MAX, n = 21) {
+export function milkyAxis(m0, step = 0.025, max = MILKY_UI_MAX, n = 21) {   // 기본 창 = 기준 ±0.25(ESS 한계, spec §2.1)
   const half = ((n - 1) / 2) * step;
   let lo = m0 - half;
   if (lo < step) lo = step;
@@ -278,6 +278,8 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 - Modify: `src/engine/mech3d/tally.js:34-60` (`makeAccumulator`)
 - Modify: `src/engine/mech3d/job.js:42-57` (`runChunk`)
 - Test: `test/mech3d-reweight.mjs` (append)
+
+> **실행 중 개정(커밋 3a4e812):** 이 장면은 Milky 1 차이에 μs 가 약 2.2배라 ±1 재가중은 ESS ≈ 0 이다. A-1 은 기준 3 ±0.2(2.8·3.2), `milkyAxis(3, 0.025)`, 배치 12개, 판정 = ESS ≥ 0.3 · 총광량 z < 3 · 길이 프로파일 행 최대 z < 4 · |ΔU| ≤ 0.03 으로 바꿨다. 아래 원안 코드는 기록용.
 
 - [ ] **Step 1: 실패하는 시험 추가** (A-1: 재가중 지도 vs 그 Milky 직접 계산). `test/m3-fixture.mjs` 의 `plateFixture` 를 쓴다(Milky 3 판 + LED 5개).
 
@@ -1154,13 +1156,13 @@ io 계약(UI 가 Worker 로 구현, 시험은 가짜로 구현):
 | io 함수 | 입력 | 반환 |
 |---|---|---|
 | `milkyRows(design, milkies)` | 현재 설계, 격자 | `milkyRows` 결과(`milky-search.js`) |
-| `basis(design, milkies \| null)` | 현재 설계 | `{ cand, maps, emitted }`(maps[c] = Float32Array, 격자면 nJ·셀) |
+| `basis(design)` | 현재 설계(① 이 켜져 있으면 milky = 상한) | `{ cand, maps, emitted }`(maps[c] = Float32Array 셀 지도, emitted = 후보 LED 1개 방출) |
 | `evalShapes(design, cands, N)` | 설계, 형상 후보, 후보당 광자 | `[{ cand, stats, eff, ok, why }]`(제약 위반 = ok:false) |
 | `verify(design)` | 설계 | `{ stats, eff, lum }`(일반 점진 계산, 잡음 목표까지) |
 | `progress(stage, frac, text)` | — | — |
 | `cancelled()` | — | boolean |
 
-`design = { milky, count, pitch, shape: null | { part, dt, h, R } }`, `cfg = { stages: { milky, leds, shape }, obs, line, G, nMax, pitchRange, milkyPart, shapePart }`.
+`design = { milky, count, pitch, shape: null | { part, dt, h, R } }`, `cfg = { stages: { milky, leds, shape }, obs, line, G, nMax, pitchRange, milkyMax, shapePart, shapeCands, schedule }`.
 
 - [ ] **Step 1: 실패하는 시험 작성** — `test/mech3d-autodesign.mjs`
 
@@ -1171,20 +1173,23 @@ import { ok, done } from './mech3d-util.mjs';
 
 const obs = { targetLen: 0.8, targetWid: 0.6 };
 const st = (Ulen, Uwid) => ({ Ulen, Uwid, empty: false });
-{ // ① 만: 여유 = 0.5+0.12m−0.8 → Milky 2.5 부터 통과 → 최종 검증 결과 동봉
-  const calls = [];
-  const io = {
-    milkyRows: async (d, ms) => { calls.push('m'); return ms.map((m) => ({ milky: m, Ulen: 0.5 + 0.12 * m, Uwid: 0.9, eff: 1 - m / 20, ess: 1, trusted: true, margin: Math.min(0.5 + 0.12 * m - 0.8, 0.3) })); },
-    verify: async (d) => { calls.push(`v${d.milky}`); return { stats: st(0.81, 0.9), eff: 0.8 }; },
-    progress() {}, cancelled: () => false,
-  };
-  const r = await runAutoDesign({ stages: { milky: true, leds: false, shape: false }, obs, current: { milky: 3, count: 5, pitch: 0, shape: null } }, io);
-  ok(r.feasible && Math.abs(r.best.milky - 2.5) < 0.01 && calls.at(-1) === 'v2.5' && r.verified.stats.Ulen === 0.81, `① 최소 Milky 2.5 · 최종 검증: ${r.best.milky}`); }
-{ // 창 맨 아래부터 통과 → 기준을 낮춰 한 번 더(최대 3곳)
-  let bases = [];
-  const io = { milkyRows: async (d, ms) => { bases.push(ms[10]); return ms.map((m) => ({ milky: m, Ulen: 0.9, Uwid: 0.9, eff: 1, ess: 1, trusted: true, margin: 0.1 })); }, verify: async () => ({ stats: st(0.9, 0.9), eff: 1 }), progress() {}, cancelled: () => false };
-  const r = await runAutoDesign({ stages: { milky: true }, obs, current: { milky: 6, count: 5, pitch: 0 } }, io);
-  ok(bases.length === 2 && bases[1] < bases[0] && r.best.milky === 0.25, `edge=low → 기준 낮춤(${bases.join(' → ')}), 최소 0.25`); }
+// 가짜 재가중 행: U(m) = 0.5 + 0.12·m → 목표 0.8 경계 = Milky 2.5 (창 = 기준 ±0.25)
+const rowsOf = (ms, U = (m) => 0.5 + 0.12 * m) => ms.map((m) => ({ milky: m, Ulen: U(m), Uwid: 0.9, eff: 1 - m / 20, ess: 1, trusted: true, margin: Math.min(U(m) - 0.8, 0.3) }));
+{ // ① 만: 기준 3 → 창 전체 통과 → 이분 탐색으로 내려가 경계 2.5 를 찾음 → 최종 검증
+  const bases = [], calls = [];
+  const io = { milkyRows: async (d, ms) => { bases.push(ms[10]); return rowsOf(ms); }, verify: async (d) => { calls.push(d.milky); return { stats: st(0.81, 0.9), eff: 0.8 }; }, progress() {}, cancelled: () => false };
+  const r = await runAutoDesign({ stages: { milky: true }, obs, current: { milky: 3, count: 5, pitch: 0, shape: null }, milkyMax: 5 }, io);
+  ok(r.feasible && Math.abs(r.best.milky - 2.5) < 0.03 && calls.at(-1) === r.best.milky && bases.length <= 8 && bases[1] < bases[0], `① 이분 탐색: 기준 ${bases.map((b) => b.toFixed(2)).join(' → ')} → 최소 Milky ${r.best.milky}`); }
+{ // 상한까지 미달(U 가 천천히 오름) → 가장 가까운 안 = 상한 근처 + 상한 안내
+  const io = { milkyRows: async (d, ms) => rowsOf(ms, (m) => 0.6 + 0.01 * m), verify: async () => ({ stats: st(0.6, 0.9), eff: 1 }), progress() {}, cancelled: () => false };
+  const r = await runAutoDesign({ stages: { milky: true }, obs, current: { milky: 3 }, milkyMax: 5 }, io);
+  ok(!r.feasible && /상한 5/.test(r.reason) && r.best.milky >= 4.9, `불가: ${r.reason}`); }
+{ // ②+①: 후보 지도는 Milky 상한(5)에서 추적, 최소 개수 뒤 ① 이 Milky 를 낮춤
+  let basisMilky = null;
+  const G = { ns: 2, nw: 1, ds: 1, cell: 1, w0: -0.5, L: 2, closed: false, winS: 5, area: new Float64Array([1, 1]), valid: new Uint8Array([1, 1]) };
+  const io = { basis: async (d) => { basisMilky = d.milky; return { cand: [0, 1, 2], maps: [0, 1, 2].map(() => Float32Array.from([1, 1])), emitted: 1 }; }, milkyRows: async (d, ms) => rowsOf(ms), verify: async () => ({ stats: st(0.9, 0.9), eff: 1 }), progress() {}, cancelled: () => false };
+  const r = await runAutoDesign({ stages: { milky: true, leds: true }, obs: { targetLen: 0.8, targetWid: 0 }, current: { milky: 3, count: 5, pitch: 0 }, milkyMax: 5, G, line: { length: 2, closed: false }, nMax: 4 }, io);
+  ok(basisMilky === 5 && r.best.count === 1 && Math.abs(r.best.milky - 2.5) < 0.03, `②: 상한 ${basisMilky} 에서 최소 ${r.best.count}개 → ① Milky ${r.best.milky}`); }
 { // 단계적 압축: 27 → 6 → 2 → 1, 각 단계 광자 수 증가
   const seen = [];
   const evalFn = async (cands, N) => { seen.push([cands.length, N]); return cands.map((c) => ({ cand: c, stats: st(0.7 + c.k / 100, 0.9), eff: 0.5 + c.k / 1000, ok: c.k !== 26 })); };
@@ -1204,11 +1209,13 @@ done();
 
 ```js
 // P4 자동설계 단계 실행기 — spec §1·§2. 순서 ② → ① → ③, 체크 안 한 항목은 현재 값 고정. 계산은 io 가 맡는다(Worker / 시험 가짜).
+// ① 재가중 창은 기준 ±0.25(ESS 한계, spec §2.1) — 창 밖은 이분 탐색으로 기준을 옮긴다. ② 는 Milky 상한에서 최소 개수를 구한 뒤 ① 이 낮춘다.
 // 결과 { feasible, best(design), steps:[{stage, …}], reason, verified, cancelled }
 import { milkyAxis } from './reweight.js';
 import { pickMilky, margin } from './milky-search.js';
 import { searchLeds } from './basis.js';
 
+export const MILKY_STEP = 0.025, MILKY_ITERS = 8;
 export const shapeScore = (r, obs) => (!r.ok ? -Infinity : margin(r.stats, obs) >= 0 ? 1 + r.eff : Math.min(r.stats.Ulen / obs.targetLen, r.stats.Uwid == null ? Infinity : r.stats.Uwid / obs.targetWid));
 
 // 단계적 압축: schedule = [[남길 수(첫 단계는 전체), 광자 수]…]. 각 단계 결과 점수로 다음 단계 후보를 줄임
@@ -1224,35 +1231,49 @@ export async function halving(cands, evalFn, obs, schedule = [[27, 3e4], [6, 1e5
   return last;
 }
 
+// ① Milky: 구간 [0.25, 상한] 이분 탐색 — 창 전체 통과면 위쪽 끝을 창 아래로, 전부 미달이면 아래쪽 끝을 창 위로. 중지 = null
+async function searchMilky(d, cfg, io, steps, mCap) {
+  let lo = 0.25, hi = mCap, m0 = Math.min(hi, Math.max(lo, d.milky ?? hi)), found = null, nearest = null;
+  for (let it = 0; it < MILKY_ITERS; it++) {
+    if (io.cancelled?.()) return null;
+    io.progress?.('milky', it / MILKY_ITERS, `Milky 재가중 (기준 ${m0.toFixed(2)})`);
+    const ms = milkyAxis(m0, MILKY_STEP, mCap), rows = await io.milkyRows(d, ms), pick = pickMilky(rows, cfg.obs);
+    steps.push({ stage: 'milky', base: m0, rows, pick });
+    if (pick.feasible) {
+      found = pick;
+      if (pick.edge !== 'low' || ms[0] <= lo + 1e-9) break;   // 창 안에서 경계를 찾음 / 더 내려갈 곳 없음
+      hi = ms[0];
+    } else {
+      if (!pick.best) break;   // 믿을 격자점 없음
+      if (!nearest || pick.best.margin > nearest.best.margin) nearest = pick;
+      lo = ms.at(-1);
+      if (lo >= hi - 1e-9) break;   // 상한까지 미달
+    }
+    m0 = (lo + hi) / 2;
+  }
+  return { found, nearest };
+}
+
 export async function runAutoDesign(cfg, io) {
-  const { stages, obs } = cfg, steps = [];
+  const { stages, obs } = cfg, steps = [], mCap = cfg.milkyMax ?? Math.max(cfg.current?.milky ?? 0, 5);
   let d = { ...cfg.current }, feasible = true, reason = '';
   const stop = () => io.cancelled?.();
   if (stop()) return { cancelled: true };
-  if (stages.leds) {   // ②
+  if (stages.leds) {   // ② — ① 이 켜져 있으면 Milky 상한(확산 최대)에서 최소 개수
     io.progress?.('leds', 0, 'LED 후보 위치 추적');
-    const ms = stages.milky ? milkyAxis(d.milky) : null;
-    const B = await io.basis(d, ms);
+    if (stages.milky) d = { ...d, milky: mCap };
+    const B = await io.basis(d);
     if (stop()) return { cancelled: true };
-    const r = searchLeds({ G: cfg.G, obs, line: cfg.line, cand: B.cand, maps: B.maps, pitchRange: cfg.pitchRange ?? null, nMax: cfg.nMax, emitted: B.emitted, milkies: ms });
+    const r = searchLeds({ G: cfg.G, obs, line: cfg.line, cand: B.cand, maps: B.maps, pitchRange: cfg.pitchRange ?? null, nMax: cfg.nMax, emitted: B.emitted });
     steps.push({ stage: 'leds', ...r });
-    d = { ...d, count: r.n, pitch: r.pitch, ...(ms ? { milky: ms[r.j] } : {}) };
+    d = { ...d, count: r.n, pitch: r.pitch };
     if (!r.feasible) { feasible = false; reason = r.reason; }
   }
-  if (stages.milky) {   // ① (②가 고른 개수에서 다시 정밀하게)
-    let m0 = d.milky, pick = null;
-    for (let base = 0; base < 3; base++) {
-      if (stop()) return { cancelled: true };
-      io.progress?.('milky', base / 3, `Milky 재가중 (기준 ${m0})`);
-      const ms = milkyAxis(m0), rows = await io.milkyRows(d, ms);
-      pick = pickMilky(rows, obs);
-      steps.push({ stage: 'milky', base: m0, rows, pick });
-      if (pick.edge === 'low' && ms[0] > 0.25) { m0 = Math.max(0.25, ms[0] - (ms[10] - ms[0])); continue; }
-      if (pick.edge === 'high' && ms.at(-1) < 9.9) { m0 = Math.min(9.9, ms.at(-1) + (ms[10] - ms[0])); continue; }
-      break;
-    }
-    d = { ...d, milky: pick.milky ?? d.milky };
-    if (!pick.feasible) { feasible = false; reason = pick.reason; }
+  if (stages.milky) {   // ① — (②가 고른 개수에서) 목표를 만족하는 최소 Milky
+    const m = await searchMilky(d, cfg, io, steps, mCap);
+    if (!m) return { cancelled: true };
+    if (m.found) d = { ...d, milky: m.found.milky };
+    else { feasible = false; d = { ...d, milky: m.nearest?.milky ?? d.milky }; reason = `${m.nearest?.reason ?? '믿을 수 있는 격자점이 없음'} — Milky 상한 ${mCap} 을 올리거나 ②·③ 을 함께 쓰세요`; }
   }
   if (stages.shape && cfg.shapeCands?.length) {   // ③
     io.progress?.('shape', 0, `형상 후보 ${cfg.shapeCands.length}개 평가`);
@@ -1272,7 +1293,7 @@ export async function runAutoDesign(cfg, io) {
 }
 ```
 
-- [ ] **Step 4: 통과 확인** — `node test/mech3d-autodesign.mjs < /dev/null` → `all PASS`. (두 번째 시험: 기준 6 → 창 [3.5, 8.5] 전체 통과 → edge 'low' → 기준 6 − 5 = 1 → 창 [0.25, 5.25] → 맨 아래 0.25 도 통과 & `ms[0] === 0.25` 이므로 멈춤 → 0.25.)
+- [ ] **Step 4: 통과 확인** — `node test/mech3d-autodesign.mjs < /dev/null` → `all PASS`. (첫 시험 경로: 기준 3 창 [2.75, 3.25] 전체 통과 → hi 2.75 → 기준 1.5 창 전부 미달 → lo 1.75 → 기준 2.25 … → 창 안에 경계 2.5.)
 
 - [ ] **Step 5: 커밋**
 
@@ -1460,10 +1481,11 @@ export function autoCardHtml({ avail, sel, running, names = [] }) {
     const a = avail[k];
     return `<label class="m3-ad-item${a.ok ? '' : ' off'}"><input type="checkbox" data-ad="${k}"${sel[k] && a.ok ? ' checked' : ''}${a.ok ? '' : ' disabled'}> ${label}${a.ok ? '' : ` <span class="mut">— ${esc(a.why)}</span>`}</label>`;
   };
+  const cap = (sel.milky && avail.milky.ok) || (sel.leds && avail.leds.ok) ? `<div class="m3-row">Milky 상한 <input type="number" min="0.5" max="9.9" step="0.5" value="${sel.milkyMax ?? 5}" data-ad="milkyMax"> <span class="mut">② 는 이 값(확산 최대)에서 개수를 정하고 ① 이 낮춤</span></div>` : '';
   const part = avail.shape.ok ? `<div class="m3-row">③ 대상 <select data-ad="shapePart">${avail.shape.parts.map((i) => `<option value="${i}"${i === sel.shapePart ? ' selected' : ''}>${esc(names[i] ?? `부품 ${i + 1}`)}</option>`).join('')}</select></div>` : '';
   const prog = running ? `<div class="m3-ad-prog"><div class="bar"><i style="width:${Math.round((running.frac ?? 0) * 100)}%"></i></div><span>${esc(running.text)}</span> <button type="button" data-ad="stop">중지</button></div>` : '';
   const any = ITEMS.some(([k]) => sel[k] && avail[k].ok);
-  return `<div class="m3-h">자동설계 <span class="mut">체크한 항목만 바꿈 · 순서 ②→①→③</span></div>${ITEMS.map(row).join('')}${part}
+  return `<div class="m3-h">자동설계 <span class="mut">체크한 항목만 바꿈 · 순서 ②→①→③</span></div>${ITEMS.map(row).join('')}${cap}${part}
     ${running ? prog : `<div class="m3-row"><button type="button" data-ad="run"${any ? '' : ' disabled'}>▶ 실행</button><button type="button" data-ad="close">닫기</button></div>`}`;
 }
 // 비교표 — cur/best = { count, pitch, milky, Ulen, Uwid, eff, lum? }, shape = { dt, h, R } | null
@@ -1486,7 +1508,7 @@ export function renderAutoPanel(el, state, h) {
   el.querySelectorAll('[data-ad]').forEach((x) => {
     const k = x.dataset.ad;
     if (x.type === 'checkbox') x.onchange = () => h.onSel(k, x.checked);
-    else if (x.tagName === 'SELECT') x.onchange = () => h.onSel(k, +x.value);
+    else if (x.tagName === 'SELECT' || x.type === 'number') x.onchange = () => h.onSel(k, +x.value);
     else x.onclick = () => h.onAction(k);
   });
 }
@@ -1498,7 +1520,7 @@ export function renderAutoPanel(el, state, h) {
 
 ```js
 // ---- 자동설계(P4) ----
-function adState() { return (A.ad ??= { open: false, sel: { milky: true, leds: false, shape: false, shapePart: -1 }, running: null, result: null, undo: null }); }
+function adState() { return (A.ad ??= { open: false, sel: { milky: true, leds: false, shape: false, shapePart: -1, milkyMax: null }, running: null, result: null, undo: null }); }
 function adInfo() {   // 부품별 비 2.5D 비율(관측 방향) — 라인이 있을 때만
   const S = A.store.session, rt = getMech3d();
   return { non25: S.line ? rt.parts.map((p) => frameHeights(p, S.line.frame, 0.5).non25) : [] };
@@ -1548,10 +1570,10 @@ async function adRun() {
       const r = await R.trace(jobFor(Md, parts), { N: 1500000, rw: { part: st.milkyPart, milkies: ms } });   // ≈5초(15 Worker)
       return milkyRows(G, obs, { milkies: ms, batches: r.rwBatches, ess: r.ess, emitted: r.ledger.emitted });
     },
-    async basis(d, ms) {
-      const { M: Md, parts } = designScene({ ...d, ...(ms ? { milky: ms[10] } : {}) });
+    async basis(d) {   // ① 이 켜져 있으면 실행기가 d.milky = 상한으로 넘김
+      const { M: Md, parts } = designScene(d);
       const cand = candidatePositions(S.line, 1), sets = cand.map((s) => [ledAtS(S.line, s, Md.light.manual, getMech3d())]);
-      const r = await R.traceEach(jobFor(Md, parts, { emitters: sets[0] }), sets, { N: 20000, ...(ms ? { rw: { part: st.milkyPart, milkies: ms } } : {}) });
+      const r = await R.traceEach(jobFor(Md, parts, { emitters: sets[0] }), sets, { N: 20000 });
       return { cand, maps: r.maps, emitted: r.emitted };
     },
     async evalShapes(d, cands, N) {
@@ -1583,7 +1605,7 @@ async function adRun() {
   const pitchNow = cur.count > 1 ? (cur.pitch > 0 ? cur.pitch : S.line.length / cur.count) : S.line.length;
   try {
     const res = await runAutoDesign({
-      stages, obs, G, line: S.line, current: cur, nMax: Math.max(1, Math.min(60, Math.floor(S.line.length / 2))), pitchRange: null,
+      stages, obs, G, line: S.line, current: cur, milkyMax: st.sel.milkyMax ?? Math.max(cur.milky ?? 0, 5), nMax: Math.max(1, Math.min(60, Math.floor(S.line.length / 2))), pitchRange: null,
       shapePart: st.sel.shapePart, shapeCands: stages.shape ? shapeCandidates({ t0: H0.t0, pitch: pitchNow, hasCenters: true }) : [],
     }, io);
     st.running = null;
