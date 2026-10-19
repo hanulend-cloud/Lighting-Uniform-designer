@@ -1,6 +1,6 @@
 // P4 단계 실행기(가짜 io): node test/mech3d-autodesign.mjs
 import { runAutoDesign, shapeScore, halving, smoothU, halvingTotal, sameDesign, screenShapeVars, shapeTotal } from '../src/engine/mech3d/autodesign.js';
-import { shapeVarRanges } from '../src/engine/mech3d/shape-opt.js';
+import { shapeVarRanges, gridCandidates } from '../src/engine/mech3d/shape-opt.js';
 import { ok, done } from './mech3d-util.mjs';
 
 const obs = { targetLen: 0.8, targetWid: 0.6 };
@@ -91,5 +91,14 @@ const rowsOf = (ms, U = (m) => 0.5 + 0.12 * m) => ms.map((m) => ({ milky: m, Ule
   const r = await runAutoDesign({ stages: { shape: true }, obs, current: { milky: 3, shape: null }, shapePart: 0, shapeRanges: rg }, io);
   const grid = seen[2], Rs = new Set(grid.map((c) => c.R));
   ok(grid.length === 9 && Rs.size === 3 && r.best.shape.h > 0, `격자 ${grid.length}개, R ${[...Rs]}`); }
+{ // 격자 차원 예산 3: h(+R) = 2 → 다른 변수 하나만 / h 가 예산을 넘으면 건너뜀
+  const rg = shapeVarRanges({ t0: 2, pitch: 5, hasCenters: true });
+  const fake = (g) => async (cands) => cands.map((c) => ({ cand: c, stats: st(0.5 + g(c), 0.9), eff: 0.5, ok: true }));
+  const g1 = (c) => (c.h > 0 ? 0.3 : 0) + (c.c > 0 ? 0.2 : 0) + (c.e > 0 ? 0.1 : 0) + (c.dt > 0 ? 0.05 : 0);
+  const a = await screenShapeVars(fake(g1), rg, obs), ga = gridCandidates([...a.vars, 'R'], rg);
+  ok(a.vars.join() === 'h,c' && ga.length <= 27, `h 선택 → 다른 변수 1개: ${a.vars} (격자 ${ga.length})`);
+  const g2 = (c) => (c.c > 0 ? 0.3 : 0) + (c.e > 0 ? 0.2 : 0) + (c.h > 0 ? 0.1 : 0) + (c.dt > 0 ? 0.05 : 0);
+  const b = await screenShapeVars(fake(g2), rg, obs);
+  ok(b.vars.join() === 'c,e,dt' && gridCandidates(b.vars, rg).length <= 27, `h 가 예산 초과 → 건너뜀: ${b.vars}`); }
 ok(halvingTotal(27) === 35 && halvingTotal(4) === 10 && halvingTotal(1) === 3, 'halving 평가 후보 수 합(진행률 분모)');
 done();

@@ -45,7 +45,8 @@ export async function halving(cands, evalFn, obs, schedule = SHAPE_SCHEDULE, can
 // 진행률 분모 — 선별 후보 수 + 압축 평가 수. 선별은 io.shapePlan?.({ screen, grid, total }) 로 먼저 알리고, 그 뒤 evalShapes 호출마다 후보 1개씩 센다
 export const shapeTotal = (nScreen, nGrid, schedule = SHAPE_SCHEDULE) => nScreen + halvingTotal(nGrid, schedule);
 // ③ 1단계 변수 선별 — 현재 형상 + 변수별 하한/상한 하나씩(R 은 h 와 묶음: h 후보는 R=mid). 이득 = max(점수(lo), 점수(hi)) − 점수(현재) ≥ eps 인 상위 keep 개
-export async function screenShapeVars(evalFn, ranges, obs, { N = 6e4, maxMs = 2500, eps = 0.01, keep = 3 } = {}) {
+// 격자 차원 예산 budget(기본 3 → 3^3 = 27 이하): h 는 R 과 함께라 2, 나머지 1 — 이득 순으로 예산 안에 드는 것만
+export async function screenShapeVars(evalFn, ranges, obs, { N = 6e4, maxMs = 2500, eps = 0.01, keep = 3, budget = 3 } = {}) {
   const rd = (v) => Math.round(v * 1e4) / 1e4, Rm = ranges.R ? rd((ranges.R[0] + ranges.R[1]) / 2) : 1, zero = { dt: 0, h: 0, R: Rm, e: 0, c: 0 };
   const names = Object.keys(ranges).filter((k) => k !== 'R'), cands = [zero], tag = [-1];
   names.forEach((v, i) => ranges[v].forEach((x) => { cands.push({ ...zero, [v]: rd(x) }); tag.push(i); }));
@@ -55,7 +56,12 @@ export async function screenShapeVars(evalFn, ranges, obs, { N = 6e4, maxMs = 25
     const best = Math.max(...cands.filter((_, k) => tag[k] === i).map(sc));
     gains[v] = Number.isFinite(best) ? (Number.isFinite(base) ? best - base : eps) : 0;
   });
-  const vars = names.filter((v) => gains[v] >= eps).sort((a, b) => gains[b] - gains[a]).slice(0, keep);
+  const vars = [];
+  let left = budget;
+  for (const v of names.filter((v) => gains[v] >= eps).sort((a, b) => gains[b] - gains[a])) {
+    const cost = v === 'h' && ranges.R ? 2 : 1;
+    if (vars.length < keep && cost <= left) { vars.push(v); left -= cost; }
+  }
   return { vars, gains, results };
 }
 
