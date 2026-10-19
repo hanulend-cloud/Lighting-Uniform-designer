@@ -54,6 +54,13 @@ const rowsOf = (ms, U = (m) => 0.5 + 0.12 * m) => ms.map((m) => ({ milky: m, Ule
   ok(smoothU({ Ulen: 0.55 }) === 0.55, 'profile 없음 → Ulen');
   const noisy = { stats: { Ulen: 0.4, Uwid: 0.9, profile: prof }, eff: 0.5, ok: true };
   ok(Math.abs(shapeScore(noisy, obs) - 0.8 / 0.8) < 1e-9, '미달안 점수 = 평활 길이 U / 목표'); }
+{ // ③ 최적 후보가 전부 0(R 무관) → shape = null(빈 shapeMod 없음) → 현재안 그대로
+  const cur = { milky: 3, count: 5, pitch: 0, shape: null }, calls = [];
+  const cands = [{ dt: 0, h: 0, R: 2.75, e: 0, c: 0 }, { dt: 0.2, h: 0, R: 2.75, e: 0, c: 0 }];
+  const io = { evalShapes: async (d, cs) => cs.map((c) => ({ cand: c, stats: st(c.dt ? 0.7 : 0.9, 0.9), eff: 0.6, ok: true })),
+    verify: async (d) => { calls.push(d.shape); return { stats: st(0.9, 0.9), eff: 0.6 }; }, progress() {}, cancelled: () => false };
+  const r = await runAutoDesign({ stages: { shape: true }, obs, current: cur, shapePart: 0, shapeCands: cands }, io);
+  ok(r.best.shape === null && r.unchanged && calls.length === 1, `영 형상 후보 → shape null, 현재안 유지 (verify ${calls.length}회)`); }
 { // ③ 최적안이 검증에서 현재안보다 나쁨 → 현재안 유지 + 사유, 시도안은 steps 에
   const cur = { milky: 3, count: 5, pitch: 0, shape: null };
   const io = { evalShapes: async (d, cands) => cands.map((c) => ({ cand: c, stats: st(0.9, 0.9), eff: 0.6, ok: true })),

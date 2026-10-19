@@ -149,7 +149,8 @@ export async function runAutoDesign(cfg, io) {
     if (stop()) return { cancelled: true };
     steps.push({ stage: 'shape', best });
     if (best) {
-      d = { ...d, shape: { part: cfg.shapePart, ...best.cand } };
+      const c = best.cand, zero = ['dt', 'h', 'e', 'c'].every((k) => !(c[k] ?? 0));   // 전부 0 이면 R 무관 — 빈 shapeMod 안 만듦
+      d = { ...d, shape: zero ? null : { part: cfg.shapePart, ...c } };
       if (margin(best.stats, obs) < 0) { feasible = false; reason = `형상 최적안도 목표 미달 — 길이 U ${best.stats.Ulen.toFixed(2)}${best.stats.Uwid == null ? '' : ` · 폭 U ${best.stats.Uwid.toFixed(2)}`}`; }
       else { feasible = true; reason = ''; }
     } else { feasible = false; reason = '제약(살두께·간섭)을 만족하는 형상 후보가 없음 — 범위를 줄이세요'; }
