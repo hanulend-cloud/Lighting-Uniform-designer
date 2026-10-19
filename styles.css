@@ -349,3 +349,26 @@ canvas.m3-g { width: 100%; display: block; border-radius: 4px; background: #fafb
 .m3-gauge .f.ok { background: var(--m3-ok); }
 .m3-gauge .f.bad { background: var(--m3-bad); }
 .m3-dot.ok ~ .m3-ico { color: var(--m3-ok); } .m3-dot.warn ~ .m3-ico { color: var(--m3-warn); } .m3-dot.bad ~ .m3-ico { color: var(--m3-bad); }
+
+/* 3D 기구 모드 — 좁은 화면(노트북·분할 창): 3D 뷰가 0px 로 눌리지 않게 단계적으로 재배치 */
+@media (max-width: 1280px) {
+  .m3-main { grid-template-columns: 230px minmax(0, 1fr) 360px; }
+}
+@media (max-width: 1024px) {
+  /* 좁은 화면에서는 화면 높이 고정을 풀고 페이지가 스크롤되게(3D 모드일 때만) */
+  body:has(#mech3d-wrap:not([hidden])) { height: auto; min-height: 100vh; overflow: auto; }
+  main:has(#mech3d-wrap:not([hidden])) { grid-template-rows: auto; min-height: auto; }
+  #mech3d-wrap { grid-template-rows: auto auto auto; overflow: visible; }
+  .m3-left, .m3-tree, .m3-props, .m3-res { min-height: auto; max-height: none; overflow: visible; }
+  .m3-left { display: block; }   /* 트리·속성을 자연 높이로 쌓음(겹침 방지) */
+  .m3-main { grid-template-columns: 220px minmax(0, 1fr); grid-template-rows: minmax(380px, 60vh) auto; }
+  .m3-res { grid-column: 1 / -1; border-left: none; border-top: 1px solid var(--m3-line);
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); align-content: start; }
+}
+@media (max-width: 720px) {
+  .m3-main { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(320px, 55vh) auto; }
+  .m3-left { border-right: none; border-bottom: 1px solid var(--m3-line); }
+  .m3-tree { max-height: 30vh; }
+}
+/* hidden 속성이 display 지정에 덮이지 않게(3D 모드에서 평판 영역이 자리 차지하던 문제) */
+#design-wrap[hidden], #results-wrap[hidden] { display: none; }
