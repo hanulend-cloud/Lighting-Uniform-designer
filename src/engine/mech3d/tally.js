@@ -31,15 +31,18 @@ export function tallyGeometry(line, obs) {
   return { ns, nw, ds, cell, w0, valid, area, L, closed: line.closed, winS: obs.winS ?? Math.max(5, L / 10), pix: { x0: R.x0, y0: R.y0, cell: R.cell, nx: R.nx, ny: R.ny }, pixOk };
 }
 
-export function makeAccumulator(G, line, obs) {
+// rw = { C: rwCoeffs 결과 } | null — 있으면 관측 셀에 집계되는 탈출마다 Milky 격자 j 별 가중 w·f_j 도 더한다(acc 와 같은 셀 배열을 격자 수만큼 이어 붙임)
+export function makeAccumulator(G, line, obs, rw = null) {
   const faces = new Set(obs.faces.map((f) => `${f.part}|${f.face}`)), d = obs.dir ?? line.frame.d, cosC = Math.cos(((obs.cone ?? 10) * Math.PI) / 180);
-  const R = G.pix, acc = new Float64Array(G.ns * G.nw), cnt = new Uint32Array(G.ns * G.nw);
-  let lx = 0, ly = 0, lz = 0, has = false, lp = -1;
+  const R = G.pix, nCell = G.ns * G.nw, acc = new Float64Array(nCell), cnt = new Uint32Array(nCell);
+  const C = rw?.C ?? null, nJ = C ? C.n : 0, racc = C ? new Float64Array(nJ * nCell) : null, sf = C ? new Float64Array(nJ) : null, sf2 = C ? new Float64Array(nJ) : null;
+  let lx = 0, ly = 0, lz = 0, has = false, lp = -1, nRw = 0;
   return {
     acc, cnt,
+    get rw() { return C ? { acc: racc, sf, sf2, n: nRw } : null; },
     // p = 광자 번호(runMC3D 가 마지막 인자로 전달). 탈출 광자가 마지막 출사 광자와 같을 때만 집계 — 흡수·소실된 광자의 낡은 출사점을 쓰지 않는다.
     onExit(part, face, x, y, z, dx, dy, dz, w, p) { has = faces.has(`${part}|${face}`); lx = x; ly = y; lz = z; lp = p; },
-    onEscape(x, y, z, dx, dy, dz, w, p) {
+    onEscape(x, y, z, dx, dy, dz, w, p, tL = 0, tK = 0) {
       if (!has || lp !== p) return;
       has = false;
       if (dx * d[0] + dy * d[1] + dz * d[2] < cosC) return;
@@ -51,7 +54,12 @@ export function makeAccumulator(G, line, obs) {
       if (G.closed) i = ((i % G.ns) + G.ns) % G.ns; else if (i < 0 || i >= G.ns) return;
       const j = Math.floor((ww - G.w0) / G.cell);
       if (j < 0 || j >= G.nw) return;
-      acc[i * G.nw + j] += w; cnt[i * G.nw + j]++;
+      const k = i * G.nw + j;
+      acc[k] += w; cnt[k]++;
+      if (C) {
+        nRw++;
+        for (let g = 0; g < nJ; g++) { const f = Math.exp(tK * C.lr[g] - C.dm[g] * tL); racc[g * nCell + k] += w * f; sf[g] += f; sf2[g] += f * f; }
+      }
     },
   };
 }
