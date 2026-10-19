@@ -2,7 +2,7 @@
 // 노드 id: 'parts' | 'part:i' | 'light' | 'leds' | 'obs' | 'target' | 'contacts'. 클릭 → h.onNode(id)
 import { PART_KINDS } from '../../engine/mech3d/materials.js';
 
-const esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
+export const esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 const LINE_KIND = { line: '직선', circle: '원', path: '곡선' };
 export function partBadge(p) {
   const m = p.material, lab = PART_KINDS[m?.kind]?.label ?? '?';
@@ -27,7 +27,21 @@ export function treeNodes(M, S) {
   node('contacts', '접촉면', String(M.contacts.length));
   return out;
 }
+const BOUND = new WeakMap();   // el → { h, html }  (이벤트는 컨테이너에 한 번만 위임, 핸들러는 최신 것)
+export const treeHtml = (M, S) => `<div class="m3-h">피처 트리</div>${treeNodes(M, S).map((n) => `<div class="m3-node ${n.child ? 'child' : ''} ${n.sel ? 'sel' : ''}" role="button" tabindex="0"${n.sel ? ' aria-current="true"' : ''} data-node="${esc(n.id)}">${esc(n.label)} <span class="${n.child ? `m3-badge k-${esc(n.kind)}` : 'b'}">${esc(n.badge)}</span></div>`).join('')}`;
 export function renderFeatureTree(el, M, S, h) {
-  el.innerHTML = `<div class="m3-h">피처 트리</div>${treeNodes(M, S).map((n) => `<div class="m3-node ${n.child ? 'child' : ''} ${n.sel ? 'sel' : ''}" data-node="${esc(n.id)}">${esc(n.label)} <span class="${n.child ? `m3-badge k-${n.kind}` : 'b'}">${esc(n.badge)}</span></div>`).join('')}`;
-  el.querySelectorAll('[data-node]').forEach((d) => { d.onclick = () => h.onNode(d.dataset.node); });
+  let B = BOUND.get(el);
+  if (!B) {
+    B = { h, html: null }; BOUND.set(el, B);
+    const fire = (e) => { const n = e.target.closest?.('[data-node]'); if (n && el.contains(n)) B.h?.onNode?.(n.dataset.node); };
+    el.addEventListener('click', fire);
+    el.addEventListener('keydown', (e) => { if ((e.key !== 'Enter' && e.key !== ' ' && e.key !== 'Spacebar') || !e.target.closest?.('[data-node]')) return; e.preventDefault(); fire(e); });
+  }
+  B.h = h;
+  const html = treeHtml(M, S);
+  if (html === B.html) return;
+  B.html = html;
+  const ae = el.ownerDocument?.activeElement, keep = ae && el.contains(ae) ? ae.dataset?.node : null;   // 다시 그려도 키보드 초점 유지
+  el.innerHTML = html;
+  if (keep != null) [...el.querySelectorAll('[data-node]')].find((n) => n.dataset.node === keep)?.focus({ preventScroll: true });
 }

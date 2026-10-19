@@ -337,3 +337,15 @@ canvas.m3-g { width: 100%; display: block; border-radius: 4px; background: #fafb
 .m3-row .warn, .m3-props .warn { color: #c96a26; }
 
 #inputbar[hidden] { display: none; }
+
+/* --- m3 접근성: 키보드 초점 · 상태 기호 · 게이지 색 클래스 --- */
+.m3-cmd button:focus-visible, .m3-cmd .m3-btn:focus-visible, .m3-node:focus-visible, .m3-chk:focus-visible, .m3-views button:focus-visible {
+  outline: 2px solid var(--m3-acc, #1f6fd1); outline-offset: 2px; }
+.m3-node { outline-offset: -2px; }
+.m3-node[aria-current="true"] { font-weight: 600; }
+.m3-chk { border-radius: 4px; padding: 1px 3px; }
+.m3-ico { font-weight: 700; min-width: 1ch; text-align: center; }
+.m3-dot.na ~ .m3-ico { color: var(--m3-mut); }
+.m3-gauge .f.ok { background: var(--m3-ok); }
+.m3-gauge .f.bad { background: var(--m3-bad); }
+.m3-dot.ok ~ .m3-ico { color: var(--m3-ok); } .m3-dot.warn ~ .m3-ico { color: var(--m3-warn); } .m3-dot.bad ~ .m3-ico { color: var(--m3-bad); }
