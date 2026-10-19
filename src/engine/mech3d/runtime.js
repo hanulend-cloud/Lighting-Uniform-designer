@@ -5,9 +5,9 @@ import { findContacts } from './contacts.js';
 import { defaultPart } from './materials.js';
 import { defaultLight, defaultObserve, defaultChecks } from './defs.js';
 import { scaleMoveMesh, isIdentityXform } from './xform.js';
-import { frameHeights, deformPart, refineForBumps } from './shape-opt.js';
+import { heightsFor, deformPart, refinedFor } from './shape-opt.js';
 
-let raw = null, xkey = '';   // raw = 불러온 원본 장면(변환 전) — IndexedDB 에는 원본만 보관
+let raw = null, xkey = '', pmemo = [];   // raw = 불러온 원본 장면(변환 전) — IndexedDB 에는 원본만 보관. pmemo[i] = { raw, key, mesh } 부품별 메모(다른 부품만 바뀌면 다시 안 만듦)
 let scene = null;   // { name, parts: [{ positions, triangles, faceIds, faceCount, volume, bvh }], combined, bvh }
 
 // 전역을 바꾸지 않는 장면 메쉬 생성(계산 작업용) — 부품별 BVH + 결합 메쉬 + 결합 BVH
@@ -17,13 +17,13 @@ export function buildSceneMesh(name, rawParts) {
   return { name, parts, combined, bvh: buildBvh(combined.positions, combined.triangles) };
 }
 export function setMech3dMesh(name, rawParts) {
-  raw = buildSceneMesh(name, rawParts); raw.raw = raw; xkey = '';
+  raw = buildSceneMesh(name, rawParts); raw.raw = raw; xkey = ''; pmemo = [];
   scene = raw;
   return scene;
 }
 // 현재 장면(부품 크기·위치 조절 반영). scene.raw = 원본 장면(같은 기구인지 비교용)
 export function getMech3d() { return scene; }
-export function clearMech3d() { scene = raw = null; xkey = ''; }
+export function clearMech3d() { scene = raw = null; xkey = ''; pmemo = []; }
 // 부품 변경 = 크기·위치(xform) → 형상(shapeMod, P4 ③) 순서. mods[i] = spec.mech3d.parts[i](xform·shapeMod 필드만 봄). 반환: 바뀌었는지
 export function applyPartMods(mods) {
   if (!raw) return false;
@@ -37,13 +37,18 @@ export function applyPartMods(mods) {
   if (xs.every((x) => !x)) { scene = raw; return true; }
   const parts = raw.parts.map((p, i) => {
     if (!xs[i]) return p;
+    const k = JSON.stringify(xs[i]), c = pmemo[i];
+    if (c && c.raw === p && c.key === k) return c.mesh;
     let m = p;
     if (xs[i].x) { const b = bounds(p.positions); m = scaleMoveMesh(p, xs[i].x, [(b[0] + b[3]) / 2, (b[1] + b[4]) / 2, (b[2] + b[5]) / 2]); }
     const s = xs[i].s;
     if (s) {
-      const H = frameHeights(m, s.frame, s.cell ?? 0.5);
-      m = deformPart(refineForBumps(m, s.frame, s.centers, s.R, Math.max(0.1, s.R / 8)), s.frame, H, s);
+      const H = heightsFor(m, s.frame, s.cell ?? 0.5);
+      if (H.non25 > 0.02) console.warn(`부품 ${i}: 관측 방향 비 2.5D ${(H.non25 * 100).toFixed(1)}% — 형상 변경(shapeMod) 건너뜀`);
+      else m = deformPart(refinedFor(m, s.frame, s.centers, s.R, Math.max(0.1, s.R / 8)), s.frame, H, s);
     }
+    if (!m.bvh) m = { ...m, bvh: buildBvh(m.positions, m.triangles) };
+    pmemo[i] = { raw: p, key: k, mesh: m };
     return m;
   });
   scene = buildSceneMesh(raw.name, parts); scene.raw = raw;

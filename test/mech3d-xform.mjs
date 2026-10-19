@@ -5,7 +5,7 @@ import { bounds } from '../src/engine/mech3d/mesh.js';
 import { xformFromInput, xformEditor } from '../src/ui/mech3d-panel.js';
 import { defaultLight, defaultObserve, migrateMech3d, SOLDER_R } from '../src/engine/mech3d/defs.js';
 import { meshVolume } from '../src/engine/mech3d/mesh.js';
-import { boxMesh, ok, done } from './mech3d-util.mjs';
+import { boxMesh, mergeMeshes, ok, done } from './mech3d-util.mjs';
 
 const R = eulerMatrix([0, 0, 90]);
 const p = applyPoint(R, [10, 0, 0], [1, 2, 3]);
@@ -57,4 +57,19 @@ ok(!('bvh' in transformMesh(mb, [1, 0, 0], [0, 0, 0])), '변환 사본은 캐시
   ok(applyPartMods([{ shapeMod: mod }]) && Math.abs(meshVolume(getMech3d().parts[0].positions, getMech3d().parts[0].triangles) - 1000) < 1e-3 && getMech3d().raw === raw, 'shapeMod Δt 0.5 반영(부피 1000), 원본 유지');
   ok(!applyPartMods([{ shapeMod: mod }]), '같은 변경이면 다시 만들지 않음');
   ok(applyPartMods([{}]) && getMech3d() === raw, 'shapeMod 지우면 원본'); clearMech3d(); }
+{ // 부품별 메모: 다른 부품만 바뀌면 이 부품은 다시 만들지 않음
+  setMech3dMesh('s2', [boxMesh(0, 0, 0, 40, 10, 2), boxMesh(0, 20, 0, 10, 10, 2)]);
+  const mod = { frame: { u: [1, 0, 0], v: [0, 1, 0], d: [0, 0, 1] }, dt: 0.2, h: 0.5, R: 3, centers: [[10, 5], [30, 5]], cell: 0.5 };
+  applyPartMods([{ shapeMod: mod }, {}]); const p0 = getMech3d().parts[0];
+  applyPartMods([{ shapeMod: mod }, { xform: { offset: [1, 0, 0], scale: [1, 1, 1] } }]);
+  ok(getMech3d().parts[0] === p0 && getMech3d().parts[1] !== getMech3d().raw.parts[1], '다른 부품 xform 변경 → 형상 부품은 그대로(메모)');
+  clearMech3d(); }
+{ // 비 2.5D(관측 방향 두 겹) 부품 → shapeMod 건너뜀(경고)
+  const two = mergeMeshes([boxMesh(0, 0, 0, 40, 10, 1), boxMesh(0, 0, 2, 40, 10, 1)]);
+  setMech3dMesh('s3', [two]); const raw = getMech3d();
+  const mod = { frame: { u: [1, 0, 0], v: [0, 1, 0], d: [0, 0, 1] }, dt: 0.5, h: 0, R: 1, centers: [], cell: 0.5 };
+  const warn = console.warn; let warned = 0; console.warn = () => { warned++; };
+  applyPartMods([{ shapeMod: mod }]); console.warn = warn;
+  ok(warned === 1 && Math.abs(meshVolume(getMech3d().parts[0].positions, getMech3d().parts[0].triangles) - 800) < 1e-3 && getMech3d().raw === raw, `비 2.5D → 형상 변경 건너뜀 · 경고 ${warned}번`);
+  clearMech3d(); }
 done();
