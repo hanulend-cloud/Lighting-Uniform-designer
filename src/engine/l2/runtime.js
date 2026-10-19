@@ -6,11 +6,13 @@ import { createTable } from './slab-table.js';
 import { validateTable } from './validator.js';
 
 let state = { table: null, check: null, error: 'L2 테이블 미로드' };
+let raw = null;   // 마지막으로 읽은 원자료 { meta, data, refAD } — 3D 계산 Worker 에 그대로 넘겨 다시 받기·풀기를 건너뜀
 
 // loader(): Promise<{ meta, data: Float32Array, refAD }>
 export async function initL2(loader) {
   try {
     const { meta, data, refAD } = await loader();
+    raw = { meta, data, refAD };
     const table = createTable(meta, data);
     state = { table, check: validateTable(table, refAD), error: null };
   } catch (e) {
@@ -20,6 +22,9 @@ export async function initL2(loader) {
 }
 
 export function l2State() { return state; }
+export function l2Raw() { return raw; }
+// 이미 받은 원자료로 적재(메인이 넘겨준 { meta, data:Float32Array, refAD }) — fetch·gzip 풀기 없음
+export function bufferLoader(r) { return async () => r; }
 
 export function browserLoader(base = './src/engine/l2/data/') {
   return async () => {

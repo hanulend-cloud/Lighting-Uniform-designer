@@ -28,7 +28,7 @@ function delayedPort(T, delay = 100) {
 }
 const chunks = (p) => p.log.filter((m) => m.type === 'chunk');
 const scenes = (p) => p.log.filter((m) => m.type === 'scene');
-const OPT = { chunkN: 1000, bins: 10, debounceMs: 500, tickMs: 1000, maxPhotons: 1e9 };
+const OPT = { chunkN: 1000, fixedChunk: true, bins: 10, debounceMs: 500, tickMs: 1000, maxPhotons: 1e9 };
 
 {   // 디바운스 · 장면 · 시드 · 누적 · 이전 청크 무시 · 다른 sceneKey 무시 · 취소
   const T = fakeTimers(), a = manualPort(), b = manualPort(), ups = [];
@@ -108,7 +108,7 @@ const OPT = { chunkN: 1000, bins: 10, debounceMs: 500, tickMs: 1000, maxPhotons:
   const J = runJob({ S: fx.S, line: fx.line, obs: fx.obs, G: fx.G, emitters: fx.emitters, ledSpec: fx.ledSpec, N: 20000, seed: 3, batches: 10 });
   const hostPort = () => { const h = makeChunkHost({ getTable: () => table }); return { send: (m) => Promise.resolve().then(() => h.handle(m).reply) }; };
   const T = fakeTimers();
-  const P = createProgressive({ ports: [hostPort(), hostPort()], timers: T, opts: { chunkN: 2000, bins: 10, maxPhotons: 20000, seedBase: 3, debounceMs: 500, tickMs: 1000 } });
+  const P = createProgressive({ ports: [hostPort(), hostPort()], timers: T, opts: { chunkN: 2000, fixedChunk: true, bins: 10, maxPhotons: 20000, seedBase: 3, debounceMs: 500, tickMs: 1000 } });
   P.restart({ sceneKey: 'e1', scene: { mechParts: [fx.plate], mspec: fx.mspec, ledParts: null, lineData: lightData(fx.line), G: fx.G, obs: fx.obs, emitters: fx.emitters }, G: fx.G, obs: fx.obs, nLeds: 5, fluxLm: 0 });
   await T.advance(500); await settle(200);
   const s = P.snapshot(), ref = tallyStats(fx.G, J.accs, fx.obs, J.cnts);
@@ -175,5 +175,79 @@ const OPT = { chunkN: 1000, bins: 10, debounceMs: 500, tickMs: 1000, maxPhotons:
   const nw = chunks(p).slice(nc);
   ok(P.snapshot().state === 'running' && nw.length > 0 && nw.every((m) => m.sceneKey === 's2') && nw[0].seed === chunkSeed(1, 0), '재개 → 새 장면 청크(번호 0부터)');
   P.cancel();
+}
+// ---- 적응형 청크 · 광자 수 정규화 · 포트별 시작 ----
+// 합성 MC 포트: 셀 k 의 광자당 기댓값 mu[k], 광자당 표준편차 sig — 청크 합 = N·mu + √N·sig·z(시드 결정적). 속도 rate 광자/ms → ms 보고
+const mu = [0.85, 0.85, 1, 1, 1, 1, 0.95, 0.95], sig = 2;
+function gauss(seed, k) { let x = Math.sin(seed * 12.9898 + k * 78.233) * 43758.5453; const u1 = x - Math.floor(x); x = Math.sin(seed * 39.3468 + k * 11.135) * 24634.6345; const u2 = x - Math.floor(x); return Math.sqrt(-2 * Math.log(u1 + 1e-12)) * Math.cos(2 * Math.PI * u2); }
+const mcReply = (msg, rate) => ({ sceneKey: msg.sceneKey, acc: Float64Array.from(mu, (m, k) => msg.N * m + Math.sqrt(msg.N) * sig * gauss(msg.seed, k)), cnt: new Uint32Array(8).fill(msg.N / 100), ledger: { ...LED, emitted: msg.N }, leak: {}, ms: msg.N / rate });
+function mcPort(T, rate) {
+  const log = [];
+  return { log, send(msg) { log.push(msg); return msg.type === 'scene' ? Promise.resolve({ sceneKey: msg.sceneKey, ready: true }) : new Promise((res) => T.setTimeout(() => res(mcReply(msg, rate)), msg.N / rate)); } };
+}
+const perPhoton = (s) => Array.from(s.sum, (v) => v / s.photons);
+{   // 적응형: 첫 청크 minChunk, 다음은 잰 속도 × 0.5초(상·하한), 포트마다 따로
+  const T = fakeTimers(), slow = mcPort(T, 1.3), fast = mcPort(T, 40);   // 1,300 / 40,000 광자/초
+  const P = createProgressive({ ports: [slow, fast], timers: T, opts: { bins: 10, debounceMs: 500, tickMs: 1000, maxPhotons: 1e9, targetNoise: 1e-9 } });
+  P.restart(job(1)); await T.advance(500 + 5000);
+  const ns = chunks(slow).map((m) => m.N), nf = chunks(fast).map((m) => m.N);
+  ok(ns[0] === 1000 && nf[0] === 1000, `첫 청크 1,000 광자 (느림 ${ns[0]}, 빠름 ${nf[0]})`);
+  ok(ns.slice(1).every((n) => n === 1000), `느린 포트(1.3/ms × 500ms = 650 → 하한 1,000): ${ns.slice(0, 4).join(',')}`);
+  ok(nf[1] === 20000 && nf.slice(1).every((n) => n === 20000), `빠른 포트 40/ms × 500ms = 20,000: ${nf.slice(0, 4).join(',')}`);
+  const all = [...chunks(slow), ...chunks(fast)].map((m) => m.seed).sort((a, b) => a - b);
+  ok(all.every((v, i) => v === chunkSeed(1, i)), '시드는 청크 번호 순 — 빈틈·중복 없음');
+  P.cancel();
+  const T2 = fakeTimers(), huge = mcPort(T2, 1000);
+  const Q = createProgressive({ ports: [huge], timers: T2, opts: { bins: 10, debounceMs: 500, maxPhotons: 1e9, targetNoise: 1e-9 } });
+  Q.restart(job(1)); await T2.advance(500 + 200);
+  ok(chunks(huge)[1].N === 50000, `상한 50,000 (${chunks(huge)[1].N})`);
+  Q.cancel();
+}
+{   // 첫 지표: 작은 첫 청크라 1초 안에(속도 1,300 광자/초 Worker 2개)
+  const T = fakeTimers(), a = mcPort(T, 1.3), b = mcPort(T, 1.3);
+  let first = null;
+  const P = createProgressive({ ports: [a, b], timers: T, onUpdate: (s) => { if (first == null && s.stats) first = T.now(); }, opts: { bins: 10, debounceMs: 0, maxPhotons: 1e9, targetNoise: 1e-9 } });
+  P.restart(job(1)); await T.advance(3000);
+  ok(first != null && first <= 1000, `첫 지표 ${first} ms (≤ 1,000)`);
+  P.cancel();
+}
+{   // 광자 수 정규화 — 크기가 같으면 ÷ 청크 수와 정확히 같음
+  const T = fakeTimers(), p = delayedPort(T);
+  const P = createProgressive({ ports: [p], timers: T, opts: { ...OPT, maxPhotons: 20000, targetNoise: 1e-9 } });
+  P.restart(job(1)); await T.advance(5000);
+  const s = P.snapshot(), ref = tallyStats(G, s.bins.map((b) => b.acc.map((v) => v / b.n)), obs);
+  ok(s.reason === 'max' && s.bins.every((b) => b.n === 2 && b.photons === 2000) && s.stats.Ulen === ref.Ulen && s.stats.relNoise === ref.relNoise, `같은 크기 20청크: 배치 ÷ 2 와 비트 일치 (잡음 ${(ref.relNoise * 100).toFixed(4)}%)`);
+}
+{   // 적응형 누적 평균 = 고정 25k 누적 평균 (3σ 안) — 청크 크기가 제각각이어도 광자 수 정규화로 치우침 없음
+  const run = async (opts, rate) => {
+    const T = fakeTimers(), ps = [mcPort(T, rate), mcPort(T, rate * 3)];
+    const P = createProgressive({ ports: ps, timers: T, opts: { bins: 10, debounceMs: 0, tickMs: 1000, targetNoise: 1e-9, maxPhotons: 400000, ...opts } });
+    P.restart(job(1)); await T.advance(1e6);
+    return P.snapshot();
+  };
+  const F = await run({ fixedChunk: true, chunkN: 25000 }, 5), A_ = await run({}, 5);
+  const sizes = new Set(A_.bins.map((b) => b.photons)), nA = A_.bins.map((b) => b.photons);
+  ok(F.reason === 'max' && A_.reason === 'max' && F.photons === 400000 && A_.photons === 400000 && sizes.size > 1 && Math.max(...nA) / Math.min(...nA) < 1.5, `둘 다 40만 광자, 적응형 청크 크기 제각각 · 배치 광자 ${Math.min(...nA)}~${Math.max(...nA)} 고르게`);
+  const mF = perPhoton(F), mA = perPhoton(A_), tol = 3 * sig * Math.sqrt(2 / 400000);
+  ok(mA.every((v, k) => Math.abs(v - mF[k]) <= tol && Math.abs(v - mu[k]) <= tol), `셀 평균 일치(3σ = ${tol.toExponential(1)}): 최대 차 ${Math.max(...mA.map((v, k) => Math.abs(v - mF[k]))).toExponential(1)}`);
+  const se = Math.hypot(F.stats.seLen ?? 0, A_.stats.seLen ?? 0);
+  ok(Math.abs(A_.stats.Ulen - F.stats.Ulen) <= 3 * se && Math.abs(A_.stats.Ulen - 0.85) <= 3 * (A_.stats.seLen ?? 0) + 1e-3, `길이 U 일치: 적응 ${A_.stats.Ulen.toFixed(4)} · 고정 ${F.stats.Ulen.toFixed(4)} (3σ ${(3 * se).toFixed(4)})`);
+  ok(Math.abs(A_.stats.relNoise / F.stats.relNoise - 1) < 0.5, `잡음 추정 비슷: 적응 ${(A_.stats.relNoise * 100).toFixed(3)}% · 고정 ${(F.stats.relNoise * 100).toFixed(3)}%`);
+}
+{   // 포트별 시작: 장면이 늦은 포트가 있어도 준비된 포트는 바로 청크 · 늦은 포트는 준비되면 합류 · 청크는 포트당 1개만 진행
+  const T = fakeTimers(), a = delayedPort(T), lateRes = [];
+  const b = { log: [], send(msg) { this.log.push(msg); return msg.type === 'scene' ? new Promise((res) => lateRes.push(() => res({ sceneKey: msg.sceneKey, ready: true }))) : new Promise((res) => T.setTimeout(() => res(make(msg)), 100)); } };
+  const P = createProgressive({ ports: [a, b], timers: T, opts: OPT });
+  P.restart(job(1)); await T.advance(500 + 350);
+  ok(P.snapshot().state === 'running' && chunks(a).length === 4 && chunks(b).length === 0, `늦은 포트 기다리지 않음: a 청크 ${chunks(a).length}개, b 0개`);
+  lateRes.shift()(); await T.advance(0);
+  ok(chunks(b).length === 1, 'b 장면 준비 → b 청크 시작');
+  const m = manualPort();
+  const Q = createProgressive({ ports: [m], timers: T, opts: OPT });
+  Q.restart(job(1)); await T.advance(500);
+  Q.restart(job(2)); await T.advance(500);
+  const seq = m.log.map((x) => x.type).join(',');
+  ok(seq === 'scene,chunk,scene,chunk' && m.log[3].sceneKey === 's2', `다시 시작: 진행 중 청크 1개 뒤에 새 장면, 그다음 새 청크 (${seq})`);
+  Q.cancel(); P.cancel();
 }
 done();

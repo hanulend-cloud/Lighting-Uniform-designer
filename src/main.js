@@ -2,7 +2,7 @@
 import { DEFAULT_SPEC, LEVEL_DEFAULTS } from './model/defaults.js';
 import { buildGeometry, combinedEffect, activeLevels, effectiveEdgeMargin } from './model/geometry.js';
 import { computeField, computeCameraLuminance, evalGrid, l2Describe } from './engine/directLit.js';
-import { initL2, browserLoader, l2State, setMaterialDb, materialDb } from './engine/l2/runtime.js';
+import { initL2, browserLoader, l2State, l2Raw, setMaterialDb, materialDb } from './engine/l2/runtime.js';
 import { createDb } from './model/materials-db.js';
 import { renderL2Panel } from './ui/l2-panel.js';
 import { migrateMilkyV13 } from './engine/l2/material.js';
@@ -118,7 +118,7 @@ function buildForm() {
     }
     form.appendChild(grp);
   }
-  $('#btn-reset').onclick = () => { spec = structuredClone(DEFAULT_SPEC); markSoloReset(); mount(); m3app.unmount(); applyMode(); schedule(); };
+  $('#btn-reset').onclick = () => { spec = structuredClone(DEFAULT_SPEC); markSoloReset(); mount(); m3app.unmount(); m3app.resetWorkers(); applyMode(); schedule(); };
   $('#btn-mech3d-show').onclick = () => { spec.mode = 'mech3d'; persist(); applyMode(); };
   $('#file-mech3d').onchange = (e) => { const f = e.target.files?.[0]; if (f) importMech3d(f); e.target.value = ''; };
   $('#btn-step').onclick = () => {
@@ -143,7 +143,33 @@ function onToggleLevel(level, checked) {
 // 단독 행 캐시는 Worker 가 보관(해당 레벨/공통 조건 미변경 시 재사용). soloReset 이면 다음 요청에서 비운다.
 let soloReset = false;
 function markSoloReset() { soloReset = true; }
-let solver = null;
+let solver = null, psfWorkers = [];
+// 평판 계산 Worker 시작 — L2 응답표·소재 DB·불러온 몸체를 Worker 쪽에도 싣는다(메인은 L2 카드 표시용으로 따로 보유).
+// 3D 모드로 시작하면 만들지 않는다(3D 계산 Worker 와 CPU·L2 적재를 다투지 않게) — 평판 계산이 처음 필요할 때 만든다.
+function startSolver() {
+  solver = new Worker(new URL('./engine/solve-worker.js', import.meta.url), { type: 'module' });
+  solver.onmessage = onSolverMessage;
+  solver.onerror = (e) => { $('#timing').textContent = `계산 Worker 오류: ${e.message ?? e}`; };
+  solver.postMessage({ type: 'init', l2Base: new URL('./engine/l2/data/', import.meta.url).href, db: dbLists() });
+  // PSF 병렬 풀(교차 출처 격리일 때): 보조 Worker 를 여기(메인)서 만들고 MessageChannel 로 계산 Worker 와 직접 연결
+  if (globalThis.crossOriginIsolated) {
+    const K = Math.min(7, (navigator.hardwareConcurrency ?? 2) - 2), ports = [];
+    for (let k = 0; k < K; k++) {
+      const w = new Worker(new URL('./engine/shape/psf-worker.js', import.meta.url), { type: 'module' }), ch = new MessageChannel();
+      w.postMessage({ type: 'port', port: ch.port2 }, [ch.port2]);
+      ports.push(ch.port1); psfWorkers.push(w);
+    }
+    if (ports.length) solver.postMessage({ type: 'pool', ports }, ports);
+  }
+  syncBody();
+}
+// 3D 모드로 들어갈 때 평판 계산이 돌고 있으면 멈춘다(취소 메시지가 없어 Worker 를 종료) — 평판으로 돌아오면 다시 만들어 계산
+function stopFlatSolve() {
+  clearTimeout(timer);
+  if (!solver || !busy) return;
+  solver.terminate(); for (const w of psfWorkers) w.terminate();
+  solver = null; psfWorkers = []; busy = false; pending = true; markSoloReset();
+}
 const dbLists = () => { const l = materialDb()?.list() ?? []; return { base: l.filter((e) => e.origin === 'base'), user: l.filter((e) => e.origin !== 'base') }; };
 function syncBody() {
   const b = getBody();
@@ -186,7 +212,7 @@ function clearShape() {
 // ---- 3D 기구 모드 (spec 2026-10-14 §3, 2026-10-15 m3-cad-ui) — 화면·계산은 src/ui/m3/app.js ----
 function m3ctx() {
   return {
-    mspec: spec.mech3d, persist, dbLists, materialDb, l2Table: () => l2State().table, milkyFromMusR,
+    mspec: spec.mech3d, persist, dbLists, materialDb, l2Table: () => l2State().table, l2Raw, milkyFromMusR,
     onImportMech3d: importMech3d,
     onExit: () => { spec.mode = 'flat'; persist(); applyMode(); schedule(); },
   };
@@ -198,6 +224,7 @@ function applyMode() {
   $('#results-wrap').hidden = m3;
   $('#inputbar').hidden = m3;
   $('#btn-mech3d-show').hidden = m3 || !(spec.mech3d && getMech3d());
+  if (m3) stopFlatSolve();
   if (m3) m3app.mount(m3ctx()).catch((e) => m3app.setStatus(`3D 화면 오류: ${e.message ?? e}`));
   else m3app.unmount();
 }
@@ -274,7 +301,8 @@ function runAsync() { run(); }
 
 function run() {
   persist();
-  if (!solver) return;
+  if (spec.mode === 'mech3d') return;   // 3D 모드에서는 평판 계산을 돌리지 않음
+  if (!solver) startSolver();
   if (busy) { pending = true; return; }
   busy = true; pending = false; jobT0 = performance.now();
   const active = activeLevels(spec), eg = evalGrid(spec, GRID);
@@ -670,6 +698,7 @@ await initL2(browserLoader());
 }
 spec = load() || structuredClone(DEFAULT_SPEC);
 migrate(spec);
+if (spec.mode === 'mech3d') m3app.warmWorkers({ dbLists, l2Raw });   // 3D 계산 Worker 를 먼저 띄움(몸체·기구 복원과 겹치게)
 // 불러온 L3 몸체 복원(IndexedDB) — 없으면 평판으로 되돌림
 if (spec.body.shape.source === 'step' && !(await loadBodyIDB({ flipZ: spec.body.shape.flipZ, rot: spec.body.shape.rot }))) {
   spec.body.shape = structuredClone(DEFAULT_SPEC.body.shape);
@@ -677,22 +706,8 @@ if (spec.body.shape.source === 'step' && !(await loadBodyIDB({ flipZ: spec.body.
 // 3D 기구 복원(IndexedDB) — 메쉬가 없으면 평판 모드로
 if (spec.mode === 'mech3d' && !(spec.mech3d && await loadMech3dIDB())) { spec.mode = 'flat'; spec.mech3d = null; }
 if (spec.mech3d?.light?.step) await loadLedIDB();   // 검증은 m3app.mount 에서
-// 계산 Worker 시작 — L2 응답표·소재 DB·불러온 몸체를 Worker 쪽에도 싣는다(메인은 L2 카드 표시용으로 따로 보유)
-solver = new Worker(new URL('./engine/solve-worker.js', import.meta.url), { type: 'module' });
-solver.onmessage = onSolverMessage;
-solver.onerror = (e) => { $('#timing').textContent = `계산 Worker 오류: ${e.message ?? e}`; };
-solver.postMessage({ type: 'init', l2Base: new URL('./engine/l2/data/', import.meta.url).href, db: dbLists() });
-// PSF 병렬 풀(교차 출처 격리일 때): 보조 Worker 를 여기(메인)서 만들고 MessageChannel 로 계산 Worker 와 직접 연결
-if (globalThis.crossOriginIsolated) {
-  const K = Math.min(7, (navigator.hardwareConcurrency ?? 2) - 2), ports = [];
-  for (let k = 0; k < K; k++) {
-    const w = new Worker(new URL('./engine/shape/psf-worker.js', import.meta.url), { type: 'module' }), ch = new MessageChannel();
-    w.postMessage({ type: 'port', port: ch.port2 }, [ch.port2]);
-    ports.push(ch.port1);
-  }
-  if (ports.length) solver.postMessage({ type: 'pool', ports }, ports);
-}
-syncBody();
+// 평판 계산 Worker — 평판 모드로 시작할 때만 지금 만든다(3D 모드면 평판 계산이 처음 필요할 때 run() 이 만든다)
+if (spec.mode !== 'mech3d') startSolver();
 mount();
 setupZoom();
 setupHeatPick();

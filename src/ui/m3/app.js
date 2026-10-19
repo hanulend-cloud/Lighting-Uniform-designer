@@ -24,6 +24,16 @@ const $ = (s) => document.querySelector(s);
 const VIEWS = [['top', '평면 (XY)'], ['front', '정면 (XZ)'], ['side', '측면 (YZ)'], ['iso', '등각']];
 let A = null;       // 마운트 상태 { ctx, store, pool, prog, view, results, cmd, ... }
 let viewP = null;   // 3D 뷰는 한 번만 만든다(같은 캔버스에 WebGL 문맥을 다시 만들지 않음)
+// 계산 Worker 풀도 한 번만 — 3D↔평판 전환·다시 마운트에도 유지(Worker 시작·L2 표 적재 수 초 방지). resetWorkers() 로만 종료.
+// sceneKey 는 모듈 전체에서 이어지는 번호 — 유지된 Worker 의 장면 캐시가 다른 마운트의 같은 이름과 섞이지 않게
+let pool = null, sceneSeq = 0;
+function getPool(ctx) {
+  pool ??= createPool({ dbLists: ctx.dbLists, l2Raw: ctx.l2Raw ?? (() => null), onStatus: (t) => setStatus(t) });
+  return pool;
+}
+export function resetWorkers() { pool?.killAll('계산 Worker 초기화'); }
+// 시작 시 미리 띄우기(main.js — 3D 모드로 열 때 IndexedDB·화면 준비와 겹쳐 Worker 모듈·L2 표를 적재)
+export function warmWorkers(ctx) { getPool(ctx).warm(); }
 
 export const isMounted = () => !!A;
 export function setStatus(t) { A?.store.update('session', (_, s) => { s.status = t; }); }
@@ -45,13 +55,14 @@ function getView() {
 export async function mount(ctx) {
   if (A && A.ctx.mspec === ctx.mspec) { A.ctx = ctx; return; }   // 같은 기구 — 그대로
   unmount();
+  const pool = getPool(ctx);
+  pool.setDb(ctx.dbLists()); pool.warm();   // 첫 작업 전에 Worker 를 띄워 L2 표를 적재(이미 떠 있으면 소재 DB 만 갱신)
   const store = createStore(ctx.mspec, { persist: ctx.persist });
   L.resetLedCaches();
   const v0 = L.validateLedStep(ctx.mspec, store.session);   // main.js:982 의 시작 시 검증을 여기서
   if (v0.status) store.session.status = v0.status;
   if (v0.changed) ctx.persist();
-  const pool = createPool({ dbLists: ctx.dbLists, onStatus: (t) => setStatus(t) });
-  const a = A = { ctx, store, pool, view: null, meshShown: null, lineKey: '', Gc: null, obsShown: null, checks: {}, sceneSeq: 0, markKey: '', timing: { start: 0, first: null, noise5: null } };
+  const a = A = { ctx, store, pool, view: null, meshShown: null, lineKey: '', Gc: null, obsShown: null, checks: {}, markKey: '', timing: { start: 0, first: null, noise5: null } };
   a.prog = createProgressive({ ports: pool.ports(), onUpdate: onCalc, opts: { targetNoise: ctx.mspec.observe.targetNoise ?? 0.02 } });
   a.results = createResultsPanel($('#m3-res'));
   a.cmd = mountCommandBar($('#m3-cmd'), cmdHandlers());
@@ -69,7 +80,7 @@ export async function mount(ctx) {
 export function unmount() {
   if (!A) return;
   const a = A; A = null;   // 먼저 비워서 cancel 의 onUpdate 가 그리지 않게
-  a.prog.dispose(); a.unsub(); a.store.dispose(); a.pool.killAll('3D 모드 종료');   // 풀은 항상 종료(라인 인식·청크 모두)
+  a.prog.dispose(); a.unsub(); a.store.dispose();   // 풀은 유지(진행 중 청크는 ≤0.5초 — 끝나면 버려짐)
   window.removeEventListener('keydown', a.keydown);
   if (a.view) { a.view.setObsSurface(null); a.view.setCheckMarkers([]); a.view.setSection(null); }
   $('#m3-legend').hidden = true;
@@ -127,7 +138,7 @@ function makeJob() {
   const obs = tallyObs(M.observe, M.observe.dir ?? S.line.frame.d), G = geometry(obs);
   const ledParts = M.light.kind === 'step' && getLedMesh() ? L.rawParts(getLedMesh().parts) : null;
   return {
-    sceneKey: `s${++A.sceneSeq}`, G, obs, nLeds: emitters.length, fluxLm: M.light.spec.fluxLm ?? 0,
+    sceneKey: `s${++sceneSeq}`, G, obs, nLeds: emitters.length, fluxLm: M.light.spec.fluxLm ?? 0,
     scene: { mechParts: L.rawParts(getMech3d().parts), mspec: JSON.parse(JSON.stringify(M)), ledParts, lineData: lightData(S.line), G, obs, emitters },
   };
 }

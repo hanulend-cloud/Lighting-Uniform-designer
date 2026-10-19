@@ -1,8 +1,10 @@
 // 3D 계산 Worker 풀 — main.js(P3) 에서 옮김. 0번 Worker 는 라인 인식에도 쓴다. 필요한 만큼 늘리고 유지(L2 표 재적재 방지).
-// ports() = 점진 계산 제어기용 포트 [{ send(msg) → Promise<reply> }] (K = 코어 수 − 1, 1~8)
+// ports() = 점진 계산 제어기용 포트 [{ send(msg) → Promise<reply> }] (K = 논리 코어 수 − 1, 1~15 — 측정: 16스레드에서 8→15개면 ±5% 12초→9초)
+// 풀은 app.js 가 한 번 만들어 3D↔평판 전환·다시 마운트에도 유지한다(Worker·L2 표 재적재 = 수 초 방지). warm() = K 개 미리 띄우기.
+// l2Raw(): 메인이 이미 읽은 L2 원자료 { meta, data, refAD } — init 에 복사해 넘겨 Worker 마다 fetch·gzip 풀기를 건너뜀(없으면 Worker 가 받음)
 const TIMEOUT = 10 * 60 * 1000;
 
-export function createPool({ dbLists, onStatus = () => {} }) {
+export function createPool({ dbLists, l2Raw = () => null, onStatus = () => {} }) {
   const pending = new Map(), pool = [];
   let reqId = 0;
   function onMessage(e) {
@@ -22,7 +24,7 @@ export function createPool({ dbLists, onStatus = () => {} }) {
     const w = new Worker(new URL('../../engine/mech3d/mc3d-worker.js', import.meta.url), { type: 'module' });
     w.onmessage = onMessage;
     w.onerror = (e) => { const msg = `계산 Worker 오류: ${e.message ?? e}`; onStatus(msg); drop(w, msg); };
-    w.postMessage({ type: 'init', l2Base: new URL('../../engine/l2/data/', import.meta.url).href, db: dbLists() });
+    w.postMessage({ type: 'init', l2Base: new URL('../../engine/l2/data/', import.meta.url).href, l2: l2Raw() ?? undefined, db: dbLists() });
     return w;
   }
   const worker = (k = 0) => { while (pool.length <= k) pool.push(spawn()); return pool[k]; };
@@ -32,7 +34,9 @@ export function createPool({ dbLists, onStatus = () => {} }) {
     pending.set(id, { res, rej, w, timer });
     w.postMessage({ ...msg, id });
   });
-  const size = () => Math.max(1, Math.min(8, (navigator.hardwareConcurrency ?? 4) - 1));
+  const size = () => Math.max(1, Math.min(15, (navigator.hardwareConcurrency ?? 4) - 1));
   const ports = () => Array.from({ length: size() }, (_, k) => ({ send: (msg) => call(worker(k), msg) }));
-  return { worker, call, killAll, ports };
+  const warm = () => { for (let k = 0; k < size(); k++) worker(k); };
+  const setDb = (db) => { for (const w of pool) w.postMessage({ type: 'db', db }); };   // 이미 뜬 Worker 의 소재 DB 갱신(새 Worker 는 init 에서)
+  return { worker, call, killAll, ports, warm, setDb };
 }
