@@ -38,10 +38,9 @@ export function pitchOptions(line, n, range = null) {
 }
 // maps[c] 길이 = nJ·셀(격자 지도) 또는 셀. milkies 가 있으면 격자 j 마다 판정(가장 작은 통과 Milky 선택)
 // 반환 { feasible, n, pitch, j, stats, eff, margin, reason, tried:[{n, pitch, j, margin, eff}] }
+export const NEAR_TOL = 0.01;
 export function searchLeds({ G, obs, line, cand, maps, pitches = [0], pitchRange = null, nMax, emitted, milkies = null }) {
-  const nCell = G.ns * G.nw, nJ = milkies ? milkies.length : 1, tried = [];
-  let best = null;
-  const better = (a, b) => !b || a.margin > b.margin || (a.margin === b.margin && a.eff > b.eff);
+  const nCell = G.ns * G.nw, nJ = milkies ? milkies.length : 1, tried = [], rows = [];
   for (let n = 1; n <= nMax; n++) {
     let hit = null;
     for (const p of pitchRange ? pitchOptions(line, n, pitchRange) : pitches) {
@@ -58,12 +57,16 @@ export function searchLeds({ G, obs, line, cand, maps, pitches = [0], pitchRange
           if (!hit || row.j < hit.j || (row.j === hit.j && row.eff > hit.eff)) hit = row;
           break;   // 이 피치에서는 가장 낮은 통과 Milky 를 찾았음
         }
-        if (better(row, best)) best = row;
+        rows.push(row);
       }
     }
     if (hit) return { feasible: true, ...hit, reason: '', tried };
   }
-  const b = best ?? { n: nMax, pitch: 0, j: 0, stats: null, eff: NaN, margin: -Infinity };
+  // 가장 가까운 안: 여유가 최고값에서 NEAR_TOL 안인 것 중 LED 가 가장 적은 것(우선순위 = 개수 최소) → 효율
+  //   여유가 같으면(다른 쪽 — 보통 폭 — 이 막음) 길이 목표를 넘는 가장 적은 개수, 길이도 못 넘으면 길이 여유가 최고에 가까운 가장 적은 개수
+  const top = rows.reduce((m, r) => Math.max(m, r.margin), -Infinity), C = rows.filter((r) => r.margin >= top - NEAR_TOL);
+  const mL = (r) => r.stats.Ulen - obs.targetLen, bestL = C.reduce((m, r) => Math.max(m, mL(r)), -Infinity), needL = bestL >= 0 ? 0 : bestL - NEAR_TOL;
+  const b = C.filter((r) => mL(r) >= needL).sort((a, c) => a.n - c.n || c.eff - a.eff)[0] ?? { n: nMax, pitch: 0, j: 0, stats: null, eff: NaN, margin: -Infinity };
   const st = b.stats;
-  return { feasible: false, ...b, n: nMax, tried, reason: `LED 최대 ${nMax}개에서도 길이 U ${st ? st.Ulen.toFixed(2) : '–'}${st?.Uwid == null ? '' : ` · 폭 U ${st.Uwid.toFixed(2)}`} — ${st && st.Uwid != null && st.Uwid - obs.targetWid < st.Ulen - obs.targetLen ? '폭 방향 확산 부족: ③ 형상 또는 Milky 상향 권장' : '길이 방향 리플: Milky 상향 또는 LED–커버 거리 확대 권장'}` };
+  return { feasible: false, ...b, tried, reason: `LED ${nMax}개까지 늘려도 목표 미달 — 가장 가까운 ${b.n}개: 길이 U ${st ? st.Ulen.toFixed(2) : '–'}${st?.Uwid == null ? '' : ` · 폭 U ${st.Uwid.toFixed(2)}`} — ${st && st.Uwid != null && st.Uwid - obs.targetWid < st.Ulen - obs.targetLen ? '폭 방향 확산 부족: ③ 형상 또는 Milky 상향 권장' : '길이 방향 리플: Milky 상향 또는 LED–커버 거리 확대 권장'}` };
 }

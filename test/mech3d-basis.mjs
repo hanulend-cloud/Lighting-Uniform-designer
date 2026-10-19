@@ -25,7 +25,13 @@ const line = { length: 100, closed: false };
   const sum = layoutMap(cand, maps, [25, 75.5]);
   ok(Math.abs(sum[25] - (maps[25][25] + 0.5 * maps[75][25] + 0.5 * maps[76][25])) < 1e-6, 'layoutMap = 위치별 보간 지도 합');
   const none = searchLeds({ G, obs: { targetLen: 0.999, targetWid: 0 }, line, cand, maps, pitches: [0], nMax: 5, emitted: 1 });
-  ok(!none.feasible && none.n === 5 && /LED 최대 5개/.test(none.reason), `불가 → 가장 가까운 안: ${none.reason}`); }
+  ok(!none.feasible && none.n === 5 && /LED 5개까지/.test(none.reason), `불가 → 가장 가까운 안(개수가 늘수록 나아짐 → 5개): ${none.reason}`);
+  // 폭이 막는 장면: 지도 폭 방향 2칸 중 한 칸이 늘 어두움 → 개수를 늘려도 여유 같음 → 가장 적은 개수
+  const G2 = { ...G, nw: 2, area: new Float64Array(200).fill(1), valid: new Uint8Array(200).fill(1), winS: 10 };
+  const maps2 = cand.map((s) => Float32Array.from({ length: 200 }, (_, k) => { const i = k >> 1, j = k & 1; return (j ? 0.3 : 1) * Math.exp(-(((i + 0.5) - s) ** 2) / (2 * 12 * 12)); }));
+  const w = searchLeds({ G: G2, obs: { targetLen: 0.5, targetWid: 0.8 }, line, cand, maps: maps2, pitches: [0], nMax: 20, emitted: 1 });
+  let wantN = 1; for (; wantN <= 20; wantN++) { const t = searchLeds({ G: G2, obs: { targetLen: 0.5, targetWid: 0 }, line, cand, maps: maps2, pitches: [0], nMax: wantN, emitted: 1 }); if (t.feasible) break; }
+  ok(!w.feasible && w.n === wantN && w.stats.Ulen >= 0.5, `폭이 막으면 길이 목표를 넘는 가장 적은 개수: ${w.n}개(길이만 보면 ${wantN}개) · ${w.reason}`); }
 { const p = pitchOptions({ length: 100, closed: false }, 5, { min: 10, max: 30 });
   ok(p[0] === 0 && p.includes(10) && p.includes(25) && !p.includes(26), '피치 후보: 0(균등) + 범위 1mm 간격, (n−1)·p ≤ L 만');
   ok(pitchOptions({ length: 100, closed: true }, 5, { min: 10, max: 30 }).join() === '0', '닫힌 라인은 균등만'); }
