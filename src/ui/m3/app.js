@@ -15,7 +15,7 @@ import { createPool } from './pool.js';
 import * as L from './leds.js';
 import { buildObsOverlay, cellColors, extractFaces } from './colormap.js';
 import { mountCommandBar } from './command-bar.js';
-import { renderFeatureTree } from './feature-tree.js';
+import { renderFeatureTree, toggleVisibility } from './feature-tree.js';
 import { renderPropertyPanel } from './property-panel.js';
 import { createResultsPanel } from './results-panel.js';
 import { renderStatusBar } from './status-bar.js';
@@ -347,7 +347,10 @@ function autoGrid() { const l = A.store.session.line; return l ? { cellS: Math.m
 function renderAll(tag = 'all') {
   const st = A.store, M = st.mspec, S = st.session;
   renderView();
-  renderFeatureTree($('#m3-tree'), M, S, { onNode: (id) => st.update('session', (_, x) => { x.node = id; x.sel = id.startsWith('part:') ? { part: +id.slice(5), face: null } : null; }) });
+  renderFeatureTree($('#m3-tree'), M, S, {
+    onNode: (id) => st.update('session', (_, x) => { x.node = id; x.sel = id.startsWith('part:') ? { part: +id.slice(5), face: null } : null; }),
+    onEye: (id, only) => st.update('view', (m, x) => Object.assign(x, toggleVisibility(id, only, m.parts.length, x.hidden, x.hideLeds))),
+  });
   if (tag !== 'view') renderPropertyPanel($('#m3-props'), M, S, { dbList: A.ctx.materialDb()?.list() ?? [], auto: autoGrid(), dir: M.observe.dir ?? S.line?.frame.d, lineInfo: lineInfo() }, propHandlers());
   if (tag === 'session' || tag === 'all') renderMarkers();
   A.cmd.update(S, S.calc);
@@ -369,8 +372,11 @@ function renderView() {
   const meshKey = [cur, lp];   // 기구·LED 메쉬(위치 보정 포함 — 캐시 객체)가 바뀌면 다시 그림. 카메라는 기구가 바뀔 때만 맞춤
   if (!A.meshShown || A.meshShown.some((x, i) => x !== meshKey[i])) {
     const keepCamera = !!A.meshShown && A.meshShown[0] === cur;
+    if (A.meshShown?.[0] !== cur) { S.hidden = []; S.hideLeds = false; }   // 다른 기구를 불러오면 보기 상태 초기화
     A.meshShown = meshKey; v.setParts([...cur.parts, ...(lp ?? [])], kinds, { keepCamera });
   } else v.setKinds(kinds);
+  const hid = new Set(S.hidden), nMech = M.parts.length;
+  v.setHidden((i) => (i < nMech ? hid.has(i) : S.hideLeds));
   v.setSelection(S.sel);
   let arrows = [];
   try { arrows = L.currentEmitters(M, S.line).map((e) => ({ pos: e.pos, axis: e.axis })); } catch { arrows = []; }

@@ -16,6 +16,8 @@ export function initialSession() {
     view: 'iso',         // 'top' | 'front' | 'side' | 'iso'
     section: null,       // { axis:'x'|'y'|'z', pos, box:[6] } | null
     focusCheck: null,    // 강조할 점검 id
+    hidden: [],          // 3D 에서 숨긴 기구 부품 번호(보기 전용 — 계산에는 그대로 포함)
+    hideLeds: false,     // LED STEP 부품(PCB·LED) 숨김
   };
 }
 

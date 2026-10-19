@@ -127,6 +127,7 @@ export function createMech3dView(canvas, { onPick, gizmo = null }) {
       g.computeVertexNormals();
       const m = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ vertexColors: true, side: THREE.DoubleSide, roughness: 0.6, clippingPlanes: clip }));
       m.userData.part = i;
+      m.visible = !hiddenFn?.(i);
       scene.add(m);
       return m;
     });
@@ -170,6 +171,7 @@ export function createMech3dView(canvas, { onPick, gizmo = null }) {
   function updateOutline() {
     if (selOutline) { scene.remove(selOutline); selOutline.geometry.dispose(); selOutline.material.dispose(); selOutline = null; }
     const m = sel?.part != null ? meshes[sel.part] : null;
+    if (m && !m.visible) return;   // 숨긴 부품은 외곽선도 감춤
     if (!m) return;
     selOutline = new THREE.LineSegments(new THREE.EdgesGeometry(m.geometry, 25), new THREE.LineBasicMaterial({ color: 0xffb020, depthTest: false, transparent: true, opacity: 0.95 }));
     selOutline.renderOrder = 3;
@@ -183,7 +185,13 @@ export function createMech3dView(canvas, { onPick, gizmo = null }) {
     render();
   }
   // 선택 모드별 클릭 대상·투시: pickable(i) = 클릭 가능한 부품, ghostOf(i) = 반투명으로 비출 부품(둘 다 null = 전체/없음)
-  let pickable = null, ghost = null;
+  let pickable = null, ghost = null, hiddenFn = null;
+  // 보기 켜기/끄기: hiddenOf(i) = true 이면 그리지 않고 클릭도 안 됨(null = 모두 보임)
+  function setHidden(hiddenOf) {
+    hiddenFn = hiddenOf;
+    meshes.forEach((m, i) => { m.visible = !hiddenFn?.(i); });
+    updateOutline(); render();
+  }
   function setPickMode(pickableFn, ghostFn) { pickable = pickableFn; ghost = ghostFn; meshes.forEach((_, i) => colorize(i)); render(); }
 
   // 단면: sec = { axis:'x'|'y'|'z', pos } | null
@@ -261,7 +269,7 @@ export function createMech3dView(canvas, { onPick, gizmo = null }) {
     const r = canvas.getBoundingClientRect();
     ray.setFromCamera(new THREE.Vector2(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1), camera);
     // 단면 중이면 잘려 안 보이는 쪽(평면 거리 < 0)의 교차는 건너뛰고 다음 교차를 쓴다(Raycaster 는 clipping 을 모름)
-    const hits = ray.intersectObjects(pickable ? meshes.filter((m) => pickable(m.userData.part)) : meshes, false);
+    const hits = ray.intersectObjects(meshes.filter((m) => m.visible && (!pickable || pickable(m.userData.part))), false);
     const h = clip.length ? hits.find((x) => clip[0].distanceToPoint(x.point) >= 0) : hits[0];
     // 선택 모드(pickable 지정)에서는 클릭 광선도 넘긴다 — 빈 곳 클릭이어도 { part: null, face: null, ray } (가까운 LED 맞춤용)
     const rr = { o: ray.ray.origin.toArray(), d: ray.ray.direction.toArray() };
@@ -274,5 +282,5 @@ export function createMech3dView(canvas, { onPick, gizmo = null }) {
     onPick({ part, face: partsRef[part].faceIds[h.faceIndex], ray: rr, worldPerPixel: wpp });
   });
 
-  return { setParts, setKinds, setSelection, setOverlay, setPickMode, render, setView, fit, viewName: () => viewName, setSection, setObsSurface, setObsColors, setCheckMarkers };
+  return { setParts, setKinds, setHidden, setSelection, setOverlay, setPickMode, render, setView, fit, viewName: () => viewName, setSection, setObsSurface, setObsColors, setCheckMarkers };
 }

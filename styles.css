@@ -287,6 +287,11 @@ main:has(#mech3d-wrap:not([hidden])) { grid-template-rows: minmax(0, 1fr); }
 .m3-node.sel { background: var(--m3-accbg); color: var(--m3-acc); }
 .m3-node .b { margin-left: auto; font-size: 11px; color: var(--m3-mut); }
 .m3-node.child { padding-left: 22px; }
+.m3-eye { width: 18px; text-align: center; font-size: 12px; cursor: pointer; border-radius: 4px; flex: none; }
+.m3-eye:hover, .m3-eye:focus-visible { background: #e3e8f2; }
+.m3-eye.off { color: var(--m3-mut); }
+.m3-node.hid { color: var(--m3-mut); }
+.m3-node:not(.child) .m3-eye { order: 9; font-size: 11px; }
 .m3-badge { margin-left: auto; font-size: 10px; padding: 1px 5px; border-radius: 4px; background: #e9ecf2; color: #3c4455; }
 .m3-badge.k-milky { background: #e3edf6; } .m3-badge.k-clear { background: #dcefff; color: #0d4b85; } .m3-badge.k-led { background: #fff1cc; color: #7a5a12; }
 .m3-vp { position: relative; background: #141a26; min-height: 0; overflow: hidden; }

@@ -1,5 +1,5 @@
 // CAD UI 순수 도우미(DOM 없이): node test/m3-ui-pure.mjs
-import { treeNodes, partBadge, renderFeatureTree, treeHtml, esc as escT } from '../src/ui/m3/feature-tree.js';
+import { treeNodes, partBadge, renderFeatureTree, treeHtml, toggleVisibility, esc as escT } from '../src/ui/m3/feature-tree.js';
 import { calcLabel } from '../src/ui/m3/command-bar.js';
 import { judgeText, lumCard, fmtU, buildLut, NO_DATA_RGB, DEFAULT_GUIDE } from '../src/ui/m3/results-panel.js';
 import { checkLabels, statusWord, statusIcon, checkAria, isActivateKey, esc as escS } from '../src/ui/m3/status-bar.js';
@@ -32,8 +32,25 @@ ok(calcLabel({ state: 'running' }) === '⏸ 계산 중' && calcLabel({ state: 'p
   ok(!el.innerHTML.includes('<img') && el.innerHTML.includes('&lt;img src=x onerror=&quot;a()&quot;&gt;&amp;&#39;'), '부품 이름 escape');
   ok(escT(`<>"'&`) === '&lt;&gt;&quot;&#39;&amp;' && escS(`<>"'&`) === '&lt;&gt;&quot;&#39;&amp;', 'esc: 특수문자 5종 모두'); }
 { const h = treeHtml(M, { node: 'part:0', line: null });
-  ok(/role="button" tabindex="0" aria-current="true" data-node="part:0"/.test(h) && (h.match(/aria-current/g) ?? []).length === 1 && (h.match(/role="button" tabindex="0"/g) ?? []).length === treeNodes(M, { node: 'part:0', line: null }).length,
+  ok(/role="button" tabindex="0" aria-current="true" data-node="part:0"/.test(h) && (h.match(/aria-current/g) ?? []).length === 1 && (h.match(/role="button" tabindex="0"(?: aria-current="true")? data-node=/g) ?? []).length === treeNodes(M, { node: 'part:0', line: null }).length,
     '트리 노드: role=button · tabindex=0 · 선택 노드만 aria-current'); }
+{ const N = treeNodes(M, { node: null, line: null, hidden: [1], hideLeds: false });
+  ok(N[0].eye === 'all' && N[1].eye === 'on' && N[2].eye === 'off' && N.find((n) => n.id === 'leds').eye === undefined, '눈 단추: 숨긴 부품 off · 머리 = 모두 보기 · 직접 배치 LED 없음');
+  ok(treeNodes(M, { node: null, line: null, hidden: [] })[0].eye === undefined, '숨긴 것 없으면 머리 눈 단추 없음');
+  const h = treeHtml(M, { node: null, line: null, hidden: [1] });
+  ok(/data-eye="part:1"[^>]*aria-pressed="false"/.test(h) && /class="m3-node child  hid"/.test(h), '눈 단추 HTML · 숨긴 행 흐리게');
+  const stp = { ...M, light: { ...defaultLight(), kind: 'step', step: { leds: [0, 1], excluded: [] } } };
+  ok(treeNodes(stp, { node: null, line: null, hideLeds: true }).find((n) => n.id === 'leds').eye === 'off', 'LED STEP 노드 눈 단추');
+  const T = toggleVisibility;
+  ok(JSON.stringify(T('part:1', false, 3, [], false)) === '{"hidden":[1],"hideLeds":false}' && JSON.stringify(T('part:1', false, 3, [1], false)) === '{"hidden":[],"hideLeds":false}'
+    && JSON.stringify(T('part:1', true, 3, [], false)) === '{"hidden":[0,2],"hideLeds":true}' && JSON.stringify(T('parts', false, 3, [0, 2], true)) === '{"hidden":[],"hideLeds":false}'
+    && JSON.stringify(T('leds', false, 3, [2], false)) === '{"hidden":[2],"hideLeds":true}' && JSON.stringify(T('leds', true, 3, [], true)) === '{"hidden":[0,1,2],"hideLeds":false}', 'toggleVisibility: 끄기·켜기·이것만·모두 보기·LED'); }
+{ const cls = []; const el = { listeners: {}, addEventListener(k, f) { this.listeners[k] = f; }, contains: () => true, ownerDocument: null, querySelectorAll: () => [], set innerHTML(v) { this._h = v; }, get innerHTML() { return this._h; } };
+  let eye = null, node = null;
+  renderFeatureTree(el, M, { node: null, line: null }, { onNode: (id) => { node = id; }, onEye: (id, only) => { eye = [id, only]; } });
+  const tgt = (ds) => ({ closest: (q) => (q === '[data-eye]' ? (ds.eye ? { dataset: ds } : null) : { dataset: ds }) });
+  el.listeners.click({ target: tgt({ eye: 'part:0', node: 'part:0' }), shiftKey: true, stopPropagation() {} });
+  ok(eye?.[0] === 'part:0' && eye[1] === true && node === null, '눈 단추 클릭 → onEye(Shift), 노드 선택 안 함'); }
 ok(statusWord('ok') === '양호' && statusWord('warn') === '경고' && statusWord('bad') === '불량' && statusWord('na') === '미계산' && statusWord('?') === '미계산'
   && statusIcon('ok') === '✓' && statusIcon('warn') === '!' && statusIcon('bad') === '✕' && statusIcon('na') === '–' && checkAria({ text: '살두께 0.50 mm', st: 'warn' }) === '살두께 0.50 mm — 경고', '배지 상태 단어 · 기호');
 ok(isActivateKey({ key: 'Enter' }) && isActivateKey({ key: ' ' }) && !isActivateKey({ key: 'a' }) && !isActivateKey({ key: 'Tab' }), '활성화 키 = Enter/Space');
