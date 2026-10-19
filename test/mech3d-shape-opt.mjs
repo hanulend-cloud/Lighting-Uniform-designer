@@ -24,7 +24,9 @@ const plate = boxMesh(0, 0, 0, 40, 10, 2);
   ok(Math.abs(minThickness(H, { dt: 0, h, R, centers }) - 1.5) < 1e-6, '최소 두께 = 2 − h'); }
 { const C = shapeCandidates({ t0: 2, pitch: 20, hasCenters: true });
   ok(C.length === 27 && C.some((c) => c.dt === -1 && c.h === -1 && c.R === 6) && C.some((c) => c.dt === 2 && c.h === 1 && c.R === 16), '후보 27개: Δt ∈ [−0.5t₀, t₀], h ∈ [−0.5t₀, 0.5t₀], R ∈ [0.3p, 0.8p]');
-  ok(shapeCandidates({ t0: 2, pitch: 20, hasCenters: false }).length === 3, 'LED 중심 없음 → Δt 만 3개'); }
+  ok(shapeCandidates({ t0: 2, pitch: 20, hasCenters: false }).length === 3, 'LED 중심 없음 → Δt 만 3개');
+  ok(C.some((c) => c.dt === 0 && c.h === 0), '후보에 현재 형상(Δt=0·h=0) 포함');
+  ok(shapeCandidates({ t0: 2, pitch: 20, hasCenters: false }).map((c) => c.dt).join() === '-1,0,2', 'LED 중심 없음 → Δt {−1, 0, 2}'); }
 // ---- 리뷰 반영 ----
 const grid40 = () => { const C = []; for (let j = 0; j < 5; j++) for (let i = 0; i < 8; i++) C.push([18.75 + 37.5 * i, 20 + 40 * j]); return C; };
 const segD = (A, B, c) => { const ex = B[0] - A[0], ey = B[1] - A[1], l2 = ex * ex + ey * ey, t = l2 > 0 ? Math.min(1, Math.max(0, ((c[0] - A[0]) * ex + (c[1] - A[1]) * ey) / l2)) : 0; return Math.hypot(A[0] + t * ex - c[0], A[1] + t * ey - c[1]); };

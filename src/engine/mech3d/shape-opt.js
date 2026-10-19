@@ -218,13 +218,16 @@ export function refinedFor(mesh, F, centers, R, hMax) {
 }
 
 // 후보 27개(3×3×3) — 범위는 spec §2.3 기본. LED 중심이 없으면 Δt 만 3개
+// Δt·h 는 {lo, 0, hi} — 현재 형상(Δt=0·h=0)이 늘 후보에 들게(가운데 값 대신 0). R 은 {lo, 중간, hi}
 export function shapeCandidates({ t0, pitch, hasCenters, ranges = null }) {
-  const lin = ([a, b]) => [a, (a + b) / 2, b].map((v) => Math.round(v * 1e4) / 1e4);
+  const rd = (v) => Math.round(v * 1e4) / 1e4;
+  const lin = ([a, b]) => [a, (a + b) / 2, b].map(rd);
+  const withZero = ([a, b]) => [...new Set([a, 0, b].map(rd))].sort((x, y) => x - y);
   const r = ranges ?? { dt: [-0.5 * t0, 1.0 * t0], h: [-0.5 * t0, 0.5 * t0], R: [0.3 * pitch, 0.8 * pitch] };
   const out = [];
-  for (const dt of lin(r.dt)) {
+  for (const dt of withZero(r.dt)) {
     if (!hasCenters) { out.push({ dt, h: 0, R: 1 }); continue; }
-    for (const h of lin(r.h)) for (const R of lin(r.R)) out.push({ dt, h, R });
+    for (const h of withZero(r.h)) for (const R of lin(r.R)) out.push({ dt, h, R });
   }
   return out;
 }
