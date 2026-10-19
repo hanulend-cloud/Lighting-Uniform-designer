@@ -110,7 +110,11 @@ export async function runAutoDesign(cfg, io) {
   const fewer = margin(verified.stats, obs) >= 0 && margin(currentVerified.stats, obs) >= 0 && d.count < (cfg.current.count ?? 0);
   if (!fewer && !(sc(verified) - sc(currentVerified) >= SCORE_EPS)) {
     steps.push({ stage: 'guard', tried: d, triedVerified: verified, triedReason: reason });
-    return { feasible: margin(currentVerified.stats, obs) >= 0, best: { ...cfg.current }, steps, reason: '현재안보다 나은 설계를 찾지 못함 — 현재안 유지', verified: currentVerified, current: currentVerified, unchanged: true, cancelled: false };
+    return { feasible: margin(currentVerified.stats, obs) >= 0, best: { ...cfg.current }, steps, reason: `현재안보다 나은 설계를 찾지 못함 — 현재안 유지${reason ? ` (${reason})` : ''}`, verified: currentVerified, current: currentVerified, unchanged: true, cancelled: false };
   }
+  // 판정·문구는 정밀 재계산 값 기준(후보 평가값은 광자가 적어 잡음이 큼)
+  const vs = verified.stats, ok = margin(vs, obs) >= 0;
+  if (ok) { feasible = true; reason = ''; }
+  else if (reason.startsWith('형상 최적안도')) { feasible = false; reason = `형상 최적안도 목표 미달 — 길이 U ${vs.Ulen.toFixed(2)}${vs.Uwid == null ? '' : ` · 폭 U ${vs.Uwid.toFixed(2)}`}`; }
   return { feasible, best: d, steps, reason, verified, current: currentVerified, cancelled: false };
 }

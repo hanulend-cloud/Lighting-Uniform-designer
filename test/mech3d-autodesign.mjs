@@ -58,4 +58,9 @@ const rowsOf = (ms, U = (m) => 0.5 + 0.12 * m) => ms.map((m) => ({ milky: m, Ule
   const io = { milkyRows: async () => { throw new Error('불리면 안 됨'); }, progress() {}, cancelled: () => true };
   const r = await runAutoDesign({ stages: { milky: true }, obs, current: { milky: 3 } }, io);
   ok(r.cancelled === true, '중지 → cancelled'); }
+{ // 현재안 유지 문구에 단계 이유를 남김 · 최종 문구는 정밀 재계산 값
+  const G = { ns: 2, nw: 1, ds: 1, cell: 1, w0: -0.5, L: 2, closed: false, winS: 5, area: new Float64Array([1, 1]), valid: new Uint8Array([1, 1]) };
+  const io = { basis: async () => ({ cand: [0, 1, 2], maps: [Float32Array.from([1, 0.1]), Float32Array.from([1, 0.1]), Float32Array.from([1, 0.1])], emitted: 1 }), verify: async () => ({ stats: { Ulen: 0.5, Uwid: null, empty: false }, eff: 0.5 }), progress() {}, cancelled: () => false };
+  const r = await runAutoDesign({ stages: { leds: true }, obs: { targetLen: 0.9, targetWid: 0 }, current: { milky: 3, count: 1, pitch: 0 }, G, line: { length: 2, closed: false }, nMax: 2 }, io);
+  ok(r.unchanged && /현재안 유지 \(LED 최대 2개/.test(r.reason), `현재안 유지 + 단계 이유: ${r.reason}`); }
 done();
