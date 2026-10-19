@@ -298,6 +298,7 @@ main:has(#mech3d-wrap:not([hidden])) { grid-template-rows: minmax(0, 1fr); }
 .m3-gap.touch b { color: var(--m3-mut); }
 .m3-gap.bad { background: #fff0ef; } .m3-gap.bad b { color: #d92d20; }
 .m3-gap.led b { color: #1f9d45; }
+.m3-xfhint { font-size: 11px; color: var(--m3-mut); margin: 0 0 3px; }
 .m3-warn { font-size: 12px; color: #b54708; background: #fff6e5; border-radius: 4px; padding: 3px 6px; margin: 2px 0 4px; }
 .m3-eye { width: 18px; text-align: center; font-size: 12px; cursor: pointer; border-radius: 4px; flex: none; }
 .m3-eye:hover, .m3-eye:focus-visible { background: #e3e8f2; }

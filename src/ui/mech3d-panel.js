@@ -91,8 +91,9 @@ export function xformEditor(p, info, lock = true) {
       <span>위치</span>${[0, 1, 2].map((k) => cell(`c${k}`, cen[k], posLo(k), posHi(k), `위치 ${'XYZ'[k]} mm`)).join('')}
       <span class="mut">가능</span>${[0, 1, 2].map((k) => `<span class="m3-lim">${lim ? rangeText(posLo(k), posHi(k)) : '계산 중'}</span>`).join('')}
       <span>크기</span>${[0, 1, 2].map((k) => cell(`z${k}`, siz[k], MIN_SIZE, sizeHi(k), `크기 ${'XYZ'[k]} mm`)).join('')}
-      <span class="mut">최대</span>${[0, 1, 2].map((k) => `<span class="m3-lim">${lim ? (Number.isFinite(sizeHi(k)) ? f2(sizeHi(k)) : '—') : '계산 중'}</span>`).join('')}
+      <span class="mut">최대${lock ? '*' : ''}</span>${[0, 1, 2].map((k) => `<span class="m3-lim">${lim ? (Number.isFinite(sizeHi(k)) ? f2(sizeHi(k)) : '—') : '계산 중'}</span>`).join('')}
     </div>
+    ${lock && lim && Number.isFinite(lim.uniform) && lim.uniform < 1.001 && (lim.size ?? []).some((v, k) => v > siz[k] + 0.01) ? '<div class="m3-xfhint">* 비율 고정 중 — 다른 축이 막혀 키울 수 없습니다. 고정을 끄면 축별로 키울 수 있습니다.</div>' : ''}
     <div class="m3-row"><label><input type="checkbox" data-m3-xflock ${lock ? 'checked' : ''}> 비율 고정</label>
       <button type="button" data-m3-xfreset ${p.xform ? '' : 'disabled'}>원래대로</button>
       <span class="mut">원본 ${z0.map((v) => v.toFixed(1)).join('×')}</span></div>`;

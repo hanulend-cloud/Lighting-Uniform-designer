@@ -246,12 +246,13 @@ function xformInfoOf(i) {
   const ek = JSON.stringify(em.map((e) => e.pos));
   if (A.xli && A.xli.rt === rt && A.xli.i === i && A.xli.lp === lp && A.xli.ek === ek) return A.xli.res;
   const raw = rt.raw.parts[i], r = axisLimits(raw, M.parts[i].xform ?? null, rt.parts.map((p, j) => (j === i ? null : p)), { ledParts: lp, emitters: em });
-  const cut = (v, sg) => (Number.isFinite(v) ? sg * Math.max(0, Math.abs(v) - TOL) : v);   // 0 쪽으로 TOL 만큼
-  const s = M.parts[i].xform?.scale ?? [1, 1, 1], big = Math.max(...r.size0.map((v, k) => v * s[k]));
+  // 0.01mm 단위로 안쪽 내림 — 맞닿음(간격 ≤ TOL)은 간섭이 아니므로 벽에 딱 맞는 치수(예: 16.00)도 입력 가능
+  const cut = (v, sg) => (Number.isFinite(v) ? sg * Math.floor(Math.abs(v) * 100 + 1e-6) / 100 : v);
+  const s = M.parts[i].xform?.scale ?? [1, 1, 1];
   const lim = {
     move: r.move.map(([lo, hi]) => [cut(lo, -1), cut(hi, 1)]),
-    size: r.size.map((v, k) => (Number.isFinite(v) ? Math.max(r.size0[k] * s[k], v - 2 * TOL) : v)),
-    uniform: Number.isFinite(r.uniform) ? Math.max(1, r.uniform - (2 * TOL) / big) : r.uniform,
+    size: r.size.map((v, k) => (Number.isFinite(v) ? Math.max(r.size0[k] * s[k], cut(v, 1)) : v)),
+    uniform: Number.isFinite(r.uniform) ? Math.max(1, Math.floor(r.uniform * 1e4) / 1e4) : r.uniform,
   };
   const res = { center0: r.center0, size0: r.size0, lim };
   A.xli = { rt, i, lp, ek, res };

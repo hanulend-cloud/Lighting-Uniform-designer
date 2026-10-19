@@ -49,5 +49,7 @@ ok(!('bvh' in transformMesh(mb, [1, 0, 0], [0, 0, 0])), '변환 사본은 캐시
   ok(u.clamped && u.xf.scale.every((v) => Math.abs(v - 1.2) < 1e-9), '비율 고정: 최대 1.2배');
   ok(F(null, 'c0', NaN).xf === null && !F(null, 'c0', NaN).clamped, 'NaN 무시');
   const h = xformEditor({ size: [20, 10, 2], xform: { offset: [2, 0, 0], scale: [1, 1, 1] } }, info, false);
-  ok(h.includes('value="12.00"') && h.includes('min="9.00"') && h.includes('max="16.00"') && h.includes('9.00 ~ 16.00') && h.includes('— ~ —') && h.includes('24.00'), '편집기: 현재 중심·가능 범위·최대 크기 표시'); }
+  ok(h.includes('value="12.00"') && h.includes('min="9.00"') && h.includes('max="16.00"') && h.includes('9.00 ~ 16.00') && h.includes('— ~ —') && h.includes('24.00') && !h.includes('m3-xfhint'), '편집기: 현재 중심·가능 범위·최대 크기 표시');
+  const hl = xformEditor({ size: [20, 10, 2] }, { ...info, lim: { ...info.lim, uniform: 1 } }, true);
+  ok(hl.includes('m3-xfhint') && hl.includes('최대*') && hl.includes('max="20.00"'), '비율 고정으로 막히면 이유 안내'); }
 done();
