@@ -13,7 +13,7 @@ export function stageAvailability(M, info) {
   };
 }
 const ITEMS = [['milky', '① Milky 레벨'], ['leds', '② LED 개수·피치'], ['shape', '③ LGP 형상']];
-export function autoCardHtml({ avail, sel, running, names = [] }) {
+export function autoCardHtml({ avail, sel, running, names = [], canRevert = false }) {
   const row = ([k, label]) => {
     const a = avail[k];
     return `<label class="m3-ad-item${a.ok ? '' : ' off'}"><input type="checkbox" data-ad="${k}"${sel[k] && a.ok ? ' checked' : ''}${a.ok ? '' : ' disabled'}> ${label}${a.ok ? '' : ` <span class="mut">— ${esc(a.why)}</span>`}</label>`;
@@ -23,7 +23,7 @@ export function autoCardHtml({ avail, sel, running, names = [] }) {
   const prog = running ? `<div class="m3-ad-prog"><div class="bar"><i style="width:${Math.round((running.frac ?? 0) * 100)}%"></i></div><span>${esc(running.text)}</span> <button type="button" data-ad="stop">중지</button></div>` : '';
   const any = ITEMS.some(([k]) => sel[k] && avail[k].ok);
   return `<div class="m3-h">자동설계 <span class="mut">체크한 항목만 바꿈 · 순서 ②→①→③</span></div>${ITEMS.map(row).join('')}${cap}${part}
-    ${running ? prog : `<div class="m3-row"><button type="button" data-ad="run"${any ? '' : ' disabled'}>▶ 실행</button><button type="button" data-ad="close">닫기</button></div>`}`;
+    ${running ? prog : `<div class="m3-row"><button type="button" data-ad="run"${any ? '' : ' disabled'}>▶ 실행</button>${canRevert ? '<button type="button" data-ad="revert" title="마지막 적용 전 값으로">↶ 되돌리기</button>' : ''}<button type="button" data-ad="close">닫기</button></div>`}`;
 }
 // 비교표 — cur/best = { count, pitch, milky, Ulen, Uwid, eff, lum? }, shape = { dt, h, R } | null, stepLeds = LED STEP 발광점 수(직접 배치면 null)
 export function compareHtml({ cur, best, feasible, reason, shape, stepLeds = null, canRevert = false }) {
