@@ -5,6 +5,7 @@ import { runMC3D } from '../src/engine/mech3d/mc3d.js';
 import { defaultPart, setPartMaterial, setPartMaterialParam } from '../src/engine/mech3d/materials.js';
 import { loadTable } from './l2-util.mjs';
 import { boxMesh, ok, done } from './mech3d-util.mjs';
+import { milkyGridOptics, rwCoeffs, rwFactor, essRatio, milkyAxis } from '../src/engine/mech3d/reweight.js';
 
 const table = loadTable();
 const part = (i, kind, params = {}) => Object.entries(params).reduce((p, [k, v]) => setPartMaterialParam(p, k, v), setPartMaterial(defaultPart(i, `p${i}`, 1), kind));
@@ -31,4 +32,15 @@ const beam = { flux: 1, sample: (r) => [4.5 + r(), 4.5 + r(), -1, 0, 0, 1] };
   const b = runMC3D(S, { source: beam, N: 3000, seed: 9, track: 0 });
   ok(undef && JSON.stringify(a.ledger) === JSON.stringify(b.ledger), 'track 없음 = 기존 동작, 같은 시드면 ledger 동일');
 }
+{ const p = part(0, 'milky', { milky: 3 }), ms = milkyAxis(3, 0.25, 9.9), G = milkyGridOptics(p, { table }, ms);
+  ok(ms.length === 21 && ms[0] === 0.5 && ms[20] === 5.5 && ms.every((m, i) => !i || Math.abs(m - ms[i - 1] - 0.25) < 1e-9), `Milky 축: 기준 3 주변 21점 0.25 간격 (${ms[0]}~${ms[20]})`);
+  ok(milkyAxis(1, 0.25, 9.9)[0] === 0.25 && milkyAxis(9, 0.25, 9.9).at(-1) === 9.9, 'Milky 축: 0.25 미만·9.9 초과는 잘라 범위 안으로 밀기');
+  const base = G[ms.indexOf(3)], C = rwCoeffs(base, G);
+  ok(Math.abs(rwFactor(C, ms.indexOf(3), 2.7, 13) - 1) < 1e-12 && G.every((g) => g.g === base.g), '기준점 가중치 = 1 · g 고정');
+  const j = ms.indexOf(4), f = rwFactor(C, j, 2, 5), want = (G[j].mus / base.mus) ** 5 * Math.exp(-((G[j].mus + G[j].mua) - (base.mus + base.mua)) * 2);
+  ok(Math.abs(f / want - 1) < 1e-12, `가중치 식 f = (μs'/μs)^k·e^{−Δμt·L}: ${f.toExponential(4)}`);
+  const e = essRatio(new Float64Array([10, 10]), new Float64Array([10, 50]), 10);
+  ok(Math.abs(e[0] - 1) < 1e-12 && Math.abs(e[1] - 0.2) < 1e-12, 'ESS 비율 = (Σf)²/(n·Σf²)');
+  let thrown = ''; try { rwCoeffs({ mus: 0, mua: 0, g: 0.9 }, G); } catch (er) { thrown = er.message; }
+  ok(/기준 Milky/.test(thrown), '기준 μs = 0 이면 재가중 불가 — 오류'); }
 done();
