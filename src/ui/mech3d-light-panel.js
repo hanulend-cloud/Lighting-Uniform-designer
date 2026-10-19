@@ -25,7 +25,7 @@ export function renderLightProps(el, m, ui, h) {
   const stepHtml = L.kind !== 'step' ? '' : `
     <div class="m3-row"><label class="shape-btn">LED STEP 불러오기<input type="file" accept=".stp,.step" hidden data-lp-file></label>
       ${st ? `<span class="mut">${esc(st.name)}</span>` : ''}</div>
-    ${st ? `<div class="m3-row">${pickBtn(ui, 'led', 'LED 발광면 클릭')} ${pickBtn(ui, 'ledx', 'LED 제외/포함 클릭')} ${ui.ledInfo ? esc(ui.ledInfo) : st.emitters?.length ? `LED ${st.leds.length}개 인식됨` : '<span class="mut">LED 하나의 발광면(빛이 나오는 면)을 클릭하세요</span>'}${st.excluded?.length ? ` <span class="mut">· 제외 ${st.excluded.length}개</span>` : ''}</div>
+    ${st ? `<div class="m3-row">${ui.ledInfo ? esc(ui.ledInfo) : st.emitters?.length ? `LED ${st.leds.length}개 인식됨` : '<span class="mut">LED 하나의 발광면(빛이 나오는 면)을 클릭하세요</span>'}${st.excluded?.length ? ` <span class="mut">· 제외 ${st.excluded.length}개</span>` : ''} <span class="mut">(발광면·제외 클릭은 LED 노드)</span></div>
     <div class="m3-row">위치 보정 x<input type="number" step="0.1" value="${st.offset[0]}" data-lp-step="ox"> y<input type="number" step="0.1" value="${st.offset[1]}" data-lp-step="oy"> z<input type="number" step="0.1" value="${st.offset[2]}" data-lp-step="oz">mm</div>
     <div class="m3-row">회전 X<input type="number" step="90" value="${st.rot[0]}" data-lp-step="rx"> Y<input type="number" step="90" value="${st.rot[1]}" data-lp-step="ry"> Z<input type="number" step="90" value="${st.rot[2]}" data-lp-step="rz">°</div>`
       : ui.ledInfo ? `<div class="m3-row">${esc(ui.ledInfo)}</div>` : ''}`;
@@ -63,7 +63,12 @@ export function renderLedProps(el, m, ui, h) {
     <div class="m3-row"><label>광속</label><input type="number" min="0" step="1" value="${L.spec.fluxLm ?? 0}" data-lp-spec="fluxLm"> lm/개 <span class="mut">0 = 상대값(최대 대비 %)</span></div>
     <div class="m3-row"><label>PCB 색</label><select data-lp-solder>${['백색', '녹색', '흑색'].map((c) => `<option ${c === L.solder ? 'selected' : ''}>${c}</option>`).join('')}</select></div>`;
   wirePick(el, ui, h);
-  on(el, '[data-lp-spec]', 'change', (x) => { const k = x.dataset.lpSpec; if (k === 'model') h.onLedSpec(k, x.value); else { const v = readNum(x); if (v != null) h.onLedSpec(k, v); } });
+  on(el, '[data-lp-spec]', 'change', (x) => {
+    const k = x.dataset.lpSpec;
+    if (k === 'model') { h.onLedSpec(k, x.value); return; }
+    const v = readNum(x);
+    if (v != null) h.onLedSpec(k, v); else if (k === 'fluxLm') h.onLedSpec(k, 0);   // 광속 빈칸 = 0(상대값)
+  });
   on(el, '[data-lp-solder]', 'change', (x) => h.onSolder(x.value));
 }
 

@@ -7,7 +7,7 @@ const STATE = { idle: '대기', pending: '변경 감지…', starting: '장면 �
 export function checkLabels(C) {
   const I = C.interference, R = C.reach, W = C.wall, K = C.leak, na = (x) => !x || x.status === 'na';
   return [
-    { id: 'interference', st: I?.status ?? 'na', text: na(I) ? 'LED–부품 간섭 –' : I.count ? `LED–부품 간섭 ${I.count}건` : 'LED–부품 간섭 없음' },
+    { id: 'interference', st: I?.status ?? 'na', text: na(I) ? 'LED–부품 간섭 –' : I.status === 'warn' ? `LED 포팅(투과 부품 안) ${I.count}건` : I.count ? `LED–부품 간섭 ${I.count}건` : 'LED–부품 간섭 없음' },
     { id: 'reach', st: R?.status ?? 'na', text: na(R) ? 'LED–커버 –' : `LED–커버 ${R.minDist != null ? `${R.minDist.toFixed(1)} mm` : '가림'} · 도달 ${Math.floor(R.minReach * 100 + 1e-9)}%` },
     { id: 'wall', st: W?.status ?? 'na', text: na(W) ? '살두께 –' : `살두께 ${(Math.floor(W.min * 100 + 1e-9) / 100).toFixed(2)} mm` },
     { id: 'leak', st: K?.status ?? 'na', text: na(K) ? '새는 빛 –' : `새는 빛 ${Math.ceil(K.ratio * 100 - 1e-9)}%` },

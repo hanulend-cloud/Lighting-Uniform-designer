@@ -1,0 +1,393 @@
+// 3D 기구 모드 화면(CAD식) — spec 2026-10-15 m3-cad-ui §2·§3.
+// main.js 는 mount(ctx) / unmount() / setStatus(t) / flush() / isMounted() 만 부른다.
+// 저장 상태 = ctx.mspec(spec.mech3d), 세션 상태 = store.session. 흐름: store.update(tag) → onChange(tag)
+//   observe → 관측 라인 다시 인식 · 물리 태그 → 점진 계산 재시작 · 기하 점검 태그 → 점검 ①②③ · target → 판정만 다시. 모두 다시 그림.
+// 점진 계산 갱신(1초마다)은 store 알림 없이 결과 패널·상태 띠·색지도만 다시 그린다(입력 중 속성 패널이 다시 그려지지 않게).
+import { getMech3d, getLedMesh, setLedMesh, saveLedIDB } from '../../engine/mech3d/runtime.js';
+import { setPartMaterial, setPartMaterialParam, setPartFinish } from '../../engine/mech3d/materials.js';
+import { lineFromData, lightData, obsDirection } from '../../engine/mech3d/line.js';
+import { tallyGeometry } from '../../engine/mech3d/tally.js';
+import { bounds } from '../../engine/mech3d/mesh.js';
+import { runGeomChecks, checkLeak } from '../../engine/mech3d/checks.js';
+import { createStore, PHYSICS, GEOM_CHECK } from './store.js';
+import { createProgressive } from './progressive.js';
+import { createPool } from './pool.js';
+import * as L from './leds.js';
+import { buildObsOverlay, cellColors, extractFaces } from './colormap.js';
+import { mountCommandBar } from './command-bar.js';
+import { renderFeatureTree } from './feature-tree.js';
+import { renderPropertyPanel } from './property-panel.js';
+import { createResultsPanel } from './results-panel.js';
+import { renderStatusBar } from './status-bar.js';
+
+const $ = (s) => document.querySelector(s);
+const VIEWS = [['top', '평면 (XY)'], ['front', '정면 (XZ)'], ['side', '측면 (YZ)'], ['iso', '등각']];
+let A = null;       // 마운트 상태 { ctx, store, pool, prog, view, results, cmd, ... }
+let viewP = null;   // 3D 뷰는 한 번만 만든다(같은 캔버스에 WebGL 문맥을 다시 만들지 않음)
+
+export const isMounted = () => !!A;
+export function setStatus(t) { A?.store.update('session', (_, s) => { s.status = t; }); }
+export function flush() { A?.store.flush(); }
+globalThis.__m3 = () => A;   // 브라우저 점검용: __m3().prog.snapshot(), __m3().timing, __m3().checks
+
+function getView() {
+  viewP ??= import('../mech3d-view.js').then(({ createMech3dView }) => {
+    const v = createMech3dView($('#mech3d-canvas'), { onPick: (s) => { if (A) onPick(s); }, gizmo: $('#m3-axes') });
+    const el = $('#m3-views');
+    el.innerHTML = VIEWS.map(([k, t]) => `<button data-view="${k}">${t}</button>`).join('');
+    el.querySelectorAll('[data-view]').forEach((b) => { b.onclick = () => { v.setView(b.dataset.view); A?.store.update('view', (_, s) => { s.view = b.dataset.view; }); }; });
+    return v;
+  });
+  return viewP;
+}
+
+// ---- 마운트 ----
+export async function mount(ctx) {
+  if (A && A.ctx.mspec === ctx.mspec) { A.ctx = ctx; return; }   // 같은 기구 — 그대로
+  unmount();
+  const store = createStore(ctx.mspec, { persist: ctx.persist });
+  L.resetLedCaches();
+  const v0 = L.validateLedStep(ctx.mspec, store.session);   // main.js:982 의 시작 시 검증을 여기서
+  if (v0.status) store.session.status = v0.status;
+  if (v0.changed) ctx.persist();
+  const pool = createPool({ dbLists: ctx.dbLists, onStatus: (t) => setStatus(t) });
+  const a = A = { ctx, store, pool, view: null, meshShown: null, lineKey: '', Gc: null, obsShown: null, checks: {}, sceneSeq: 0, markKey: '', timing: { start: 0, first: null, noise5: null } };
+  a.prog = createProgressive({ ports: pool.ports(), onUpdate: onCalc, opts: { targetNoise: ctx.mspec.observe.targetNoise ?? 0.02 } });
+  a.results = createResultsPanel($('#m3-res'));
+  a.cmd = mountCommandBar($('#m3-cmd'), cmdHandlers());
+  a.unsub = store.subscribe(onChange);
+  a.keydown = onKey; window.addEventListener('keydown', onKey);
+  const view = await getView();
+  if (A !== a) return;   // 기다리는 사이 이탈
+  a.view = view;
+  view.setObsSurface(null); view.setCheckMarkers([]);
+  renderAll();
+  refreshLine();
+  rerunGeomChecks();
+  restartCalc();
+}
+export function unmount() {
+  if (!A) return;
+  const a = A; A = null;   // 먼저 비워서 cancel 의 onUpdate 가 그리지 않게
+  a.prog.dispose(); a.unsub(); a.store.dispose(); a.pool.killAll('3D 모드 종료');   // 풀은 항상 종료(라인 인식·청크 모두)
+  window.removeEventListener('keydown', a.keydown);
+  if (a.view) { a.view.setObsSurface(null); a.view.setCheckMarkers([]); a.view.setSection(null); }
+  $('#m3-legend').hidden = true;
+}
+
+// ---- 변경 처리 ----
+function onChange(tag) {
+  if (!A) return;
+  const M = A.store.mspec;
+  if (tag === 'observe') refreshLine();
+  if (PHYSICS.has(tag)) restartCalc();
+  if (tag === 'target') A.prog.setJudge({ obs: M.observe, targetNoise: M.observe.targetNoise ?? 0.02, fluxLm: M.light.spec.fluxLm ?? 0 });
+  if (GEOM_CHECK.has(tag)) rerunGeomChecks();
+  renderAll(tag);
+}
+function onKey(e) {
+  if (!A || e.target.closest?.('input, select, textarea')) return;
+  if (e.key === 'Escape') A.store.update('session', (_, s) => { s.sel = null; s.pick = null; s.focusCheck = null; });
+  else if (e.key === 'f' || e.key === 'F') A.view?.fit();
+}
+
+// ---- 관측 라인 (main.js:266-282) — 관측면·방향이 바뀌면 Worker 0 에서 다시 인식 ----
+async function refreshLine() {
+  const st = A.store, O = st.mspec.observe, S = st.session, pool = A.pool, key = JSON.stringify([O.faces, O.dir]);
+  if (key === A.lineKey) return;
+  A.lineKey = key; S.line = null; S.lineErr = '';
+  if (!O.faces.length) return;
+  const parts = L.rawParts(getMech3d().parts);
+  try {
+    const dir = O.dir ?? obsDirection(parts, O.faces);
+    const r = await pool.call(pool.worker(0), { type: 'line', parts, faces: O.faces, dir });
+    if (A?.store === st && key === A.lineKey) { S.line = lineFromData(r.lineData); afterLine(); }
+  } catch (e) {
+    if (A?.store === st && key === A.lineKey) { S.line = null; S.lineErr = `라인 인식 실패: ${e.message}`; afterLine(); }
+  }
+}
+function afterLine() { restartCalc(); rerunGeomChecks(); A.store.update('session'); }
+
+// ---- 점진 계산 ----
+// 집계 격자 인자(빈칸 = 자동) — tally.js 계약: cellS·cellW·winS(null = 자동). 구버전 obs.cell 은 쓰지 않음 (main.js:284)
+const tallyObs = (O, dir) => ({ ...O, dir, cell: null, cellS: O.cellS ?? null, cellW: O.cellW ?? null, winS: O.winS ?? null });
+// 집계 격자 — (라인, cellS, cellW, winS, 가장자리 제외) 별로 캐시(계산 ≈60ms). 색지도 덧그림도 같은 캐시에 (main.js:286-290)
+function geometry(obs) {
+  const S = A.store.session, key = JSON.stringify([obs.cellS, obs.cellW, obs.winS, obs.edgeExcl]);
+  if (!A.Gc || A.Gc.line !== S.line || A.Gc.key !== key) A.Gc = { line: S.line, key, G: tallyGeometry(S.line, obs), overlay: null };
+  return A.Gc.G;
+}
+// 디바운스가 끝날 때 부르는 작업 생성기 — 라인·광원이 없으면 null(안내), 직접 배치 오류는 던짐(계산 실패로 표시)
+function makeJob() {
+  if (!A) return null;
+  const M = A.store.mspec, S = A.store.session;
+  if (!S.line) return null;
+  const emitters = L.currentEmitters(M, S.line);
+  if (!emitters.length) return null;
+  const obs = tallyObs(M.observe, M.observe.dir ?? S.line.frame.d), G = geometry(obs);
+  const ledParts = M.light.kind === 'step' && getLedMesh() ? L.rawParts(getLedMesh().parts) : null;
+  return {
+    sceneKey: `s${++A.sceneSeq}`, G, obs, nLeds: emitters.length, fluxLm: M.light.spec.fluxLm ?? 0,
+    scene: { mechParts: L.rawParts(getMech3d().parts), mspec: JSON.parse(JSON.stringify(M)), ledParts, lineData: lightData(S.line), G, obs, emitters },
+  };
+}
+function restartCalc() { A.timing = { start: 0, first: null, noise5: null }; A.prog.restart(makeJob); }
+function guidance(snap) {
+  const M = A.store.mspec, S = A.store.session;
+  if (snap.state === 'error') return `계산 실패: ${snap.error}`;
+  if (!M.observe.faces.length) return '관측면을 지정하세요 — 명령 막대의 👁 관측면';
+  if (!S.line) return S.lineErr || '관측 라인 인식 중…';
+  if (snap.state === 'idle' && snap.reason === 'notReady') return '광원을 지정하세요 — 명령 막대의 💡 LED 지정';
+  if (!snap.stats) return snap.state === 'pending' ? '' : '계산 시작 중…';
+  if (snap.stats.empty) return '판정할 유효 셀이 없음 — 관측면이 너무 좁거나 가장자리 제외가 큼';
+  return '';
+}
+function onCalc(snap) {
+  if (!A) return;
+  const S = A.store.session, M = A.store.mspec, T = A.timing, now = performance.now();
+  S.calc = snap;
+  if (snap.state === 'starting' && !T.start) T.start = now;   // 성능 기준(spec §6)은 장면 준비 시작부터
+  if (T.start && snap.stats && T.first == null) T.first = (now - T.start) / 1000;
+  if (T.start && snap.stats?.relNoise != null && snap.stats.relNoise <= 0.05 && T.noise5 == null) T.noise5 = (now - T.start) / 1000;
+  updateLeakCheck(snap);
+  A.results.update({ snap, observe: M.observe, message: guidance(snap) });
+  paintObs(snap);
+  A.cmd.update(S, snap);
+  renderStatus();
+}
+// 관측면 색지도: 격자가 바뀌면 덧그림 메쉬를 다시 만들고, 갱신마다 색만 바꾼다
+function paintObs(snap) {
+  const v = A.view, Gc = A.Gc, st = snap.stats;
+  if (!v) return;
+  if (!st || st.empty || !Gc || snap.G !== Gc.G) {
+    if (A.obsShown && snap.state !== 'running' && snap.state !== 'done' && snap.state !== 'paused') { v.setObsSurface(null); A.obsShown = null; $('#m3-legend').hidden = true; }
+    return;
+  }
+  if (A.obsShown !== Gc) {
+    Gc.overlay ??= buildObsOverlay(getMech3d().parts, A.store.mspec.observe.faces, A.store.session.line, Gc.G);
+    v.setObsSurface({ ...Gc.overlay, dir: A.store.session.line.frame.d });   // dir: 큰 모델에서 덧그림을 더 띄움(buildObsOverlay 와 같은 방향)
+    A.obsShown = Gc; $('#m3-legend').hidden = false;
+  }
+  v.setObsColors(cellColors(Gc.overlay.cells, st.map, Gc.G.valid));
+}
+
+// ---- 설계 점검 ----
+function rerunGeomChecks() {
+  const M = A.store.mspec, S = A.store.session, rt = getMech3d();
+  if (!rt) return;
+  let emitters = [];
+  try { emitters = L.currentEmitters(M, S.line); } catch { emitters = []; }
+  // LED STEP 의 PCB(합친 장면 번호 = 기구 부품 수 + pcb)는 LED 몸체와 늘 맞닿으므로 간섭 검사에서 뺀다
+  const pcb = M.light.kind === 'step' ? M.light.step?.pcb ?? -1 : -1, exclude = pcb >= 0 ? [rt.parts.length + pcb] : [];
+  Object.assign(A.checks, runGeomChecks({ rt, mspec: M, emitters, bodies: L.ledBodies(M), obsParts: new Set(M.observe.faces.map((f) => f.part)), beam: M.light.spec.beam, exclude }));
+  renderMarkers(); renderStatus();
+}
+function updateLeakCheck(snap) {
+  const M = A.store.mspec;
+  A.checks.leak = snap.ledger.escaped > 0 ? checkLeak({ leak: snap.leak, escaped: snap.ledger.escaped, maxLeak: M.checks?.maxLeak ?? 0.2 }) : { status: 'na', ratio: null, worst: null };
+  const k = JSON.stringify([A.checks.leak.status, A.checks.leak.worst?.part, A.checks.leak.worst?.face]);
+  if (k !== A.markKey) { A.markKey = k; renderMarkers(); }
+}
+// 3D 표식: ① 빨간 원(간섭) ② 거리선(LED 축 → 관측면, 도달 부족이면 주황 + 원) ③ 주황 원(가장 얇은 곳) ④ 주황 면(가장 많이 새는 면). 상태 띠 배지 클릭 = 크게
+function renderMarkers() {
+  if (!A?.view) return;
+  const C = A.checks, f = A.store.session.focusCheck, M = A.store.mspec, rt = getMech3d(), out = [];
+  const size = (id) => (f === id ? 20 : 12);
+  for (const it of C.interference?.items ?? []) out.push({ type: 'ring', pos: it.pos, color: it.kind === 'potted' ? 0xffa000 : 0xff3b30, size: size('interference') });   // 포팅 LED(투과 부품 안) = 주황 경고
+  for (const it of C.reach?.items ?? []) {
+    const warn = it.reach < (M.checks?.minReach ?? 0.5), col = warn ? 0xffa000 : 0x4cd964;
+    if (it.dist != null) out.push({ type: 'line', a: it.pos, b: it.pos.map((v, k) => v + it.axis[k] * it.dist), color: col });
+    if (warn || f === 'reach') out.push({ type: 'ring', pos: it.pos, color: col, size: size('reach') });
+  }
+  if (C.wall?.pos && (C.wall.status === 'warn' || f === 'wall')) out.push({ type: 'ring', pos: C.wall.pos, color: 0xffa000, size: size('wall') });
+  const w = C.leak?.worst;
+  if (w && w.part >= 0 && rt?.parts[w.part] && (C.leak.status === 'warn' || f === 'leak')) {
+    const t = extractFaces(rt.parts[w.part], new Set([w.face]));
+    out.push({ type: 'tris', positions: t.positions, triangles: t.triangles, color: 0xff8c1a, opacity: f === 'leak' ? 0.8 : 0.5 });
+  }
+  A.view.setCheckMarkers(out);
+}
+
+// ---- 3D 클릭 (main.js:393-425) — 기구 부품 수(nMech) 이상인 번호는 LED STEP 부품 ----
+function onPick(s) {
+  const st = A.store, M = st.mspec, S = st.session, nMech = getMech3d().parts.length, pick = S.pick;
+  const say = (t) => st.update('session', (_, x) => { x.status = t; });
+  if (s && s.part == null && pick !== 'led' && pick !== 'ledx') s = null;   // 선택 모드 빈 곳 클릭(광선만) — LED 모드에서만 씀
+  if ((pick === 'led' || pick === 'ledx') && s && s.part != null && s.part < nMech) { say('LED STEP 부품(PCB·LED)을 클릭하세요 — 기구 부품은 이 모드에서 선택되지 않음'); return; }
+  if (pick === 'obs' && s && s.part < nMech) {
+    st.update('observe', (m) => {
+      const k = m.observe.faces.findIndex((f) => f.part === s.part && f.face === s.face);
+      if (k >= 0) m.observe.faces.splice(k, 1); else m.observe.faces.push({ part: s.part, face: s.face });
+    });
+    return;
+  }
+  if (pick === 'led' && s && M.light.step) {
+    const p = L.snapLedPick(M, s, nMech, true);
+    if (!p) { say('가까운 LED 를 찾지 못함 — LED 가까이를 클릭하세요'); return; }
+    st.update('light', (m, x) => {
+      try {
+        L.applyStepRecognition(m, x, m.light.step, { part: p.part, face: p.face });
+        if (p.snapped) x.ledInfo += ' (가까운 LED · 윗면 발광으로 가정 — 측면 발광 LED 는 확대해서 발광면을 직접 클릭)';
+        x.pick = null; x.status = '';
+      } catch (e) { x.ledInfo = `LED 인식 실패: ${e.message}`; }
+    });
+    return;
+  }
+  if (pick === 'ledx' && s && M.light.step) {
+    const p = L.snapLedPick(M, s, nMech, false);
+    if (!p) { say('가까운 LED 를 찾지 못함 — LED 가까이를 클릭하세요'); return; }
+    st.update('light', (m, x) => {
+      const stp = m.light.step, i = p.part; stp.excluded ??= []; x.status = '';
+      const k = stp.excluded.indexOf(i); if (k >= 0) stp.excluded.splice(k, 1); else if (stp.leds.includes(i)) stp.excluded.push(i);
+    });
+    return;
+  }
+  if (pick === 'pcb' && s && s.part < nMech) { st.update('light', (m, x) => { m.light.manual.pcb = { kind: 'face', part: s.part, face: s.face }; x.pick = null; }); return; }
+  st.update('session', (_, x) => { x.sel = s && s.part < nMech ? s : null; if (x.sel) x.node = `part:${x.sel.part}`; });   // LED STEP 부품은 소재 편집 대상이 아님
+}
+
+// ---- 속성 편집 처리기 (main.js:348-361, 426-451) — 태그가 계산·점검 범위를 정한다 ----
+function propHandlers() {
+  const st = A.store, ctx = A.ctx;
+  const part = (i, fn) => st.update('material', (m) => { m.parts[i] = fn(m.parts[i]); });
+  return {
+    onKind: (i, k) => part(i, (p) => setPartMaterial(p, k)),
+    onMat: (i, key, v) => part(i, (p) => {
+      let q = setPartMaterialParam(p, key, v);
+      // DB 소재 선택: Milky 칸을 그 소재의 피팅 μs' 에 해당하는 값으로(Milky = 농도 — 이후 사용자가 조절)
+      const ent = key === 'dbId' && v ? ctx.materialDb()?.get(v) : null, tbl = ctx.l2Table();
+      if (ent && tbl) q = setPartMaterialParam(q, 'milky', Math.round(ctx.milkyFromMusR(tbl, ent.fitted.musR) * 100) / 100);
+      return q;
+    }),
+    onFinish: (i, face, f) => part(i, (p) => setPartFinish(p, face, f)),
+    onContact: (i, mode) => st.update('contacts', (m) => { m.contacts[i] = { ...m.contacts[i], mode }; }),
+    onLightKind: (k) => st.update('light', (m, x) => { m.light.kind = k; x.pick = null; }),
+    onLedFile: (f) => importLedStep(f),
+    onPick: (mode) => st.update('session', (_, x) => { x.pick = mode; }),
+    onStep: (key, v) => st.update('light', (m, x) => {
+      const s = m.light.step; (key[0] === 'o' ? s.offset : s.rot)['xyz'.indexOf(key[1])] = v;
+      if (s.ref) { try { L.applyStepRecognition(m, x, s, s.ref); } catch (e) { s.emitters = []; x.ledInfo = `LED 인식 실패: ${e.message}`; } }
+    }),
+    onManual: (key, v) => st.update('light', (m, x) => {
+      const Lm = m.light.manual;
+      if (key === 'pcbKind') { Lm.pcb = v === 'depth' ? { kind: 'depth', depth: 10 } : { kind: 'face' }; if (x.pick === 'pcb') x.pick = null; }
+      else if (key === 'depth') Lm.pcb.depth = v;
+      else Lm[key] = key === 'count' ? Math.max(1, Math.round(v)) : v;
+    }),
+    onSolder: (v) => st.update('light', (m) => { m.light.solder = v; }),
+    onLedSpec: (key, v) => st.update(key === 'fluxLm' ? 'target' : 'light', (m) => { m.light.spec[key] = v; }),   // 광속은 휘도 환산만 — 재계산 없음
+    onObs: (key, v) => st.update('observe', (m) => { m.observe[key] = v; }),
+    onClearObs: () => st.update('observe', (m) => { m.observe.faces = []; }),
+    onObsDir: (v) => st.update('observe', (m) => { m.observe.dir = v ? (() => { const l = Math.hypot(...v); return v.map((x) => x / l); })() : null; }),
+    onRetryLine: () => { A.lineKey = ''; refreshLine(); },
+    onTarget: (key, v) => st.update('target', (m) => { m.observe[key] = v; }),
+    onCheckParam: (key, v) => st.update('target', (m) => { m.checks[key] = v; }),
+  };
+}
+// LED STEP 불러오기 (main.js:452-469)
+function importLedStep(file) {
+  const st = A.store, say = (t) => { if (A?.store === st) st.update('session', (_, x) => { x.ledInfo = t; }); };
+  say(`${file.name} 읽는 중…`);
+  file.text().then((text) => {
+    const w = new Worker(new URL('../../engine/mech3d/mech3d-worker.js', import.meta.url), { type: 'module' });
+    w.onmessage = (m) => {
+      if (m.data.stage) { say(m.data.stage); return; }
+      w.terminate();
+      if (m.data.error) { say(`불러오기 실패: ${m.data.error}`); return; }
+      if (A?.store !== st) return;
+      setLedMesh(file.name, m.data.parts); saveLedIDB().catch(() => {}); L.resetLedCaches();
+      st.update('light', (M, x) => {
+        M.light.step = { name: file.name, offset: [0, 0, 0], rot: [0, 0, 0], ref: null, leds: [], excluded: [], pcb: -1, emitters: [] };
+        x.ledInfo = `부품 ${m.data.parts.length}개 — LED 하나의 발광면을 클릭하세요`; x.pick = 'led'; x.node = 'leds';   // 발광면·제외 클릭 버튼은 LED 노드에
+      });
+    };
+    w.onerror = (e) => { w.terminate(); say(`불러오기 실패: ${e.message ?? e}`); };
+    w.postMessage({ text });
+  }).catch((e) => say(`불러오기 실패: ${e.message}`));
+}
+// 명령 막대
+function cmdHandlers() {
+  return {
+    onImport: (f) => A.ctx.onImportMech3d(f),
+    onLed: () => A.store.update('session', (m, x) => { const stp = m.light.kind === 'step' && m.light.step; x.node = stp ? 'leds' : 'light'; x.pick = stp ? (x.pick === 'led' ? null : 'led') : null; }),
+    onObs: () => A.store.update('session', (_, x) => { x.node = 'obs'; x.pick = x.pick === 'obs' ? null : 'obs'; }),
+    onSection: () => A.store.update('view', (_, x) => {
+      if (x.section) { x.section = null; return; }
+      const b = bounds(getMech3d().combined.positions);
+      x.section = { axis: 'x', pos: (b[0] + b[3]) / 2, box: b };
+    }),
+    onFit: () => A.view?.fit(),
+    onToggleCalc: () => {   // '⏸ 계산 중'(대기·장면 준비 포함) → 일시정지, 일시정지 → 재개, 그 밖(완료·오류·대기) → 다시 계산
+      const s = A.prog.snapshot().state;
+      if (s === 'running' || s === 'pending' || s === 'starting') A.prog.pause(); else if (s === 'paused') A.prog.resume(); else restartCalc();
+    },
+    onExit: () => A.ctx.onExit(),
+  };
+}
+
+// ---- 그리기 ----
+function lineInfo() {
+  const S = A.store.session, M = A.store.mspec, l = S.line;
+  if (l) return `라인: ${{ line: '직선', circle: '원', path: '곡선' }[l.kind]}${l.closed ? '(닫힘)' : ''} · 길이 ${l.length.toFixed(1)}mm · 폭 ${l.width.toFixed(1)}mm${l.branched ? ' · ⚠ 갈래 있음(가장 긴 경로 사용)' : ''}`;
+  return M.observe.faces.length && !S.lineErr ? '라인 인식 중…' : '';
+}
+// 자동 격자 값(표시용 — tally.js 규칙과 같음. w 칸은 최대 국소 폭 대신 라인 폭으로 근사) (main.js:376)
+function autoGrid() { const l = A.store.session.line; return l ? { cellS: Math.max(1, l.length / 100), cellW: Math.max(0.5, l.width / 8), winS: Math.max(5, l.length / 10) } : null; }
+function renderAll(tag = 'all') {
+  const st = A.store, M = st.mspec, S = st.session;
+  renderView();
+  renderFeatureTree($('#m3-tree'), M, S, { onNode: (id) => st.update('session', (_, x) => { x.node = id; x.sel = id.startsWith('part:') ? { part: +id.slice(5), face: null } : null; }) });
+  if (tag !== 'view') renderPropertyPanel($('#m3-props'), M, S, { dbList: A.ctx.materialDb()?.list() ?? [], auto: autoGrid(), dir: M.observe.dir ?? S.line?.frame.d, lineInfo: lineInfo() }, propHandlers());
+  if (tag === 'session' || tag === 'all') renderMarkers();
+  A.cmd.update(S, S.calc);
+  renderStatus();
+}
+function renderStatus() {
+  const S = A.store.session, M = A.store.mspec;
+  renderStatusBar($('#m3-status'), { calc: S.calc, targetNoise: M.observe.targetNoise ?? 0.02, checks: A.checks, focus: S.focusCheck, text: S.status }, {
+    onCheck: (id) => A.store.update('session', (_, s) => { s.focusCheck = s.focusCheck === id ? null : id; }),
+  });
+}
+// 3D 뷰 (main.js:336-373 의 뷰 부분) + 보기 버튼 · 단면 조절
+function renderView() {
+  const v = A.view, cur = getMech3d();
+  if (!v || !cur) return;
+  const M = A.store.mspec, S = A.store.session, stp = M.light.kind === 'step' ? M.light.step : null;
+  const lp = stp ? L.ledPartsNow(M) : null, ledSet = new Set(stp?.leds ?? []), exSet = new Set(stp?.excluded ?? []);   // 제외된 LED 는 회색(불투명) — 발광 화살표도 빠짐
+  const kinds = [...M.parts.map((p) => p.material.kind), ...(lp ?? []).map((_, i) => (i === stp.pcb ? 'pcb' : ledSet.has(i) && !exSet.has(i) ? 'led' : 'opaque'))];
+  const meshKey = [cur, lp];   // 기구·LED 메쉬(위치 보정 포함 — 캐시 객체)가 바뀌면 다시 그림. 카메라는 기구가 바뀔 때만 맞춤
+  if (!A.meshShown || A.meshShown.some((x, i) => x !== meshKey[i])) {
+    const keepCamera = !!A.meshShown && A.meshShown[0] === cur;
+    A.meshShown = meshKey; v.setParts([...cur.parts, ...(lp ?? [])], kinds, { keepCamera });
+  } else v.setKinds(kinds);
+  v.setSelection(S.sel);
+  let arrows = [];
+  try { arrows = L.currentEmitters(M, S.line).map((e) => ({ pos: e.pos, axis: e.axis })); } catch { arrows = []; }
+  let line3d = null;
+  if (S.line) {
+    const out = [], K = 200;
+    for (let k = 0; k <= K; k++) { const s = (k / K) * S.line.length, [x, y] = S.line.fromSW(S.line.closed && k === K ? 0 : s, 0); out.push(...S.line.to3D(x, y, 0.3)); }
+    line3d = Float32Array.from(out);
+  }
+  v.setOverlay({ obsFaces: M.observe.faces, line3d, arrows });
+  // 선택 모드: LED 발광면/제외 → LED STEP 부품만 클릭되고 기구물은 투시, 관측면·PCB 면 → 기구 부품만 클릭
+  const nM = cur.parts.length, led = S.pick === 'led' || S.pick === 'ledx', mech = S.pick === 'obs' || S.pick === 'pcb';
+  v.setPickMode(led ? (i) => i >= nM : mech ? (i) => i < nM : null, led ? (i) => i < nM : null);
+  if (v.viewName() !== S.view) v.setView(S.view);
+  $('#m3-views').querySelectorAll('[data-view]').forEach((b) => b.classList.toggle('on', b.dataset.view === S.view));
+  v.setSection(S.section);
+  renderSectionCtl();
+}
+function renderSectionCtl() {
+  const el = $('#m3-section'), sec = A.store.session.section;
+  el.hidden = !sec;
+  if (!sec) return;
+  const b = sec.box, k = 'xyz'.indexOf(sec.axis), lo = b[k], hi = b[k + 3];
+  el.innerHTML = `단면 <select data-s="axis">${['x', 'y', 'z'].map((a) => `<option ${a === sec.axis ? 'selected' : ''}>${a}</option>`).join('')}</select>
+    <input type="range" min="${lo}" max="${hi}" step="${(hi - lo) / 200 || 0.1}" value="${sec.pos}" data-s="pos"> <b>${sec.pos.toFixed(1)}</b> mm`;
+  el.querySelector('[data-s="axis"]').onchange = (e) => A.store.update('view', (_, s) => { const a = e.target.value, kk = 'xyz'.indexOf(a); s.section = { ...s.section, axis: a, pos: (b[kk] + b[kk + 3]) / 2 }; });
+  el.querySelector('[data-s="pos"]').oninput = (e) => {   // 끄는 중에는 store 알림 없이 평면만(다시 그리면 슬라이더가 끊김)
+    const s = A.store.session; s.section = { ...s.section, pos: +e.target.value };
+    A.view.setSection(s.section); el.querySelector('b').textContent = s.section.pos.toFixed(1);
+  };
+}
