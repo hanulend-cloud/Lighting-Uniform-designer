@@ -82,7 +82,7 @@ export function createMech3dView(canvas, { onPick, gizmo = null }) {
   function colorize(i) {
     const m = meshes[i], p = partsRef[i], col = m.geometry.getAttribute('color');
     const base = new THREE.Color(KIND_COLOR[kinds[i]]);
-    const partCol = sel?.part === i ? base.clone().lerp(SEL_TINT, 0.45) : base;
+    const partCol = sel?.part === i ? base.clone().lerp(SEL_TINT, 0.6) : base;
     const T = p.triangles;
     for (let t = 0; t < T.length / 3; t++) {
       const isSel = sel?.part === i && sel.face === p.faceIds[t];
@@ -90,7 +90,8 @@ export function createMech3dView(canvas, { onPick, gizmo = null }) {
       for (let j = 0; j < 3; j++) col.setXYZ(T[t * 3 + j], c.r, c.g, c.b);
     }
     col.needsUpdate = true;
-    const op = ghost?.(i) ? Math.min(0.15, KIND_OPACITY[kinds[i]]) : KIND_OPACITY[kinds[i]];   // 투시: LED 선택 중 기구물 반투명
+    let op = ghost?.(i) ? Math.min(0.15, KIND_OPACITY[kinds[i]]) : KIND_OPACITY[kinds[i]];   // 투시: LED 선택 중 기구물 반투명
+    if (sel?.part === i && !ghost?.(i)) op = Math.max(op, 0.7);   // 선택 부품: 투명 소재여도 잘 보이게
     m.material.opacity = op;
     m.material.transparent = op < 1;
     m.material.depthWrite = !m.material.transparent; m.renderOrder = m.material.transparent ? 1 : 0;
@@ -130,6 +131,7 @@ export function createMech3dView(canvas, { onPick, gizmo = null }) {
       return m;
     });
     meshes.forEach((_, i) => colorize(i));
+    updateOutline();   // 메쉬가 새로 만들어졌으므로 선택 외곽선도 다시
     const box = new THREE.Box3(); meshes.forEach((m) => box.expandByObject(m));
     model = { c: box.getCenter(new THREE.Vector3()), r: box.getSize(new THREE.Vector3()).length() / 2 || 10 };
     axes.scale.setScalar((model.r * 0.3) / 10);
@@ -163,7 +165,23 @@ export function createMech3dView(canvas, { onPick, gizmo = null }) {
     const touched = new Set([...prev, ...obsSet].map((k) => +k.split('|')[0]));
     meshes.forEach((_, i) => { if (touched.has(i)) colorize(i); }); render();
   }
-  function setSelection(s) { sel = s; meshes.forEach((_, i) => colorize(i)); render(); }
+  // 선택 강조: 색 강조 + 밝은 외곽선(다른 부품에 가려도 보이게 깊이 검사 끔)
+  let selOutline = null;
+  function updateOutline() {
+    if (selOutline) { scene.remove(selOutline); selOutline.geometry.dispose(); selOutline.material.dispose(); selOutline = null; }
+    const m = sel?.part != null ? meshes[sel.part] : null;
+    if (!m) return;
+    selOutline = new THREE.LineSegments(new THREE.EdgesGeometry(m.geometry, 25), new THREE.LineBasicMaterial({ color: 0xffb020, depthTest: false, transparent: true, opacity: 0.95 }));
+    selOutline.renderOrder = 3;
+    scene.add(selOutline);
+  }
+  function setSelection(s) {
+    const prevPart = sel?.part;
+    sel = s;
+    meshes.forEach((_, i) => colorize(i));
+    if (prevPart !== sel?.part || !selOutline !== !sel) updateOutline();
+    render();
+  }
   // 선택 모드별 클릭 대상·투시: pickable(i) = 클릭 가능한 부품, ghostOf(i) = 반투명으로 비출 부품(둘 다 null = 전체/없음)
   let pickable = null, ghost = null;
   function setPickMode(pickableFn, ghostFn) { pickable = pickableFn; ghost = ghostFn; meshes.forEach((_, i) => colorize(i)); render(); }
