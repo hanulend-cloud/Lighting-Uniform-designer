@@ -5,7 +5,7 @@ import { partOptics } from './optics.js';
 import { MILKY_UI_MAX } from '../l2/material.js';
 
 // 기준 m0 주변 n 점(간격 step). 범위 [step, MILKY_UI_MAX] 를 넘으면 창 전체를 안쪽으로 민다(점 수 유지)
-export function milkyAxis(m0, step = 0.25, max = MILKY_UI_MAX, n = 21) {
+export function milkyAxis(m0, step = 0.025, max = MILKY_UI_MAX, n = 21) {   // 기본 창 = 기준 ±0.25(ESS 한계, spec §2.1)
   const half = ((n - 1) / 2) * step;
   let lo = m0 - half;
   if (lo < step) lo = step;

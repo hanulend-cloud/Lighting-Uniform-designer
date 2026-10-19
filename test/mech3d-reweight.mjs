@@ -9,6 +9,7 @@ import { milkyGridOptics, rwCoeffs, rwFactor, essRatio, milkyAxis } from '../src
 import { plateFixture } from './m3-fixture.mjs';
 import { composeScene, runChunk } from '../src/engine/mech3d/job.js';
 import { tallyStats } from '../src/engine/mech3d/tally.js';
+import { milkyRows, pickMilky, margin } from '../src/engine/mech3d/milky-search.js';
 
 const table = loadTable();
 const part = (i, kind, params = {}) => Object.entries(params).reduce((p, [k, v]) => setPartMaterialParam(p, k, v), setPartMaterial(defaultPart(i, `p${i}`, 1), kind));
@@ -79,4 +80,22 @@ const beam = { flux: 1, sample: (r) => [4.5 + r(), 4.5 + r(), -1, 0, 0, 1] };
     const dU = Math.abs(a.Ulen - d.Ulen);
     ok(ess[j] >= 0.3 && zTot < 3 && zRow < 4 && dU <= 0.03, `A-1 Milky ${m}: ESS ${ess[j].toFixed(2)} · 총광량 z ${zTot.toFixed(2)} · 행 최대 z ${zRow.toFixed(2)} · U 재가중 ${a.Ulen.toFixed(3)} vs 직접 ${d.Ulen.toFixed(3)}`);
   } }
+{ // 합성: 셀 1행(길이 10칸 × 폭 1칸), Milky 가 클수록 리플이 줄고 효율이 준다
+  const G = { ns: 10, nw: 1, ds: 1, cell: 1, w0: -0.5, L: 10, closed: false, winS: 5, area: new Float64Array(10).fill(1), valid: new Uint8Array(10).fill(1) };
+  const obs = { targetLen: 0.8, targetWid: 0.5 };
+  const ms = [1, 2, 3, 4, 5], amp = (m) => 0.5 / m, eff = (m) => 1 - 0.05 * m;
+  const mk = (m) => Float64Array.from({ length: 10 }, (_, i) => eff(m) * (1 + amp(m) * Math.cos(i)));
+  const batches = Array.from({ length: 4 }, () => { const a = new Float64Array(5 * 10); ms.forEach((m, j) => a.set(mk(m), j * 10)); return a; });
+  const rows = milkyRows(G, obs, { milkies: ms, batches, ess: new Float64Array([1, 1, 1, 1, 0.1]), emitted: 10 });
+  ok(rows.length === 5 && rows[4].trusted === false && rows[0].trusted, '행: ESS 0.1 은 믿지 않음');
+  // U = (1−a)/(1+a) ≥ 0.8 ⇔ a ≤ 1/9 ⇔ m ≥ 4.5 → 믿는 행 중 통과 없음 → 가장 가까운 안 = Milky 4
+  const p = pickMilky(rows, obs);
+  ok(!p.feasible && p.best.milky === 4 && /Milky 4/.test(p.reason), `통과 없음 → 가장 가까운 안 Milky 4: ${p.reason}`);
+  const obs2 = { targetLen: 0.6, targetWid: 0.5 };   // a ≤ 0.25 ⇔ m ≥ 2 → 보간 경계: m=1 (U 0.333) 과 m=2 (U 0.6) 사이 → 2
+  const p2 = pickMilky(milkyRows(G, obs2, { milkies: ms, batches, ess: new Float64Array(5).fill(1), emitted: 10 }), obs2);
+  ok(p2.feasible && Math.abs(p2.milky - 2) < 0.02 && p2.edge === null, `최소 Milky ≈ 2: ${p2.milky}`);
+  const p3 = pickMilky(milkyRows(G, { targetLen: 0.2, targetWid: 0.1 }, { milkies: ms, batches, ess: new Float64Array(5).fill(1), emitted: 10 }), { targetLen: 0.2, targetWid: 0.1 });
+  ok(p3.feasible && p3.milky === 1 && p3.edge === 'low', '창 맨 아래도 통과 → 더 낮은 쪽으로 기준 이동 신호(edge=low)');
+  ok(margin({ Ulen: 0.7, Uwid: null }, obs) === 0.7 - 0.8, '폭 판정 없음(좁은 라인) → 길이만'); }
+{ const a = milkyAxis(3); ok(a.length === 21 && Math.abs(a[0] - 2.75) < 1e-9 && Math.abs(a[20] - 3.25) < 1e-9, `milkyAxis(3) 기본 창 21점 2.75~3.25: ${a[0]}~${a[20]}`); }
 done();
