@@ -3,7 +3,7 @@
 //   { type:'db', db } → 소재 DB 교체(풀은 3D 모드를 나가도 유지되므로 다시 들어올 때 최신 DB 로)
 //   { type:'line', id, parts, faces, dir } → { id, lineData }  (전체 L.data — 래스터 포함. 메인이 tallyGeometry(G) 계산에 씀)
 //   { type:'scene', id, sceneKey, mechParts, mspec, ledParts, lineData, G, obs, emitters } → { id, sceneKey, ready:true }
-//   { type:'chunk', id, sceneKey, seed, N } → { id, sceneKey, acc, cnt, ledger, leak, escObs, ms } | { id, sceneKey, stale:true }
+//   { type:'chunk', id, sceneKey, seed, N, rw?:{part, milkies}, emitters? } → { id, sceneKey, acc, cnt, ledger, leak, escObs, ms, rw?:{acc, sf, sf2, n, milkies} } | { id, sceneKey, stale:true }
 //     (spec 2026-10-15 m3-cad-ui §4 — 장면은 한 번 만들고 청크만 반복. chunk-host.js 계약)
 //   오류: { id, error }
 import { initL2, l2State, browserLoader, bufferLoader, setMaterialDb } from '../l2/runtime.js';

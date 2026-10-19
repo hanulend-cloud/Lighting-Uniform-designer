@@ -37,4 +37,16 @@ const same = (a, b) => a.length === b.length && a.every((v, k) => v === b[k]);
   ok(host.handle({ type: 'chunk', sceneKey: 'k1', seed: 1, N: 10 }).reply.stale === true, '오류 후 이전 장면 청크 → stale');
   ok(host.handle({ type: 'line' }) === null, '모르는 메시지 → null(Worker 가 다른 처리기로)');
 }
+{ // P4: chunk.rw = { part, milkies } → 격자 지도 동봉, chunk.emitters = 발광점 덮어쓰기(후보 위치 LED 1개)
+  const F = plateFixture(table), host = makeChunkHost({ getTable: () => table });
+  host.handle({ type: 'scene', sceneKey: 'p4', mechParts: [F.plate], mspec: F.mspec, ledParts: null, lineData: lightData(F.line), G: F.G, obs: F.obs, emitters: F.emitters });
+  const r = host.handle({ type: 'chunk', sceneKey: 'p4', seed: 7, N: 3000, rw: { part: 0, milkies: [2.5, 3, 3.5] } }).reply;
+  const nCell = F.G.ns * F.G.nw;
+  ok(r.rw && r.rw.acc.length === 3 * nCell && r.rw.sf.length === 3 && r.rw.n > 0 && r.rw.milkies.join() === '2.5,3,3.5', '청크 rw: 격자 3점 지도·Σf·n');
+  const one = host.handle({ type: 'chunk', sceneKey: 'p4', seed: 7, N: 3000, emitters: [F.emitters[2]] }).reply;
+  const all = host.handle({ type: 'chunk', sceneKey: 'p4', seed: 7, N: 3000 }).reply;
+  const mid = (a) => { let s = 0; for (let i = Math.floor(F.G.ns * 0.45); i < Math.ceil(F.G.ns * 0.55); i++) for (let j = 0; j < F.G.nw; j++) s += a[i * F.G.nw + j]; return s; };
+  ok(one.acc.some((v) => v > 0) && Math.abs(all.ledger.emitted / one.ledger.emitted - 5) < 1e-9 && mid(one.acc) / one.ledger.emitted > mid(all.acc) / all.ledger.emitted, 'chunk.emitters: 가운데 LED 1개만 — 방출 = LED 1개 몫(combineSources 는 광속 합), 가운데에 몰림');
+}
+
 done();
