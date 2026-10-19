@@ -454,7 +454,7 @@ function renderView() {
   let arrows = [];
   try { arrows = L.currentEmitters(M, S.line).map((e) => ({ pos: e.pos, axis: e.axis })); } catch { arrows = []; }
   let line3d = null;
-  if (S.line) {
+  if (S.line && S.node === 'obs') {   // 인식한 라인 중심선 — 관측면 노드를 골랐을 때만(평소엔 결과 색을 가림)
     const out = [], K = 200;
     for (let k = 0; k <= K; k++) { const s = (k / K) * S.line.length, [x, y] = S.line.fromSW(S.line.closed && k === K ? 0 : s, 0); out.push(...S.line.to3D(x, y, 0.3)); }
     line3d = Float32Array.from(out);
