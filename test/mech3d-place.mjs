@@ -1,5 +1,5 @@
 // LED 직접 배치: node test/mech3d-place.mjs
-import { manualLeds, pcbPlaneMesh } from '../src/engine/mech3d/placement.js';
+import { manualLeds, ledAtS, pcbPlaneMesh } from '../src/engine/mech3d/placement.js';
 import { recognizeLine } from '../src/engine/mech3d/line.js';
 import { meshVolume } from '../src/engine/mech3d/mesh.js';
 import { buildBvh } from '../src/engine/mech3d/bvh.js';
@@ -44,4 +44,7 @@ const strip = recognizeLine([topFaceMesh(rectTris(0, 0, 100, 6), 12)], faces, [0
   const ang = L.map((e) => (Math.acos(Math.min(1, e.axis[2])) * 180) / Math.PI);
   ok(ang.every((v) => Math.abs(v - 10) < 1e-3) && L.every((e) => Math.abs(Math.hypot(...e.axis) - 1) < 1e-9 && e.axis[2] > 0), `기울어진 PCB 면(10°) → 발광 축 = 면 법선: ${ang.map((v) => v.toFixed(3))}°`);
 }
+{ const em = manualLeds(strip, { count: 3, pitch: 0, side: 'direct', pcb: { kind: 'depth', depth: 4 } });
+  const one = ledAtS(strip, em[1].s, { side: 'direct', pcb: { kind: 'depth', depth: 4 } });
+  ok(JSON.stringify(one) === JSON.stringify(em[1]), 'ledAtS(s) = manualLeds 의 같은 s 결과'); }
 done();

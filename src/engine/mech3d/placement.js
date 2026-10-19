@@ -15,31 +15,33 @@ export function ledSPositions(line, count, pitch) {
   return Array.from({ length: count }, (_, i) => ((i + 0.5) * L) / count);
 }
 
+// 라인 위 s 한 곳의 LED — manualLeds 와 P4 ② 후보 위치가 같이 씀. 반환 { s, pos, axis, xAxis }
+export function ledAtS(line, s, { side = 'direct', pcb }, rt = null) {
+  const F = line.frame;
+  const [x, y] = line.fromSW(s, 0), [tx, ty] = line.tangentAt(s);
+  let pos, hitN = null;
+  if (pcb.kind === 'depth') pos = line.to3D(x, y, -pcb.depth);
+  else {
+    const top = line.to3D(x, y, 1e4), m = rt?.parts?.[pcb.part];
+    if (!m) throw new Error('PCB 면 부품을 찾을 수 없음');
+    const h = intersectRay(m.bvh, top[0], top[1], top[2], -F.d[0], -F.d[1], -F.d[2], 0, Infinity);
+    if (!h || m.faceIds[h.tri] !== pcb.face) throw new Error(`s=${s.toFixed(1)}mm 아래에 선택한 PCB 면이 없음`);
+    const a = m.triangles[3 * h.tri] * 3, b = m.triangles[3 * h.tri + 1] * 3, c = m.triangles[3 * h.tri + 2] * 3, P = m.positions;
+    const e1 = [P[b] - P[a], P[b + 1] - P[a + 1], P[b + 2] - P[a + 2]], e2 = [P[c] - P[a], P[c + 1] - P[a + 1], P[c + 2] - P[a + 2]];
+    hitN = [e1[1] * e2[2] - e1[2] * e2[1], e1[2] * e2[0] - e1[0] * e2[2], e1[0] * e2[1] - e1[1] * e2[0]];
+    const nl = Math.hypot(...hitN) || 1, sg = hitN[0] * F.d[0] + hitN[1] * F.d[1] + hitN[2] * F.d[2] < 0 ? -1 : 1;
+    hitN = hitN.map((v) => (sg * v) / nl);
+    pos = [top[0] - h.t * F.d[0], top[1] - h.t * F.d[1], top[2] - h.t * F.d[2]];
+  }
+  const T3 = [tx * F.u[0] + ty * F.v[0], tx * F.u[1] + ty * F.v[1], tx * F.u[2] + ty * F.v[2]];
+  const left = [F.d[1] * T3[2] - F.d[2] * T3[1], F.d[2] * T3[0] - F.d[0] * T3[2], F.d[0] * T3[1] - F.d[1] * T3[0]];
+  const axis = side === 'left' ? left : side === 'right' ? left.map((v) => -v) : hitN ?? F.d.slice();
+  return { s, pos, axis, xAxis: T3 };
+}
+
 export function manualLeds(line, { count, pitch = 0, side = 'direct', pcb }, rt = null) {
   if (pcb.kind === 'depth' && !(pcb.depth > 0)) throw new Error('PCB 깊이는 0 보다 커야 함');
-  const F = line.frame, out = [];
-  for (const s of ledSPositions(line, count, pitch)) {
-    const [x, y] = line.fromSW(s, 0), [tx, ty] = line.tangentAt(s);
-    let pos, hitN = null;
-    if (pcb.kind === 'depth') pos = line.to3D(x, y, -pcb.depth);
-    else {
-      const top = line.to3D(x, y, 1e4), m = rt?.parts?.[pcb.part];
-      if (!m) throw new Error('PCB 면 부품을 찾을 수 없음');
-      const h = intersectRay(m.bvh, top[0], top[1], top[2], -F.d[0], -F.d[1], -F.d[2], 0, Infinity);
-      if (!h || m.faceIds[h.tri] !== pcb.face) throw new Error(`s=${s.toFixed(1)}mm 아래에 선택한 PCB 면이 없음`);
-      const a = m.triangles[3 * h.tri] * 3, b = m.triangles[3 * h.tri + 1] * 3, c = m.triangles[3 * h.tri + 2] * 3, P = m.positions;
-      const e1 = [P[b] - P[a], P[b + 1] - P[a + 1], P[b + 2] - P[a + 2]], e2 = [P[c] - P[a], P[c + 1] - P[a + 1], P[c + 2] - P[a + 2]];
-      hitN = [e1[1] * e2[2] - e1[2] * e2[1], e1[2] * e2[0] - e1[0] * e2[2], e1[0] * e2[1] - e1[1] * e2[0]];
-      const nl = Math.hypot(...hitN) || 1, sg = hitN[0] * F.d[0] + hitN[1] * F.d[1] + hitN[2] * F.d[2] < 0 ? -1 : 1;
-      hitN = hitN.map((v) => (sg * v) / nl);
-      pos = [top[0] - h.t * F.d[0], top[1] - h.t * F.d[1], top[2] - h.t * F.d[2]];
-    }
-    const T3 = [tx * F.u[0] + ty * F.v[0], tx * F.u[1] + ty * F.v[1], tx * F.u[2] + ty * F.v[2]];
-    const left = [F.d[1] * T3[2] - F.d[2] * T3[1], F.d[2] * T3[0] - F.d[0] * T3[2], F.d[0] * T3[1] - F.d[1] * T3[0]];
-    const axis = side === 'left' ? left : side === 'right' ? left.map((v) => -v) : hitN ?? F.d.slice();
-    out.push({ s, pos, axis, xAxis: T3 });
-  }
-  return out;
+  return ledSPositions(line, count, pitch).map((s) => ledAtS(line, s, { side, pcb }, rt));
 }
 
 // 가상 PCB(깊이 지정): 관측 라인 외곽 + margin, 두께 1mm, 윗면 = LED 높이(관측면 최저점 − depth)
