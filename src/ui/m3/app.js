@@ -6,7 +6,7 @@
 import { getMech3d, getLedMesh, setLedMesh, saveLedIDB, applyPartMods, redetectContacts } from '../../engine/mech3d/runtime.js';
 import { setPartMaterial, setPartMaterialParam, setPartFinish } from '../../engine/mech3d/materials.js';
 import { lineFromData, lightData, obsDirection } from '../../engine/mech3d/line.js';
-import { tallyGeometry } from '../../engine/mech3d/tally.js';
+import { tallyGeometry, tallyStats } from '../../engine/mech3d/tally.js';
 import { bounds } from '../../engine/mech3d/mesh.js';
 import { runGeomChecks, checkLeak } from '../../engine/mech3d/checks.js';
 import { createStore, PHYSICS, GEOM_CHECK } from './store.js';
@@ -20,6 +20,16 @@ import { partClearance, limitXform, axisLimits, TOL } from '../../engine/mech3d/
 import { renderPropertyPanel } from './property-panel.js';
 import { createResultsPanel } from './results-panel.js';
 import { renderStatusBar } from './status-bar.js';
+import { createAdRunner } from './autodesign-run.js';
+import { renderAutoPanel, stageAvailability } from './autodesign-panel.js';
+import { runAutoDesign } from '../../engine/mech3d/autodesign.js';
+import { milkyRows } from '../../engine/mech3d/milky-search.js';
+import { candidatePositions } from '../../engine/mech3d/basis.js';
+import { ledAtS } from '../../engine/mech3d/placement.js';
+import { frameHeights, deformPart, refineForBumps, minThickness, shapeCandidates } from '../../engine/mech3d/shape-opt.js';
+import { interferenceKeys } from '../../engine/mech3d/clearance.js';
+import { scaleMoveMesh, isIdentityXform } from '../../engine/mech3d/xform.js';
+import { defaultChecks } from '../../engine/mech3d/defs.js';
 
 const $ = (s) => document.querySelector(s);
 const VIEWS = [['top', '평면 (XY)'], ['front', '정면 (XZ)'], ['side', '측면 (YZ)'], ['iso', '등각']];
@@ -82,6 +92,7 @@ export async function mount(ctx) {
 export function unmount() {
   if (!A) return;
   const a = A; A = null;   // 먼저 비워서 cancel 의 onUpdate 가 그리지 않게
+  a.ad?.runner?.cancel();
   a.prog.dispose(); a.unsub(); a.store.dispose();   // 풀은 유지(진행 중 청크는 ≤0.5초 — 끝나면 버려짐)
   window.removeEventListener('keydown', a.keydown);
   if (a.view) { a.view.setObsSurface(null); a.view.setCheckMarkers([]); a.view.setSection(null); }
@@ -277,6 +288,164 @@ function clearanceOf(i) {
   return res;
 }
 
+// ---- 자동설계(P4) ----
+function adState() { return (A.ad ??= { open: false, sel: { milky: true, leds: false, shape: false, shapePart: -1, milkyMax: null }, running: null, result: null, undo: null, milkyPart: null, runner: null, info: null }); }
+function adInfo() {   // 부품별 비 2.5D 비율(관측 방향) — 라인이 있을 때만. (기구·라인) 별 캐시(높이맵 계산이 무거움)
+  const st = adState(), S = A.store.session, rt = getMech3d();
+  if (!st.info || st.info.rt !== rt || st.info.line !== S.line) st.info = { rt, line: S.line, non25: S.line && rt ? rt.parts.map((p) => frameHeights(p, S.line.frame, 0.5).non25) : [] };
+  return st.info;
+}
+const adMilkyPart = (M, avail) => (avail.milky.ok ? (avail.milky.parts.find((i) => M.observe.faces.some((f) => f.part === i)) ?? avail.milky.parts[0]) : null);
+function renderAuto() {
+  const el = $('#m3-auto'), st = adState();
+  el.hidden = !st.open;
+  if (!st.open) return;
+  const M = A.store.mspec, avail = stageAvailability(M, adInfo());
+  if (st.sel.shapePart < 0 && avail.shape.ok) st.sel.shapePart = avail.shape.parts[0];
+  const mp = adMilkyPart(M, avail), sel = { ...st.sel, milkyMax: st.sel.milkyMax ?? Math.max(mp != null ? M.parts[mp].material.milky : 0, 5) };
+  renderAutoPanel(el, { avail, sel, running: st.running, result: st.result, names: M.parts.map((p) => p.name), canRevert: !!st.undo }, {
+    onSel: (k, v) => { st.sel[k] = v; renderAuto(); },
+    onAction: (k) => ({ run: adRun, stop: () => st.runner?.cancel(), close: () => { st.open = false; renderAuto(); }, apply: adApply, cancel: adCancel, revert: adRevert, step: adStep })[k]?.(),
+  });
+}
+// 형상 원본 = 원본 메쉬 + 크기·위치 조절(이미 적용된 shapeMod 는 빼고 — 적용 때 shapeMod 를 바꿔 끼우므로 평가와 같게)
+function adBaseMesh(i) {
+  const rt = getMech3d(), raw = (rt.raw ?? rt).parts[i], xf = A.store.mspec.parts[i].xform;
+  if (isIdentityXform(xf)) return raw;
+  const b = bounds(raw.positions);
+  return scaleMoveMesh(raw, xf, [(b[0] + b[3]) / 2, (b[1] + b[4]) / 2, (b[2] + b[5]) / 2]);
+}
+// 설계 → (mspec 복사본, 기구 메쉬) — 형상은 후보 메쉬로 바꾼 부품 포함
+function designScene(d) {
+  const M = JSON.parse(JSON.stringify(A.store.mspec)), S = A.store.session, rt = getMech3d(), mp = adState().milkyPart;
+  if (mp != null && d.milky != null) M.parts[mp] = setPartMaterialParam(M.parts[mp], 'milky', d.milky);
+  if (M.light.kind === 'manual' && d.count != null) { M.light.manual.count = d.count; M.light.manual.pitch = d.pitch; }
+  let parts = rt.parts;
+  if (d.shape) {
+    const i = d.shape.part, mod = shapeModFor(d.shape, M), base = adBaseMesh(i);
+    const mesh = deformPart(refineForBumps(base, mod.frame, mod.centers, mod.R, Math.max(0.1, mod.R / 8)), mod.frame, frameHeights(base, mod.frame, mod.cell), mod);
+    parts = rt.parts.map((p, j) => (j === i ? mesh : p)); M.parts[i].shapeMod = mod;
+  }
+  return { M, parts, S };
+}
+// LED 중심 = 그 설계(M: ② 가 바꾼 개수·피치 반영)의 발광점을 관측 평면에 투영
+function shapeModFor({ dt, h, R }, M = A.store.mspec) {
+  const S = A.store.session, F = S.line.frame, em = L.currentEmitters(M, S.line);
+  const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+  return { frame: { u: F.u, v: F.v, d: F.d }, dt, h, R, centers: em.map((e) => [dot(e.pos, F.u), dot(e.pos, F.v)]), cell: 0.5 };
+}
+const adJob = (M, parts, o) => { const j = jobFor(M, parts, o); if (!j) throw new Error('LED 가 없음'); return j; };
+const adEff = (r) => { let t = 0; for (const b of r.batches) for (const v of b) t += v; return t / r.ledger.emitted; };
+async function adRun() {
+  const a = A, st = adState(), M = A.store.mspec, S = A.store.session;
+  if (!S.line || st.running) return;
+  const avail = stageAvailability(M, adInfo()), stages = { milky: st.sel.milky && avail.milky.ok, leds: st.sel.leds && avail.leds.ok, shape: st.sel.shape && avail.shape.ok };
+  st.milkyPart = adMilkyPart(M, avail);
+  const R = (st.runner = createAdRunner({ ports: A.pool.ports() }));
+  A.prog.pause();   // 같은 Worker 를 쓰므로 점진 계산은 멈춤(끝나면 장면을 다시 보냄)
+  st.running = { frac: 0, text: '준비' }; st.result = null; A.meshShown = null; renderView(); renderAuto();
+  const cur = { milky: st.milkyPart != null ? M.parts[st.milkyPart].material.milky : null, count: M.light.manual?.count ?? 0, pitch: M.light.manual?.pitch ?? 0, shape: null };
+  const obs = tallyObs(M.observe, M.observe.dir ?? S.line.frame.d), G = geometry(obs), sp = st.sel.shapePart;
+  const minWall = { ...defaultChecks(), ...(M.checks ?? {}) }.minWall;
+  const io = {
+    progress: (stage, frac, text) => { if (A !== a) return; st.running = { frac, text }; renderAuto(); },
+    cancelled: () => R.stopped,
+    async milkyRows(d, ms) {   // 재가중 기준 = 창 가운데
+      const { M: Md, parts } = designScene({ ...d, milky: ms[Math.floor(ms.length / 2)] });
+      const r = await R.trace(adJob(Md, parts), { N: 1500000, rw: { part: st.milkyPart, milkies: ms } });   // ≈5초(15 Worker)
+      return milkyRows(G, obs, { milkies: ms, batches: r.rwBatches, ess: r.ess, emitted: r.ledger.emitted });
+    },
+    async basis(d) {   // ① 이 켜져 있으면 실행기가 d.milky = 상한으로 넘김
+      const { M: Md, parts } = designScene(d);
+      const cand = candidatePositions(S.line, 1), sets = cand.map((s) => [ledAtS(S.line, s, Md.light.manual, getMech3d())]);
+      const r = await R.traceEach(adJob(Md, parts, { emitters: sets[0] }), sets, { N: 20000 });
+      return { cand, maps: r.maps, emitted: r.emitted };
+    },
+    async evalShapes(d, cands, N) {
+      const out = [], base = adBaseMesh(sp), H = frameHeights(base, S.line.frame, 0.5);
+      const others = getMech3d().parts.map((p, j) => (j === sp ? null : p)), lp = (M.light.kind === 'step' && L.ledPartsNow(M)) || [];
+      const before = interferenceKeys(base, others, lp, []);
+      for (const c of cands) {
+        if (R.stopped) break;
+        const { M: Md, parts } = designScene({ ...d, shape: { part: sp, ...c } }), mod = Md.parts[sp].shapeMod;
+        const thin = minThickness(H, mod) < minWall;
+        const clash = !thin && [...interferenceKeys(parts[sp], others, lp, []).keys()].some((k) => !before.has(k));
+        if (thin || clash) { out.push({ cand: c, ok: false, why: thin ? '살두께' : '간섭' }); continue; }
+        const r = await R.trace(adJob(Md, parts), { N, batches: 4 }), stt = tallyStats(G, r.batches, obs);
+        out.push({ cand: c, ok: !stt.empty, stats: stt, eff: adEff(r) });
+      }
+      return out;
+    },
+    async verify(d) {   // 정밀 재판정: 고정 200만 광자(잡음 ≈ ±2%, 점진 계산 목표와 같은 수준)
+      const { M: Md, parts } = designScene(d);
+      const r = await R.trace(adJob(Md, parts), { N: 2000000, batches: 10 });
+      return { stats: tallyStats(G, r.batches, obs), eff: adEff(r) };
+    },
+  };
+  const H0 = stages.shape ? frameHeights(adBaseMesh(sp), S.line.frame, 0.5) : null;
+  const pitchNow = cur.count > 1 ? (cur.pitch > 0 ? cur.pitch : S.line.length / cur.count) : S.line.length;
+  let res = null;
+  try {
+    res = await runAutoDesign({
+      stages, obs, G, line: S.line, current: cur, milkyMax: st.sel.milkyMax ?? Math.max(cur.milky ?? 0, 5), nMax: Math.max(1, Math.min(60, Math.floor(S.line.length / 2))), pitchRange: null,
+      shapePart: sp, shapeCands: stages.shape ? shapeCandidates({ t0: H0.t0, pitch: pitchNow, hasCenters: true }) : [],
+    }, io);
+  } catch (e) { if (A === a && !R.stopped) setStatus(`자동설계 실패: ${e.message}`); }
+  if (A !== a) return;   // 그사이 이탈
+  st.running = null; st.runner = null;
+  if (res && !res.cancelled) {
+    const C = A.store.session.calc;
+    st.result = { design: res.best, feasible: res.feasible, reason: res.reason, shape: res.best.shape ?? null,
+      cur: { ...cur, Ulen: C?.stats?.Ulen, Uwid: C?.stats?.Uwid, eff: C?.photometry?.eff ?? NaN },
+      best: { ...res.best, Ulen: res.verified.stats.Ulen, Uwid: res.verified.stats.Uwid, eff: res.verified.eff } };
+  }
+  // Worker 에 자동설계 장면이 올라가 있음 — 진행 중이던(일시정지된) 계산은 다시 시작(사용자 일시정지는 유지), 끝난 계산은 그대로
+  if (A.prog.snapshot().state === 'paused' || A.prog.snapshot().state === 'running') restartCalc();
+  A.meshShown = null; renderView(); renderAuto();
+}
+// 비교 중 3D 미리보기 — 결과마다 한 번 만들어 둠(meshKey 비교용 객체)
+function adPreview() {
+  const r = A.ad?.result;
+  if (!r) return null;
+  if (!r.preview) { const { M, parts } = designScene(r.design); r.preview = { M, parts, raw: getMech3d().raw }; }
+  return r.preview;
+}
+function adCancel() { const st = adState(); st.result = null; A.meshShown = null; renderView(); renderAuto(); }
+function adApply() {
+  const st = adState(), d = st.result?.design;
+  if (!d) return;
+  const M = A.store.mspec, mod = d.shape ? adPreview().M.parts[d.shape.part].shapeMod : null;
+  st.undo = { milky: st.milkyPart != null ? [st.milkyPart, M.parts[st.milkyPart].material.milky] : null, manual: M.light.kind === 'manual' ? { ...M.light.manual } : null, shape: d.shape ? [d.shape.part, M.parts[d.shape.part].shapeMod ?? null] : null };
+  st.result = null; A.meshShown = null;
+  if (st.milkyPart != null && d.milky != null) A.store.update('material', (m) => { m.parts[st.milkyPart] = setPartMaterialParam(m.parts[st.milkyPart], 'milky', d.milky); });
+  if (M.light.kind === 'manual') A.store.update('light', (m) => { m.light.manual.count = d.count; m.light.manual.pitch = d.pitch; });
+  if (mod) A.store.update('material', (m) => { m.parts[d.shape.part].shapeMod = mod; applyPartMods(m.parts); m.contacts = redetectContacts(m.contacts); });
+  renderAuto();
+}
+function adRevert() {
+  const st = adState(), u = st.undo;
+  if (!u) return;
+  st.undo = null; A.meshShown = null;
+  if (u.milky) A.store.update('material', (m) => { m.parts[u.milky[0]] = setPartMaterialParam(m.parts[u.milky[0]], 'milky', u.milky[1]); });
+  if (u.manual) A.store.update('light', (m) => { Object.assign(m.light.manual, u.manual); });
+  if (u.shape) A.store.update('material', (m) => { if (u.shape[1]) m.parts[u.shape[0]].shapeMod = u.shape[1]; else delete m.parts[u.shape[0]].shapeMod; applyPartMods(m.parts); m.contacts = redetectContacts(m.contacts); });
+  renderAuto();
+}
+function adStep() {
+  const d = adState().result?.design;
+  if (!d?.shape) return;
+  const { parts, M } = adPreview(), mesh = parts[d.shape.part], name = M.parts[d.shape.part].name;
+  const w = new Worker(new URL('../../export/mesh-step-worker.js', import.meta.url), { type: 'module' });
+  setStatus('STEP 생성 중…');
+  w.onmessage = (ev) => {
+    if (ev.data.type === 'done') { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([ev.data.stepText], { type: 'application/step' })); a.download = `${name}-p4.stp`; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000); setStatus('STEP 내보내기 완료'); }
+    else setStatus(`STEP 실패: ${ev.data.message}`);
+    w.terminate();
+  };
+  w.onerror = (e) => { setStatus(`STEP 실패: ${e.message ?? e}`); w.terminate(); };
+  w.postMessage({ mesh: { positions: mesh.positions, triangles: mesh.triangles }, name });
+}
+
 // ---- 3D 클릭 (main.js:393-425) — 기구 부품 수(nMech) 이상인 번호는 LED STEP 부품 ----
 function onPick(s) {
   const st = A.store, M = st.mspec, S = st.session, nMech = getMech3d().parts.length, pick = S.pick;
@@ -404,6 +573,7 @@ function cmdHandlers() {
       const s = A.prog.snapshot().state;
       if (s === 'running' || s === 'pending' || s === 'starting') A.prog.pause(); else if (s === 'paused') A.prog.resume(); else restartCalc();
     },
+    onAuto: () => { const st = adState(); st.open = !st.open; renderAuto(); },
     onExit: () => A.ctx.onExit(),
   };
 }
@@ -429,6 +599,7 @@ function renderAll(tag = 'all') {
   if (tag === 'session' || tag === 'all') renderMarkers();
   A.cmd.update(S, S.calc);
   renderStatus();
+  renderAuto();
 }
 function renderStatus() {
   const S = A.store.session, M = A.store.mspec;
@@ -443,17 +614,18 @@ function renderView() {
   const M = A.store.mspec, S = A.store.session, stp = M.light.kind === 'step' ? M.light.step : null;
   const lp = stp ? L.ledPartsNow(M) : null, ledSet = new Set(stp?.leds ?? []), exSet = new Set(stp?.excluded ?? []);   // 제외된 LED 는 회색(불투명) — 발광 화살표도 빠짐
   const kinds = [...M.parts.map((p) => p.material.kind), ...(lp ?? []).map((_, i) => (i === stp.pcb ? 'pcb' : ledSet.has(i) && !exSet.has(i) ? 'led' : 'opaque'))];
-  const meshKey = [cur, lp];   // 기구·LED 메쉬(위치 보정 포함 — 캐시 객체)가 바뀌면 다시 그림. 카메라는 기구가 바뀔 때만 맞춤
+  const pv = adPreview();   // 자동설계 비교 중 = 최적안 미리보기(형상 메쉬·LED 위치)
+  const meshKey = [pv ?? cur, lp];   // 기구·LED 메쉬(위치 보정 포함 — 캐시 객체)가 바뀌면 다시 그림. 카메라는 기구가 바뀔 때만 맞춤
   if (!A.meshShown || A.meshShown.some((x, i) => x !== meshKey[i])) {
     const keepCamera = !!A.meshShown && A.meshShown[0].raw === cur.raw;   // 크기·위치 조절만 바뀌면 카메라 유지
     if (A.meshShown?.[0].raw !== cur.raw) { S.hidden = []; S.hideLeds = false; }   // 다른 기구를 불러오면 보기 상태 초기화
-    A.meshShown = meshKey; v.setParts([...cur.parts, ...(lp ?? [])], kinds, { keepCamera });
+    A.meshShown = meshKey; v.setParts([...(pv ?? cur).parts, ...(lp ?? [])], kinds, { keepCamera });
   } else v.setKinds(kinds);
   const hid = new Set(S.hidden), nMech = M.parts.length;
   v.setHidden((i) => (i < nMech ? hid.has(i) : S.hideLeds));
   v.setSelection(S.sel);
   let arrows = [];
-  try { arrows = L.currentEmitters(M, S.line).map((e) => ({ pos: e.pos, axis: e.axis })); } catch { arrows = []; }
+  try { arrows = L.currentEmitters(pv?.M ?? M, S.line).map((e) => ({ pos: e.pos, axis: e.axis })); } catch { arrows = []; }
   let line3d = null;
   if (S.line && S.node === 'obs') {   // 인식한 라인 중심선 — 관측면 노드를 골랐을 때만(평소엔 결과 색을 가림)
     const out = [], K = 200;

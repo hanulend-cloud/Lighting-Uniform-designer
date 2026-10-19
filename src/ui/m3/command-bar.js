@@ -14,7 +14,7 @@ export function mountCommandBar(el, h) {
   el.innerHTML = `<button type="button" class="m3-btn" data-c="import" title="기구설계 STEP(.stp/.step) — 모든 부품을 불러와 바꿈">📂 기구 불러오기</button><input type="file" accept=".stp,.step" hidden data-c="file" aria-label="기구 STEP 파일 선택">
     <button type="button" data-c="led" aria-pressed="false">💡 LED 지정</button><button type="button" data-c="obs" aria-pressed="false">👁 관측면</button>
     <span class="m3-sep"></span><button type="button" data-c="sec" aria-pressed="false">✂ 단면</button><button type="button" data-c="fit" title="단축키 F">⤢ 맞춤(F)</button>
-    <span class="m3-sep"></span><button type="button" data-c="calc">▶ 계산</button>
+    <span class="m3-sep"></span><button type="button" data-c="calc">▶ 계산</button><button type="button" data-c="auto">✨ 자동설계</button>
     <span class="m3-hint">Esc 선택 해제 · 드래그 회전 · 휠 확대 · 우클릭/Shift 드래그 이동</span>
     <button type="button" data-c="exit">평판 모드로</button>`;
   const b = (k) => el.querySelector(`[data-c="${k}"]`);
@@ -25,6 +25,7 @@ export function mountCommandBar(el, h) {
   b('sec').onclick = () => h.onSection();
   b('fit').onclick = () => h.onFit();
   b('calc').onclick = () => h.onToggleCalc();
+  b('auto').onclick = () => h.onAuto?.();
   b('exit').onclick = () => h.onExit();
   const toggle = (n, on) => {
     if (n.classList.contains('on') !== on) n.classList.toggle('on', on);

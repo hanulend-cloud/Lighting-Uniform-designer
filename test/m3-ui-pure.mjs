@@ -8,6 +8,7 @@ import { defaultLight, defaultObserve, defaultChecks } from '../src/engine/mech3
 import { defaultPart, setPartMaterial, setPartMaterialParam } from '../src/engine/mech3d/materials.js';
 import { clearanceHtml } from '../src/ui/mech3d-panel.js';
 import { ok, done } from './mech3d-util.mjs';
+import { stageAvailability, autoCardHtml, compareHtml } from '../src/ui/m3/autodesign-panel.js';
 
 const M = {
   name: 't', contacts: [{ a: 0, b: 1, mode: 'contact' }], checks: defaultChecks(),
@@ -80,4 +81,13 @@ ok(fmtU(0.7999) === '0.79' && fmtU(0.92) === '0.92' && fmtU(0.29) === '0.29' && 
   ok(T[1].text.endsWith('도달 49%') && T[2].text === '살두께 0.79 mm' && T[3].text === '새는 빛 21%' && L7 === '새는 빛 7%' && checkLabels({ reach: { status: 'ok', minReach: 1, minDist: null } })[1].text === 'LED–커버 가림',
     `점검 반올림: ${T.map((t) => t.text).join(' | ')} | ${L7}`); }
 ok(judgeText(0.8004, 0.8009).cls === 'ok' && judgeText(0.7999, 0.8).cls === 'bad' && judgeText(0.8, 0.8).cls === 'ok' && judgeText(0.855, 0.8567).text === '목표 0.85 · 합격', '판정 = 표시(내림)값 비교, 목표도 내림 표시');
+{ const base = { parts: [{ material: { kind: 'milky' } }, { material: { kind: 'opaque' } }], light: { kind: 'manual' }, observe: { faces: [{ part: 0, face: 1 }] } };
+  const a = stageAvailability(base, { non25: [0, 0.5] });
+  ok(a.milky.ok && a.leds.ok && a.shape.ok && a.shape.parts.join() === '0', '가능: Milky 부품 있음 · 직접 배치 · 2.5D 부품만 ③ 대상');
+  const b = stageAvailability({ ...base, light: { kind: 'step' }, parts: [{ material: { kind: 'clear' } }] }, { non25: [0.5] });
+  ok(!b.milky.ok && /Milky 부품/.test(b.milky.why) && !b.leds.ok && /LED STEP/.test(b.leds.why) && !b.shape.ok, '불가 이유: Milky 없음 · LED STEP 위치 고정 · 2.5D 아님');
+  const h = autoCardHtml({ avail: a, sel: { milky: true, leds: false, shape: false, shapePart: 0 }, running: null });
+  ok(h.includes('data-ad="milky" checked') && h.includes('data-ad="run"') && !h.includes('disabled data-ad="milky"'), '카드: 체크 상태·실행 버튼');
+  const c = compareHtml({ cur: { count: 5, pitch: 0, milky: 3, Ulen: 0.62, Uwid: 0.7, eff: 0.6 }, best: { count: 4, pitch: 0, milky: 3.5, Ulen: 0.81, Uwid: 0.72, eff: 0.55 }, feasible: true, reason: '', shape: null });
+  ok(c.includes('LED') && c.includes('4') && c.includes('0.81') && c.includes('data-ad="apply"') && c.includes('data-ad="cancel"'), '비교표: 현재 | 최적 · 적용·취소'); }
 done();

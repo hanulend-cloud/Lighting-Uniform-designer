@@ -390,3 +390,12 @@ canvas.m3-g { width: 100%; display: block; border-radius: 4px; background: #fafb
 }
 /* hidden 속성이 display 지정에 덮이지 않게(3D 모드에서 평판 영역이 자리 차지하던 문제) */
 #design-wrap[hidden], #results-wrap[hidden] { display: none; }
+/* 자동설계 카드(P4) — 오른쪽 열 = 카드 + 결과(격자 3열 유지) */
+.m3-right { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
+.m3-right > .m3-res { flex: 1; min-height: 0; }
+#m3-auto { border-left: 1px solid var(--m3-line); border-bottom: 1px solid var(--m3-line); padding: 8px 10px; font-size: 12px; max-height: 50%; overflow: auto; }
+@media (max-width: 1024px) { .m3-right { grid-column: 1 / -1; } #m3-auto { border-left: none; max-height: none; } }
+#m3-auto[hidden] { display: none; }
+.m3-ad-item { display: block; margin: 2px 0; } .m3-ad-item.off { color: var(--m3-mut); }
+.m3-ad-prog { display: flex; gap: 6px; align-items: center; margin: 6px 0; } .m3-ad-prog .bar { flex: 1; height: 6px; background: #e6e9ef; border-radius: 3px; overflow: hidden; } .m3-ad-prog .bar i { display: block; height: 100%; background: var(--m3-acc); }
+.m3-cmp { width: 100%; border-collapse: collapse; margin: 4px 0; } .m3-cmp th, .m3-cmp td { padding: 2px 4px; text-align: left; border-bottom: 1px solid var(--m3-line); } .m3-cmp td.chg { color: var(--m3-acc); font-weight: 600; }
