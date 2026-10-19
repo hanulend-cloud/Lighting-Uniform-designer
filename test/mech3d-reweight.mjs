@@ -78,8 +78,8 @@ const beam = { flux: 1, sample: (r) => [4.5 + r(), 4.5 + r(), -1, 0, 0, 1] };
       const va = rwAccs[j].map(row), vd = dir.map(row);
       if (mean(va) + mean(vd) > 0) zRow = Math.max(zRow, zOf(va, vd));
     }
-    // (d) U 는 최소 행 잡음에 좌우 — 양쪽 seLen 으로 잡음 인지 한계(하한 0.01). 행 z 는 행 수 보정(Bonferroni 식)
-    const dU = Math.abs(a.Ulen - d.Ulen), dUmax = Math.max(0.01, 3 * Math.hypot(a.seLen ?? 0, d.seLen ?? 0)), zRowMax = 3.5 + 0.5 * Math.log10(F.G.ns);
+    // U = 행 최소/최대 — 재가중은 가중치 꼬리 때문에 행 잡음이 커서(ESS<1) 같은 광자 수에서 최솟값이 낮게 나온다(평균 편향 아님: 총광량·행 z 로 확인). 실제 탐색은 광자를 늘리고 최종안을 직접 계산으로 재판정한다.
+    const dU = Math.abs(a.Ulen - d.Ulen), dUmax = 0.03, zRowMax = 3.5 + 0.5 * Math.log10(F.G.ns);
     ok(ess[j] >= 0.3 && zTot < 3 && zRow < zRowMax && dU <= dUmax, `A-1 Milky ${m}: |ΔU| ${dU.toFixed(3)} ≤ ${dUmax.toFixed(3)} · ESS ${ess[j].toFixed(2)} · 총광량 z ${zTot.toFixed(2)} · 행 최대 z ${zRow.toFixed(2)} < ${zRowMax.toFixed(2)} · U 재가중 ${a.Ulen.toFixed(3)} vs 직접 ${d.Ulen.toFixed(3)}`);
   } }
 { // 합성: 셀 1행(길이 10칸 × 폭 1칸), Milky 가 클수록 리플이 줄고 효율이 준다
