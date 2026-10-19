@@ -34,7 +34,7 @@ export function createPool({ dbLists, l2Raw = () => null, onStatus = () => {} })
     pending.set(id, { res, rej, w, timer });
     w.postMessage({ ...msg, id });
   });
-  const size = () => Math.max(1, Math.min(15, (navigator.hardwareConcurrency ?? 4) - 1));
+  const size = () => Math.max(1, Math.min(12, (navigator.hardwareConcurrency ?? 4) - 2));   // 화면(메인 스레드)·브라우저 몫으로 코어 2개 남김
   const ports = () => Array.from({ length: size() }, (_, k) => ({ send: (msg) => call(worker(k), msg) }));
   const warm = () => { for (let k = 0; k < size(); k++) worker(k); };
   const setDb = (db) => { for (const w of pool) w.postMessage({ type: 'db', db }); };   // 이미 뜬 Worker 의 소재 DB 갱신(새 Worker 는 init 에서)
