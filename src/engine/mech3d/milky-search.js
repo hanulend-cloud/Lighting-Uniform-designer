@@ -3,7 +3,7 @@ import { tallyStats } from './tally.js';
 import { ESS_MIN } from './reweight.js';
 
 // 목표 여유: min(U길이 − 목표, U폭 − 목표). 폭 판정이 없으면(좁은 라인) 길이만
-export const margin = (st, obs) => Math.min(st.Ulen - obs.targetLen, st.Uwid == null ? Infinity : st.Uwid - obs.targetWid);
+export const margin = (st, obs) => Math.min(st.Ulen - obs.targetLen, st.Uwid == null || obs.targetWid == null ? Infinity : st.Uwid - obs.targetWid);
 
 // batches: 배치별 Float64Array(격자 수 × 셀), ess: 격자별 유효 표본 비율, emitted: 방출 총량(효율 분모)
 // 반환 [{ milky, Ulen, Uwid, eff, ess, trusted, margin, map }]
@@ -17,16 +17,17 @@ export function milkyRows(G, obs, { milkies, batches, ess, emitted }) {
   });
 }
 
-// 믿는 행에서 여유가 처음 0 이상이 되는 Milky(앞 행과 선형 보간). edge: 'low'(창 맨 아래부터 통과 — 더 낮게 볼 것) | 'high'(통과 없음 & 위로 여지) | null
+// 믿는 행에서 여유가 처음 0 이상이 되고 다음 믿는 행도 0 이상인 Milky(원 격자 이웃인 앞 행과 선형 보간). edge: 'low'(창 맨 아래부터 통과 — 더 낮게 볼 것) | 'high'(통과 없음 & 위로 여지) | null
 export function pickMilky(rows, obs) {
-  const R = rows.filter((r) => r.trusted);
+  const R = rows.filter((r) => r.trusted), ix = R.map((r) => rows.indexOf(r));
   if (!R.length) return { feasible: false, best: null, milky: null, edge: null, reason: '믿을 수 있는 격자점이 없음 — 광자를 늘리세요' };
-  const i = R.findIndex((r) => r.margin >= 0);
+  const i = R.findIndex((r, k) => r.margin >= 0 && (k + 1 >= R.length || R[k + 1].margin >= 0));   // 통과가 이어져야 함(단발 잡음 무시)
   if (i < 0) {
     const best = R.reduce((a, b) => (b.margin > a.margin ? b : a));
     return { feasible: false, best, milky: best.milky, edge: 'high', reason: `Milky ${best.milky}에서도 길이 U ${best.Ulen.toFixed(2)}${best.Uwid == null ? '' : ` · 폭 U ${best.Uwid.toFixed(2)}`} — 목표 ${obs.targetLen.toFixed(2)}${best.Uwid == null ? '' : ` / ${obs.targetWid.toFixed(2)}`} 미달` };
   }
   if (i === 0) return { feasible: true, best: R[0], milky: R[0].milky, edge: 'low', reason: '' };
+  if (ix[i] - ix[i - 1] !== 1) return { feasible: true, best: R[i], milky: R[i].milky, edge: null, reason: '' };   // 원 격자에서 이웃이 아니면 보간 안 함
   const a = R[i - 1], b = R[i], t = a.margin === b.margin ? 1 : -a.margin / (b.margin - a.margin);
   return { feasible: true, best: b, milky: Math.round((a.milky + t * (b.milky - a.milky)) * 100) / 100, edge: null, reason: '' };
 }

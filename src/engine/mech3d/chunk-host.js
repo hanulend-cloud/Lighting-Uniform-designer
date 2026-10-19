@@ -19,9 +19,9 @@ export function makeChunkHost({ getTable, getDb = () => null }) {
           const table = getTable();
           if (!table) throw new Error('L2 산란 응답표가 없음');
           cache = null;   // 실패하면 이전 장면도 쓰지 않음
-          const rt = buildSceneMesh('mech', m.mechParts), line = lineFromData(m.lineData);
-          const S = composeScene({ rt, mspec: m.mspec, ledParts: m.ledParts, table, db: getDb(), line });
-          cache = { sceneKey: m.sceneKey, S, line, G: m.G, obs: m.obs, emitters: m.emitters, ledSpec: m.mspec.light.spec, mspec: m.mspec };
+          const db = getDb(), rt = buildSceneMesh('mech', m.mechParts), line = lineFromData(m.lineData);
+          const S = composeScene({ rt, mspec: m.mspec, ledParts: m.ledParts, table, db, line });
+          cache = { sceneKey: m.sceneKey, db, S, line, G: m.G, obs: m.obs, emitters: m.emitters, ledSpec: m.mspec.light.spec, mspec: m.mspec };
           return { reply: { sceneKey: m.sceneKey, ready: true }, transfer: [] };
         } catch (e) { cache = null; return { reply: { sceneKey: m.sceneKey, error: String(e?.message ?? e) }, transfer: [] }; }
       }
@@ -29,8 +29,11 @@ export function makeChunkHost({ getTable, getDb = () => null }) {
         if (!cache || cache.sceneKey !== m.sceneKey) return { reply: { sceneKey: m.sceneKey, stale: true }, transfer: [] };
         const { S, line, obs, G, ledSpec } = cache, emitters = m.emitters ?? cache.emitters;   // P4 ②: 후보 위치 LED 만
         let rw = null;
-        if (m.rw) {   // P4 ①: 기준 = 장면의 그 부품 광학값, 격자 = 같은 부품의 Milky 만 바꾼 값
-          const grid = milkyGridOptics(cache.mspec.parts[m.rw.part], { table: getTable(), db: getDb() }, m.rw.milkies);
+        if (m.rw) {
+          const pi = m.rw.part;
+          if (!Number.isInteger(pi) || pi < 0 || pi >= cache.mspec.parts.length || cache.mspec.parts[pi].material?.kind !== 'milky') return { reply: { sceneKey: m.sceneKey, error: 'rw.part 는 Milky 부품 번호여야 함' }, transfer: [] };
+          // P4 ①: 기준 = 장면의 그 부품 광학값, 격자 = 같은 부품의 Milky 만 바꾼 값
+          const grid = milkyGridOptics(cache.mspec.parts[m.rw.part], { table: getTable(), db: cache.db }, m.rw.milkies);
           rw = { part: m.rw.part, C: rwCoeffs(S.optics[m.rw.part], grid) };
         }
         const r = runChunk({ S, line, obs, G, emitters, ledSpec, N: m.N, seed: m.seed, rw });

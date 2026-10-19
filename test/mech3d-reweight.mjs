@@ -27,7 +27,7 @@ const beam = { flux: 1, sample: (r) => [4.5 + r(), 4.5 + r(), -1, 0, 0, 1] };
   let sk = 0, sL = 0;
   runMC3D(S, { source: beam, N: 20000, seed: 5, track: 0, onEscape: (x, y, z, dx, dy, dz, w, p, tL, tK) => { sk += tK; sL += tL; } });
   const mus = S.optics[0].mus, r = sk / (mus * sL);
-  ok(Math.abs(r - 1) < 0.03, `Milky 3: Σk / (μs·ΣL) = ${r.toFixed(4)} (≈1)`);
+  ok(Math.abs(r - 1) < 0.03, `Milky 3: Σk / (μs·ΣL) = ${r.toFixed(4)} (≈ 탈출 조건부라 근사)`);
 }
 { // track 을 주지 않으면 tL·tK 는 undefined, 결과(ledger)는 track 과 비트 동일
   const S = scene([boxMesh(0, 0, 0, 10, 10, 2)], [part(0, 'milky', { milky: 3 })]);
@@ -46,7 +46,9 @@ const beam = { flux: 1, sample: (r) => [4.5 + r(), 4.5 + r(), -1, 0, 0, 1] };
   const e = essRatio(new Float64Array([10, 10]), new Float64Array([10, 50]), 10);
   ok(Math.abs(e[0] - 1) < 1e-12 && Math.abs(e[1] - 0.2) < 1e-12, 'ESS 비율 = (Σf)²/(n·Σf²)');
   let thrown = ''; try { rwCoeffs({ mus: 0, mua: 0, g: 0.9 }, G); } catch (er) { thrown = er.message; }
-  ok(/기준 Milky/.test(thrown), '기준 μs = 0 이면 재가중 불가 — 오류'); }
+  ok(/기준 Milky/.test(thrown), '기준 μs = 0 이면 재가중 불가 — 오류');
+  let t2 = ''; try { rwCoeffs({ mus: 1, mua: 0, g: 0.9 }, [{ mus: 1, mua: 0, g: 0.9 }, { mus: 0, mua: 0, g: 0.9 }]); } catch (er) { t2 = er.message; }
+  ok(/격자 μs/.test(t2), '격자 μs = 0 이면 오류'); }
 { const F = plateFixture(table), ms = milkyAxis(3, 0.025), base = F.S.optics[0], fi = (v) => ms.findIndex((x) => Math.abs(x - v) < 1e-9);
   const grid = milkyGridOptics(F.mspec.parts[0], { table }, ms), C = rwCoeffs(base, grid), nCell = F.G.ns * F.G.nw;
   const B = 12, rwAccs = Array.from({ length: grid.length }, () => []);
@@ -76,9 +78,9 @@ const beam = { flux: 1, sample: (r) => [4.5 + r(), 4.5 + r(), -1, 0, 0, 1] };
       const va = rwAccs[j].map(row), vd = dir.map(row);
       if (mean(va) + mean(vd) > 0) zRow = Math.max(zRow, zOf(va, vd));
     }
-    // (d) U 는 ≈0.05 로 가장 잡음 큰 최소 행에 좌우돼 편향 검출력이 낮다 — 느슨한 0.03
-    const dU = Math.abs(a.Ulen - d.Ulen);
-    ok(ess[j] >= 0.3 && zTot < 3 && zRow < 4 && dU <= 0.03, `A-1 Milky ${m}: ESS ${ess[j].toFixed(2)} · 총광량 z ${zTot.toFixed(2)} · 행 최대 z ${zRow.toFixed(2)} · U 재가중 ${a.Ulen.toFixed(3)} vs 직접 ${d.Ulen.toFixed(3)}`);
+    // (d) U 는 최소 행 잡음에 좌우 — 양쪽 seLen 으로 잡음 인지 한계(하한 0.01). 행 z 는 행 수 보정(Bonferroni 식)
+    const dU = Math.abs(a.Ulen - d.Ulen), dUmax = Math.max(0.01, 3 * Math.hypot(a.seLen ?? 0, d.seLen ?? 0)), zRowMax = 3.5 + 0.5 * Math.log10(F.G.ns);
+    ok(ess[j] >= 0.3 && zTot < 3 && zRow < zRowMax && dU <= dUmax, `A-1 Milky ${m}: |ΔU| ${dU.toFixed(3)} ≤ ${dUmax.toFixed(3)} · ESS ${ess[j].toFixed(2)} · 총광량 z ${zTot.toFixed(2)} · 행 최대 z ${zRow.toFixed(2)} < ${zRowMax.toFixed(2)} · U 재가중 ${a.Ulen.toFixed(3)} vs 직접 ${d.Ulen.toFixed(3)}`);
   } }
 { // 합성: 셀 1행(길이 10칸 × 폭 1칸), Milky 가 클수록 리플이 줄고 효율이 준다
   const G = { ns: 10, nw: 1, ds: 1, cell: 1, w0: -0.5, L: 10, closed: false, winS: 5, area: new Float64Array(10).fill(1), valid: new Uint8Array(10).fill(1) };
@@ -96,6 +98,12 @@ const beam = { flux: 1, sample: (r) => [4.5 + r(), 4.5 + r(), -1, 0, 0, 1] };
   ok(p2.feasible && Math.abs(p2.milky - 2) < 0.02 && p2.edge === null, `최소 Milky ≈ 2: ${p2.milky}`);
   const p3 = pickMilky(milkyRows(G, { targetLen: 0.2, targetWid: 0.1 }, { milkies: ms, batches, ess: new Float64Array(5).fill(1), emitted: 10 }), { targetLen: 0.2, targetWid: 0.1 });
   ok(p3.feasible && p3.milky === 1 && p3.edge === 'low', '창 맨 아래도 통과 → 더 낮은 쪽으로 기준 이동 신호(edge=low)');
-  ok(margin({ Ulen: 0.7, Uwid: null }, obs) === 0.7 - 0.8, '폭 판정 없음(좁은 라인) → 길이만'); }
+  ok(margin({ Ulen: 0.7, Uwid: null }, obs) === 0.7 - 0.8, '폭 판정 없음(좁은 라인) → 길이만');
+  ok(margin({ Ulen: 0.9, Uwid: 0.3 }, { targetLen: 0.8 }) === 0.9 - 0.8 && !Number.isNaN(margin({ Ulen: 0.9, Uwid: 0.3 }, { targetLen: 0.8 })), 'targetWid 없음 → 폭 무시(NaN 아님)');
+  const R = (milky, m, trusted = true) => ({ milky, margin: m, trusted, Ulen: 0, Uwid: null });
+  const pb = pickMilky([R(1, -0.2), R(2, -0.1), R(3, 0.05), R(4, -0.05), R(5, -0.02), R(6, 0.1), R(7, 0.2)], obs);
+  ok(pb.milky > 5 && pb.milky <= 6, `단발 통과(잡음)는 무시 — 지속 통과 Milky ${pb.milky}`);
+  const pg = pickMilky([R(1, -0.2), R(2, -0.1, false), R(3, 0.1), R(4, 0.2)], obs);
+  ok(pg.feasible && pg.milky === 3, `신뢰 안 되는 행이 사이에 있으면 보간 안 함 → ${pg.milky}`); }
 { const a = milkyAxis(3); ok(a.length === 21 && Math.abs(a[0] - 2.75) < 1e-9 && Math.abs(a[20] - 3.25) < 1e-9, `milkyAxis(3) 기본 창 21점 2.75~3.25: ${a[0]}~${a[20]}`); }
 done();

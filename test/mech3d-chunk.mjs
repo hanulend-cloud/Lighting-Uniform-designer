@@ -43,6 +43,7 @@ const same = (a, b) => a.length === b.length && a.every((v, k) => v === b[k]);
   const r = host.handle({ type: 'chunk', sceneKey: 'p4', seed: 7, N: 3000, rw: { part: 0, milkies: [2.5, 3, 3.5] } }).reply;
   const nCell = F.G.ns * F.G.nw;
   ok(r.rw && r.rw.acc.length === 3 * nCell && r.rw.sf.length === 3 && r.rw.n > 0 && r.rw.milkies.join() === '2.5,3,3.5', '청크 rw: 격자 3점 지도·Σf·n');
+  for (const part of [5, -1, 0.5]) { const e = host.handle({ type: 'chunk', sceneKey: 'p4', seed: 7, N: 10, rw: { part, milkies: [3] } }).reply; ok(e.sceneKey === 'p4' && /Milky 부품/.test(e.error), `rw.part ${part} → 오류`); }
   const one = host.handle({ type: 'chunk', sceneKey: 'p4', seed: 7, N: 3000, emitters: [F.emitters[2]] }).reply;
   const all = host.handle({ type: 'chunk', sceneKey: 'p4', seed: 7, N: 3000 }).reply;
   const mid = (a) => { let s = 0; for (let i = Math.floor(F.G.ns * 0.45); i < Math.ceil(F.G.ns * 0.55); i++) for (let j = 0; j < F.G.nw; j++) s += a[i * F.G.nw + j]; return s; };

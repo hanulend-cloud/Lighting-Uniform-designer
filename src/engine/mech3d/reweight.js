@@ -25,6 +25,7 @@ export function milkyGridOptics(part, { table, db = null }, milkies) {
 export function rwCoeffs(base, grid) {
   if (!(base.mus > 0)) throw new Error('기준 Milky 의 μs 가 0 — 재가중은 Milky > 0 에서 시작해야 함');
   if (grid.some((g) => Math.abs(g.g - base.g) > 1e-9)) throw new Error('격자의 g 가 기준과 다름 — 재가중 불가');
+  if (grid.some((g) => !(g.mus > 0))) throw new Error('격자 μs 가 0 — Milky > 0 이어야 함');
   const n = grid.length, lr = new Float64Array(n), dm = new Float64Array(n);
   grid.forEach((g, j) => { lr[j] = Math.log(g.mus / base.mus); dm[j] = g.mus + g.mua - (base.mus + base.mua); });
   return { n, lr, dm };

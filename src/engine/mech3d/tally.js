@@ -42,7 +42,7 @@ export function makeAccumulator(G, line, obs, rw = null) {
     get rw() { return C ? { acc: racc, sf, sf2, n: nRw } : null; },
     // p = 광자 번호(runMC3D 가 마지막 인자로 전달). 탈출 광자가 마지막 출사 광자와 같을 때만 집계 — 흡수·소실된 광자의 낡은 출사점을 쓰지 않는다.
     onExit(part, face, x, y, z, dx, dy, dz, w, p) { has = faces.has(`${part}|${face}`); lx = x; ly = y; lz = z; lp = p; },
-    onEscape(x, y, z, dx, dy, dz, w, p, tL = 0, tK = 0) {
+    onEscape(x, y, z, dx, dy, dz, w, p, tL = 0, tK = 0) {   // tL/tK 는 runMC3D 의 track 옵션이 줌 — rw 인데 track 없으면 모든 f = 1
       if (!has || lp !== p) return;
       has = false;
       if (dx * d[0] + dy * d[1] + dz * d[2] < cosC) return;
