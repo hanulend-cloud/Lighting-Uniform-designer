@@ -1,5 +1,5 @@
 // ② LED 개수·피치(후보 응답 합산): node test/mech3d-basis.mjs
-import { candidatePositions, interpWeights, layoutMap, searchLeds, pitchOptions } from '../src/engine/mech3d/basis.js';
+import { candidatePositions, interpWeights, layoutMap, searchLeds, pitchOptions, nearestRow } from '../src/engine/mech3d/basis.js';
 import { ok, done } from './mech3d-util.mjs';
 import { loadTable } from './l2-util.mjs';
 import { plateFixture } from './m3-fixture.mjs';
@@ -32,6 +32,12 @@ const line = { length: 100, closed: false };
   const w = searchLeds({ G: G2, obs: { targetLen: 0.5, targetWid: 0.8 }, line, cand, maps: maps2, pitches: [0], nMax: 20, emitted: 1 });
   let wantN = 1; for (; wantN <= 20; wantN++) { const t = searchLeds({ G: G2, obs: { targetLen: 0.5, targetWid: 0 }, line, cand, maps: maps2, pitches: [0], nMax: wantN, emitted: 1 }); if (t.feasible) break; }
   ok(!w.feasible && w.n === wantN && w.stats.Ulen >= 0.5, `폭이 막으면 길이 목표를 넘는 가장 적은 개수: ${w.n}개(길이만 보면 ${wantN}개) · ${w.reason}`); }
+{ // 가장 가까운 안: NaN 여유·길이 U 행은 뺌 · 같은 개수면 낮은 Milky(j) → 효율
+  const o = { targetLen: 0.8, targetWid: 0.6 }, row = (n, j, Ulen, margin, eff = 0.5) => ({ n, pitch: 0, j, stats: { Ulen, Uwid: 0.5 }, eff, margin });
+  const b = nearestRow([row(1, 0, NaN, NaN), row(2, 0, 0.7, NaN), row(3, 1, 0.75, -0.05, 0.9), row(3, 0, 0.75, -0.05, 0.4), row(4, 0, 0.75, -0.055)], o, 5);
+  ok(b.n === 3 && b.j === 0, `NaN 행 제외 → 3개 · 낮은 j 우선: n ${b.n} j ${b.j}`);
+  const z = nearestRow([row(1, 0, NaN, NaN)], o, 5);
+  ok(z.n === 5 && z.stats === null, '믿을 행 없음 → nMax 기본값'); }
 { const p = pitchOptions({ length: 100, closed: false }, 5, { min: 10, max: 30 });
   ok(p[0] === 0 && p.includes(10) && p.includes(25) && !p.includes(26), '피치 후보: 0(균등) + 범위 1mm 간격, (n−1)·p ≤ L 만');
   ok(pitchOptions({ length: 100, closed: true }, 5, { min: 10, max: 30 }).join() === '0', '닫힌 라인은 균등만'); }

@@ -18,6 +18,7 @@ import { mountCommandBar } from './command-bar.js';
 import { renderFeatureTree, toggleVisibility } from './feature-tree.js';
 import { partClearance, limitXform, axisLimits, TOL } from '../../engine/mech3d/clearance.js';
 import { renderPropertyPanel } from './property-panel.js';
+import { clampVirtual } from '../mech3d-light-panel.js';
 import { createResultsPanel } from './results-panel.js';
 import { renderStatusBar } from './status-bar.js';
 import { createAdRunner } from './autodesign-run.js';
@@ -265,7 +266,10 @@ function renderMarkers() {
 function hitName(M, key, line = A.store.session.line) {
   const [k, j] = [key[0], +key.slice(2)];
   if (k === 'p') return M.parts[j]?.name ?? `부품 ${j + 1}`;
-  if (k === 'l') return j === (L.stepLayout(M, line)?.pcb ?? M.light.step?.pcb) ? 'PCB' : `LED ${j + 1}`;   // j = 배치(원래/가상) 번호
+  if (k === 'l') {   // j = 배치(원래/가상) 번호 — 가상 LED 는 복사 순번
+    const lay = L.stepLayout(M, line), i = lay?.virtual ? lay.leds.indexOf(j) : -1;
+    return j === (lay?.pcb ?? M.light.step?.pcb) ? 'PCB' : `LED ${(i >= 0 ? i : j) + 1}`;
+  }
   return `LED ${j + 1} 발광점`;
 }
 // 선택 부품의 크기·위치 가능 범위(캐시: 장면·부품·LED 가 같으면 재사용) — 표시·입력 제한용으로 여유 TOL 을 뺀다
@@ -343,14 +347,12 @@ function adBaseMesh(i, ctx) {
 }
 // 형상 후보 메쉬 — 세분은 메모(refinedFor: 후보 27개도 R 3개 → 세분 3번). hDiv = R/hMax(STEP 은 거칠게 3)
 const adShapeMesh = (base, mod, hDiv = 8) => deformPart(refinedFor(base, mod.frame, mod.centers, mod.R, Math.max(0.1, mod.R / hDiv)), mod.frame, heightsFor(base, mod.frame, mod.cell), mod);
-// LED STEP: 설계 d 가 가상 배치인가 — 현재가 원래 위치이고 개수·피치가 그대로면 원래(①·③ 만 돌리면 가상으로 바꾸지 않음)
-const adStepVirt = (d, cur) => !(cur?.stepOrig && d.count === cur.count && d.pitch === cur.pitch);
 // 설계 → (mspec 복사본, 기구 메쉬) — 형상은 후보 메쉬로 바꾼 부품 포함
 function designScene(d, ctx) {
   const M = adClone(ctx.M0), rt = ctx.rt, mp = ctx.mp;
   if (mp != null && d.milky != null) M.parts[mp] = setPartMaterialParam(M.parts[mp], 'milky', d.milky);
   if (M.light.kind === 'manual' && d.count != null) { M.light.manual.count = d.count; M.light.manual.pitch = d.pitch; }
-  if (M.light.kind === 'step' && M.light.step && d.count != null && adStepVirt(d, ctx.cur)) M.light.step.virtual = { count: d.count, pitch: d.pitch };
+  if (M.light.kind === 'step' && M.light.step && d.count != null && d.stepVirt) M.light.step.virtual = { count: d.count, pitch: d.pitch };
   let parts = rt.parts;
   if (d.shape) {
     const i = d.shape.part, mod = shapeModFor(d.shape, M, ctx.line), base = adBaseMesh(i, ctx);
@@ -381,10 +383,10 @@ async function adRun() {
   st.userPaused = ps === 'paused'; st.deferred = ['paused', 'running', 'pending', 'starting'].includes(ps);
   if (ps === 'pending') A.prog.cancel(); else A.prog.pause();
   st.running = { frac: 0, text: '준비' }; st.result = null; A.meshShown = null; renderView(); renderAuto();
-  // LED STEP: 현재 = 가상이면 그 개수·피치, 아니면 현재 발광점 수·0(stepOrig = 원래 위치)
+  // LED STEP: 현재 = 가상이면 그 개수·피치, 아니면 현재 발광점 수·0(stepOrig = 원래 위치) · stepVirt = 설계가 가상 배치인가(② 가 STEP 에서 돌면 엔진이 true)
   const stp = M0.light.kind === 'step', sv = stp ? M0.light.step?.virtual ?? null : null;
   let nOrig = 0; if (stp && !sv) { try { nOrig = L.currentEmitters(M0, line).length; } catch { nOrig = 0; } }
-  const cur = { milky: ctx.mp != null ? M0.parts[ctx.mp].material.milky : null, count: stp ? (sv ? sv.count : nOrig) : M0.light.manual?.count ?? 0, pitch: stp ? sv?.pitch ?? 0 : M0.light.manual?.pitch ?? 0, shape: null, ...(stp ? { stepOrig: !sv } : {}) };
+  const cur = { milky: ctx.mp != null ? M0.parts[ctx.mp].material.milky : null, count: stp ? (sv ? sv.count : nOrig) : M0.light.manual?.count ?? 0, pitch: stp ? sv?.pitch ?? 0 : M0.light.manual?.pitch ?? 0, shape: null, ...(stp ? { stepOrig: !sv, stepVirt: !!sv } : {}) };
   ctx.cur = cur;
   const minWall = { ...defaultChecks(), ...(M0.checks ?? {}) }.minWall, t0 = performance.now();
   const shapeCands = stages.shape ? shapeCandidates({ t0: heightsFor(adBaseMesh(sp, ctx), line.frame, 0.5).t0, pitch: cur.count > 1 ? (cur.pitch > 0 ? cur.pitch : line.length / cur.count) : line.length, hasCenters: true }) : [];
@@ -438,7 +440,7 @@ async function adRun() {
   let res = null;
   try {
     res = await runAutoDesign({
-      stages, obs, G, line, current: cur, milkyMax: st.sel.milkyMax ?? Math.max(cur.milky ?? 0, 5), nMax: Math.max(1, Math.min(60, Math.floor(line.length / 2))), pitchRange: null,
+      stages, obs, G, line, current: cur, milkyMax: st.sel.milkyMax ?? Math.max(cur.milky ?? 0, 5), nMax: Math.max(1, Math.min(60, Math.floor(line.length / 2))), pitchRange: null, stepMode: stp,
       shapePart: sp, shapeCands,
     }, io);
   } catch (e) { if (A === a && !R.stopped) setStatus(`자동설계 실패: ${e.message}`); }
@@ -450,7 +452,7 @@ async function adRun() {
     const smI = sp >= 0 && M0.parts[sp]?.shapeMod ? sp : M0.parts.findIndex((p) => p.shapeMod), sm = smI >= 0 ? M0.parts[smI].shapeMod : null;   // 비교표 '현재' 열 — 이미 적용된 형상(표시만)
     st.result = { design: res.best, feasible: res.feasible, reason: res.reason, shape: res.best.shape ?? null, stepLeds: nStep, unchanged: !!res.unchanged, ctx, stages,
       cur: { ...cur, shape: sm ? { dt: sm.dt, h: sm.h, R: sm.R } : null, Ulen: C?.stats?.Ulen, Uwid: C?.stats?.Uwid, eff: C?.eff ?? NaN, profile: C?.stats?.profile ?? null },
-      best: { ...res.best, ...(stp ? { stepOrig: !adStepVirt(res.best, cur) } : {}), Ulen: res.verified.stats.Ulen, Uwid: res.verified.stats.Uwid, eff: res.verified.eff, profile: res.verified.stats.profile ?? null } };
+      best: { ...res.best, ...(stp ? { stepOrig: !res.best.stepVirt } : {}), Ulen: res.verified.stats.Ulen, Uwid: res.verified.stats.Uwid, eff: res.verified.eff, profile: res.verified.stats.profile ?? null } };
   }
   // Worker 에 자동설계 장면이 올라가 있음 — 진행 중이던 계산·실행 중 편집은 다시 시작, 끝난 계산은 그대로.
   // restart 는 일시정지 상태를 이어가므로(wantPaused) 사용자가 멈춘 게 아니면 resume(대기 중 resume = 일시정지 요청 해제)
@@ -473,7 +475,7 @@ function adApply() {
   const milkyCh = mp != null && d.milky != null && d.milky !== M.parts[mp].material.milky;
   const lightCh = !!r.stages?.leds && M.light.kind === 'manual' && d.count != null && (d.count !== Lm.count || d.pitch !== Lm.pitch);
   const sv = M.light.kind === 'step' ? M.light.step?.virtual ?? null : null;   // LED STEP: 가상 배치로 바뀌었고 이전과 다르면
-  const stepCh = !!r.stages?.leds && M.light.kind === 'step' && !!M.light.step && d.count != null && adStepVirt(d, r.ctx.cur) && (!sv || sv.count !== d.count || sv.pitch !== d.pitch);
+  const stepCh = !!r.stages?.leds && M.light.kind === 'step' && !!M.light.step && d.count != null && !!d.stepVirt && (!sv || sv.count !== d.count || sv.pitch !== d.pitch);
   const mod = d.shape ? adPreview().M.parts[d.shape.part].shapeMod : null;
   const undo = { milky: milkyCh ? [mp, adClone(M.parts[mp].material)] : null, manual: lightCh ? adClone(Lm) : null, stepVirt: stepCh ? { v: adClone(sv) } : null, shape: mod ? [d.shape.part, adClone(M.parts[d.shape.part].shapeMod ?? null)] : null };
   st.result = null; A.meshShown = null;
@@ -590,8 +592,12 @@ function propHandlers() {
     }),
     // LED STEP 가상 배치: v = { count, pitch } | null(원래 STEP 위치). 가상 중에는 발광면·제외 클릭을 끈다
     onStepVirtual: (v) => st.update('light', (m, x) => {
-      m.light.step.virtual = v ? { count: Math.max(1, Math.round(v.count)), pitch: Math.max(0, v.pitch) } : null;
+      const c = v ? clampVirtual(v, x.line) : null;   // 개수 상한 · (개수−1)·피치 ≤ 라인 길이 · 닫힌 라인 = 균등
+      m.light.step.virtual = c;
       if (v && (x.pick === 'led' || x.pick === 'ledx')) { x.pick = null; x.status = '가상 배치 중에는 원래 STEP 위치로 돌아가서 지정하세요'; }
+      if (c && (c.count !== Math.round(v.count) || c.pitch !== v.pitch)) x.status = `가상 배치 보정: ${c.count}개 ${c.pitch > 0 ? `피치 ${c.pitch}mm` : '균등'}(라인 길이 안으로)`;
+      const err = c ? L.stepLayout(m, x.line)?.err : null;
+      if (err) x.status = `가상 배치 실패 — 원래 STEP 위치로 계산: ${err}`;
     }),
     onManual: (key, v) => st.update('light', (m, x) => {
       const Lm = m.light.manual;
@@ -664,13 +670,14 @@ function autoGrid() { const l = A.store.session.line; return l ? { cellS: Math.m
 function renderAll(tag = 'all') {
   const st = A.store, M = st.mspec, S = st.session;
   renderView();
+  const lay = M.light.kind === 'step' ? L.stepLayout(M, S.line) : undefined;   // LED STEP 실제 배치(가상 실패 표시용)
   renderFeatureTree($('#m3-tree'), M, S, {
     onNode: (id) => st.update('session', (_, x) => { x.node = id; x.sel = id.startsWith('part:') ? { part: +id.slice(5), face: null } : null; }),
     onEye: (id, only) => st.update('view', (m, x) => Object.assign(x, toggleVisibility(id, only, m.parts.length, x.hidden, x.hideLeds))),
-  });
+  }, lay);
   const pi = S.node?.startsWith('part:') ? +S.node.slice(5) : -1, clr = pi >= 0 ? clearanceOf(pi) : null;
   if (clr !== A.clrShown) { A.clrShown = clr; renderMarkers(); }
-  if (tag !== 'view') renderPropertyPanel($('#m3-props'), M, S, { dbList: A.ctx.materialDb()?.list() ?? [], auto: autoGrid(), dir: M.observe.dir ?? S.line?.frame.d, lineInfo: lineInfo(), clearance: clr, xfInfo: pi >= 0 ? xformInfoOf(pi) : null, xfMsg: S.xfMsg?.part === pi ? S.xfMsg.text : '' }, propHandlers());
+  if (tag !== 'view') renderPropertyPanel($('#m3-props'), M, S, { dbList: A.ctx.materialDb()?.list() ?? [], auto: autoGrid(), dir: M.observe.dir ?? S.line?.frame.d, lineInfo: lineInfo(), clearance: clr, xfInfo: pi >= 0 ? xformInfoOf(pi) : null, xfMsg: S.xfMsg?.part === pi ? S.xfMsg.text : '', lay: lay ?? null }, propHandlers());
   if (tag === 'session' || tag === 'all') renderMarkers();
   A.cmd.update(S, S.calc);
   renderStatus();
@@ -687,10 +694,10 @@ function renderView() {
   const v = A.view, cur = getMech3d();
   if (!v || !cur) return;
   const M = A.store.mspec, S = A.store.session, stp = M.light.kind === 'step' ? M.light.step : null;
-  const lay = stp ? L.stepLayout(M, S.line) : null, lp = lay?.parts ?? null;   // 원래/가상 배치(캐시 객체)
+  const pv = adPreview();   // 자동설계 비교 중 = 최적안 미리보기(형상 메쉬·LED 위치)
+  const lay = stp ? L.stepLayout(pv?.M ?? M, S.line) : null, lp = lay?.parts ?? null;   // 원래/가상 배치(캐시 객체) — 미리보기면 최적안 배치(몸체 = 화살표)
   const ledSet = new Set(lay?.leds ?? []), exSet = new Set(lay?.excluded ?? []);   // 제외된 LED 는 회색(불투명) — 발광 화살표도 빠짐
   const kinds = [...M.parts.map((p) => p.material.kind), ...(lp ?? []).map((_, i) => (i === lay.pcb ? 'pcb' : ledSet.has(i) && !exSet.has(i) ? 'led' : 'opaque'))];
-  const pv = adPreview();   // 자동설계 비교 중 = 최적안 미리보기(형상 메쉬·LED 위치)
   const meshKey = [pv ?? cur, lp];   // 기구·LED 메쉬(위치 보정 포함 — 캐시 객체)가 바뀌면 다시 그림. 카메라는 기구가 바뀔 때만 맞춤
   if (!A.meshShown || A.meshShown.some((x, i) => x !== meshKey[i])) {
     const keepCamera = !!A.meshShown && A.meshShown[0].raw === cur.raw;   // 크기·위치 조절만 바뀌면 카메라 유지

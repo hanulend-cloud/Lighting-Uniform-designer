@@ -1,4 +1,5 @@
 // 자동설계 카드 — spec P4 §3. 체크 3개(①②③) · ③ 대상 부품 · [실행]/[중지] · 진행 · 현재|최적 비교 · [적용][취소][되돌리기][STEP]
+import { stepRefEmitter } from '../../engine/mech3d/virtual-leds.js';   // 가상 배치 기준 LED(엔진과 같은 규칙)
 const esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 const f2 = (v) => (Number.isFinite(v) ? v.toFixed(2) : '–');
 
@@ -30,8 +31,6 @@ export function profileSvg(cur, best, W = 200, H = 48) {
   return `<div class="m3-row"><span class="mut">길이 프로파일(각 최대 = 1) · 회색 현재 · 색 최적</span></div><svg class="m3-ad-prof" viewBox="0 0 ${W} ${H}" width="100%" height="${H}" preserveAspectRatio="none" role="img" aria-label="길이 프로파일 현재 대 최적">${a}${b}</svg>`;
 }
 
-// 가상 배치 기준 LED(virtualLayout 과 같은 규칙: 확인 필요·제외가 아닌 첫 발광점)
-const stepRefEmitter = (st) => { const ex = new Set(st?.excluded ?? []); return (st?.emitters ?? []).find((e) => !e.needsCheck && !ex.has(e.part)) ?? null; };
 // M = spec.mech3d, info.non25[i] = 부품 i 의 비 2.5D 비율(관측 방향, app 이 frameHeights 로 계산)
 export function stageAvailability(M, info) {
   const milkyParts = M.parts.map((p, i) => (p.material.kind === 'milky' ? i : -1)).filter((i) => i >= 0);

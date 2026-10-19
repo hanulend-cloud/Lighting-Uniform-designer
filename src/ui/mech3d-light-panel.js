@@ -1,5 +1,6 @@
 // 3D 기구 — 광원 · LED · 관측면 · 목표 속성 편집기 (spec 2026-10-14 §4·§5, 2026-10-15 m3-cad-ui §2). 상태 없음.
 // P3 의 renderLightPanel 을 피처 트리 노드별로 나눴다. 계산 버튼·결과 표시는 자동 점진 계산(결과 패널·상태 띠)으로 옮김.
+import { stepRefEmitter } from '../engine/mech3d/virtual-leds.js';
 const esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
 const num = (v, d = 1) => (Number.isFinite(v) ? v.toFixed(d) : '-');
 const numIn = (v, d) => (Number.isFinite(v) ? v.toFixed(d) : '');   // number input 값(빈칸 허용)
@@ -44,27 +45,41 @@ export function renderLightProps(el, m, ui, h) {
   on(el, '[data-lp-man]', 'change', (x) => { const k = x.dataset.lpMan; if (k === 'pcbKind' || k === 'side') h.onManual(k, x.value); else { const v = readNum(x); if (v != null) h.onManual(k, v); } });
 }
 
+// 가상 배치 개수 상한 = 자동설계 ② 와 같은 차수: max(1, min(200, ⌊L/2⌋)). 라인 없으면 200
+export const virtCountMax = (line) => Math.max(1, Math.min(200, Math.floor((line?.length ?? 400) / 2)));
+// 가상 배치 값 보정(순수): 개수 1~상한 정수 · 피치 ≥ 0, (개수−1)·피치 ≤ 라인 길이 · 닫힌 라인 = 피치 0(균등)
+export function clampVirtual(v, line = null) {
+  const count = Math.min(virtCountMax(line), Math.max(1, Math.round(v.count)));
+  let pitch = Math.max(0, Number.isFinite(v.pitch) ? v.pitch : 0);
+  if (line?.closed) pitch = 0;
+  else if (line && count > 1) pitch = Math.min(pitch, Math.floor((line.length / (count - 1)) * 10) / 10);
+  return { count, pitch };
+}
 // LED STEP "배치" 행(순수 HTML): [STEP 원래 위치 | 가상 배치] + 가상이면 개수·피치·[원래 STEP 위치로] (spec P4 §2.2a)
-export function stepLayoutRowHtml(st) {
-  const v = st.virtual, can = !!st.emitters?.length;
+// line = 관측 라인({ length, closed } | null) — 개수 상한·닫힌 라인 피치 비활성
+export function stepLayoutRowHtml(st, line = null) {
+  const v = st.virtual, ref = stepRefEmitter(st), closed = !!line?.closed;
   const radio = (val, label, chk, dis) => `<label><input type="radio" name="lp-vmode" value="${val}" data-lp-vmode ${chk ? 'checked' : ''} ${dis ? 'disabled title="LED 발광면을 먼저 지정하세요"' : ''}> ${label}</label>`;
-  return `<div class="m3-row"><label>배치</label>${radio('orig', 'STEP 원래 위치', !v, false)} ${radio('virt', '가상 배치', !!v, !can && !v)}</div>
-    ${v ? `<div class="m3-row">개수<input type="number" min="1" step="1" value="${v.count}" data-lp-virt="count" aria-label="가상 배치 LED 개수"> 피치<input type="number" min="0" step="0.5" value="${v.pitch}" data-lp-virt="pitch" aria-label="가상 배치 피치 mm">mm <span class="mut">(0 = 균등)</span> <button data-lp-vorig>원래 STEP 위치로</button></div>
-    <div class="m3-row mut">기준 LED 의 몸체·발광점을 관측 라인을 따라 복사 — 원래 STEP 은 그대로</div>` : ''}`;
+  return `<fieldset class="m3-row"><legend>배치</legend>${radio('orig', 'STEP 원래 위치', !v, false)} ${radio('virt', '가상 배치', !!v, !ref && !v)}</fieldset>
+    ${v ? `<div class="m3-row">개수<input type="number" min="1" max="${virtCountMax(line)}" step="1" value="${v.count}" data-lp-virt="count" aria-label="가상 배치 LED 개수"> 피치<input type="number" min="0" step="0.5" value="${v.pitch}" data-lp-virt="pitch" aria-label="가상 배치 피치 mm"${closed ? ' disabled' : ''}>mm <span class="mut">${closed ? '닫힌 라인은 균등 배치' : '(0 = 균등)'}</span> <button data-lp-vorig>원래 STEP 위치로</button></div>
+    <div class="m3-row mut">${ref ? `기준 = LED STEP 부품 ${ref.part + 1} — ` : ''}기준 LED 의 몸체·발광점을 관측 라인을 따라 복사 — 원래 STEP 은 그대로</div>` : ''}`;
 }
 // LED 노드: 인식 상태 · (LED STEP) 배치 · 배광 · 지향각 · 발광면 크기 · 광속(lm/개, 0 = 상대값) · PCB 색
-// ui = { pick, ledInfo }, h = { onLedSpec(key,val), onSolder(v), onPick(mode|null), onStepVirtual(v|null) }
+// ui = { pick, ledInfo, line?, lay?(stepLayout 결과 — 실제 배치·err) }, h = { onLedSpec(key,val), onSolder(v), onPick(mode|null), onStepVirtual(v|null) }
 export function renderLedProps(el, m, ui, h) {
   const L = m.light;
   if (L.kind === 'none') { el.innerHTML = '<div class="m3-h">속성 · LED</div><div class="mut">광원 노드에서 방식을 먼저 고르세요</div>'; return; }
-  const st = L.step, v = L.kind === 'step' ? st?.virtual : null;
+  const st = L.step, v = L.kind === 'step' ? st?.virtual : null, lay = ui.lay ?? null;
   const nLed = (st?.leds ?? []).filter((i) => !(st.excluded ?? []).includes(i)).length;
+  const failed = !!v && !lay?.virtual && (!!lay?.err || !!ui.line);   // 라인이 있는데 원래 배치로 돌아감(오류·메쉬 없음)
+  const virtTxt = !v ? '' : lay?.virtual ? ` · 가상 배치 ${lay.leds.length}개` : failed ? ` · <span class="warn">가상 배치 실패 — 원래 ${nLed}개로 계산</span>` : ` · 가상 배치 ${v.count}개 <span class="mut">(관측 라인 대기)</span>`;
   const status = L.kind === 'step'
-    ? (st?.emitters?.length ? `LED ${st.leds.length}개 인식${st.excluded?.length ? ` · 제외 ${st.excluded.length}개` : ''}${v ? ` · 가상 배치 ${v.count}개` : ''}` : '<span class="mut">LED 발광면을 아직 지정하지 않음</span>')
+    ? (st?.emitters?.length ? `LED ${st.leds.length}개 인식${st.excluded?.length ? ` · 제외 ${st.excluded.length}개` : ''}${virtTxt}` : `<span class="mut">LED 발광면을 아직 지정하지 않음</span>${virtTxt}`)
     : `직접 배치 ${L.manual.count}개`;
   el.innerHTML = `<div class="m3-h">속성 · LED</div>
     <div class="m3-row">${status}</div>
-    ${L.kind === 'step' && st ? stepLayoutRowHtml(st) : ''}
+    ${failed ? `<div class="m3-row"><span class="warn">${esc(lay?.err ?? 'LED STEP 메쉬가 없음 — 다시 불러오세요')}</span></div>` : ''}
+    ${L.kind === 'step' && st ? stepLayoutRowHtml(st, ui.line ?? null) : ''}
     ${L.kind === 'step' && st ? (v ? '<div class="m3-row mut">가상 배치 중에는 발광면·제외 지정을 쓰지 않음(원래 STEP 위치에서 지정)</div>' : `<div class="m3-row">${pickBtn(ui, 'led', 'LED 발광면 클릭')} ${pickBtn(ui, 'ledx', 'LED 제외/포함 클릭')}</div>`) : ''}
     ${ui.ledInfo ? `<div class="m3-row mut">${esc(ui.ledInfo)}</div>` : ''}
     <div class="m3-row"><label>배광</label><select data-lp-spec="model"><option value="lambertian" ${sel(L.spec.model, 'lambertian')}>램버시안</option><option value="gaussian" ${sel(L.spec.model, 'gaussian')}>가우시안</option></select>
@@ -81,8 +96,8 @@ export function renderLedProps(el, m, ui, h) {
   });
   on(el, '[data-lp-solder]', 'change', (x) => h.onSolder(x.value));
   // 배치 전환: 처음 가상으로 = 현재 LED 수·피치 0(균등)
-  on(el, '[data-lp-vmode]', 'change', (x) => { if (!x.checked) return; if (x.value === 'virt') { if (!v) h.onStepVirtual({ count: Math.max(1, nLed), pitch: 0 }); } else if (v) h.onStepVirtual(null); });
-  on(el, '[data-lp-virt]', 'change', (x) => { const n = readNum(x); if (n != null && v) h.onStepVirtual({ ...v, [x.dataset.lpVirt]: x.dataset.lpVirt === 'count' ? Math.max(1, Math.round(n)) : n }); });
+  on(el, '[data-lp-vmode]', 'change', (x) => { if (!x.checked) return; if (x.value === 'virt') { if (!v) h.onStepVirtual(clampVirtual({ count: Math.max(1, nLed), pitch: 0 }, ui.line ?? null)); } else if (v) h.onStepVirtual(null); });
+  on(el, '[data-lp-virt]', 'change', (x) => { const n = readNum(x); if (n != null && v) h.onStepVirtual(clampVirtual({ ...v, [x.dataset.lpVirt]: n }, ui.line ?? null)); });
   on(el, '[data-lp-vorig]', 'click', () => h.onStepVirtual(null));
 }
 

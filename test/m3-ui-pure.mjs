@@ -7,7 +7,7 @@ import { ramp, NO_DATA } from '../src/ui/m3/colormap.js';
 import { defaultLight, defaultObserve, defaultChecks } from '../src/engine/mech3d/defs.js';
 import { defaultPart, setPartMaterial, setPartMaterialParam } from '../src/engine/mech3d/materials.js';
 import { clearanceHtml } from '../src/ui/mech3d-panel.js';
-import { stepLayoutRowHtml } from '../src/ui/mech3d-light-panel.js';
+import { stepLayoutRowHtml, clampVirtual, virtCountMax } from '../src/ui/mech3d-light-panel.js';
 import { ok, done } from './mech3d-util.mjs';
 import { stageAvailability, autoCardHtml, compareHtml, clampCap, overallFrac, etaText, profileSvg } from '../src/ui/m3/autodesign-panel.js';
 
@@ -127,5 +127,16 @@ ok(clampCap(12) === 9.9 && clampCap(0.1) === 0.5 && clampCap(3) === 3 && clampCa
   ok(/value="orig" data-lp-vmode checked/.test(h0) && !/data-lp-virt/.test(h0) && !/data-lp-vorig/.test(h0), '배치 행: 원래 위치 선택 · 개수·피치 없음');
   ok(/value="virt" data-lp-vmode checked/.test(h1) && /value="6" data-lp-virt="count"/.test(h1) && /value="15" data-lp-virt="pitch"/.test(h1) && h1.includes('원래 STEP 위치로'), '배치 행: 가상 → 개수·피치·원래 위치로');
   ok(/value="virt" data-lp-vmode\s+disabled/.test(h2), '발광면 미지정 → 가상 배치 비활성');
-  ok(/data-lp-virt="count" aria-label="가상 배치 LED 개수"/.test(h1) && /data-lp-virt="pitch" aria-label="가상 배치 피치 mm"/.test(h1), '배치 행: 개수·피치 입력 aria-label'); }
+  ok(/data-lp-virt="count" aria-label="가상 배치 LED 개수"/.test(h1) && /data-lp-virt="pitch" aria-label="가상 배치 피치 mm"/.test(h1), '배치 행: 개수·피치 입력 aria-label');
+  ok(/<fieldset[^>]*><legend>배치<\/legend>/.test(h0) && h1.includes('기준 = LED STEP 부품 2'), '배치 행: fieldset·legend · 기준 부품 이름');
+  ok(/value="virt" data-lp-vmode\s+disabled/.test(stepLayoutRowHtml({ ...st, emitters: [{ part: 3 }] })) && /value="virt" data-lp-vmode\s+disabled/.test(stepLayoutRowHtml({ ...st, emitters: [{ part: 1, needsCheck: true }] })), '가상 배치 활성 = 엔진 기준 규칙(제외·확인 필요 발광점만 → 비활성)');
+  const hc = stepLayoutRowHtml({ ...st, virtual: { count: 6, pitch: 0 } }, { length: 120, closed: true }), ho = stepLayoutRowHtml({ ...st, virtual: { count: 6, pitch: 0 } }, { length: 120, closed: false });
+  ok(/data-lp-virt="pitch" aria-label="가상 배치 피치 mm" disabled/.test(hc) && hc.includes('닫힌 라인은 균등 배치') && !/data-lp-virt="pitch"[^>]*disabled/.test(ho) && /max="60" step="1" value="6" data-lp-virt="count"/.test(ho), '배치 행: 닫힌 라인 피치 비활성 · 개수 상한 = ⌊L/2⌋');
+  ok(virtCountMax({ length: 1000 }) === 200 && virtCountMax({ length: 1 }) === 1 && virtCountMax(null) === 200, '가상 개수 상한: max(1, min(200, ⌊L/2⌋))');
+  const c1 = clampVirtual({ count: 5, pitch: 40 }, { length: 100, closed: false }), c2 = clampVirtual({ count: 999, pitch: 3 }, { length: 100, closed: true }), c3 = clampVirtual({ count: 2.4, pitch: -1 }, null);
+  ok(c1.count === 5 && c1.pitch === 25 && c2.count === 50 && c2.pitch === 0 && c3.count === 2 && c3.pitch === 0, `clampVirtual: (n−1)·p ≤ L · 닫힌 = 균등 · 상한 (${JSON.stringify([c1, c2, c3])})`);
+  // 실제 배치로 배지·개수: 가상 성공 = 복사 수, 실패(오류) = 원래 개수 + '가상 배치 실패', 라인 대기 = 요청값
+  const vs = { ...st, virtual: { count: 6, pitch: 15 } }, nodeL = (S, lay) => treeNodes({ ...M, light: { ...defaultLight(), kind: 'step', step: vs } }, S, lay).find((n) => n.id === 'leds');
+  const okL = nodeL({ node: null, line: { kind: 'line', length: 100, width: 5 } }, { virtual: vs.virtual, leds: [3, 4, 5, 6, 7, 8] }), bad = nodeL({ node: null, line: { kind: 'line', length: 100, width: 5 } }, { virtual: null, leds: [1, 2, 3], err: '배치 길이 초과' }), wait = nodeL({ node: null, line: null }, { virtual: null, leds: [1, 2, 3] });
+  ok(okL.label === 'LED ×6' && okL.badge === '가상 6개 피치 15' && bad.label === 'LED ×2' && bad.badge === '가상 배치 실패' && wait.badge === '가상 6개 피치 15', `배지: ${okL.badge} / ${bad.label} ${bad.badge} / ${wait.badge}`); }
 done();

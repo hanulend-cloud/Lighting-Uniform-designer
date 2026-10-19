@@ -22,7 +22,8 @@ export function smoothU(stats) {
 // 통과 판정은 margin(원래 Ulen) 그대로, 미달안 순위만 평활 길이 U
 export const shapeScore = (r, obs) => (!r.ok ? -Infinity : margin(r.stats, obs) >= 0 ? 1 + r.eff : Math.min(smoothU(r.stats) / obs.targetLen, r.stats.Uwid == null ? Infinity : r.stats.Uwid / obs.targetWid));
 export const SCORE_EPS = 0.01;   // 최종안이 현재안보다 이만큼은 나아야 추천
-const sameDesign = (a, b) => ['count', 'pitch', 'milky'].every((k) => (a?.[k] ?? null) === (b?.[k] ?? null)) && JSON.stringify(a?.shape ?? null) === JSON.stringify(b?.shape ?? null);
+// stepVirt = LED STEP 가상 배치 여부(② 가 STEP 에서 돌면 true, current 는 현재 배치가 가상인지) — 개수가 같아도 원래 ↔ 가상은 다른 설계
+export const sameDesign = (a, b) => ['count', 'pitch', 'milky'].every((k) => (a?.[k] ?? null) === (b?.[k] ?? null)) && !!a?.stepVirt === !!b?.stepVirt && JSON.stringify(a?.shape ?? null) === JSON.stringify(b?.shape ?? null);
 
 // 단계적 압축: schedule = [[남길 수(첫 단계는 전체), 광자 수, 후보당 시간 제한 ms?]…]. 각 단계 결과 점수로 다음 단계 후보를 줄임
 export const SHAPE_SCHEDULE = [[27, 6e4, 2500], [6, 2e5, 4000], [2, 6e5, 6000]];
@@ -84,7 +85,7 @@ export async function runAutoDesign(cfg, io) {
     if (stop()) return { cancelled: true };
     const r = searchLeds({ G: cfg.G, obs, line: cfg.line, cand: B.cand, maps: B.maps, pitchRange: cfg.pitchRange ?? null, nMax: cfg.nMax, emitted: B.emitted });
     steps.push({ stage: 'leds', ...r });
-    d = { ...d, count: r.n, pitch: r.pitch };
+    d = { ...d, count: r.n, pitch: r.pitch, stepVirt: !!cfg.stepMode };   // cfg.stepMode = LED STEP(② 는 가상 배치를 점수 매김)
     if (!r.feasible) { feasible = false; reason = r.reason; }
   }
   if (stages.milky) {   // ① — (②가 고른 개수에서) 목표를 만족하는 최소 Milky

@@ -13,9 +13,14 @@ export function rotateAbout(p, c, k, a) {
 const rotDir = (d, k, a) => rotateAbout(d, [0, 0, 0], k, a);
 const angle = (line, s) => { const [tx, ty] = line.tangentAt(s); return Math.atan2(ty, tx); };
 
+// 가상 배치 기준 발광점 — 확인 필요·제외가 아닌 첫 발광점(엔진·UI 공통 규칙). 없으면 null
+export function stepRefEmitter(step) {
+  const ex = new Set(step?.excluded ?? []);
+  return (step?.emitters ?? []).find((e) => !e.needsCheck && !ex.has(e.part)) ?? null;
+}
 // count 0 = LED 몸체 없는 부품만(자동설계 ② 후보 지도). positions = s 목록을 직접(개수·피치 대신), bodies false = 발광점만(part null)
 export function virtualLayout({ parts, step, line, count, pitch = 0, positions = null, bodies = true }) {
-  const ex = new Set(step.excluded ?? []), em = (step.emitters ?? []).find((e) => !e.needsCheck && !ex.has(e.part));
+  const em = stepRefEmitter(step);
   if (!em) throw new Error('가상 배치: 기준이 될 LED 가 없음 — LED 발광면을 먼저 지정하세요');
   const ref = em.part, body = parts[ref], F = line.frame;
   const [x0, y0] = line.to2D(em.pos), [s0, w0] = line.toSW(x0, y0), base0 = line.to3D(x0, y0, 0);

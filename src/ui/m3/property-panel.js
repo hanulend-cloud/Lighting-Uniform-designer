@@ -12,7 +12,7 @@ export function renderPropertyPanel(el, M, S, ui, h) {
   }
   switch (id) {
     case 'light': renderLightProps(el, M, { pick: S.pick, ledInfo: S.ledInfo }, h); return;
-    case 'leds': renderLedProps(el, M, { pick: S.pick, ledInfo: S.ledInfo }, h); return;
+    case 'leds': renderLedProps(el, M, { pick: S.pick, ledInfo: S.ledInfo, line: S.line, lay: ui.lay ?? null }, h); return;
     case 'obs': renderObserveProps(el, M, { pick: S.pick, lineInfo: ui.lineInfo, lineErr: S.lineErr, auto: ui.auto, dir: ui.dir }, h); return;
     case 'target': renderTargetProps(el, M, h); return;
     case 'contacts': renderContactsProps(el, M, h); return;

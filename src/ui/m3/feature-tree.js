@@ -10,9 +10,10 @@ export function partBadge(p) {
   if (m.kind === 'clear' || m.kind === 'whiteTrans') return `${lab} ${Math.round(m.T * 100)}%`;
   return p.finish?.R != null ? `${lab} ${Math.round(p.finish.R * 100)}%` : lab;
 }
-// M = spec.mech3d, S = store.session → [{ id, label, badge, child, kind, sel, eye? }]
+// M = spec.mech3d, S = store.session, lay = LED STEP 실제 배치(stepLayout 결과, 생략 = 모름) → [{ id, label, badge, child, kind, sel, eye? }]
+// 가상 배치를 요청했지만 배치가 원래로 돌아갔으면(오류·메쉬 없음) 배지 '가상 배치 실패' · 개수 = 원래
 // eye: 보기 켜기/끄기 단추 — 'on' | 'off' (부품·LED 노드), 'all' (부품 머리: 숨긴 부품이 있을 때 "모두 보기")
-export function treeNodes(M, S) {
+export function treeNodes(M, S, lay) {
   const L = M.light, O = M.observe, out = [], hid = new Set(S.hidden ?? []);
   const node = (id, label, badge, child = false, kind = '', eye) => out.push({ id, label, badge, child, kind, sel: S.node === id, eye });
   node('parts', '▾ 부품', String(M.parts.length), false, '', hid.size || S.hideLeds ? 'all' : undefined);
@@ -20,9 +21,10 @@ export function treeNodes(M, S) {
   node('light', '▾ 광원', { none: '지정 안 함', step: 'LED STEP', manual: '직접 배치' }[L.kind]);
   if (L.kind !== 'none') {
     const ex = L.step?.excluded ?? [], vt = L.kind === 'step' ? L.step?.virtual : null;
-    const n = vt ? vt.count : L.kind === 'step' ? (L.step?.leds ?? []).filter((i) => !ex.includes(i)).length : L.manual.count;
+    const failed = !!vt && lay !== undefined && !lay?.virtual && (!!lay?.err || !!S.line);   // 라인 대기 중은 실패 아님
+    const n = vt && !failed ? (lay?.virtual ? lay.leds.length : vt.count) : L.kind === 'step' ? (L.step?.leds ?? []).filter((i) => !ex.includes(i)).length : L.manual.count;
     const pit = (p) => (p > 0 ? `피치 ${+(+p).toFixed(1)}` : '균등');
-    node('leds', `LED ×${n}`, L.kind === 'manual' ? pit(L.manual.pitch) : vt ? `가상 ${vt.count}개 ${pit(vt.pitch)}` : `${L.spec.beam}°`, true, 'led', L.kind === 'step' ? (S.hideLeds ? 'off' : 'on') : undefined);
+    node('leds', `LED ×${n}`, L.kind === 'manual' ? pit(L.manual.pitch) : failed ? '가상 배치 실패' : vt ? `가상 ${vt.count}개 ${pit(vt.pitch)}` : `${L.spec.beam}°`, true, 'led', L.kind === 'step' ? (S.hideLeds ? 'off' : 'on') : undefined);
   }
   const ln = S.line;
   node('obs', '▾ 관측면', ln ? `${LINE_KIND[ln.kind] ?? ln.kind} ${ln.length.toFixed(0)}×${ln.width.toFixed(0)}` : O.faces.length ? '인식 중' : '미지정');
@@ -43,8 +45,8 @@ export function toggleVisibility(id, only, nParts, hidden = [], hideLeds = false
 const BOUND = new WeakMap();   // el → { h, html }  (이벤트는 컨테이너에 한 번만 위임, 핸들러는 최신 것)
 const EYE = { on: ['👁', '보기 끄기 (Shift+클릭: 이 부품만 보기)', 'true'], off: ['◌', '보기 켜기 (Shift+클릭: 이 부품만 보기)', 'false'], all: ['👁', '모두 보기', 'false'] };
 const eyeHtml = (n) => n.eye ? `<span class="m3-eye ${n.eye}" role="button" tabindex="0" data-eye="${esc(n.id)}" title="${EYE[n.eye][1]}" aria-label="${esc(n.label)} ${EYE[n.eye][1]}" aria-pressed="${EYE[n.eye][2]}">${EYE[n.eye][0]}</span>` : '';
-export const treeHtml = (M, S) => `<div class="m3-h">피처 트리</div>${treeNodes(M, S).map((n) => `<div class="m3-node ${n.child ? 'child' : ''} ${n.sel ? 'sel' : ''} ${n.eye === 'off' ? 'hid' : ''}" role="button" tabindex="0"${n.sel ? ' aria-current="true"' : ''} data-node="${esc(n.id)}">${eyeHtml(n)}${esc(n.label)} <span class="${n.child ? `m3-badge k-${esc(n.kind)}` : 'b'}">${esc(n.badge)}</span></div>`).join('')}`;
-export function renderFeatureTree(el, M, S, h) {
+export const treeHtml = (M, S, lay) => `<div class="m3-h">피처 트리</div>${treeNodes(M, S, lay).map((n) => `<div class="m3-node ${n.child ? 'child' : ''} ${n.sel ? 'sel' : ''} ${n.eye === 'off' ? 'hid' : ''}" role="button" tabindex="0"${n.sel ? ' aria-current="true"' : ''} data-node="${esc(n.id)}">${eyeHtml(n)}${esc(n.label)} <span class="${n.child ? `m3-badge k-${esc(n.kind)}` : 'b'}">${esc(n.badge)}</span></div>`).join('')}`;
+export function renderFeatureTree(el, M, S, h, lay) {
   let B = BOUND.get(el);
   if (!B) {
     B = { h, html: null }; BOUND.set(el, B);
@@ -57,7 +59,7 @@ export function renderFeatureTree(el, M, S, h) {
     el.addEventListener('keydown', (e) => { if ((e.key !== 'Enter' && e.key !== ' ' && e.key !== 'Spacebar') || !e.target.closest?.('[data-node]')) return; e.preventDefault(); fire(e); });
   }
   B.h = h;
-  const html = treeHtml(M, S);
+  const html = treeHtml(M, S, lay);
   if (html === B.html) return;
   B.html = html;
   const ae = el.ownerDocument?.activeElement, keep = ae && el.contains(ae) ? (ae.dataset?.eye != null ? `eye:${ae.dataset.eye}` : ae.dataset?.node) : null;   // 다시 그려도 키보드 초점 유지

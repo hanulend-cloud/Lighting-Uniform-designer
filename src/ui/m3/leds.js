@@ -20,14 +20,15 @@ function stepPartsNow(M) {
   return ledCache.parts;
 }
 // 원래/가상 배치 하나로(spec P4 §2.2a) → { parts, leds, pcb, excluded, emitters, virtual, err? } | null.
-// 입력이 같으면 같은 객체(화면 meshKey 비교용). 캐시 2칸(원래·가상). line 이 없으면 원래 배치
+// 입력이 같으면 같은 객체(화면 meshKey 비교용). 캐시 4칸(LRU — 자동설계 복사본이 화면 항목을 밀어내지 않게). line 이 없으면 원래 배치
 export function stepLayout(M, line = null) {
   const st = M?.light?.step, parts = stepPartsNow(M);
   if (!st || !parts) return null;
   const v = st.virtual && line ? st.virtual : null, ln = v ? line : null;
   const key = JSON.stringify([st.leds, st.pcb, st.excluded, (st.emitters ?? []).map((e) => [e.part, e.pos, e.axis, e.xAxis, !!e.needsCheck]), v]);
   let c = layCache.find((x) => x.parts === parts && x.line === ln && x.key === key);
-  if (!c) { c = { parts, line: ln, key, res: stepLayoutOf({ parts, step: { ...st, virtual: v }, line: ln }) }; layCache = [c, ...layCache].slice(0, 2); }
+  if (!c) c = { parts, line: ln, key, res: stepLayoutOf({ parts, step: { ...st, virtual: v }, line: ln }) };
+  layCache = [c, ...layCache.filter((x) => x !== c)].slice(0, 4);   // 최근 사용을 앞으로
   return c.res;
 }
 // 화면·간섭용 LED STEP 부품: line 을 주면 가상 배치 반영, 없으면 원래(인식·클릭 맞춤은 STEP 번호 기준이라 원래)
