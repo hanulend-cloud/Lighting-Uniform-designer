@@ -61,10 +61,27 @@ export function autoCardHtml({ avail, sel, running, names = [], canRevert = fals
   return `<div class="m3-h">자동설계 <span class="mut">체크한 항목만 바꿈 · 순서 ②→①→③</span></div>${ITEMS.map(row).join('')}${mTarget}${cap}${part}
     ${running ? progHtml(running) : `<div class="m3-row">${run}${canRevert ? '<button type="button" data-ad="revert" title="마지막 적용 전 값으로">↶ 되돌리기</button>' : ''}<button type="button" data-ad="close">닫기</button></div>`}`;
 }
-const shapeText = (s) => `두께 ${s.dt >= 0 ? '+' : ''}${f2(s.dt)} · ${s.h >= 0 ? '포켓' : '돌출'} ${f2(Math.abs(s.h))} · R ${f2(s.R)} mm`;
-// 비교표 — cur/best = { count, pitch, milky, Ulen, Uwid, eff, profile? }, shape = { dt, h, R } | null, cur.shape = 이미 적용된 형상(없으면 원본)
+// 형상 문구 — 0 인 항 생략. e = 끝단 두께, c = 폭 가장자리 두께(+ 가장자리 두껍게 · − 얇게), h < 0 = 돌출
+const sg = (v) => `${v >= 0 ? '+' : '−'}${f2(Math.abs(v))}`, nz = (v) => Number.isFinite(v) && Math.abs(v) >= 5e-5;
+export function shapeText(s) {
+  const t = [];
+  if (nz(s.dt)) t.push(`두께 ${sg(s.dt)}`);
+  if (nz(s.h)) t.push(`${s.h > 0 ? '포켓' : '돌출'} ${f2(Math.abs(s.h))} R ${Number.isFinite(s.R) ? s.R.toFixed(1) : '–'}`);
+  if (nz(s.e)) t.push(`끝단 두께 ${sg(s.e)}`);
+  if (nz(s.c)) t.push(`폭 가장자리 두께 ${sg(s.c)}`);
+  return t.length ? `${t.join(' · ')} mm` : '변경 없음';
+}
+// ③ 선별 요약 — 이득 ≥ 0.005 만 큰 순, 나머지는 '효과 없음' 으로 이름만
+const VAR_NAME = { dt: '두께', h: '국부 형상', e: '끝단 두께', c: '폭 가장자리 두께' };
+export function screenSummary(gains) {
+  if (!gains) return '';
+  const ks = Object.keys(VAR_NAME).filter((k) => k in gains), on = ks.filter((k) => gains[k] >= 0.005).sort((a, b) => gains[b] - gains[a]), off = ks.filter((k) => !on.includes(k));
+  const head = on.length ? on.map((k) => `${VAR_NAME[k]} +${f2(gains[k])}`).join(' · ') : '모든 형상 변수';
+  return `효과(선별): ${head}${off.length ? `${on.length ? ' — ' : ' '}${on.length ? off.map((k) => VAR_NAME[k]).join('·') + ' ' : ''}효과 없음` : ''}`;
+}
+// 비교표 — cur/best = { count, pitch, milky, Ulen, Uwid, eff, profile? }, shape = { dt, h, R, e?, c? } | null, cur.shape = 이미 적용된 형상(없으면 원본), screen = ③ 선별 이득 { dt, e, c, h? } | null
 // stepLeds = LED STEP 발광점 수(직접 배치면 null) · STEP 이면 열마다 stepOrig(true = 원래 위치, false = 가상 배치) · unchanged = 최종안이 현재안 그대로(나은 설계 없음) → 사유 표시 · [적용] 비활성
-export function compareHtml({ cur, best, feasible, reason, shape, stepLeds = null, canRevert = false, unchanged = false }) {
+export function compareHtml({ cur, best, feasible, reason, shape, stepLeds = null, canRevert = false, unchanged = false, screen = null }) {
   const tr = (label, a, b) => `<tr><th>${label}</th><td>${a}</td><td class="${a !== b ? 'chg' : ''}">${b}</td></tr>`;
   const lay = (x) => `${x.count}개 ${x.pitch > 0 ? `피치 ${x.pitch}` : '균등'}`;
   const led = (x) => (stepLeds == null ? lay(x) : x.stepOrig === false ? `가상 ${lay(x)}` : `LED STEP 원래 ${x.count ?? stepLeds}개`);   // STEP: stepOrig = 원래 STEP 위치
@@ -76,7 +93,7 @@ export function compareHtml({ cur, best, feasible, reason, shape, stepLeds = nul
       ${tr('길이 U', f2(cur.Ulen), f2(best.Ulen))}${tr('폭 U', f2(cur.Uwid), f2(best.Uwid))}
       ${tr('광 효율', `${f2(cur.eff * 100)}%`, `${f2(best.eff * 100)}%`)}
       ${shape || cur.shape ? tr('형상', curShape, shape ? shapeText(shape) : curShape) : ''}
-    </table>${profileSvg(cur.profile, best.profile)}
+    </table>${profileSvg(cur.profile, best.profile)}${screen ? `<div class="m3-row mut">${esc(screenSummary(screen))}</div>` : ''}
     <div class="m3-row"><button type="button" data-ad="apply"${unchanged ? ' disabled title="현재안과 같음"' : ''}>적용</button><button type="button" data-ad="cancel">취소</button>${shape ? '<button type="button" data-ad="step">STEP 내보내기</button>' : ''}${canRevert ? '<button type="button" data-ad="revert">되돌리기</button>' : ''}</div>`;
 }
 

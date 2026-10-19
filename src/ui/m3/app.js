@@ -23,12 +23,12 @@ import { createResultsPanel } from './results-panel.js';
 import { renderStatusBar } from './status-bar.js';
 import { createAdRunner } from './autodesign-run.js';
 import { renderAutoPanel, stageAvailability, clampCap, overallFrac, etaText } from './autodesign-panel.js';
-import { runAutoDesign, halvingTotal } from '../../engine/mech3d/autodesign.js';
+import { runAutoDesign, shapeTotal } from '../../engine/mech3d/autodesign.js';
 import { milkyRows } from '../../engine/mech3d/milky-search.js';
 import { candidatePositions } from '../../engine/mech3d/basis.js';
 import { ledAtS } from '../../engine/mech3d/placement.js';
 import { virtualEmittersAt } from '../../engine/mech3d/virtual-leds.js';
-import { heightsFor, deformPart, refinedFor, minThickness, shapeCandidates } from '../../engine/mech3d/shape-opt.js';
+import { heightsFor, deformPart, refinedFor, minThickness, shapeVarRanges, pathFromLine, swOnPath, ledEll, lineVarH } from '../../engine/mech3d/shape-opt.js';
 import { interferenceKeys } from '../../engine/mech3d/clearance.js';
 import { scaleMoveMesh, isIdentityXform } from '../../engine/mech3d/xform.js';
 import { defaultChecks } from '../../engine/mech3d/defs.js';
@@ -346,7 +346,8 @@ function adBaseMesh(i, ctx) {
   return mesh;
 }
 // 형상 후보 메쉬 — 세분은 메모(refinedFor: 후보 27개도 R 3개 → 세분 3번). hDiv = R/hMax(STEP 은 거칠게 3)
-const adShapeMesh = (base, mod, hDiv = 8) => deformPart(refinedFor(base, mod.frame, mod.centers, mod.R, Math.max(0.1, mod.R / hDiv)), mod.frame, heightsFor(base, mod.frame, mod.cell), mod);
+// hBottom = lineVarH(mod) — runtime.applyPartMods 와 같게(평가 형상 = 적용 형상)
+const adShapeMesh = (base, mod, hDiv = 8) => deformPart(refinedFor(base, mod.frame, mod.centers, mod.R, Math.max(0.1, mod.R / hDiv), lineVarH(mod)), mod.frame, heightsFor(base, mod.frame, mod.cell), mod);
 // 설계 → (mspec 복사본, 기구 메쉬) — 형상은 후보 메쉬로 바꾼 부품 포함
 function designScene(d, ctx) {
   const M = adClone(ctx.M0), rt = ctx.rt, mp = ctx.mp;
@@ -362,10 +363,16 @@ function designScene(d, ctx) {
   return { M, parts };
 }
 // LED 중심 = 그 설계(M: ② 가 바꾼 개수·피치 반영)의 발광점을 관측 평면에 투영
-function shapeModFor({ dt, h, R }, M, line) {
+// e·c 용 중심선(관측 좌표 path·halfW·closed·L)과 ℓ(LED 피치: 직접·가상 배치 = 그 피치/균등 L/n, LED STEP 원래 = 발광점 평균 간격, 1개 = L/4)도 저장 — shapeMod 만으로 형상 결정
+const adPaths = new WeakMap();   // 라인별 중심선 메모(후보마다 다시 표본하지 않게)
+function shapeModFor({ dt, h, R, e = 0, c = 0 }, M, line) {
   const F = line.frame, em = L.currentEmitters(M, line);
   const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
-  return { frame: { u: F.u, v: F.v, d: F.d }, dt, h, R, centers: em.map((e) => [dot(e.pos, F.u), dot(e.pos, F.v)]), cell: 0.5 };
+  const centers = em.map((x) => [dot(x.pos, F.u), dot(x.pos, F.v)]);
+  let P = adPaths.get(line); if (!P) adPaths.set(line, (P = pathFromLine(line, F)));
+  const lay = M.light.kind === 'manual' ? M.light.manual : M.light.kind === 'step' ? M.light.step?.virtual ?? null : null;
+  const ell = ledEll({ pitch: lay?.pitch ?? 0, count: lay?.count ?? 0, ss: centers.map(([x, y]) => swOnPath(P, x, y)[0]), L: P.L });
+  return { frame: { u: F.u, v: F.v, d: F.d }, dt, h, R, e, c, centers, cell: 0.5, path: P.path, halfW: P.halfW, closed: P.closed, L: P.L, ell };
 }
 const adJob = (M, parts, ctx, o = {}) => { const j = jobFor(M, parts, { line: ctx.line, G: ctx.G, obs: ctx.obs, ...o }); if (!j) throw new Error('LED 가 없음'); return j; };
 const adEff = (r) => { let t = 0; for (const b of r.batches) for (const v of b) t += v; return t / r.ledger.emitted; };
@@ -389,9 +396,9 @@ async function adRun() {
   const cur = { milky: ctx.mp != null ? M0.parts[ctx.mp].material.milky : null, count: stp ? (sv ? sv.count : nOrig) : M0.light.manual?.count ?? 0, pitch: stp ? sv?.pitch ?? 0 : M0.light.manual?.pitch ?? 0, shape: null, ...(stp ? { stepOrig: !sv, stepVirt: !!sv } : {}) };
   ctx.cur = cur;
   const minWall = { ...defaultChecks(), ...(M0.checks ?? {}) }.minWall, t0 = performance.now();
-  const shapeCands = stages.shape ? shapeCandidates({ t0: heightsFor(adBaseMesh(sp, ctx), line.frame, 0.5).t0, pitch: cur.count > 1 ? (cur.pitch > 0 ? cur.pitch : line.length / cur.count) : line.length, hasCenters: true }) : [];
-  const shapeTot = halvingTotal(shapeCands.length);
-  let shapeI = 0;
+  // ③ 변수 범위(Δt·h·R·e·c) — 엔진이 선별 → 격자 → 압축. 진행률 분모는 io.shapePlan 으로 받음(격자 크기 모르는 선별 중엔 최대 격자 27 로 어림)
+  const shapeRanges = stages.shape ? shapeVarRanges({ t0: heightsFor(adBaseMesh(sp, ctx), line.frame, 0.5).t0, pitch: cur.count > 1 ? (cur.pitch > 0 ? cur.pitch : line.length / cur.count) : line.length, hasCenters: true }) : null;
+  let shapeI = 0, shapeScr = 0, shapeTot = 1;
   const progress = (stage, frac, text) => {   // 전체 진행률(단계 무게) + 남은 시간
     if (A !== a || R.stopped) return;
     const f = overallFrac(stages, stage, frac), eta = etaText(performance.now() - t0, f);
@@ -400,6 +407,7 @@ async function adRun() {
   const io = {
     progress,
     cancelled: () => R.stopped,
+    shapePlan: ({ screen, total }) => { shapeScr = screen; shapeTot = Math.max(1, total ?? shapeTotal(screen, 27)); },
     async milkyRows(d, ms, { precise = false } = {}) {   // 재가중 기준 = 창 가운데. 시간 제한(Milky 4~5 는 광자당 ~10배) — 경계가 든 창은 정밀 재추적
       const { M: Md, parts } = designScene({ ...d, milky: ms[Math.floor(ms.length / 2)] }, ctx);
       const r = await R.trace(adJob(Md, parts, ctx), { ...(precise ? { N: 3e6, maxMs: 6000 } : { N: 1.5e6, maxMs: 2500, minN: 2e5 }), rw: { part: ctx.mp, milkies: ms } });
@@ -421,7 +429,7 @@ async function adRun() {
       const before = interferenceKeys(base, others, lp, []);
       for (const c of cands) {
         if (R.stopped) break;
-        progress('shape', shapeI / shapeTot, `형상 후보 ${Math.min(shapeI + 1, shapeTot)}/${shapeTot}`); shapeI++;
+        progress('shape', Math.min(1, shapeI / shapeTot), shapeI < shapeScr ? `형상 변수 선별 ${shapeI + 1}/${shapeScr}` : `형상 후보 ${Math.min(shapeI + 1, shapeTot) - shapeScr}/${shapeTot - shapeScr}`); shapeI++;
         const { M: Md, parts } = designScene({ ...d, shape: { part: sp, ...c } }, ctx), mod = Md.parts[sp].shapeMod;
         const thin = minThickness(H, mod) < minWall;   // 칸 중심 + LED 중심
         const clash = !thin && [...interferenceKeys(parts[sp], others, lp, []).keys()].some((k) => !before.has(k));
@@ -441,7 +449,7 @@ async function adRun() {
   try {
     res = await runAutoDesign({
       stages, obs, G, line, current: cur, milkyMax: st.sel.milkyMax ?? Math.max(cur.milky ?? 0, 5), nMax: Math.max(1, Math.min(60, Math.floor(line.length / 2))), pitchRange: null, stepMode: stp,
-      shapePart: sp, shapeCands,
+      shapePart: sp, shapeRanges,
     }, io);
   } catch (e) { if (A === a && !R.stopped) setStatus(`자동설계 실패: ${e.message}`); }
   if (A !== a) return;   // 그사이 이탈
@@ -450,8 +458,8 @@ async function adRun() {
     const C = res.current;   // 현재안 = 최종안과 같은 추정기
     let nStep = null; if (M0.light.kind === 'step') { try { nStep = L.currentEmitters(M0, line).length; } catch { nStep = 0; } }
     const smI = sp >= 0 && M0.parts[sp]?.shapeMod ? sp : M0.parts.findIndex((p) => p.shapeMod), sm = smI >= 0 ? M0.parts[smI].shapeMod : null;   // 비교표 '현재' 열 — 이미 적용된 형상(표시만)
-    st.result = { design: res.best, feasible: res.feasible, reason: res.reason, shape: res.best.shape ?? null, stepLeds: nStep, unchanged: !!res.unchanged, ctx, stages,
-      cur: { ...cur, shape: sm ? { dt: sm.dt, h: sm.h, R: sm.R } : null, Ulen: C?.stats?.Ulen, Uwid: C?.stats?.Uwid, eff: C?.eff ?? NaN, profile: C?.stats?.profile ?? null },
+    st.result = { design: res.best, feasible: res.feasible, reason: res.reason, shape: res.best.shape ?? null, screen: res.steps?.find((x) => x.stage === 'shapeScreen')?.gains ?? null, stepLeds: nStep, unchanged: !!res.unchanged, ctx, stages,
+      cur: { ...cur, shape: sm ? { dt: sm.dt, h: sm.h, R: sm.R, e: sm.e ?? 0, c: sm.c ?? 0 } : null, Ulen: C?.stats?.Ulen, Uwid: C?.stats?.Uwid, eff: C?.eff ?? NaN, profile: C?.stats?.profile ?? null },
       best: { ...res.best, ...(stp ? { stepOrig: !res.best.stepVirt } : {}), Ulen: res.verified.stats.Ulen, Uwid: res.verified.stats.Uwid, eff: res.verified.eff, profile: res.verified.stats.profile ?? null } };
   }
   // Worker 에 자동설계 장면이 올라가 있음 — 진행 중이던 계산·실행 중 편집은 다시 시작, 끝난 계산은 그대로.

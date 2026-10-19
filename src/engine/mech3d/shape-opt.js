@@ -118,6 +118,13 @@ const disp = (x, y, prm) => {
   }
   return D;
 };
+// 끝단 창 길이 ℓ = LED 피치: 피치 > 0 → 그 값 · 균등(count > 1) → L/count · 발광점 s 목록(LED STEP 원래) → 평균 간격 · LED 1개 → L/4
+export function ledEll({ pitch = 0, count = 0, ss = null, L }) {
+  if (pitch > 0) return pitch;
+  if (count > 1) return L / count;
+  const s = (ss ?? []).filter(Number.isFinite).sort((a, b) => a - b);
+  return s.length > 1 && s.at(-1) > s[0] ? (s.at(-1) - s[0]) / (s.length - 1) : L / 4;
+}
 // e·c 가 있으면 아랫면 세분 최대 변 max(R/2, 2 mm), 없으면 0(세분 안 함)
 export const lineVarH = (prm) => ((prm.e ?? 0) || (prm.c ?? 0) ? Math.max((prm.R ?? 0) / 2, 2) : 0);
 

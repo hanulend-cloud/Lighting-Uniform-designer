@@ -1,5 +1,5 @@
 // ③ LGP 형상: node test/mech3d-shape-opt.mjs
-import { frameHeights, deformPart, refineForBumps, bump, minThickness, shapeCandidates, isWatertight, refinedFor, heightsFor, memoStats, pathFromLine, swOnPath, endW, lineVarH, shapeVarRanges, gridCandidates } from '../src/engine/mech3d/shape-opt.js';
+import { frameHeights, deformPart, refineForBumps, bump, minThickness, shapeCandidates, isWatertight, refinedFor, heightsFor, memoStats, pathFromLine, swOnPath, endW, lineVarH, shapeVarRanges, gridCandidates, ledEll } from '../src/engine/mech3d/shape-opt.js';
 import { meshVolume } from '../src/engine/mech3d/mesh.js';
 import { boxMesh, ok, done } from './mech3d-util.mjs';
 
@@ -111,4 +111,5 @@ const xPath = { path: Array.from({ length: 41 }, (_, i) => [i, 5]), halfW: 5, cl
   for (let k = 0; k < 100000; k++) { const i = (k * 7919) % 2000, [x, y] = path[i]; acc += swOnPath(P, x + 3 * Math.sin(k), y + 3 * Math.cos(k))[1]; }
   const ms = performance.now() - t0;
   ok(ms < 1500 && Number.isFinite(acc), `swOnPath 10만 점 × 경로 2000점: ${ms.toFixed(0)} ms`); }
+ok(ledEll({ pitch: 7, count: 5, L: 100 }) === 7 && ledEll({ count: 5, L: 100 }) === 20 && ledEll({ ss: [30, 10, 20, 40], L: 100 }) === 10 && ledEll({ count: 1, ss: [50], L: 100 }) === 25, 'ℓ = LED 피치: 피치 · 균등 L/n · 발광점 평균 간격 · 1개 L/4');
 done();

@@ -9,7 +9,7 @@ import { defaultPart, setPartMaterial, setPartMaterialParam } from '../src/engin
 import { clearanceHtml } from '../src/ui/mech3d-panel.js';
 import { stepLayoutRowHtml, clampVirtual, virtCountMax } from '../src/ui/mech3d-light-panel.js';
 import { ok, done } from './mech3d-util.mjs';
-import { stageAvailability, autoCardHtml, compareHtml, clampCap, overallFrac, etaText, profileSvg } from '../src/ui/m3/autodesign-panel.js';
+import { stageAvailability, autoCardHtml, compareHtml, clampCap, overallFrac, etaText, profileSvg, shapeText, screenSummary } from '../src/ui/m3/autodesign-panel.js';
 
 const M = {
   name: 't', contacts: [{ a: 0, b: 1, mode: 'contact' }], checks: defaultChecks(),
@@ -116,7 +116,13 @@ ok(clampCap(12) === 9.9 && clampCap(0.1) === 0.5 && clampCap(3) === 3 && clampCa
   const nl = autoCardHtml({ avail: a, sel: { milky: true }, running: null, noLine: true });
   ok(/data-ad="run" disabled title="관측 라인이 없음"/.test(nl) && /aria-label="Milky 상한"/.test(nl), '라인 없음 → 실행 비활성 · 상한 aria-label');
   const c = compareHtml({ cur: { count: 5, pitch: 0, milky: 3, Ulen: 0.6, Uwid: 0.7, eff: 0.5, shape: { dt: 0, h: 0.2, R: 3 }, profile: [1, 2] }, best: { count: 5, pitch: 0, milky: 3, Ulen: 0.8, Uwid: 0.7, eff: 0.5, profile: [2, 2] }, feasible: true, reason: '', shape: null });
-  ok(c.includes('적용된 형상') && (c.match(/<polyline/g) ?? []).length === 2, '비교표: 적용된 형상 · 프로파일 SVG'); }
+  ok(c.includes('적용된 형상') && (c.match(/<polyline/g) ?? []).length === 2, '비교표: 적용된 형상 · 프로파일 SVG');
+  const t1 = shapeText({ dt: 0.5, h: 0.4, R: 6, e: -0.3, c: 0.2 }), t2 = shapeText({ dt: 0, h: -0.25, R: 4.5, e: 0, c: -0.1 });
+  ok(t1 === '두께 +0.50 · 포켓 0.40 R 6.0 · 끝단 두께 −0.30 · 폭 가장자리 두께 +0.20 mm' && t2 === '돌출 0.25 R 4.5 · 폭 가장자리 두께 −0.10 mm' && shapeText({ dt: 0, h: 0, R: 3, e: 0, c: 0 }) === '변경 없음' && shapeText({ dt: 0.1, h: 0, R: 1 }) === '두께 +0.10 mm', `형상 문구: ${t1} / ${t2}`);
+  const s1 = screenSummary({ dt: 0.001, e: 0.02, c: 0.06, h: -0.01 }), s2 = screenSummary({ dt: 0, e: 0.002, c: 0 });
+  ok(s1 === '효과(선별): 폭 가장자리 두께 +0.06 · 끝단 두께 +0.02 — 두께·국부 형상 효과 없음' && s2 === '효과(선별): 모든 형상 변수 효과 없음' && screenSummary(null) === '', `선별 요약: ${s1} / ${s2}`);
+  const cx = compareHtml({ cur: { count: 5, pitch: 0, milky: 3, Ulen: 0.6, Uwid: 0.7, eff: 0.5 }, best: { count: 5, pitch: 0, milky: 3, Ulen: 0.8, Uwid: 0.7, eff: 0.5 }, feasible: true, reason: '', shape: { dt: 0, h: 0, R: 3, e: 0, c: 0.2 }, screen: { dt: 0, e: 0, c: 0.06 } });
+  ok(cx.includes('폭 가장자리 두께 +0.20 mm') && cx.includes('효과(선별): 폭 가장자리 두께 +0.06') && !cx.includes('곡률'), '비교표: 형상 칸 · 선별 요약 줄'); }
 { // LED STEP 가상 배치: 배지 · 배치 행
   const st = { name: 'a.stp', offset: [0, 0, 0], rot: [0, 0, 0], leds: [1, 2, 3], excluded: [3], pcb: 0, emitters: [{ part: 1 }], virtual: null };
   const node = (s) => treeNodes({ ...M, light: { ...defaultLight(), kind: 'step', step: s } }, { node: null, line: null }).find((n) => n.id === 'leds');
