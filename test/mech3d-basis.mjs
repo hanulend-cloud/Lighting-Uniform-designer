@@ -1,6 +1,9 @@
 // ② LED 개수·피치(후보 응답 합산): node test/mech3d-basis.mjs
 import { candidatePositions, interpWeights, layoutMap, searchLeds, pitchOptions } from '../src/engine/mech3d/basis.js';
 import { ok, done } from './mech3d-util.mjs';
+import { loadTable } from './l2-util.mjs';
+import { plateFixture } from './m3-fixture.mjs';
+import { runChunk } from '../src/engine/mech3d/job.js';
 
 const line = { length: 100, closed: false };
 { const c = candidatePositions(line, 1);
@@ -26,4 +29,20 @@ const line = { length: 100, closed: false };
 { const p = pitchOptions({ length: 100, closed: false }, 5, { min: 10, max: 30 });
   ok(p[0] === 0 && p.includes(10) && p.includes(25) && !p.includes(26), '피치 후보: 0(균등) + 범위 1mm 간격, (n−1)·p ≤ L 만');
   ok(pitchOptions({ length: 100, closed: true }, 5, { min: 10, max: 30 }).join() === '0', '닫힌 라인은 균등만'); }
+{ // 판 장면(LED 5개 위치 10·30·50·70·90): 후보 지도(위치마다 LED 1개, 같은 광자/LED) 합 vs 5개 직접
+  const F = plateFixture(loadTable()), nCell = F.G.ns * F.G.nw, B = 6, N1 = 20000;
+  const at = (x) => ({ pos: [x, 3, -3], axis: [0, 0, 1], xAxis: [1, 0, 0] });
+  const per = (em, b, N) => runChunk({ ...F, emitters: em, N, seed: 500 + b }).acc;
+  // combineSources 는 광속을 더한다(LED 5개 = 방출 5배) → 단일 LED 지도 5개의 합 = 5개 직접 지도(나누기 없음)
+  const sumB = Array.from({ length: B }, (_, b) => { const s = new Float64Array(nCell); for (const x of [10, 30, 50, 70, 90]) { const a = per([at(x)], b * 10 + x, N1); for (let k = 0; k < nCell; k++) s[k] += a[k]; } return s; });
+  const dirB = Array.from({ length: B }, (_, b) => per(F.emitters, 1000 + b, N1));
+  let worst = 0;
+  for (let k = 0; k < nCell; k++) {
+    if (!F.G.valid[k]) continue;
+    const a = sumB.map((x) => x[k]), d = dirB.map((x) => x[k]);
+    const mean = (v) => v.reduce((s, x) => s + x, 0) / v.length, se = (v) => Math.sqrt(v.reduce((s, x) => s + (x - mean(v)) ** 2, 0) / (v.length - 1) / v.length);
+    if (mean(d) <= 0) continue;
+    worst = Math.max(worst, Math.abs(mean(a) - mean(d)) / Math.hypot(se(a), se(d)));
+  }
+  ok(worst < 4.5, `A-2 후보 합 = 다중 LED 직접: 셀 최대 ${worst.toFixed(2)}σ`); }
 done();
