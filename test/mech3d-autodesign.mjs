@@ -14,6 +14,17 @@ const rowsOf = (ms, U = (m) => 0.5 + 0.12 * m) => ms.map((m) => ({ milky: m, Ule
   ok(r.feasible && Math.abs(r.best.milky - 2.5) < 0.03 && calls.at(-1) === r.best.milky && bases.length <= 8 && bases[1] < bases[0], `① 이분 탐색: 기준 ${bases.map((b) => b.toFixed(2)).join(' → ')} → 최소 Milky ${r.best.milky}`);
   ok(precise.length === 1 && precise[0] === bases.at(-1) && r.steps.at(-1).precise, `경계가 든 창(기준 ${precise[0]?.toFixed(2)})만 정밀 재추적`);
   ok(calls.length === 2 && calls[0] === 3 && r.current.stats.Ulen === 0.81, '현재안을 먼저 같은 추정기(verify)로 계산 → r.current'); }
+{ // cfg.currentVerified(수렴한 점진 결과) → 현재안 verify 생략
+  const calls = [], cv = { stats: st(0.81, 0.9), eff: 0.95 };
+  const io = { milkyRows: async (d, ms) => rowsOf(ms), verify: async (d) => { calls.push(d.milky); return { stats: st(0.81, 0.9), eff: 1 - d.milky / 20 }; }, progress() {}, cancelled: () => false };
+  const r = await runAutoDesign({ stages: { milky: true }, obs, current: { milky: 3, count: 5, pitch: 0, shape: null }, milkyMax: 5, currentVerified: cv }, io);
+  ok(calls.length === 1 && calls[0] !== 3 && r.current === cv, `현재안 재사용 → verify 는 최종안만 (${calls})`); }
+{ // 할선: 경계 3.3(이분이면 기준 4.75 → 2.375 → 3.56 → 2.97 → 3.27 = 5개) → 두 기준의 여유로 할선 근 → 3개
+  const bases = [], U = (m) => 0.8 + 0.1 * (m - 3.3);
+  const io = { milkyRows: async (d, ms, o) => { if (!o?.precise) bases.push(ms[10]); return rowsOf(ms, U); }, verify: async (d) => ({ stats: st(U(d.milky), 0.9), eff: 1 }), progress() {}, cancelled: () => false };
+  const r = await runAutoDesign({ stages: { milky: true }, obs, current: { milky: 4.9 }, milkyMax: 5 }, io);
+  const m = r.steps.filter((x) => x.stage === 'milky').at(-1).pick.milky;
+  ok(bases.length === 3 && Math.abs(m - 3.3) < 0.03, `할선 재기준: ${bases.map((b) => b.toFixed(2)).join(' → ')} (경계 ${m})`); }
 { // 상한까지 미달(U 가 천천히 오름) → 가장 가까운 안 = 상한 근처 + 상한 안내
   const io = { milkyRows: async (d, ms) => rowsOf(ms, (m) => 0.6 + 0.01 * m), verify: async (d) => ({ stats: st(0.6 + 0.01 * d.milky, 0.9), eff: 1 }), progress() {}, cancelled: () => false };
   const r = await runAutoDesign({ stages: { milky: true }, obs, current: { milky: 3 }, milkyMax: 5 }, io);

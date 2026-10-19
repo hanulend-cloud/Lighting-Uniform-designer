@@ -16,6 +16,12 @@ export function overallFrac(stages, stage, frac) {
 }
 // 남은 시간 — 진행 10% 이상부터 경과 ÷ 진행률로 추정
 export const etaText = (elapsedMs, frac) => (frac >= 0.1 && frac < 1 ? `남은 약 ${Math.max(1, Math.round((elapsedMs * (1 - frac)) / frac / 1000))}초` : '');
+// ① 현재안 재사용 — 점진 계산이 같은 장면(집계 격자 G 동일)에서 잡음 목표에 도달('done')했으면 { stats, eff }, 아니면 null
+export function reusableCurrent(snap, G) {
+  const s = snap?.stats, eff = snap?.photometry?.eff;
+  if (snap?.state !== 'done' || !snap.sceneKey || snap.G !== G || !s || s.empty || !(s.relNoise <= snap.targetNoise) || !Number.isFinite(eff)) return null;
+  return { stats: s, eff };
+}
 // 길이 프로파일 비교(현재 회색 · 최적 강조) — 각자 최댓값으로 정규화. NaN 칸은 건너뜀. 하나라도 없으면 ''
 export function profileSvg(cur, best, W = 200, H = 48) {
   if (!cur?.length || !best?.length) return '';

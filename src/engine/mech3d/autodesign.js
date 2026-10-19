@@ -65,9 +65,19 @@ export async function screenShapeVars(evalFn, ranges, obs, { N = 6e4, maxMs = 25
   return { vars, gains, results };
 }
 
-// ① Milky: 구간 [0.25, 상한] 이분 탐색 — 창 전체 통과면 위쪽 끝을 창 아래로, 전부 미달이면 아래쪽 끝을 창 위로. 중지 = null
+// 다음 기준점: 마지막 두 기준의 (Milky, 여유) 할선 근이 (lo, hi) 안이면 그것, 아니면 이분
+export function nextBase(pts, lo, hi) {
+  if (pts.length >= 2) {
+    const [a, b] = pts.slice(-2);
+    if (b[1] !== a[1]) { const r = b[0] - b[1] * (b[0] - a[0]) / (b[1] - a[1]); if (r > lo + 1e-9 && r < hi - 1e-9) return r; }
+  }
+  return (lo + hi) / 2;
+}
+
+// ① Milky: 구간 [0.25, 상한] 탐색 — 창 전체 통과면 위쪽 끝을 창 아래로, 전부 미달이면 아래쪽 끝을 창 위로, 다음 기준은 할선(밖이면 이분). 중지 = null
 async function searchMilky(d, cfg, io, steps, mCap) {
   let lo = 0.25, hi = mCap, m0 = Math.min(hi, Math.max(lo, d.milky ?? hi)), found = null, nearest = null;
+  const pts = [];   // 기준별 (대표 Milky, 여유)
   for (let it = 0; it < MILKY_ITERS; it++) {
     if (io.cancelled?.()) return null;
     io.progress?.('milky', it / MILKY_ITERS, `Milky 재가중 (기준 ${m0.toFixed(2)})`);
@@ -79,6 +89,7 @@ async function searchMilky(d, cfg, io, steps, mCap) {
       rows = await io.milkyRows(d, ms, { precise: true }); pick = pickMilky(rows, cfg.obs); precise = true;
     }
     steps.push({ stage: 'milky', base: m0, rows, pick, precise });
+    if (pick.best) pts.push([pick.best.milky, pick.best.margin]);
     if (pick.feasible) {
       found = pick;
       if (pick.edge !== 'low' || ms[0] <= lo + 1e-9) break;   // 창 안에서 경계를 찾음 / 더 내려갈 곳 없음
@@ -89,7 +100,7 @@ async function searchMilky(d, cfg, io, steps, mCap) {
       lo = ms.at(-1);
       if (lo >= hi - 1e-9) break;   // 상한까지 미달
     }
-    m0 = (lo + hi) / 2;
+    m0 = nextBase(pts, lo, hi);
   }
   return { found, nearest };
 }
@@ -99,8 +110,8 @@ export async function runAutoDesign(cfg, io) {
   let d = { ...cfg.current }, feasible = true, reason = '';
   const stop = () => io.cancelled?.();
   if (stop()) return { cancelled: true };
-  io.progress?.('current', 0, '현재안 계산');   // 비교표 '현재' 열 — 최종안과 같은 추정기(io.verify)
-  const currentVerified = await io.verify(d);
+  io.progress?.('current', 0, '현재안 계산');   // 비교표 '현재' 열 — 최종안과 같은 추정기(io.verify). 수렴한 점진 결과가 있으면 재사용
+  const currentVerified = cfg.currentVerified ?? await io.verify(d);
   if (stop()) return { cancelled: true };
   if (stages.leds) {   // ② — ① 이 켜져 있으면 Milky 상한(확산 최대)에서 최소 개수
     io.progress?.('leds', 0, 'LED 후보 위치 추적');

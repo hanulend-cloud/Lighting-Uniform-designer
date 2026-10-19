@@ -22,7 +22,7 @@ import { clampVirtual } from '../mech3d-light-panel.js';
 import { createResultsPanel } from './results-panel.js';
 import { renderStatusBar } from './status-bar.js';
 import { createAdRunner } from './autodesign-run.js';
-import { renderAutoPanel, stageAvailability, clampCap, overallFrac, etaText } from './autodesign-panel.js';
+import { renderAutoPanel, stageAvailability, clampCap, overallFrac, etaText, reusableCurrent } from './autodesign-panel.js';
 import { runAutoDesign, shapeTotal } from '../../engine/mech3d/autodesign.js';
 import { milkyRows } from '../../engine/mech3d/milky-search.js';
 import { candidatePositions } from '../../engine/mech3d/basis.js';
@@ -386,7 +386,7 @@ async function adRun() {
   const ctx = { M0, line, G, obs, rt, mp: st.milkyPart };
   const R = (st.runner = createAdRunner({ ports: A.pool.ports() }));
   // 같은 Worker 를 쓰므로 점진 계산은 멈춤 — 대기(디바운스) 중이면 장면을 곧 보내므로 취소. 사용자 일시정지 여부는 기억(끝나고 그대로)
-  const ps = A.prog.snapshot().state;
+  const snap0 = A.prog.snapshot(), ps = snap0.state, currentVerified = reusableCurrent(snap0, G);   // 수렴한 점진 결과 = 현재안(verify 생략)
   st.userPaused = ps === 'paused'; st.deferred = ['paused', 'running', 'pending', 'starting'].includes(ps);
   if (ps === 'pending') A.prog.cancel(); else A.prog.pause();
   st.running = { frac: 0, text: '준비' }; st.result = null; A.meshShown = null; renderView(); renderAuto();
@@ -410,7 +410,7 @@ async function adRun() {
     shapePlan: ({ screen, total }) => { shapeScr = screen; shapeTot = Math.max(1, total ?? shapeTotal(screen, 27)); },
     async milkyRows(d, ms, { precise = false } = {}) {   // 재가중 기준 = 창 가운데. 시간 제한(Milky 4~5 는 광자당 ~10배) — 경계가 든 창은 정밀 재추적
       const { M: Md, parts } = designScene({ ...d, milky: ms[Math.floor(ms.length / 2)] }, ctx);
-      const r = await R.trace(adJob(Md, parts, ctx), { ...(precise ? { N: 3e6, maxMs: 6000 } : { N: 1.5e6, maxMs: 2500, minN: 2e5 }), rw: { part: ctx.mp, milkies: ms } });
+      const r = await R.trace(adJob(Md, parts, ctx), { ...(precise ? { N: 3e6, maxMs: 6000 } : { N: 1.5e6, maxMs: 2000, minN: 1e5 }), rw: { part: ctx.mp, milkies: ms } });
       return milkyRows(G, obs, { milkies: ms, batches: r.rwBatches, ess: r.ess, emitted: r.ledger.emitted });
     },
     async basis(d) {   // ① 이 켜져 있으면 실행기가 d.milky = 상한으로 넘김
@@ -449,7 +449,7 @@ async function adRun() {
   try {
     res = await runAutoDesign({
       stages, obs, G, line, current: cur, milkyMax: st.sel.milkyMax ?? Math.max(cur.milky ?? 0, 5), nMax: Math.max(1, Math.min(60, Math.floor(line.length / 2))), pitchRange: null, stepMode: stp,
-      shapePart: sp, shapeRanges,
+      shapePart: sp, shapeRanges, currentVerified,
     }, io);
   } catch (e) { if (A === a && !R.stopped) setStatus(`자동설계 실패: ${e.message}`); }
   if (A !== a) return;   // 그사이 이탈

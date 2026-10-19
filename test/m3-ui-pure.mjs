@@ -9,7 +9,7 @@ import { defaultPart, setPartMaterial, setPartMaterialParam } from '../src/engin
 import { clearanceHtml } from '../src/ui/mech3d-panel.js';
 import { stepLayoutRowHtml, clampVirtual, virtCountMax } from '../src/ui/mech3d-light-panel.js';
 import { ok, done } from './mech3d-util.mjs';
-import { stageAvailability, autoCardHtml, compareHtml, clampCap, overallFrac, etaText, profileSvg, shapeText, screenSummary } from '../src/ui/m3/autodesign-panel.js';
+import { stageAvailability, autoCardHtml, compareHtml, clampCap, overallFrac, etaText, profileSvg, shapeText, screenSummary, reusableCurrent } from '../src/ui/m3/autodesign-panel.js';
 
 const M = {
   name: 't', contacts: [{ a: 0, b: 1, mode: 'contact' }], checks: defaultChecks(),
@@ -145,4 +145,9 @@ ok(clampCap(12) === 9.9 && clampCap(0.1) === 0.5 && clampCap(3) === 3 && clampCa
   const vs = { ...st, virtual: { count: 6, pitch: 15 } }, nodeL = (S, lay) => treeNodes({ ...M, light: { ...defaultLight(), kind: 'step', step: vs } }, S, lay).find((n) => n.id === 'leds');
   const okL = nodeL({ node: null, line: { kind: 'line', length: 100, width: 5 } }, { virtual: vs.virtual, leds: [3, 4, 5, 6, 7, 8] }), bad = nodeL({ node: null, line: { kind: 'line', length: 100, width: 5 } }, { virtual: null, leds: [1, 2, 3], err: '배치 길이 초과' }), wait = nodeL({ node: null, line: null }, { virtual: null, leds: [1, 2, 3] });
   ok(okL.label === 'LED ×6' && okL.badge === '가상 6개 피치 15' && bad.label === 'LED ×2' && bad.badge === '가상 배치 실패' && wait.badge === '가상 6개 피치 15', `배지: ${okL.badge} / ${bad.label} ${bad.badge} / ${wait.badge}`); }
+{ // ① 현재안 재사용: 같은 장면(G)에서 수렴('done', relNoise ≤ 목표)한 점진 결과만
+  const G = { ns: 1 }, stats = { Ulen: 0.8, Uwid: 0.7, relNoise: 0.015 }, snap = { state: 'done', sceneKey: 's3', G, stats, photometry: { eff: 0.6 }, targetNoise: 0.02 };
+  const r = reusableCurrent(snap, G);
+  ok(r && r.stats === stats && r.eff === 0.6, '수렴한 결과 → { stats, eff }');
+  ok(reusableCurrent({ ...snap, state: 'paused' }, G) === null && reusableCurrent({ ...snap, stats: { ...stats, relNoise: 0.03 } }, G) === null && reusableCurrent(snap, { ns: 1 }) === null && reusableCurrent({ ...snap, sceneKey: null }, G) === null && reusableCurrent({ ...snap, photometry: null }, G) === null, '미수렴·다른 장면·결과 없음 → null'); }
 done();
