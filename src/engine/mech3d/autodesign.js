@@ -63,7 +63,7 @@ export async function runAutoDesign(cfg, io) {
     const m = await searchMilky(d, cfg, io, steps, mCap);
     if (!m) return { cancelled: true };
     if (m.found) d = { ...d, milky: m.found.milky };
-    else { feasible = false; d = { ...d, milky: m.nearest?.milky ?? d.milky }; reason = `${m.nearest?.reason ?? '믿을 수 있는 격자점이 없음'} — Milky 상한 ${mCap} 을 올리거나 ②·③ 을 함께 쓰세요`; }
+    else { feasible = false; d = { ...d, milky: m.nearest?.milky ?? d.milky }; reason = `${m.nearest?.reason ?? '믿을 수 있는 격자점이 없음'} — Milky 상한(${mCap})을 올리거나 ②·③ 을 함께 쓰세요`; }
   }
   if (stages.shape && cfg.shapeCands?.length) {   // ③
     io.progress?.('shape', 0, `형상 후보 ${cfg.shapeCands.length}개 평가`);
