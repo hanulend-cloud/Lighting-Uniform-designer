@@ -1,5 +1,6 @@
 // P4 단계 실행기(가짜 io): node test/mech3d-autodesign.mjs
-import { runAutoDesign, shapeScore, halving, smoothU, halvingTotal, sameDesign } from '../src/engine/mech3d/autodesign.js';
+import { runAutoDesign, shapeScore, halving, smoothU, halvingTotal, sameDesign, screenShapeVars, shapeTotal } from '../src/engine/mech3d/autodesign.js';
+import { shapeVarRanges } from '../src/engine/mech3d/shape-opt.js';
 import { ok, done } from './mech3d-util.mjs';
 
 const obs = { targetLen: 0.8, targetWid: 0.6 };
@@ -69,5 +70,26 @@ const rowsOf = (ms, U = (m) => 0.5 + 0.12 * m) => ms.map((m) => ({ milky: m, Ule
   const r = await runAutoDesign({ stages: { leds: true }, stepMode: true, obs: { targetLen: 0.8, targetWid: 0 }, current: { milky: 3, count: 1, pitch: 0, stepVirt: false }, G, line: { length: 2, closed: false }, nMax: 3 }, io);
   ok(!r.unchanged && r.best.count === 1 && r.best.stepVirt === true && seen.join() === 'false,true', `STEP ② 같은 개수 → 가상안 검증·추천 (${seen})`);
   ok(!sameDesign({ count: 1, pitch: 0, stepVirt: true }, { count: 1, pitch: 0 }) && sameDesign({ count: 1, pitch: 0, stepVirt: false }, { count: 1, pitch: 0 }), 'sameDesign: stepVirt 비교(없음 = false)'); }
+{ // ③ 2단계: 선별(변수별 lo/hi) → 선택 변수 격자 halving
+  const rg = shapeVarRanges({ t0: 2, pitch: 5, hasCenters: false }), cur = { milky: 3, count: 5, pitch: 0, shape: null };
+  const mk = (gain, seen = []) => async (d, cands) => { seen.push(cands.map((c) => ({ ...c }))); return cands.map((c) => ({ cand: c, stats: st(0.6 + gain(c), 0.9), eff: 0.5, ok: true })); };
+  const seen = [], plans = [];
+  const io = { evalShapes: mk((c) => (c.c > 0 ? 0.3 : 0), seen), verify: async (d) => ({ stats: st(d.shape?.c > 0 ? 0.9 : 0.6, 0.9), eff: 0.5 }), progress() {}, shapePlan: (p) => plans.push(p), cancelled: () => false };
+  const r = await runAutoDesign({ stages: { shape: true }, obs, current: cur, shapePart: 0, shapeRanges: rg }, io);
+  const sc = r.steps.find((x) => x.stage === 'shapeScreen');
+  ok(sc.vars.join() === 'c' && seen[0].length === 7 && seen[1].length === 3 && seen[1].some((c) => c.c === 0 && c.dt === 0), `선별 → ['c'], 선별 7개 · 격자 3개(현재 포함): ${sc.vars}`);
+  ok(r.best.shape.c > 0 && !r.unchanged && plans.at(-1).total === shapeTotal(7, 3), `최종 형상 c=${r.best.shape?.c}, 분모 ${plans.at(-1)?.total}`);
+  const io2 = { ...io, evalShapes: mk(() => 0), verify: async () => ({ stats: st(0.75, 0.9), eff: 0.5 }) };
+  const r2 = await runAutoDesign({ stages: { shape: true }, obs, current: cur, shapePart: 0, shapeRanges: rg }, io2);
+  ok(r2.unchanged && r2.best.shape === null && r2.reason === '형상 변수의 효과가 잡음 수준 — 현재 형상 유지', `효과 없음 → 현재안 유지: ${r2.reason}`); }
+{ // h 선별 → R 도 격자에 포함 (R 은 선별 후보에 안 나옴)
+  const rg = shapeVarRanges({ t0: 2, pitch: 5, hasCenters: true }), seen = [];
+  const evalFn = async (cands) => { seen.push(cands); return cands.map((c) => ({ cand: c, stats: st(0.6 + (c.h > 0 ? 0.3 : 0), 0.9), eff: 0.5, ok: true })); };
+  const sc = await screenShapeVars(evalFn, rg, obs);
+  ok(sc.vars.join() === 'h' && seen[0].length === 9 && seen[0].every((c) => c.R === 2.75), `h 선별(선별 9개(R 은 h 와 묶음), R=mid): ${sc.vars}`);
+  const io = { evalShapes: (d, c, N) => evalFn(c), verify: async (d) => ({ stats: st(d.shape?.h > 0 ? 0.9 : 0.6, 0.9), eff: 0.5 }), progress() {}, cancelled: () => false };
+  const r = await runAutoDesign({ stages: { shape: true }, obs, current: { milky: 3, shape: null }, shapePart: 0, shapeRanges: rg }, io);
+  const grid = seen[2], Rs = new Set(grid.map((c) => c.R));
+  ok(grid.length === 9 && Rs.size === 3 && r.best.shape.h > 0, `격자 ${grid.length}개, R ${[...Rs]}`); }
 ok(halvingTotal(27) === 35 && halvingTotal(4) === 10 && halvingTotal(1) === 3, 'halving 평가 후보 수 합(진행률 분모)');
 done();

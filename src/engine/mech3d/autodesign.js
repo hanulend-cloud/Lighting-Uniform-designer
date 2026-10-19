@@ -4,6 +4,7 @@
 import { milkyAxis } from './reweight.js';
 import { pickMilky, margin } from './milky-search.js';
 import { searchLeds } from './basis.js';
+import { gridCandidates } from './shape-opt.js';
 
 export const MILKY_STEP = 0.025, MILKY_ITERS = 8;
 // 평활 길이 U — 길이 프로파일 3행 이동평균(NaN 행 제외)의 min/max. 한 칸 잡음 골짜기(min 통계 편향)에 덜 민감. profile 없으면 Ulen
@@ -39,6 +40,23 @@ export async function halving(cands, evalFn, obs, schedule = SHAPE_SCHEDULE, can
     pool = res.slice(0, schedule[s + 1]?.[0] ?? 1).map((r) => r.cand);
   }
   return last;
+}
+
+// 진행률 분모 — 선별 후보 수 + 압축 평가 수. 선별은 io.shapePlan?.({ screen, grid, total }) 로 먼저 알리고, 그 뒤 evalShapes 호출마다 후보 1개씩 센다
+export const shapeTotal = (nScreen, nGrid, schedule = SHAPE_SCHEDULE) => nScreen + halvingTotal(nGrid, schedule);
+// ③ 1단계 변수 선별 — 현재 형상 + 변수별 하한/상한 하나씩(R 은 h 와 묶음: h 후보는 R=mid). 이득 = max(점수(lo), 점수(hi)) − 점수(현재) ≥ eps 인 상위 keep 개
+export async function screenShapeVars(evalFn, ranges, obs, { N = 6e4, maxMs = 2500, eps = 0.01, keep = 3 } = {}) {
+  const rd = (v) => Math.round(v * 1e4) / 1e4, Rm = ranges.R ? rd((ranges.R[0] + ranges.R[1]) / 2) : 1, zero = { dt: 0, h: 0, R: Rm, e: 0, c: 0 };
+  const names = Object.keys(ranges).filter((k) => k !== 'R'), cands = [zero], tag = [-1];
+  names.forEach((v, i) => ranges[v].forEach((x) => { cands.push({ ...zero, [v]: rd(x) }); tag.push(i); }));
+  const results = await evalFn(cands, N, maxMs), byCand = new Map(results.map((r) => [r.cand, r]));
+  const sc = (c) => { const r = byCand.get(c); return r ? shapeScore(r, obs) : -Infinity; }, base = sc(zero), gains = {};
+  names.forEach((v, i) => {
+    const best = Math.max(...cands.filter((_, k) => tag[k] === i).map(sc));
+    gains[v] = Number.isFinite(best) ? (Number.isFinite(base) ? best - base : eps) : 0;
+  });
+  const vars = names.filter((v) => gains[v] >= eps).sort((a, b) => gains[b] - gains[a]).slice(0, keep);
+  return { vars, gains, results };
 }
 
 // ① Milky: 구간 [0.25, 상한] 이분 탐색 — 창 전체 통과면 위쪽 끝을 창 아래로, 전부 미달이면 아래쪽 끝을 창 위로. 중지 = null
@@ -94,9 +112,23 @@ export async function runAutoDesign(cfg, io) {
     if (m.found) d = { ...d, milky: m.found.milky };
     else { feasible = false; d = { ...d, milky: m.nearest?.milky ?? d.milky }; reason = `${m.nearest?.reason ?? '믿을 수 있는 격자점이 없음'} — Milky 상한(${mCap})을 올리거나 ②·③ 을 함께 쓰세요`; }
   }
-  if (stages.shape && cfg.shapeCands?.length) {   // ③
-    io.progress?.('shape', 0, `형상 후보 ${cfg.shapeCands.length}개 평가`);
-    const best = await halving(cfg.shapeCands, (cands, N, ms) => io.evalShapes(d, cands, N, ms), obs, cfg.schedule, stop);
+  let shapeCands = cfg.shapeCands, shapeNone = false;
+  if (stages.shape && cfg.shapeRanges) {   // ③ 1단계 선별 → 2단계 격자 (cfg.shapeCands 만 있으면 아래 기존 경로)
+    const rg = cfg.shapeRanges, nScreen = 1 + 2 * Object.keys(rg).filter((k) => k !== 'R').length;
+    io.shapePlan?.({ screen: nScreen, grid: null, total: null });
+    io.progress?.('shape', 0, `형상 변수 선별 (후보 ${nScreen}개)`);
+    const sc = await screenShapeVars((cands, N, ms) => io.evalShapes(d, cands, N, ms), rg, obs, cfg.screen);
+    if (stop()) return { cancelled: true };
+    steps.push({ stage: 'shapeScreen', gains: sc.gains, vars: sc.vars });
+    if (!sc.vars.length) { shapeNone = true; feasible = margin(currentVerified.stats, obs) >= 0; reason = '형상 변수의 효과가 잡음 수준 — 현재 형상 유지'; }
+    else {
+      shapeCands = gridCandidates(sc.vars.includes('h') && rg.R ? [...sc.vars, 'R'] : sc.vars, rg);
+      io.shapePlan?.({ screen: nScreen, grid: shapeCands.length, total: shapeTotal(nScreen, shapeCands.length, cfg.schedule) });
+    }
+  }
+  if (stages.shape && !shapeNone && shapeCands?.length) {   // ③
+    io.progress?.('shape', 0, `형상 후보 ${shapeCands.length}개 평가`);
+    const best = await halving(shapeCands, (cands, N, ms) => io.evalShapes(d, cands, N, ms), obs, cfg.schedule, stop);
     if (stop()) return { cancelled: true };
     steps.push({ stage: 'shape', best });
     if (best) {
