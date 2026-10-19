@@ -79,7 +79,7 @@ export function clearanceHtml(c) {
 const f2 = (v) => (Math.round(v * 100) / 100).toFixed(2);
 // 가능 범위 글자 — 무한은 '—'
 const rangeText = (lo, hi) => `${Number.isFinite(lo) ? f2(lo) : '—'} ~ ${Number.isFinite(hi) ? f2(hi) : '—'}`;
-export function xformEditor(p, info, lock = true) {
+export function xformEditor(p, info, lock = false) {
   const o = p.xform?.offset ?? [0, 0, 0], s = p.xform?.scale ?? [1, 1, 1], c0 = info?.center0 ?? [0, 0, 0], z0 = info?.size0 ?? p.size ?? [0, 0, 0], lim = info?.lim;
   const cen = [0, 1, 2].map((k) => c0[k] + o[k]), siz = [0, 1, 2].map((k) => z0[k] * s[k]);
   const cell = (key, v, lo, hi, label) => `<input type="number" step="0.1" value="${f2(v)}" data-m3-xf="${key}" aria-label="${label}"${Number.isFinite(lo) ? ` min="${f2(lo)}"` : ''}${Number.isFinite(hi) ? ` max="${f2(hi)}"` : ''}>`;
@@ -101,7 +101,7 @@ export function xformEditor(p, info, lock = true) {
 
 // 부품 노드 — sel = { part, face|null }, h = { onKind(part, kind), onMat(part, key, value), onFinish(part, face|null, finish|null) }
 export function renderPartProps(el, m, sel0, dbList, h) {
-  const sel = { ...sel0, lock: XF_LOCK.get(el.ownerDocument ?? XF_LOCK) ?? true };   // 비율 고정 선택은 다시 그려도 유지
+  const sel = { ...sel0, lock: XF_LOCK.get(el.ownerDocument ?? XF_LOCK) ?? false };   // 비율 고정: 기본 꺼짐(한 치수만 바꾸는 경우가 대부분), 켜면 다시 그려도 유지
   const p = m.parts[sel.part];
   if (!p) { el.innerHTML = '<div class="mut">부품을 찾을 수 없음</div>'; return; }
   const sc = p.xform?.scale ?? [1, 1, 1];
