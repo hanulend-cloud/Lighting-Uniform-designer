@@ -131,19 +131,20 @@ function geometry(obs) {
   return A.Gc.G;
 }
 // 디바운스가 끝날 때 부르는 작업 생성기 — 라인·광원이 없으면 null(안내), 직접 배치 오류는 던짐(계산 실패로 표시)
-function makeJob() {
-  if (!A) return null;
-  const M = A.store.mspec, S = A.store.session;
+// 작업 생성(현재 또는 자동설계 후보 설계) — M: spec.mech3d(복사본 가능), mechParts: 기구 메쉬(형상 후보면 바뀐 부품 포함)
+export function jobFor(M, mechParts, { emitters = null } = {}) {
+  const S = A.store.session;
   if (!S.line) return null;
-  const emitters = L.currentEmitters(M, S.line);
-  if (!emitters.length) return null;
+  const em = emitters ?? L.currentEmitters(M, S.line);
+  if (!em.length) return null;
   const obs = tallyObs(M.observe, M.observe.dir ?? S.line.frame.d), G = geometry(obs);
   const ledParts = M.light.kind === 'step' && getLedMesh() ? L.rawParts(getLedMesh().parts) : null;
   return {
-    sceneKey: `s${++sceneSeq}`, G, obs, nLeds: emitters.length, fluxLm: M.light.spec.fluxLm ?? 0,
-    scene: { mechParts: L.rawParts(getMech3d().parts), mspec: JSON.parse(JSON.stringify(M)), ledParts, lineData: lightData(S.line), G, obs, emitters },
+    sceneKey: `s${++sceneSeq}`, G, obs, nLeds: em.length, fluxLm: M.light.spec.fluxLm ?? 0,
+    scene: { mechParts: L.rawParts(mechParts), mspec: JSON.parse(JSON.stringify(M)), ledParts, lineData: lightData(S.line), G, obs, emitters: em },
   };
 }
+function makeJob() { return A ? jobFor(A.store.mspec, getMech3d().parts) : null; }
 function restartCalc() { A.timing = { start: 0, first: null, noise5: null }; A.prog.restart(makeJob); }
 function guidance(snap) {
   const M = A.store.mspec, S = A.store.session;
