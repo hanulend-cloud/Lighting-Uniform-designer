@@ -646,6 +646,13 @@ function importLedStep(file) {
       if (A?.store !== st) return;
       setLedMesh(file.name, m.data.parts); saveLedIDB().catch(() => {}); L.resetLedCaches();
       st.update('light', (M, x) => {
+        // 같은 이름의 LED STEP 을 다시 불러옴(저장소 비워짐 등) — 저장된 기준 LED·위치 보정·제외·가상 배치로 재인식
+        const old = M.light.step;
+        if (old?.ref && old.name === file.name) {
+          M.light.step = { ...old, leds: [], pcb: -1, emitters: [] };
+          try { L.applyStepRecognition(M, x, M.light.step, old.ref); x.ledInfo = `저장된 LED 지정 복원 — ${x.ledInfo}`; x.pick = null; x.node = 'leds'; return; }
+          catch (e) { x.status = `저장된 LED 지정으로 인식 실패(${e.message}) — 새로 지정하세요`; }
+        }
         M.light.step = { name: file.name, offset: [0, 0, 0], rot: [0, 0, 0], ref: null, leds: [], excluded: [], pcb: -1, emitters: [] };
         x.ledInfo = `부품 ${m.data.parts.length}개 — LED 하나의 발광면을 클릭하세요`; x.pick = 'led'; x.node = 'leds';   // 발광면·제외 클릭 버튼은 LED 노드에
       });

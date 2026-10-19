@@ -18,7 +18,9 @@ import { drawPlan } from './ui/plan.js';
 import { drawHeatmap } from './ui/heatmap.js';
 import { buildLevels, updateLevels, renderVerdict, drawProfiles } from './ui/analysis.js';
 import { exportStep } from './export/step-ui.js';
-import { setMech3dMesh, getMech3d, initialMech3dSpec, saveMech3dIDB, loadMech3dIDB, loadLedIDB } from './engine/mech3d/runtime.js';
+import { setMech3dMesh, getMech3d, initialMech3dSpec, saveMech3dIDB, loadMech3dIDB, loadLedIDB, getLedMesh, applyPartMods, redetectContacts } from './engine/mech3d/runtime.js';
+import { matchesPending, restorePending } from './engine/mech3d/restore.js';
+import { bounds } from './engine/mech3d/mesh.js';
 import { migrateMech3d } from './engine/mech3d/defs.js';
 import * as m3app from './ui/m3/app.js';
 
@@ -227,25 +229,55 @@ function applyMode() {
   if (m3) stopFlatSolve();
   if (m3) m3app.mount(m3ctx()).catch((e) => m3app.setStatus(`3D 화면 오류: ${e.message ?? e}`));
   else m3app.unmount();
+  renderPendingBanner();
 }
+// 메쉬 없이 남은 3D 설정(spec.mech3dPending) 안내 띠 — 같은 기구 STEP 을 다시 불러오면 복원
+function renderPendingBanner() {
+  const el = $('#m3-pending'), P = spec.mech3dPending;
+  el.hidden = !P;
+  if (!P) return;
+  el.querySelector('[data-name]').textContent = P.name ? ` (${P.name} · 부품 ${P.parts?.length ?? 0}개)` : '';
+  el.querySelector('[data-reload]').onclick = () => $('#file-mech3d').click();
+  el.querySelector('[data-drop]').onclick = () => {
+    if (!confirm('저장된 3D 설정(소재·관측면·LED·목표 등)을 버릴까요? 되돌릴 수 없습니다.')) return;
+    spec.mech3dPending = null; persist(); renderPendingBanner();
+  };
+}
+// 원본 메쉬 부품 → 같은 기구 판정용 { volume, size }
+const partInfo = (parts) => parts.map((p) => { const b = bounds(p.positions); return { volume: p.volume, size: [b[3] - b[0], b[4] - b[1], b[5] - b[2]] }; });
+// 지금 spec.mech3d 를 메쉬 없는 보관 상태로(버리지 않음) — 평판 모드로 시작
+function shelveMech3d() { spec.mech3dPending = spec.mech3d; spec.mech3d = null; spec.mode = 'flat'; }
 // 기구 STEP 불러오기(평판·3D 모드 공통) — spec.mech3d 를 새로 만들고 3D 모드로
 function importMech3d(file) {
   const say = (t) => { if (m3app.isMounted()) m3app.setStatus(t); else $('#timing').textContent = t; };
   say(`${file.name} 읽는 중…`);
   file.text().then((text) => {
     const w = new Worker(new URL('./engine/mech3d/mech3d-worker.js', import.meta.url), { type: 'module' });
-    w.onmessage = (m) => {
+    w.onmessage = async (m) => {
       if (m.data.stage) { say(m.data.stage); return; }
       w.terminate();
       if (m.data.error) { say(`불러오기 실패: ${m.data.error}`); return; }
       try {
+        // 저장된 3D 설정(메쉬 없음 — 보관분, 또는 평판 모드로 나간 뒤 새로고침해 메쉬 미적재)이 있으면: 같은 기구 = 복원, 다르면 물어봄(취소 = 보관 유지·불러오기 중단)
+        const pend = spec.mech3dPending ?? (spec.mech3d && !getMech3d() ? spec.mech3d : null), same = !!pend && matchesPending(pend, partInfo(m.data.parts));
+        if (pend && !same && !confirm(`${file.name}: 저장된 3D 설정${pend.name ? `(${pend.name})` : ''}과 부품 구성이 다릅니다. 새 기구로 시작할까요?
+(취소 = 저장된 설정을 그대로 두고 불러오기 중단)`)) {
+          say('불러오기 취소 — 저장된 3D 설정은 그대로 보관됨'); return;
+        }
         m3app.unmount();
         setMech3dMesh(file.name, m.data.parts);
-        const ms = initialMech3dSpec();
-        spec.mech3d = ms; spec.mode = 'mech3d';
+        let ms = initialMech3dSpec(), restored = same ? restorePending(pend, ms) : null;
+        if (restored) {
+          ms = restored;
+          if (applyPartMods(ms.parts)) ms.contacts = redetectContacts([...(pend.contacts ?? []), ...ms.contacts]);   // 크기·위치·형상 변경 반영 후 접촉면 재검출(같은 면 키 mode 유지)
+          if (ms.light?.step && !getLedMesh()) await loadLedIDB();   // LED STEP 메쉬 — 없으면 mount 의 validateLedStep 이 안내(지정은 유지)
+        }
+        spec.mech3d = ms; spec.mode = 'mech3d'; spec.mech3dPending = null;
         saveMech3dIDB().catch(() => {});
         persist(); applyMode();
-        m3app.setStatus(`불러옴: ${file.name} · 부품 ${m.data.parts.length}개 · 접촉면 ${ms.contacts.length}개 — Milky 부품부터 지정하세요`);
+        m3app.setStatus(restored
+          ? `복원함: 저장된 3D 설정 — ${file.name} · 부품 ${ms.parts.length}개 · 접촉면 ${ms.contacts.length}개${pend.name && pend.name !== file.name ? ` (저장 이름 ${pend.name})` : ''}`
+          : `불러옴: ${file.name} · 부품 ${m.data.parts.length}개 · 접촉면 ${ms.contacts.length}개 — Milky 부품부터 지정하세요`);
       } catch (e) { say(`불러오기 실패: ${e.message ?? e}`); }
     };
     w.onerror = (e) => { w.terminate(); say(`불러오기 실패: ${e.message ?? e}`); };
@@ -619,9 +651,10 @@ function importJson(e) {
   const f = e.target.files[0]; if (!f) return;
   const r = new FileReader();
   r.onload = () => { try { spec = JSON.parse(r.result); migrate(spec);
-    if (spec.mech3d && !(getMech3d() && spec.mech3d.parts.length === getMech3d().parts.length)) { spec.mode = 'flat'; spec.mech3d = null; }
+    // 지금 메쉬와 다른 기구면 버리지 않고 보관(안내 띠) — 같은 기구 STEP 을 다시 불러오면 복원
+    if (spec.mech3d && !(getMech3d() && matchesPending(spec.mech3d, partInfo(getMech3d().raw.parts)))) shelveMech3d();
     if (spec.mode === 'mech3d' && !spec.mech3d) spec.mode = 'flat';
-    mount(); m3app.unmount(); applyMode(); schedule(); } catch { alert('JSON 파싱 실패'); } };
+    persist(); mount(); m3app.unmount(); applyMode(); schedule(); } catch { alert('JSON 파싱 실패'); } };
   r.readAsText(f);
 }
 
@@ -663,6 +696,8 @@ function migrate(s) {
   s.mode ??= 'flat';
   s.mech3d ??= null;
   if (s.mech3d) migrateMech3d(s.mech3d);
+  s.mech3dPending ??= null;   // 메쉬(IndexedDB)를 잃은 3D 설정 보관 — 같은 기구 STEP 을 다시 불러오면 복원
+  if (s.mech3dPending) migrateMech3d(s.mech3dPending);
   // ver<10 저장값은 판정제외 마진 5% 를 품고 있어 새 기본(0 = 타겟 전체 판정)을 덮어쓴다 —
   // 마진과 오버행 설정을 버리고 현재 기본값으로 시작한다. ver 10 에서 사용자가 직접 넣은 값은 유지.
   if (!(s.ver >= 10)) {
@@ -703,8 +738,9 @@ if (spec.mode === 'mech3d') m3app.warmWorkers({ dbLists, l2Raw });   // 3D 계�
 if (spec.body.shape.source === 'step' && !(await loadBodyIDB({ flipZ: spec.body.shape.flipZ, rot: spec.body.shape.rot }))) {
   spec.body.shape = structuredClone(DEFAULT_SPEC.body.shape);
 }
-// 3D 기구 복원(IndexedDB) — 메쉬가 없으면 평판 모드로
-if (spec.mode === 'mech3d' && !(spec.mech3d && await loadMech3dIDB())) { spec.mode = 'flat'; spec.mech3d = null; }
+// 3D 기구 복원(IndexedDB) — 메쉬가 없으면 설정은 보관(mech3dPending, 안내 띠)하고 평판 모드로
+if (spec.mode === 'mech3d' && spec.mech3d && !(await loadMech3dIDB())) { shelveMech3d(); persist(); }
+if (spec.mode === 'mech3d' && !spec.mech3d) spec.mode = 'flat';
 if (spec.mech3d?.light?.step) await loadLedIDB();   // 검증은 m3app.mount 에서
 // 평판 계산 Worker — 평판 모드로 시작할 때만 지금 만든다(3D 모드면 평판 계산이 처음 필요할 때 run() 이 만든다)
 if (spec.mode !== 'mech3d') startSolver();

@@ -399,3 +399,10 @@ canvas.m3-g { width: 100%; display: block; border-radius: 4px; background: #fafb
 .m3-ad-item { display: block; margin: 2px 0; } .m3-ad-item.off { color: var(--m3-mut); }
 .m3-ad-prog { display: flex; gap: 6px; align-items: center; margin: 6px 0; } .m3-ad-prog .bar { flex: 1; height: 6px; background: #e6e9ef; border-radius: 3px; overflow: hidden; } .m3-ad-prog .bar i { display: block; height: 100%; background: var(--m3-acc); }
 .m3-cmp { width: 100%; border-collapse: collapse; margin: 4px 0; } .m3-cmp th, .m3-cmp td { padding: 2px 4px; text-align: left; border-bottom: 1px solid var(--m3-line); } .m3-cmp td.chg { color: var(--m3-acc); font-weight: 600; }
+
+/* 메쉬 잃은 3D 설정 보관 안내 띠 */
+#m3-pending { flex: 0 0 auto; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 8px 16px;
+  background: #fff4d6; color: #5c4300; border-bottom: 1px solid #f0c75e; font-size: 13px; }
+#m3-pending[hidden] { display: none; }
+#m3-pending button { background: #fff; color: #20262f; border: 1px solid #d3d8e0; border-radius: 6px; padding: 4px 10px; cursor: pointer; font-size: 13px; }
+#m3-pending button[data-reload] { border-color: #e0a800; font-weight: 700; }

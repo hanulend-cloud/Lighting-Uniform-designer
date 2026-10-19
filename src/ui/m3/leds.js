@@ -66,7 +66,10 @@ export function validateLedStep(M, S) {
     catch (e) { st.emitters = []; S.ledInfo = `LED 재인식 실패: ${e.message} — LED 발광면을 다시 클릭하세요`; return { changed: false, status: '' }; }
   }
   if (lm && lm.name !== st.name) clearLedMesh();
-  Object.assign(st, { ref: null, leds: [], excluded: [], pcb: -1, emitters: [] });
+  // 메쉬가 없거나 이름이 다르면 기준 LED(ref)·제외·가상 배치는 남긴다 — 같은 LED STEP 을 다시 불러오면 importLedStep 이 그 ref 로 재인식.
+  // 같은 이름 메쉬인데 번호가 안 맞으면(다른 파일) ref 도 비움
+  const keep = !lm || lm.name !== st.name;
+  Object.assign(st, { ...(keep ? {} : { ref: null, excluded: [] }), leds: [], pcb: -1, emitters: [] });
   S.ledInfo = '저장된 LED STEP 을 찾을 수 없음 — 다시 불러오세요';
   return { changed: true, status: '' };
 }
