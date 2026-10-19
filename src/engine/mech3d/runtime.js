@@ -5,6 +5,7 @@ import { findContacts } from './contacts.js';
 import { defaultPart } from './materials.js';
 import { defaultLight, defaultObserve, defaultChecks } from './defs.js';
 import { scaleMoveMesh, isIdentityXform } from './xform.js';
+import { frameHeights, deformPart, refineForBumps } from './shape-opt.js';
 
 let raw = null, xkey = '';   // raw = 불러온 원본 장면(변환 전) — IndexedDB 에는 원본만 보관
 let scene = null;   // { name, parts: [{ positions, triangles, faceIds, faceCount, volume, bvh }], combined, bvh }
@@ -23,21 +24,33 @@ export function setMech3dMesh(name, rawParts) {
 // 현재 장면(부품 크기·위치 조절 반영). scene.raw = 원본 장면(같은 기구인지 비교용)
 export function getMech3d() { return scene; }
 export function clearMech3d() { scene = raw = null; xkey = ''; }
-// 부품별 크기·위치 조절(spec.mech3d.parts[i].xform) 적용 — 바뀌었을 때만 메쉬·BVH 를 다시 만든다. 반환: 바뀌었는지
-export function applyPartXforms(xforms) {
+// 부품 변경 = 크기·위치(xform) → 형상(shapeMod, P4 ③) 순서. mods[i] = spec.mech3d.parts[i](xform·shapeMod 필드만 봄). 반환: 바뀌었는지
+export function applyPartMods(mods) {
   if (!raw) return false;
-  const xs = raw.parts.map((_, i) => (isIdentityXform(xforms?.[i]) ? null : xforms[i])), key = JSON.stringify(xs);
+  const xs = raw.parts.map((_, i) => {
+    const x = isIdentityXform(mods?.[i]?.xform) ? null : mods[i].xform, s = mods?.[i]?.shapeMod ?? null;
+    return x || s ? { x, s } : null;
+  });
+  const key = JSON.stringify(xs);
   if (key === xkey) return false;
   xkey = key;
   if (xs.every((x) => !x)) { scene = raw; return true; }
   const parts = raw.parts.map((p, i) => {
     if (!xs[i]) return p;
-    const b = bounds(p.positions);
-    return scaleMoveMesh(p, xs[i], [(b[0] + b[3]) / 2, (b[1] + b[4]) / 2, (b[2] + b[5]) / 2]);
+    let m = p;
+    if (xs[i].x) { const b = bounds(p.positions); m = scaleMoveMesh(p, xs[i].x, [(b[0] + b[3]) / 2, (b[1] + b[4]) / 2, (b[2] + b[5]) / 2]); }
+    const s = xs[i].s;
+    if (s) {
+      const H = frameHeights(m, s.frame, s.cell ?? 0.5);
+      m = deformPart(refineForBumps(m, s.frame, s.centers, s.R, Math.max(0.1, s.R / 8)), s.frame, H, s);
+    }
+    return m;
   });
   scene = buildSceneMesh(raw.name, parts); scene.raw = raw;
   return true;
 }
+// 구 호출(크기·위치만) — xforms[i] → { xform }
+export const applyPartXforms = (xforms) => applyPartMods((xforms ?? []).map((x) => ({ xform: x })));
 // 현재 장면으로 접촉면을 다시 찾는다 — 같은 면 쌍은 사용자가 고른 모드(접촉/공기층)를 유지
 export function redetectContacts(old = []) {
   const mode = new Map(old.map((c) => [`${c.a}|${c.faceA}|${c.b}|${c.faceB}`, c.mode]));

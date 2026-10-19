@@ -1,6 +1,6 @@
 // 강체 변환·기본값: node test/mech3d-xform.mjs
 import { transformMesh, eulerMatrix, applyPoint, scaleMoveMesh, isIdentityXform } from '../src/engine/mech3d/xform.js';
-import { setMech3dMesh, getMech3d, applyPartXforms, redetectContacts, clearMech3d } from '../src/engine/mech3d/runtime.js';
+import { setMech3dMesh, getMech3d, applyPartXforms, applyPartMods, redetectContacts, clearMech3d } from '../src/engine/mech3d/runtime.js';
 import { bounds } from '../src/engine/mech3d/mesh.js';
 import { xformFromInput, xformEditor } from '../src/ui/mech3d-panel.js';
 import { defaultLight, defaultObserve, migrateMech3d, SOLDER_R } from '../src/engine/mech3d/defs.js';
@@ -52,4 +52,9 @@ ok(!('bvh' in transformMesh(mb, [1, 0, 0], [0, 0, 0])), '변환 사본은 캐시
   ok(h.includes('value="12.00"') && h.includes('min="9.00"') && h.includes('max="16.00"') && h.includes('9.00 ~ 16.00') && h.includes('— ~ —') && h.includes('24.00') && !h.includes('m3-xfhint'), '편집기: 현재 중심·가능 범위·최대 크기 표시');
   const hl = xformEditor({ size: [20, 10, 2] }, { ...info, lim: { ...info.lim, uniform: 1 } }, true);
   ok(hl.includes('m3-xfhint') && hl.includes('최대*') && hl.includes('max="20.00"'), '비율 고정으로 막히면 이유 안내'); }
+{ setMech3dMesh('s', [boxMesh(0, 0, 0, 40, 10, 2)]); const raw = getMech3d();
+  const mod = { frame: { u: [1, 0, 0], v: [0, 1, 0], d: [0, 0, 1] }, dt: 0.5, h: 0, R: 1, centers: [], cell: 0.5 };
+  ok(applyPartMods([{ shapeMod: mod }]) && Math.abs(meshVolume(getMech3d().parts[0].positions, getMech3d().parts[0].triangles) - 1000) < 1e-3 && getMech3d().raw === raw, 'shapeMod Δt 0.5 반영(부피 1000), 원본 유지');
+  ok(!applyPartMods([{ shapeMod: mod }]), '같은 변경이면 다시 만들지 않음');
+  ok(applyPartMods([{}]) && getMech3d() === raw, 'shapeMod 지우면 원본'); clearMech3d(); }
 done();

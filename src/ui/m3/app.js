@@ -3,7 +3,7 @@
 // 저장 상태 = ctx.mspec(spec.mech3d), 세션 상태 = store.session. 흐름: store.update(tag) → onChange(tag)
 //   observe → 관측 라인 다시 인식 · 물리 태그 → 점진 계산 재시작 · 기하 점검 태그 → 점검 ①②③ · target → 판정만 다시. 모두 다시 그림.
 // 점진 계산 갱신(1초마다)은 store 알림 없이 결과 패널·상태 띠·색지도만 다시 그린다(입력 중 속성 패널이 다시 그려지지 않게).
-import { getMech3d, getLedMesh, setLedMesh, saveLedIDB, applyPartXforms, redetectContacts } from '../../engine/mech3d/runtime.js';
+import { getMech3d, getLedMesh, setLedMesh, saveLedIDB, applyPartMods, redetectContacts } from '../../engine/mech3d/runtime.js';
 import { setPartMaterial, setPartMaterialParam, setPartFinish } from '../../engine/mech3d/materials.js';
 import { lineFromData, lightData, obsDirection } from '../../engine/mech3d/line.js';
 import { tallyGeometry } from '../../engine/mech3d/tally.js';
@@ -58,7 +58,7 @@ export async function mount(ctx) {
   unmount();
   const pool = getPool(ctx);
   pool.setDb(ctx.dbLists()); pool.warm();   // 첫 작업 전에 Worker 를 띄워 L2 표를 적재(이미 떠 있으면 소재 DB 만 갱신)
-  applyPartXforms(ctx.mspec.parts.map((p) => p.xform));   // 저장된 부품 크기·위치 조절을 장면에 반영
+  applyPartMods(ctx.mspec.parts);   // 저장된 부품 크기·위치 조절을 장면에 반영
   const store = createStore(ctx.mspec, { persist: ctx.persist });
   L.resetLedCaches();
   const v0 = L.validateLedStep(ctx.mspec, store.session);   // main.js:982 의 시작 시 검증을 여기서
@@ -106,7 +106,7 @@ function onKey(e) {
 
 // ---- 관측 라인 (main.js:266-282) — 관측면·방향이 바뀌면 Worker 0 에서 다시 인식 ----
 async function refreshLine() {
-  const st = A.store, O = st.mspec.observe, S = st.session, pool = A.pool, key = JSON.stringify([O.faces, O.dir, st.mspec.parts.map((p) => p.xform ?? null)]);
+  const st = A.store, O = st.mspec.observe, S = st.session, pool = A.pool, key = JSON.stringify([O.faces, O.dir, st.mspec.parts.map((p) => [p.xform ?? null, p.shapeMod ?? null])]);
   if (key === A.lineKey) return;
   A.lineKey = key; S.line = null; S.lineErr = '';
   if (!O.faces.length) return;
@@ -340,7 +340,7 @@ function propHandlers() {
         if (r.limited) { xf = r.xf; x.xfMsg = { part: i, text: `${hitName(m, r.hit)}과(와) 간섭 — 간섭 직전(입력의 ${Math.round(r.t * 100)}%)까지만 적용` }; }
       }
       if (xf) m.parts[i].xform = xf; else delete m.parts[i].xform;
-      if (applyPartXforms(m.parts.map((p) => p.xform))) m.contacts = redetectContacts(m.contacts);
+      if (applyPartMods(m.parts)) m.contacts = redetectContacts(m.contacts);
     }),
     onContact: (i, mode) => st.update('contacts', (m) => { m.contacts[i] = { ...m.contacts[i], mode }; }),
     onLightKind: (k) => st.update('light', (m, x) => { m.light.kind = k; x.pick = null; }),
