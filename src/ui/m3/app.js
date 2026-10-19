@@ -23,14 +23,16 @@ import { clampVirtual } from '../mech3d-light-panel.js';
 import { createResultsPanel } from './results-panel.js';
 import { renderStatusBar } from './status-bar.js';
 import { createAdRunner } from './autodesign-run.js';
-import { renderAutoPanel, stageAvailability, clampCap, overallFrac, etaText, reusableCurrent } from './autodesign-panel.js';
+import { renderAutoPanel, stageAvailability, clampCap, overallFrac, etaText, reusableCurrent, defaultHousingPart, applyDz, applyFinish } from './autodesign-panel.js';
+import { finishOptions, ledHeightRange, heightCandidates } from '../../engine/mech3d/housing-led.js';
+import { intersectRay } from '../../engine/mech3d/bvh.js';
 import { runAutoDesign, shapeTotal } from '../../engine/mech3d/autodesign.js';
 import { milkyRows } from '../../engine/mech3d/milky-search.js';
 import { candidatePositions } from '../../engine/mech3d/basis.js';
 import { ledAtS } from '../../engine/mech3d/placement.js';
 import { virtualEmittersAt } from '../../engine/mech3d/virtual-leds.js';
 import { heightsFor, deformPart, refinedFor, minThickness, shapeVarRanges, pathFromLine, swOnPath, ledEll, lineVarH, splineInput } from '../../engine/mech3d/shape-opt.js';
-import { interferenceKeys } from '../../engine/mech3d/clearance.js';
+import { interferenceKeys, travelDistance } from '../../engine/mech3d/clearance.js';
 import { scaleMoveMesh, isIdentityXform } from '../../engine/mech3d/xform.js';
 import { defaultChecks } from '../../engine/mech3d/defs.js';
 
@@ -321,10 +323,10 @@ function clearanceOf(i) {
 }
 
 // ---- 자동설계(P4) ----
-function adState() { return (A.ad ??= { open: false, sel: { milky: true, leds: false, shape: false, shapePart: -1, milkyMax: null }, running: null, result: null, undo: null, milkyPart: null, runner: null, info: null, stepBusy: false, stepWorker: null }); }
+function adState() { return (A.ad ??= { open: false, sel: { milky: true, leds: false, shape: false, shapePart: -1, milkyMax: null, height: false, housing: false, housingPart: -1 }, running: null, result: null, undo: null, milkyPart: null, runner: null, info: null, stepBusy: false, stepWorker: null }); }
 function adInfo() {   // 부품별 비 2.5D 비율(관측 방향) — 라인이 있을 때만. (기구·라인) 별 캐시(높이맵 계산이 무거움)
   const st = adState(), S = A.store.session, rt = getMech3d();
-  if (!st.info || st.info.rt !== rt || st.info.line !== S.line) st.info = { rt, line: S.line, non25: S.line && rt ? rt.parts.map((p) => heightsFor(p, S.line.frame, 0.5).non25) : [] };
+  if (!st.info || st.info.rt !== rt || st.info.line !== S.line) st.info = { rt, line: S.line, non25: S.line && rt ? rt.parts.map((p) => heightsFor(p, S.line.frame, 0.5).non25) : [], boxes: rt ? rt.parts.map((p) => bounds(p.positions)) : [] };   // boxes = ④ 기본 대상용 외곽
   return st.info;
 }
 const adMilkyPart = (M, avail) => (avail.milky.ok ? (avail.milky.parts.find((i) => M.observe.faces.some((f) => f.part === i)) ?? avail.milky.parts[0]) : null);
@@ -335,6 +337,7 @@ function renderAuto() {
   if (!st.open) return;
   const M = A.store.mspec, avail = stageAvailability(M, adInfo());
   if (!st.running && !avail.shape.parts?.includes(st.sel.shapePart)) st.sel.shapePart = avail.shape.ok ? avail.shape.parts[0] : -1;   // 부품 소재·형상이 바뀌어 대상이 빠지면 첫 후보로
+  if (!st.running && !avail.housing.parts?.includes(st.sel.housingPart)) { const k = defaultHousingPart(M, adInfo().boxes); st.sel.housingPart = avail.housing.ok ? (avail.housing.parts.includes(k) ? k : avail.housing.parts[0]) : -1; }   // ④ 기본 = 관측 부품을 감싸는 가장 큰 불투명 부품
   const mp = st.running ? st.milkyPart : adMilkyPart(M, avail), sel = { ...st.sel, milkyMax: st.sel.milkyMax ?? Math.max(mp != null ? M.parts[mp].material.milky : 0, 5) };
   renderAutoPanel(el, { avail, sel, running: st.running, result: st.result, names: M.parts.map((p) => p.name), canRevert: !!st.undo, noLine: !A.store.session.line, milkyPart: mp }, {
     onSel: (k, v) => { if (st.running) return; st.sel[k] = k === 'milkyMax' ? clampCap(v) : v; renderAuto(); },
@@ -363,6 +366,8 @@ function designScene(d, ctx) {
   if (mp != null && d.milky != null) M.parts[mp] = setPartMaterialParam(M.parts[mp], 'milky', d.milky);
   if (M.light.kind === 'manual' && d.count != null) { M.light.manual.count = d.count; M.light.manual.pitch = d.pitch; }
   if (M.light.kind === 'step' && M.light.step && d.count != null && d.stepVirt) M.light.step.virtual = { count: d.count, pitch: d.pitch };
+  if (d.finish) applyFinish(M, d.finish);   // ④ 그 부품 기본 면 처리
+  if (d.dz) applyDz(M, d.dz, ctx.line.frame.d);   // ⑤ STEP offset(+발광점) / 직접 배치 깊이 — 가상 배치는 stepLayout 이 offset 을 따름
   let parts = rt.parts;
   if (d.shape) {
     const i = d.shape.part, mod = shapeModFor(d.shape, M, ctx.line), base = adBaseMesh(i, ctx);
@@ -385,13 +390,33 @@ function shapeModFor({ dt, h, R, e = 0, c = 0 }, M, line) {
 }
 const adJob = (M, parts, ctx, o = {}) => { const j = jobFor(M, parts, { line: ctx.line, G: ctx.G, obs: ctx.obs, ...o }); if (!j) throw new Error('LED 가 없음'); return j; };
 const adEff = (r) => { let t = 0; for (const b of r.batches) for (const v of b) t += v; return t / r.ledger.emitted; };
+// ⑤ 높이 범위 [아래, 위](관측 방향 d 이동량 mm) + gap(현재 발광점 → 관측 부품 +d 축 거리 최소, 모르면 NaN)
+// LED STEP(원래·가상) = LED 부품(PCB 포함) 각각을 기구 부품에 대해 travelDistance(이미 겹친 상대는 뺌) · 직접 배치(깊이) = 발광점 ±d 광선
+const rayT = (m, p, d) => (m?.bvh ? intersectRay(m.bvh, p[0], p[1], p[2], d[0], d[1], d[2], 1e-6, Infinity)?.t ?? Infinity : Infinity);
+function adHeightInfo(M0, line, rt) {
+  const d = line.frame.d, nd = d.map((v) => -v), mech = rt.parts, em = L.currentEmitters(M0, line);
+  let up = Infinity, down = Infinity;
+  if (M0.light.kind === 'step') {
+    for (const p of L.ledPartsNow(M0, line) ?? []) {
+      const pre = interferenceKeys(p, mech, [], []), obs = mech.map((m, j) => (pre.has(`p:${j}`) ? null : m));
+      up = Math.min(up, travelDistance(p, obs, d, 10)); down = Math.min(down, travelDistance(p, obs, nd, 10));
+    }
+  } else for (const e of em) for (const m of mech) { up = Math.min(up, rayT(m, e.pos, d)); down = Math.min(down, rayT(m, e.pos, nd)); }
+  const range = ledHeightRange({ up, down });
+  if (M0.light.kind === 'manual') range[1] = Math.min(range[1], Math.max(0, M0.light.manual.pcb.depth - 0.3));   // 깊이 > 0 유지
+  const op = [...new Set(M0.observe.faces.map((f) => f.part))];
+  let gap = Infinity; for (const e of em) for (const i of op) gap = Math.min(gap, rayT(mech[i], e.pos, d));
+  return { range, gap: Number.isFinite(gap) ? gap : NaN };
+}
 async function adRun() {
   const a = A, st = adState(), S = A.store.session;
   if (!S.line || st.running) return;
   const M0 = adClone(A.store.mspec), line = S.line, rt = getMech3d();   // 실행 격리 — 편집은 실행을 중지시킴(onChange)
-  const avail = stageAvailability(M0, adInfo()), stages = { milky: st.sel.milky && avail.milky.ok, leds: st.sel.leds && avail.leds.ok, shape: st.sel.shape && avail.shape.ok && avail.shape.parts.includes(st.sel.shapePart) };
+  const avail = stageAvailability(M0, adInfo()), stages = { milky: st.sel.milky && avail.milky.ok, leds: st.sel.leds && avail.leds.ok, shape: st.sel.shape && avail.shape.ok && avail.shape.parts.includes(st.sel.shapePart),
+    height: st.sel.height && avail.height.ok, housing: st.sel.housing && avail.housing.ok && avail.housing.parts.includes(st.sel.housingPart) };
   st.milkyPart = adMilkyPart(M0, avail);
-  const obs = tallyObs(M0.observe, M0.observe.dir ?? line.frame.d), G = geometry(obs), sp = st.sel.shapePart;
+  const obs = tallyObs(M0.observe, M0.observe.dir ?? line.frame.d), G = geometry(obs), sp = st.sel.shapePart, hp = stages.housing ? st.sel.housingPart : -1;
+  let hInfo = null; if (stages.height) { try { hInfo = adHeightInfo(M0, line, rt); } catch { stages.height = false; } }   // 범위 계산 실패 = ⑤ 생략
   const ctx = { M0, line, G, obs, rt, mp: st.milkyPart };
   const R = (st.runner = createAdRunner({ ports: A.pool.ports() }));
   // 같은 Worker 를 쓰므로 점진 계산은 멈춤 — 대기(디바운스) 중이면 장면을 곧 보내므로 취소. 사용자 일시정지 여부는 기억(끝나고 그대로)
@@ -402,8 +427,10 @@ async function adRun() {
   // LED STEP: 현재 = 가상이면 그 개수·피치, 아니면 현재 발광점 수·0(stepOrig = 원래 위치) · stepVirt = 설계가 가상 배치인가(② 가 STEP 에서 돌면 엔진이 true)
   const stp = M0.light.kind === 'step', sv = stp ? M0.light.step?.virtual ?? null : null;
   let nOrig = 0; if (stp && !sv) { try { nOrig = L.currentEmitters(M0, line).length; } catch { nOrig = 0; } }
-  const cur = { milky: ctx.mp != null ? M0.parts[ctx.mp].material.milky : null, count: stp ? (sv ? sv.count : nOrig) : M0.light.manual?.count ?? 0, pitch: stp ? sv?.pitch ?? 0 : M0.light.manual?.pitch ?? 0, shape: null, ...(stp ? { stepOrig: !sv, stepVirt: !!sv } : {}) };
+  const cur = { milky: ctx.mp != null ? M0.parts[ctx.mp].material.milky : null, count: stp ? (sv ? sv.count : nOrig) : M0.light.manual?.count ?? 0, pitch: stp ? sv?.pitch ?? 0 : M0.light.manual?.pitch ?? 0, shape: null, finish: null, dz: 0, ...(stp ? { stepOrig: !sv, stepVirt: !!sv } : {}) };
   ctx.cur = cur;
+  const finishCands = stages.housing ? finishOptions(M0.parts[hp].finish) : null;
+  const varTot = { height: (hInfo ? heightCandidates(hInfo.range, 7).length : 0) + 2, housing: (finishCands?.length ?? 0) + 2 }, varI = { height: 0, housing: 0 };   // 진행률 분모 = 1차 후보 + 정밀 2개
   const minWall = { ...defaultChecks(), ...(M0.checks ?? {}) }.minWall, t0 = performance.now();
   // ③ 변수 범위(Δt·h·R·e·c) — 엔진이 선별 → 격자 → 압축. 진행률 분모는 io.shapePlan 으로 받음(격자 크기 모르는 선별 중엔 최대 격자 27 로 어림)
   const shapeRanges = stages.shape ? shapeVarRanges({ t0: heightsFor(adBaseMesh(sp, ctx), line.frame, 0.5).t0, pitch: cur.count > 1 ? (cur.pitch > 0 ? cur.pitch : line.length / cur.count) : line.length, hasCenters: true }) : null;
@@ -448,6 +475,17 @@ async function adRun() {
       }
       return out;
     },
+    async evalVariants(d, cands, N, maxMs = 2500) {   // ⑤ { dz } · ④ { finish } 후보 — 형상 평가와 같은 예산(간섭은 범위가 이미 피함)
+      const out = [], stg = cands.length && 'dz' in cands[0] ? 'height' : 'housing', nm = stg === 'height' ? 'LED 높이' : '케이스 면';
+      for (const c of cands) {
+        if (R.stopped) break;
+        const k = ++varI[stg]; progress(stg, Math.min(1, (k - 1) / varTot[stg]), `${nm} 후보 ${Math.min(k, varTot[stg])}/${varTot[stg]}`);
+        const { M: Md, parts } = designScene({ ...d, ...('dz' in c ? { dz: c.dz } : { finish: c.finish }) }, ctx);
+        const r = await R.trace(adJob(Md, parts, ctx), { N, maxMs, minN: Math.min(N, 3e4), batches: 4 }), stt = tallyStats(G, r.batches, obs);
+        out.push({ cand: c, ok: !stt.empty, stats: stt, eff: adEff(r) });
+      }
+      return out;
+    },
     async verify(d) {   // 정밀 재판정(현재안·최종안): 200만 광자 또는 6초(≥ 30만) — 잡음 ≈ ±2%
       const { M: Md, parts } = designScene(d, ctx);
       const r = await R.trace(adJob(Md, parts, ctx), { N: 2e6, maxMs: 6000, minN: 3e5, batches: 10 });
@@ -458,7 +496,7 @@ async function adRun() {
   try {
     res = await runAutoDesign({
       stages, obs, G, line, current: cur, milkyMax: st.sel.milkyMax ?? Math.max(cur.milky ?? 0, 5), nMax: Math.max(1, Math.min(60, Math.floor(line.length / 2))), pitchRange: null, stepMode: stp,
-      shapePart: sp, shapeRanges, currentVerified,
+      shapePart: sp, shapeRanges, currentVerified, heightRange: hInfo?.range ?? null, housingPart: hp, finishCands,
     }, io);
   } catch (e) { if (A === a && !R.stopped) setStatus(`자동설계 실패: ${e.message}`); }
   if (A !== a) return;   // 그사이 이탈
@@ -468,6 +506,7 @@ async function adRun() {
     let nStep = null; if (M0.light.kind === 'step') { try { nStep = L.currentEmitters(M0, line).length; } catch { nStep = 0; } }
     const smI = sp >= 0 && M0.parts[sp]?.shapeMod ? sp : M0.parts.findIndex((p) => p.shapeMod), sm = smI >= 0 ? M0.parts[smI].shapeMod : null;   // 비교표 '현재' 열 — 이미 적용된 형상(표시만)
     st.result = { design: res.best, feasible: res.feasible, reason: res.reason, shape: res.best.shape ?? null, screen: res.steps?.find((x) => x.stage === 'shapeScreen')?.gains ?? null, stepLeds: nStep, unchanged: !!res.unchanged, ctx, stages,
+      finish: stages.housing ? { cur: M0.parts[hp].finish, best: res.best.finish ?? M0.parts[hp].finish } : null, height: stages.height && hInfo ? { dz: res.best.dz ?? 0, gap: hInfo.gap } : null,
       cur: { ...cur, shape: sm ? { dt: sm.dt, h: sm.h, R: sm.R, e: sm.e ?? 0, c: sm.c ?? 0 } : null, Ulen: C?.stats?.Ulen, Uwid: C?.stats?.Uwid, eff: C?.eff ?? NaN, profile: C?.stats?.profile ?? null },
       best: { ...res.best, ...(stp ? { stepOrig: !res.best.stepVirt } : {}), Ulen: res.verified.stats.Ulen, Uwid: res.verified.stats.Uwid, eff: res.verified.eff, profile: res.verified.stats.profile ?? null } };
   }
@@ -494,13 +533,18 @@ function adApply() {
   const sv = M.light.kind === 'step' ? M.light.step?.virtual ?? null : null;   // LED STEP: 가상 배치로 바뀌었고 이전과 다르면
   const stepCh = !!r.stages?.leds && M.light.kind === 'step' && !!M.light.step && d.count != null && !!d.stepVirt && (!sv || sv.count !== d.count || sv.pitch !== d.pitch);
   const mod = d.shape ? adPreview().M.parts[d.shape.part].shapeMod : null;
-  const undo = { milky: milkyCh ? [mp, adClone(M.parts[mp].material)] : null, manual: lightCh ? adClone(Lm) : null, stepVirt: stepCh ? { v: adClone(sv) } : null, shape: mod ? [d.shape.part, adClone(M.parts[d.shape.part].shapeMod ?? null)] : null };
+  const fp = d.finish?.part, pf = fp != null ? M.parts[fp]?.finish : null, finCh = fp != null && !(pf?.kind === d.finish.kind && (pf?.R ?? null) === (d.finish.R ?? null));   // ④ 면 처리가 다르면
+  const dzCh = Math.abs(d.dz ?? 0) > 1e-9 && (M.light.kind === 'step' ? !!M.light.step : M.light.manual?.pcb?.kind === 'depth');   // ⑤ 이동 있음
+  const undo = { milky: milkyCh ? [mp, adClone(M.parts[mp].material)] : null, manual: lightCh ? adClone(Lm) : null, stepVirt: stepCh ? { v: adClone(sv) } : null, shape: mod ? [d.shape.part, adClone(M.parts[d.shape.part].shapeMod ?? null)] : null,
+    finish: finCh ? [fp, adClone(pf)] : null, dz: dzCh ? (M.light.kind === 'step' ? { step: adClone({ offset: M.light.step.offset, emitters: M.light.step.emitters }) } : { depth: M.light.manual.pcb.depth }) : null };
   st.result = null; A.meshShown = null;
-  if (undo.milky || undo.manual || undo.stepVirt || undo.shape) st.undo = undo;
+  if (undo.milky || undo.manual || undo.stepVirt || undo.shape || undo.finish || undo.dz) st.undo = undo;
   if (milkyCh) A.store.update('material', (m) => { m.parts[mp] = setPartMaterialParam(m.parts[mp], 'milky', d.milky); });
   if (lightCh) A.store.update('light', (m) => { m.light.manual.count = d.count; m.light.manual.pitch = d.pitch; });
   if (stepCh) A.store.update('light', (m, x) => { m.light.step.virtual = { count: d.count, pitch: d.pitch }; if (x.pick === 'led' || x.pick === 'ledx') x.pick = null; });   // 가상 중엔 발광면·제외 클릭 끔
   if (mod) A.store.update('material', (m) => { m.parts[d.shape.part].shapeMod = mod; applyPartMods(m.parts); m.contacts = redetectContacts(m.contacts); });
+  if (finCh) A.store.update('material', (m) => { applyFinish(m, d.finish); });
+  if (dzCh) A.store.update('light', (m) => { applyDz(m, d.dz, r.ctx.line.frame.d); });   // STEP: 발광점도 같은 이동(재인식과 같음)
   renderAuto();
 }
 // 되돌리기 = 적용한 항목을 저장한 복사본으로 통째로 바꿈
@@ -512,6 +556,8 @@ function adRevert() {
   if (u.manual) A.store.update('light', (m) => { m.light.manual = adClone(u.manual); });
   if (u.stepVirt) A.store.update('light', (m) => { m.light.step.virtual = adClone(u.stepVirt.v); });   // null(원래 위치) 또는 이전 가상 값
   if (u.shape) A.store.update('material', (m) => { if (u.shape[1]) m.parts[u.shape[0]].shapeMod = adClone(u.shape[1]); else delete m.parts[u.shape[0]].shapeMod; applyPartMods(m.parts); m.contacts = redetectContacts(m.contacts); });
+  if (u.finish) A.store.update('material', (m) => { m.parts[u.finish[0]] = { ...m.parts[u.finish[0]], finish: adClone(u.finish[1]) }; });
+  if (u.dz) A.store.update('light', (m) => { if (u.dz.step) Object.assign(m.light.step, adClone(u.dz.step)); else m.light.manual.pcb.depth = u.dz.depth; });
   renderView(); renderAuto();
 }
 function adStep() {

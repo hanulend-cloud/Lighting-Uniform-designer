@@ -7,17 +7,18 @@ import { manualLeds } from '../../engine/mech3d/placement.js';
 import { stepLayoutOf } from '../../engine/mech3d/virtual-leds.js';
 import { bounds } from '../../engine/mech3d/mesh.js';
 
-let ledCache = null, manCache = null, layCache = [];
-export function resetLedCaches() { ledCache = null; manCache = null; layCache = []; }
+let ledCache = [], manCache = null, layCache = [];
+export function resetLedCaches() { ledCache = []; manCache = null; layCache = []; }
 export const rawParts = (parts) => parts.map(({ positions, triangles, faceIds, faceCount, volume }) => ({ positions, triangles, faceIds, faceCount, volume }));
 
-// LED STEP 부품(위치 보정 적용 — 화면·인식용, (메쉬, offset, rot) 별 캐시). Worker 에는 원본을 보내고 composeScene 이 같은 변환을 한다
+// LED STEP 부품(위치 보정 적용 — 화면·인식용, (메쉬, offset, rot) 별 캐시 3칸 LRU: 자동설계 ⑤ 후보·미리보기가 현재 위치를 밀어내지 않게). Worker 에는 원본을 보내고 composeScene 이 같은 변환을 한다
 function stepPartsNow(M) {
   const st = M?.light?.step, lm = getLedMesh();
   if (!st || !lm?.parts?.length || lm.name !== st.name) return null;
   const key = JSON.stringify([st.offset, st.rot]);
-  if (!ledCache || ledCache.raw !== lm || ledCache.key !== key) ledCache = { raw: lm, key, parts: lm.parts.map((m) => transformMesh(m, st.offset, st.rot)) };
-  return ledCache.parts;
+  const c = ledCache.find((x) => x.raw === lm && x.key === key) ?? { raw: lm, key, parts: lm.parts.map((m) => transformMesh(m, st.offset, st.rot)) };
+  ledCache = [c, ...ledCache.filter((x) => x !== c)].slice(0, 3);
+  return c.parts;
 }
 // 원래/가상 배치 하나로(spec P4 §2.2a) → { parts, leds, pcb, excluded, emitters, virtual, err? } | null.
 // 입력이 같으면 같은 객체(화면 meshKey 비교용). 캐시 4칸(LRU — 자동설계 복사본이 화면 항목을 밀어내지 않게). line 이 없으면 원래 배치

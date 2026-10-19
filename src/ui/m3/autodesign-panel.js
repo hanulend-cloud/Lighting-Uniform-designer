@@ -1,5 +1,6 @@
-// 자동설계 카드 — spec P4 §3. 체크 3개(①②③) · ③ 대상 부품 · [실행]/[중지] · 진행 · 현재|최적 비교 · [적용][취소][되돌리기][STEP]
+// 자동설계 카드 — spec P4 §3. 체크 5개(①~⑤) · ③·④ 대상 부품 · [실행]/[중지] · 진행 · 현재|최적 비교 · [적용][취소][되돌리기][STEP]
 import { stepRefEmitter } from '../../engine/mech3d/virtual-leds.js';   // 가상 배치 기준 LED(엔진과 같은 규칙)
+import { setPartFinish } from '../../engine/mech3d/materials.js';
 const esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 const f2 = (v) => (Number.isFinite(v) ? v.toFixed(2) : '–');
 
@@ -41,13 +42,50 @@ export function profileSvg(cur, best, W = 200, H = 48) {
 export function stageAvailability(M, info) {
   const milkyParts = M.parts.map((p, i) => (p.material.kind === 'milky' ? i : -1)).filter((i) => i >= 0);
   const shapeParts = M.parts.map((p, i) => (p.material.kind !== 'opaque' && (info.non25?.[i] ?? 1) <= 0.02 ? i : -1)).filter((i) => i >= 0);
+  const opaque = M.parts.map((p, i) => (p.material.kind === 'opaque' ? i : -1)).filter((i) => i >= 0);
   return {
     milky: milkyParts.length ? { ok: true, parts: milkyParts } : { ok: false, why: 'Milky 부품이 없음 — 부품 소재를 Milky 로 지정하세요' },
     leds: M.light.kind === 'manual' ? { ok: true } : M.light.kind === 'step' ? (stepRefEmitter(M.light.step) ? { ok: true, note: 'LED STEP — 기준 LED 를 복사해 가상 배치' } : { ok: false, why: 'LED STEP — 기준이 될 LED 가 없음 · LED 발광면을 먼저 지정하세요' }) : { ok: false, why: '광원을 직접 배치로 지정하세요' },
     shape: shapeParts.length ? { ok: true, parts: shapeParts } : { ok: false, why: '관측 방향으로 2.5D 인 투과 부품이 없음' },
+    height: heightAvail(M.light),
+    housing: opaque.length ? { ok: true, parts: opaque } : { ok: false, why: '불투명 부품이 없음 — 케이스 부품 소재를 불투명으로 지정하세요' },
   };
 }
-const ITEMS = [['milky', '① Milky 레벨'], ['leds', '② LED 개수·피치'], ['shape', '③ LGP 형상']];
+// ⑤ 가능 여부 — 직접 배치(깊이) · LED STEP(발광점 있음). 기구 면 PCB 는 높이가 면으로 정해짐
+function heightAvail(Lt) {
+  if (Lt.kind === 'manual') return Lt.manual?.pcb?.kind === 'face' ? { ok: false, why: 'PCB 가 기구 면에 붙어 있음 — 높이는 기구 면으로 정해짐' } : { ok: true };
+  if (Lt.kind === 'step') return stepRefEmitter(Lt.step) ? { ok: true } : { ok: false, why: 'LED STEP — LED 발광면을 먼저 지정하세요' };
+  return { ok: false, why: '광원을 지정하세요' };
+}
+// ④ 기본 대상 — 관측 부품(첫 관측면) 외곽 상자를 포함하는 불투명 부품 중 외곽 부피 최대, 없으면 불투명 부품 중 최대, 없으면 −1. boxes[i] = [x0,y0,z0,x1,y1,z1]
+export function defaultHousingPart(M, boxes) {
+  const op = M.parts.map((p, i) => (p.material.kind === 'opaque' && boxes[i] ? i : -1)).filter((i) => i >= 0);
+  if (!op.length) return -1;
+  const vol = (b) => (b[3] - b[0]) * (b[4] - b[1]) * (b[5] - b[2]), big = (is) => is.reduce((a, i) => (vol(boxes[i]) > vol(boxes[a]) ? i : a));
+  const ob = boxes[M.observe?.faces?.[0]?.part], e = 1e-6;
+  const inside = ob ? op.filter((i) => [0, 1, 2].every((k) => boxes[i][k] <= ob[k] + e && boxes[i][k + 3] >= ob[k + 3] - e)) : [];
+  return big(inside.length ? inside : op);
+}
+// 면 처리 문구 — 백색 85% · 경면 88% · 광택 · 흑색 5%
+const FIN_NAME = { whiteDiffuse: '백색', metal: '경면', black: '흑색', gloss: '광택' };
+export const finishText = (f) => (!f ? '–' : `${FIN_NAME[f.kind] ?? f.kind}${f.R != null ? ` ${Math.round(f.R * 100)}%` : ''}`);
+// ⑤ dz 적용(M = spec.mech3d, 바꿔서 돌려줌) — LED STEP: offset += dz·d, 저장된 발광점(월드 좌표)도 같이 이동 · 직접 배치(깊이): depth −= dz · 기구 면 PCB: 그대로
+export function applyDz(M, dz, d) {
+  if (!dz) return M;
+  const Lt = M.light;
+  if (Lt.kind === 'step' && Lt.step) {
+    const mv = (p) => p.map((v, k) => v + dz * d[k]);
+    Lt.step.offset = mv(Lt.step.offset ?? [0, 0, 0]);
+    Lt.step.emitters = (Lt.step.emitters ?? []).map((e) => ({ ...e, pos: mv(e.pos) }));
+  } else if (Lt.kind === 'manual' && Lt.manual?.pcb?.kind === 'depth') Lt.manual.pcb.depth -= dz;
+  return M;
+}
+// ④ 면 처리 적용 — 그 부품의 기본 면 처리만 교체(면별 덮어쓰기 유지)
+export function applyFinish(M, f) {
+  if (f) M.parts[f.part] = setPartFinish(M.parts[f.part], null, { kind: f.kind, ...(f.R != null ? { R: f.R } : {}) });
+  return M;
+}
+const ITEMS = [['milky', '① Milky 레벨'], ['leds', '② LED 개수·피치'], ['shape', '③ LGP 형상'], ['housing', '④ 케이스 면 처리'], ['height', '⑤ LED 높이(LED–커버 거리)']];
 const progHtml = (running) => {
   const pct = Math.round((running.frac ?? 0) * 100);
   return `<div class="m3-ad-prog"><div class="bar" role="progressbar" aria-label="자동설계 진행" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${pct}"><i style="width:${pct}%"></i></div><span>${esc(running.text)}</span> <button type="button" data-ad="stop">중지</button></div>`;
@@ -57,14 +95,16 @@ export function autoCardHtml({ avail, sel, running, names = [], canRevert = fals
   const dis = running ? ' disabled' : '', pname = (i) => esc(names[i] ?? `부품 ${i + 1}`);
   const row = ([k, label]) => {
     const a = avail[k];
+    if (!a) return '';
     return `<label class="m3-ad-item${a.ok ? '' : ' off'}"><input type="checkbox" data-ad="${k}"${sel[k] && a.ok ? ' checked' : ''}${a.ok ? dis : ' disabled'}> ${label}${a.ok ? (a.note ? ` <span class="mut">— ${esc(a.note)}</span>` : '') : ` <span class="mut">— ${esc(a.why)}</span>`}</label>`;
   };
   const mTarget = sel.milky && avail.milky.ok && milkyPart != null ? `<div class="m3-row mut">① 대상: ${pname(milkyPart)}</div>` : '';
   const cap = (sel.milky && avail.milky.ok) || (sel.leds && avail.leds.ok) ? `<div class="m3-row">Milky 상한 <input type="number" min="0.5" max="9.9" step="0.5" value="${sel.milkyMax ?? 5}" data-ad="milkyMax" aria-label="Milky 상한"${dis}> <span class="mut">② 는 이 값(확산 최대)에서 개수를 정하고 ① 이 낮춤</span></div>` : '';
   const part = avail.shape.ok ? `<div class="m3-row">③ 대상 <select data-ad="shapePart" aria-label="③ 대상 부품"${dis}>${avail.shape.parts.map((i) => `<option value="${i}"${i === sel.shapePart ? ' selected' : ''}>${pname(i)}</option>`).join('')}</select></div>` : '';
-  const any = ITEMS.some(([k]) => sel[k] && avail[k].ok);
+  const hPart = avail.housing?.ok && sel.housing ? `<div class="m3-row">④ 대상 <select data-ad="housingPart" aria-label="④ 대상 부품"${dis}>${avail.housing.parts.map((i) => `<option value="${i}"${i === sel.housingPart ? ' selected' : ''}>${pname(i)}</option>`).join('')}</select></div>` : '';
+  const any = ITEMS.some(([k]) => sel[k] && avail[k]?.ok);
   const run = `<button type="button" data-ad="run"${!any || noLine ? ' disabled' : ''}${noLine ? ' title="관측 라인이 없음"' : ''}>▶ 실행</button>`;
-  return `<div class="m3-h">자동설계 <span class="mut">체크한 항목만 바꿈 · 순서 ②→①→③</span></div>${ITEMS.map(row).join('')}${mTarget}${cap}${part}
+  return `<div class="m3-h">자동설계 <span class="mut">체크한 항목만 바꿈 · 순서 ②→⑤→④→①→③</span></div>${ITEMS.map(row).join('')}${mTarget}${cap}${part}${hPart}
     ${running ? progHtml(running) : `<div class="m3-row">${run}${canRevert ? '<button type="button" data-ad="revert" title="마지막 적용 전 값으로">↶ 되돌리기</button>' : ''}<button type="button" data-ad="close">닫기</button></div>`}`;
 }
 // 형상 문구 — 0 인 항 생략. e = 끝단 두께, c = 폭 가장자리 두께(+ 가장자리 두껍게 · − 얇게), h < 0 = 돌출
@@ -87,7 +127,8 @@ export function screenSummary(gains) {
 }
 // 비교표 — cur/best = { count, pitch, milky, Ulen, Uwid, eff, profile? }, shape = { dt, h, R, e?, c? } | null, cur.shape = 이미 적용된 형상(없으면 원본), screen = ③ 선별 이득 { dt, e, c, h? } | null
 // stepLeds = LED STEP 발광점 수(직접 배치면 null) · STEP 이면 열마다 stepOrig(true = 원래 위치, false = 가상 배치) · unchanged = 최종안이 현재안 그대로(나은 설계 없음) → 사유 표시 · [적용] 비활성
-export function compareHtml({ cur, best, feasible, reason, shape, stepLeds = null, canRevert = false, unchanged = false, screen = null }) {
+// finish = ④ { cur, best }(면 처리) | null · height = ⑤ { dz, gap(현재 LED–커버 축 거리, NaN = 모름) } | null
+export function compareHtml({ cur, best, feasible, reason, shape, stepLeds = null, canRevert = false, unchanged = false, screen = null, finish = null, height = null }) {
   const tr = (label, a, b) => `<tr><th>${label}</th><td>${a}</td><td class="${a !== b ? 'chg' : ''}">${b}</td></tr>`;
   const lay = (x) => `${x.count}개 ${x.pitch > 0 ? `피치 ${x.pitch}` : '균등'}`;
   const led = (x) => (stepLeds == null ? lay(x) : x.stepOrig === false ? `가상 ${lay(x)}` : `LED STEP 원래 ${x.count ?? stepLeds}개`);   // STEP: stepOrig = 원래 STEP 위치
@@ -99,6 +140,8 @@ export function compareHtml({ cur, best, feasible, reason, shape, stepLeds = nul
       ${tr('길이 U', f2(cur.Ulen), f2(best.Ulen))}${tr('폭 U', f2(cur.Uwid), f2(best.Uwid))}
       ${tr('광 효율', `${f2(cur.eff * 100)}%`, `${f2(best.eff * 100)}%`)}
       ${shape || cur.shape ? tr('형상', curShape, shape ? shapeText(shape) : curShape) : ''}
+      ${finish ? tr('케이스 면', finishText(finish.cur), finishText(finish.best ?? finish.cur)) : ''}
+      ${height ? tr('LED 높이', '현재', nz(height.dz) ? `${sg(height.dz)} mm${Number.isFinite(height.gap) ? ` (커버까지 ${(height.gap - height.dz).toFixed(1)} mm)` : ''}` : '현재') : ''}
     </table>${profileSvg(cur.profile, best.profile)}${screen ? `<div class="m3-row mut">${esc(screenSummary(screen))}</div>` : ''}
     <div class="m3-row"><button type="button" data-ad="apply"${unchanged ? ' disabled title="현재안과 같음"' : ''}>적용</button><button type="button" data-ad="cancel">취소</button>${shape ? '<button type="button" data-ad="step">STEP 내보내기</button>' : ''}${canRevert ? '<button type="button" data-ad="revert">되돌리기</button>' : ''}</div>`;
 }

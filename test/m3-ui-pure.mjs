@@ -9,7 +9,7 @@ import { defaultPart, setPartMaterial, setPartMaterialParam } from '../src/engin
 import { clearanceHtml, meshInfo, partHeaderText } from '../src/ui/mech3d-panel.js';
 import { stepLayoutRowHtml, clampVirtual, virtCountMax } from '../src/ui/mech3d-light-panel.js';
 import { ok, done } from './mech3d-util.mjs';
-import { stageAvailability, autoCardHtml, compareHtml, clampCap, overallFrac, etaText, profileSvg, shapeText, screenSummary, reusableCurrent } from '../src/ui/m3/autodesign-panel.js';
+import { stageAvailability, autoCardHtml, compareHtml, clampCap, overallFrac, etaText, profileSvg, shapeText, screenSummary, reusableCurrent, defaultHousingPart, finishText, applyDz, applyFinish } from '../src/ui/m3/autodesign-panel.js';
 
 const M = {
   name: 't', contacts: [{ a: 0, b: 1, mode: 'contact' }], checks: defaultChecks(),
@@ -160,4 +160,32 @@ ok(clampCap(12) === 9.9 && clampCap(0.1) === 0.5 && clampCap(3) === 3 && clampCa
   ok(partHeaderText(p, mi) === '40.0×10.0×2.0mm · 800 mm³', `머리: ${partHeaderText(p, mi)}`);
   ok(partHeaderText({ ...p, shapeMod: { dt: 0.2 } }, mi) === '40.0×10.0×2.0mm · 800 mm³ · 형상 변경됨', '형상 변경됨');
   ok(partHeaderText(p, null) === '40.0×10.0×2.0mm · 800 mm³', '메쉬 없음 → 원본 × 배율'); }
+{ // ④ 케이스 면 · ⑤ LED 높이 — 가능 여부 · 기본 대상 · 비교표 문구 · dz/면 처리 적용
+  const parts = [{ material: { kind: 'milky' } }, { material: { kind: 'opaque' } }, { material: { kind: 'opaque' } }];
+  const man = (pcb) => stageAvailability({ parts, light: { kind: 'manual', manual: { pcb } }, observe: { faces: [{ part: 0, face: 1 }] } }, { non25: [0, 1, 1] });
+  const a = man({ kind: 'depth', depth: 5 }), b = man({ kind: 'face', part: 1, face: 2 });
+  ok(a.height.ok && a.housing.ok && a.housing.parts.join() === '1,2' && !b.height.ok && b.height.why === 'PCB 가 기구 면에 붙어 있음 — 높이는 기구 면으로 정해짐', '⑤ 직접 배치: 깊이 = 가능 · 기구 면 PCB = 불가 이유 · ④ 불투명 부품 목록');
+  const stepA = (emitters) => stageAvailability({ parts: [{ material: { kind: 'milky' } }], light: { kind: 'step', step: { leds: [1], emitters } }, observe: { faces: [] } }, { non25: [0] });
+  const c = stepA([]), d = stepA([{ part: 1 }]);
+  ok(!c.housing.ok && /불투명/.test(c.housing.why) && !c.height.ok && /발광면/.test(c.height.why) && d.height.ok, '④ 불투명 없음 → 불가 · ⑤ LED STEP 발광점 없음 → 불가, 있으면 가능');
+  const h = autoCardHtml({ avail: a, sel: { height: true, housing: true, housingPart: 2 }, running: null, names: ['LGP', '케이스', '덮개'] });
+  ok(h.includes('data-ad="height" checked') && h.includes('LED 높이(LED–커버 거리)') && h.includes('케이스 면 처리') && /<option value="2" selected>덮개/.test(h) && h.includes('②→⑤→④→①→③') && !/data-ad="run" disabled/.test(h), '카드: ④⑤ 체크 · ④ 대상 선택 · 실행 순서');
+  const M = { parts, observe: { faces: [{ part: 0, face: 1 }] } };
+  const box0 = [0, 0, 0, 10, 10, 2], small = [-1, -1, -1, 11, 11, 3], big = [-5, -5, -5, 15, 15, 5], far = [100, 0, 0, 200, 100, 50];
+  ok(defaultHousingPart(M, [box0, small, big]) === 2 && defaultHousingPart(M, [box0, small, far]) === 1 && defaultHousingPart(M, [box0, far, [0, 0, 0, 1, 1, 1]]) === 1
+    && defaultHousingPart({ ...M, parts: [parts[0]] }, [box0]) === -1 && defaultHousingPart({ ...M, observe: { faces: [] } }, [box0, small, big]) === 2, '④ 기본 대상: 관측 부품을 감싸는 불투명 중 최대 → 없으면 불투명 최대 → 없으면 −1');
+  ok(finishText({ kind: 'whiteDiffuse', R: 0.85 }) === '백색 85%' && finishText({ kind: 'metal', R: 0.88 }) === '경면 88%' && finishText({ kind: 'gloss' }) === '광택' && finishText(null) === '–', '면 처리 문구');
+  const cur = { count: 5, pitch: 0, milky: 3, Ulen: 0.6, Uwid: 0.7, eff: 0.5 }, best = { ...cur, Ulen: 0.8 };
+  const ch = compareHtml({ cur, best, feasible: true, reason: '', shape: null, finish: { cur: { kind: 'whiteDiffuse', R: 0.85 }, best: { kind: 'whiteDiffuse', R: 0.95 } }, height: { dz: 1.2, gap: 6.5 } });
+  const c0 = compareHtml({ cur, best, feasible: true, reason: '', shape: null, height: { dz: -0.5, gap: NaN } }), c1 = compareHtml({ cur, best, feasible: true, reason: '', shape: null, height: { dz: 0, gap: 6.5 } });
+  ok(ch.includes('<tr><th>케이스 면</th><td>백색 85%</td><td class="chg">백색 95%</td></tr>') && ch.includes('<tr><th>LED 높이</th><td>현재</td><td class="chg">+1.20 mm (커버까지 5.3 mm)</td></tr>')
+    && c0.includes('<td class="chg">−0.50 mm</td>') && c1.includes('<th>LED 높이</th><td>현재</td><td class="">현재</td>') && !c1.includes('케이스 면') && !compareHtml({ cur, best, feasible: true, reason: '', shape: null }).includes('LED 높이'), `비교표: 케이스 면 · LED 높이 행`);
+  const S = { light: { kind: 'step', step: { offset: [1, 0, 0], rot: [0, 0, 0], emitters: [{ part: 1, pos: [0, 0, 1], axis: [0, 0, 1] }] } } };
+  applyDz(S, 1.5, [0, 0, 1]);
+  const D = { light: { kind: 'manual', manual: { pcb: { kind: 'depth', depth: 5 } } } }, Fc = { light: { kind: 'manual', manual: { pcb: { kind: 'face', part: 1, face: 2 } } } };
+  applyDz(D, 1.5, [0, 0, 1]); applyDz(Fc, 1.5, [0, 0, 1]);
+  ok(S.light.step.offset.join() === '1,0,1.5' && S.light.step.emitters[0].pos.join() === '0,0,2.5' && S.light.step.emitters[0].axis.join() === '0,0,1' && D.light.manual.pcb.depth === 3.5 && !('depth' in Fc.light.manual.pcb), 'dz 적용: STEP offset·발광점 함께 이동 · 깊이 −= dz · 기구 면 PCB 그대로');
+  const P = { parts: [{ finish: { kind: 'gloss' }, faceFinish: {} }, { finish: { kind: 'whiteDiffuse', R: 0.85 }, faceFinish: { 3: { kind: 'black', R: 0.05 } } }] };
+  applyFinish(P, { part: 1, kind: 'metal', R: 0.95 });
+  ok(P.parts[1].finish.kind === 'metal' && P.parts[1].finish.R === 0.95 && P.parts[1].faceFinish[3].kind === 'black' && P.parts[0].finish.kind === 'gloss', '면 처리 적용: 기본 면만 교체 · 면별 덮어쓰기 유지'); }
 done();
