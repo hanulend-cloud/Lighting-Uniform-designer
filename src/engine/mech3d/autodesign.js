@@ -133,7 +133,7 @@ const bestRow = (rows) => rows.filter((r) => r.trusted).reduce((a, b) => (!a || 
 export function limitText(row, obs) {
   const wid = row.Uwid != null && obs.targetWid != null && row.Uwid - obs.targetWid < row.Ulen - obs.targetLen;
   const f = row.dark?.[wid ? 'wid' : 'len'];
-  const cause = f == null ? '' : f < EDGE_FRAC || f > 1 - EDGE_FRAC ? ` — ${wid ? '폭 가장자리' : '길이 끝단'}이 가장 어두움(가장자리 감쇠)` : ' — 가운데 쪽이 가장 어두움(LED 리플)';
+  const cause = f == null ? '' : f < EDGE_FRAC || f > 1 - EDGE_FRAC ? ` — ${wid ? '폭 가장자리가' : '길이 끝단이'} 가장 어두움(가장자리 감쇠)` : ' — 가운데 쪽이 가장 어두움(LED 리플)';
   return `한계: ${wid ? '폭' : '길이'} 방향${cause}`;
 }
 // ① 균일도 우선(spec §2.1a): 거친 탐색 0.5, 1.5, … ≤ 상한(최고점 뒤 두 번 연속 하락이면 멈춤 · 오르는 쪽에서 통과 창이 나오면 멈춤)
