@@ -298,6 +298,15 @@ export function createMech3dView(canvas, { onPick, gizmo = null }) {
       } else if (m.type === 'line') {
         const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(Float32Array.from([...m.a, ...m.b]), 3));
         o = new THREE.Line(g, new THREE.LineBasicMaterial({ color: m.color, depthTest: false }));
+      } else if (m.type === 'arrow') {
+        // 화살표: 몸통 선 + 끝 원뿔 머리(길이의 30%)
+        const a = new THREE.Vector3(...m.axis).normalize(), L = m.len > 0 ? m.len : 1, hl = 0.3 * L;
+        o = new THREE.Group();
+        const g = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(...m.pos), new THREE.Vector3(...m.pos).addScaledVector(a, L - hl)]);
+        const shaft = new THREE.Line(g, new THREE.LineBasicMaterial({ color: m.color, depthTest: false })); shaft.renderOrder = 3; o.add(shaft);
+        const head = new THREE.Mesh(new THREE.ConeGeometry(0.35 * hl, hl, 12), new THREE.MeshBasicMaterial({ color: m.color, depthTest: false }));
+        head.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), a);
+        head.position.set(...m.pos).addScaledVector(a, L - hl / 2); head.renderOrder = 3; o.add(head);
       } else if (m.type === 'tris') {
         const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(m.positions, 3)); g.setIndex(new THREE.BufferAttribute(m.triangles, 1));
         o = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ color: m.color, transparent: true, opacity: m.opacity ?? 0.5, side: THREE.DoubleSide, depthTest: false }));

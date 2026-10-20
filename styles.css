@@ -462,3 +462,24 @@ canvas.m3-g { width: 100%; display: block; border-radius: 4px; background: #fafb
 .m3-vp:not([data-theme="dark"]) .m3-legend { color: #3b4658; }
 .m3-vp:not([data-theme="dark"]) .m3-section { background: rgba(255,255,255,.92); color: #334155; border: 1px solid #c4cbd6; }
 .m3-views [data-theme-toggle] { margin-top: 6px; }
+
+/* 다크 모드: 3D 화면과 함께 왼쪽(트리·속성)·오른쪽(자동설계·결과)·명령줄·상태줄도 어둡게 */
+#mech3d-wrap[data-theme="dark"] { --m3-line: #2c3546; --m3-mut: #8e98ab; --m3-acc: #5b9dff; --m3-accbg: #1d3150; --m3-ok: #4cc48a; --m3-bad: #f0705e; --m3-warn: #e0a445;
+  background: #161c28; color: #dbe1ea; color-scheme: dark; }
+#mech3d-wrap[data-theme="dark"] input, #mech3d-wrap[data-theme="dark"] select, #mech3d-wrap[data-theme="dark"] textarea,
+#mech3d-wrap[data-theme="dark"] button:not(.on):not([aria-pressed=true]):not(.m3-link), #mech3d-wrap[data-theme="dark"] .m3-file {
+  background: #1f2736; color: #dbe1ea; border-color: #364055; }
+#mech3d-wrap[data-theme="dark"] .m3-seg button:not([aria-pressed=true]) { background: transparent; }
+#mech3d-wrap[data-theme="dark"] .m3-node:hover, #mech3d-wrap[data-theme="dark"] .m3-eye:hover { background: #222b3b; }
+#mech3d-wrap[data-theme="dark"] .m3-badge { background: #2a3344; color: #c9d1de; }
+#mech3d-wrap[data-theme="dark"] .m3-badge.k-milky { background: #2b3a4a; } #mech3d-wrap[data-theme="dark"] .m3-badge.k-clear { background: #183a5c; color: #a9d2ff; }
+#mech3d-wrap[data-theme="dark"] .m3-badge.k-led { background: #4a3c14; color: #f3d98a; }
+#mech3d-wrap[data-theme="dark"] .m3-m { background: #1f2736; }
+#mech3d-wrap[data-theme="dark"] canvas.m3-g { background: #1b2230; }
+#mech3d-wrap[data-theme="dark"] .m3-gauge, #mech3d-wrap[data-theme="dark"] .m3-barw, #mech3d-wrap[data-theme="dark"] .m3-ad-prog .bar { background: #2c3546; }
+#mech3d-wrap[data-theme="dark"] .m3-gauge .tg { background: #e6ebf2; }
+#mech3d-wrap[data-theme="dark"] .m3-msg, #mech3d-wrap[data-theme="dark"] .m3-warn { background: #3a2f14; border-color: #5c4a1c; color: #f0cf85; }
+#mech3d-wrap[data-theme="dark"] .m3-gap.bad, #mech3d-wrap[data-theme="dark"] .m3-clash { background: #3d1f1f; color: #ff9b8f; }
+#mech3d-wrap[data-theme="dark"] .m3-gap.bad b { color: #ff9b8f; }
+#mech3d-wrap[data-theme="dark"] .m3-dot { background: #4a5366; }
+#mech3d-wrap[data-theme="dark"] .m3-dot.ok { background: var(--m3-ok); } #mech3d-wrap[data-theme="dark"] .m3-dot.warn { background: var(--m3-warn); } #mech3d-wrap[data-theme="dark"] .m3-dot.bad { background: var(--m3-bad); }

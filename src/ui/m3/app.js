@@ -68,7 +68,7 @@ function getView() {
     el.querySelectorAll('[data-view]').forEach((b) => { b.onclick = () => { v.setView(b.dataset.view); A?.store.update('view', (_, s) => { s.view = b.dataset.view; }); }; });
     // 3D 배경 밝게/어둡게 — 보는 사람별 편의 설정(새로고침해도 유지)
     const tb = el.querySelector('[data-theme-toggle]'), vp = $('#mech3d-canvas').parentElement;
-    const applyTheme = (t) => { v.setTheme(t); vp.dataset.theme = t; tb.textContent = t === 'dark' ? '☀ 밝게' : '☾ 어둡게'; tb.setAttribute('aria-pressed', String(t === 'dark')); tb.title = '3D 배경 밝게/어둡게'; };
+    const applyTheme = (t) => { v.setTheme(t); vp.dataset.theme = t; const wr = $('#mech3d-wrap'); if (wr) wr.dataset.theme = t; tb.textContent = t === 'dark' ? '☀ 밝게' : '☾ 어둡게'; tb.setAttribute('aria-pressed', String(t === 'dark')); tb.title = '3D 배경 밝게/어둡게'; };
     let t0 = 'light'; try { t0 = localStorage.getItem('uds.m3.theme') === 'dark' ? 'dark' : 'light'; } catch {}
     applyTheme(t0);
     tb.onclick = () => { const t = v.theme() === 'dark' ? 'light' : 'dark'; try { localStorage.setItem('uds.m3.theme', t); } catch {} applyTheme(t); };
@@ -271,7 +271,8 @@ function renderMarkers() {
   for (const it of C.interference?.items ?? []) out.push({ type: 'ring', pos: it.pos, color: it.kind === 'potted' ? 0xffa000 : 0xff3b30, size: size('interference') });   // 포팅 LED(투과 부품 안) = 주황 경고
   for (const it of C.reach?.items ?? []) {
     const warn = it.reach < (M.checks?.minReach ?? 0.5), col = warn ? 0xffa000 : 0x4cd964;
-    if (it.dist != null) out.push({ type: 'line', a: it.pos, b: it.pos.map((v, k) => v + it.axis[k] * it.dist), color: col });
+    // LED 방향 = 화살표, 길이는 빛 원뿔과 같게(cones 의 len 규칙: min(4, 0.4·간격))
+    if (it.dist != null) out.push({ type: 'arrow', pos: it.pos, axis: it.axis, len: Math.min(4, 0.4 * it.dist), color: col });
     if (warn || f === 'reach') out.push({ type: 'ring', pos: it.pos, color: col, size: size('reach') });
   }
   if (C.wall?.pos && (C.wall.status === 'warn' || f === 'wall')) out.push({ type: 'ring', pos: C.wall.pos, color: 0xffa000, size: size('wall') });
