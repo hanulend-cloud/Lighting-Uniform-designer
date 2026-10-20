@@ -339,7 +339,8 @@ main:has(#mech3d-wrap:not([hidden])) { grid-template-rows: minmax(0, 1fr); }
 .m3-node:not(.child) .m3-eye { order: 9; font-size: 11px; }
 .m3-badge { margin-left: auto; font-size: 10px; padding: 1px 5px; border-radius: 4px; background: #e9ecf2; color: #3c4455; }
 .m3-badge.k-milky { background: #e3edf6; } .m3-badge.k-clear { background: #dcefff; color: #0d4b85; } .m3-badge.k-led { background: #fff1cc; color: #7a5a12; }
-.m3-vp { position: relative; background: #141a26; min-height: 0; overflow: hidden; }
+.m3-vp { position: relative; background: #e6e9ee; min-height: 0; overflow: hidden; }
+.m3-vp[data-theme="dark"] { background: #141a26; }
 .m3-vp #mech3d-canvas { width: 100%; height: 100%; display: block; }
 .m3-views { position: absolute; right: 10px; top: 10px; display: flex; flex-direction: column; gap: 4px; }
 .m3-views button { background: rgba(255,255,255,.08); color: #dbe3f0; border: 1px solid #3a4558; border-radius: 5px; padding: 4px 8px; cursor: pointer; font: inherit; font-size: 12px; }
@@ -454,3 +455,10 @@ canvas.m3-g { width: 100%; display: block; border-radius: 4px; background: #fafb
 
 .m3-ad-collapsed { display: block; width: 100%; text-align: left; padding: 6px 4px; background: none; border: none; font-weight: 600; cursor: pointer; color: var(--m3-acc); }
 .m3-ad-collapsed:hover, .m3-ad-collapsed:focus-visible { background: var(--m3-accbg); border-radius: 6px; }
+
+/* 3D 배경 밝은 테마(기본): 보기 버튼·범례·단면 조절을 밝은 바탕에 맞춤 */
+.m3-vp:not([data-theme="dark"]) .m3-views button { background: rgba(255,255,255,.85); color: #334155; border-color: #c4cbd6; }
+.m3-vp:not([data-theme="dark"]) .m3-views button.on { background: var(--m3-acc); border-color: var(--m3-acc); color: #fff; }
+.m3-vp:not([data-theme="dark"]) .m3-legend { color: #3b4658; }
+.m3-vp:not([data-theme="dark"]) .m3-section { background: rgba(255,255,255,.92); color: #334155; border: 1px solid #c4cbd6; }
+.m3-views [data-theme-toggle] { margin-top: 6px; }

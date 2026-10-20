@@ -7,7 +7,7 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
 const KIND_COLOR = { milky: 0xdfe9f2, clear: 0x8cc8ff, whiteTrans: 0xf2efe6, opaque: 0x8a909c, pcb: 0x2f6b3a, led: 0xffcf3f };
 const KIND_OPACITY = { milky: 0.85, clear: 0.35, whiteTrans: 0.95, opaque: 1, pcb: 1, led: 1 };
-const LED_SEL = new THREE.Color(0xff7a1a), CONE_COLOR = 0xffd84a, CONE_SEL = 0xff7a1a, CONE_SEG = 16, CONE_RAYS = 6;   // 빛 원뿔 = 노란 점선(흐리게), 선택 LED 몸체·원뿔 = 주황 점선
+const LED_SEL = new THREE.Color(0xff7a1a), CONE_DARK = 0xffd84a, CONE_LIGHT = 0xc98a00, CONE_SEL = 0xff7a1a, CONE_SEG = 16, CONE_RAYS = 6;   // 빛 원뿔 = 노란 점선(흐리게), 선택 LED 몸체·원뿔 = 주황 점선
 const SEL_TINT = new THREE.Color(0xffb020), FACE_COLOR = new THREE.Color(0xff5a36), OBS_COLOR = new THREE.Color(0x29d3e0);
 // 보기 방향(카메라 쪽). 평면은 z 축과 아주 조금 어긋나게 — up(z) 을 바꾸지 않으려고(OrbitControls 회전축은 생성 때 up 으로 고정)
 const VIEW_DIR = { top: [0, -1e-3, 1], front: [0, -1, 0], side: [1, 0, 0], iso: [0.7, -1.1, 0.9] };
@@ -18,7 +18,10 @@ export function createMech3dView(canvas, { onPick, gizmo = null }) {
   renderer.setPixelRatio(window.devicePixelRatio || 1);
   renderer.localClippingEnabled = true;
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x0f1420);
+  // 배경 테마: 'light' = 흐린 회색(화면 전체와 통일), 'dark' = 어두운 남색. 빛 원뿔 색도 대비에 맞춤
+  const BG = { light: 0xe6e9ee, dark: 0x0f1420 };
+  let theme = 'light', CONE_COLOR = CONE_LIGHT, lastOver = null;
+  scene.background = new THREE.Color(BG.light);
   const persp = new THREE.PerspectiveCamera(35, 1, 0.1, 1e5);
   const ortho = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 1e5);
   persp.up.set(0, 0, 1); ortho.up.set(0, 0, 1);
@@ -27,7 +30,8 @@ export function createMech3dView(canvas, { onPick, gizmo = null }) {
   // 숨은 캔버스(폭 0)에서는 1 — 이때 맞춤은 pendingFit 으로 미뤘다가 첫 표시(resize) 때 다시 한다
   const aspect = () => (canvas.clientWidth > 0 ? canvas.clientWidth / (canvas.clientHeight || 400) : 1);
   let pendingFit = false;
-  scene.add(new THREE.HemisphereLight(0xffffff, 0x404050, 1.0));
+  const hemi = new THREE.HemisphereLight(0xffffff, 0xa8b0bd, 1.25); scene.add(hemi);
+  const amb = new THREE.AmbientLight(0xffffff, 0.9); scene.add(amb);   // 밝은 테마 주변광 — 어두운 테마는 낮춤   // 아래쪽 보조광: 밝은 테마는 밝게(측면이 검게 가라앉지 않게)
   const sun = new THREE.DirectionalLight(0xffffff, 0.8); sun.position.set(1, -1, 2); scene.add(sun);
   // 원점 축: x 빨강 · y 초록 · z 파랑. CAD 관례대로 원점에 두고(모델 구석으로 옮기지 않음) 길이만 모델 크기(r)에 맞춘다
   const axes = new THREE.AxesHelper(10); scene.add(axes);
@@ -184,7 +188,15 @@ export function createMech3dView(canvas, { onPick, gizmo = null }) {
   }
   // over = { obsFaces:[{part,face}], line3d: Float32Array(x,y,z...) | null, cones:[{pos,axis,half(°),len,n}], coneSel: LED 번호 | null } — 관측면 강조, 라인, LED 빛 원뿔
   // 원뿔은 표시 전용(관측면 색지도·점검 표식과 별개 무리) · 선택 모드가 아닐 때 클릭하면 onPick({ led: n })
+  function setTheme(t) {
+    theme = t === 'dark' ? 'dark' : 'light';
+    scene.background = new THREE.Color(BG[theme]);
+    CONE_COLOR = theme === 'dark' ? CONE_DARK : CONE_LIGHT;
+    hemi.groundColor.set(theme === 'dark' ? 0x404050 : 0xa8b0bd); hemi.intensity = theme === 'dark' ? 1.0 : 1.25; amb.intensity = theme === 'dark' ? 0 : 0.9;
+    if (lastOver) setOverlay(lastOver); else render();
+  }
   function setOverlay(over) {
+    lastOver = over;
     const prev = obsSet;
     obsSet = new Set((over.obsFaces ?? []).map((f) => `${f.part}|${f.face}`));
     if (overlay) { scene.remove(overlay); overlay.traverse((o) => { o.geometry?.dispose(); o.material?.dispose(); }); }
@@ -321,5 +333,5 @@ export function createMech3dView(canvas, { onPick, gizmo = null }) {
     onPick({ part, face: partsRef[part].faceIds[h.faceIndex], ray: rr, worldPerPixel: wpp });
   });
 
-  return { setParts, setKinds, setHidden, setSelection, setOverlay, setPickMode, render, setView, fit, viewName: () => viewName, setSection, setObsSurface, setObsColors, setCheckMarkers };
+  return { setTheme, theme: () => theme, setParts, setKinds, setHidden, setSelection, setOverlay, setPickMode, render, setView, fit, viewName: () => viewName, setSection, setObsSurface, setObsColors, setCheckMarkers };
 }

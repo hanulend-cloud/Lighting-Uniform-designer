@@ -64,8 +64,14 @@ function getView() {
   viewP ??= import('../mech3d-view.js').then(({ createMech3dView }) => {
     const v = createMech3dView($('#mech3d-canvas'), { onPick: (s) => { if (A) onPick(s); }, gizmo: $('#m3-axes') });
     const el = $('#m3-views');
-    el.innerHTML = VIEWS.map(([k, t]) => `<button data-view="${k}">${t}</button>`).join('');
+    el.innerHTML = VIEWS.map(([k, t]) => `<button data-view="${k}">${t}</button>`).join('') + '<button type="button" data-theme-toggle aria-pressed="false"></button>';
     el.querySelectorAll('[data-view]').forEach((b) => { b.onclick = () => { v.setView(b.dataset.view); A?.store.update('view', (_, s) => { s.view = b.dataset.view; }); }; });
+    // 3D 배경 밝게/어둡게 — 보는 사람별 편의 설정(새로고침해도 유지)
+    const tb = el.querySelector('[data-theme-toggle]'), vp = $('#mech3d-canvas').parentElement;
+    const applyTheme = (t) => { v.setTheme(t); vp.dataset.theme = t; tb.textContent = t === 'dark' ? '☀ 밝게' : '☾ 어둡게'; tb.setAttribute('aria-pressed', String(t === 'dark')); tb.title = '3D 배경 밝게/어둡게'; };
+    let t0 = 'light'; try { t0 = localStorage.getItem('uds.m3.theme') === 'dark' ? 'dark' : 'light'; } catch {}
+    applyTheme(t0);
+    tb.onclick = () => { const t = v.theme() === 'dark' ? 'light' : 'dark'; try { localStorage.setItem('uds.m3.theme', t); } catch {} applyTheme(t); };
     return v;
   });
   return viewP;
