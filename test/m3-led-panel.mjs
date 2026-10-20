@@ -76,11 +76,11 @@ const led = (o = {}) => ({ n: 2, total: 10, s: 35, gap: 6.25, adj: { ds: 0, dz: 
 { const st = { name: 'a.stp', leds: [1, 2], pcb: 0, excluded: [], emitters: [{ part: 1, pos: [0, 0, 0], axis: [0, 0, 1] }], offset: [0, 0, 0], rot: [0, 0, 0], virtual: null };
   const ms = { light: { ...defaultLight(), kind: 'step', step: st } };
   const h = ledPanelHtml(ms, { led: led({ total: 2, n: 1 }), line });
-  ok(/data-lp-ledx/.test(h) && h.includes('이 LED 제외'), 'LED STEP 원래 = 제외 토글');
-  ok(ledPanelHtml(ms, { led: led({ total: 2, n: 1, excluded: true }), line }).includes('이 LED 포함'), '제외된 LED = 포함 토글');
-  ok(/data-lp-vmode/.test(h) && (h.match(/name="lp-vmode"/g) ?? []).length === 2, 'STEP 배치 행 한 번만(라디오 이름 겹침 없음)');
-  const hv = ledPanelHtml({ light: { ...ms.light, step: { ...st, virtual: { count: 4, pitch: 0, rows: 1, rowGap: 0 } } } }, { led: led({ total: 4 }), line });
-  ok(!/data-lp-ledx/.test(hv) && /data-lp-virt="count"/.test(hv), '가상 배치 = 제외 토글 없음 · 개수 입력'); }
+  ok(/data-lp-ledx/.test(h) && h.includes('이 LED 삭제') && h.includes('STEP 원래 몸체는 그대로'), 'LED STEP 원래 = 삭제(제외 토글)');
+  ok(ledPanelHtml(ms, { led: led({ total: 2, n: 1, excluded: true }), line }).includes('이 LED 다시 넣기'), '삭제된 LED = 다시 넣기');
+  ok((h.match(/data-lp-edit="add"/g) ?? []).length === 1, 'STEP 배치 행 한 번만');
+  const hv = ledPanelHtml({ light: { ...ms.light, step: { ...st, virtual: { positions: [{ s: 1, w: 0, dz: 0 }] } } } }, { led: led({ total: 1 }), line });
+  ok(/data-lp-ledx/.test(hv) && hv.includes('배치에서 뺌') && /data-lp-edit="orig"/.test(hv), '편집한 배치 = 목록에서 삭제 · STEP 원래대로'); }
 // 노드 창(선택 없음) 의 LED 고르기 줄
 ok(/data-lp-ledsel="9"[^>]*>◀/.test(ledNavHtml(null, 10)) && /data-lp-ledsel="0"[^>]*>▶/.test(ledNavHtml(null, 10)) && ledNavHtml(null, 0) === '', '선택 없음: ◀ = 마지막, ▶ = 첫 LED · LED 없음 = 줄 없음');
 done();

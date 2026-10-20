@@ -57,7 +57,7 @@ export function stageAvailability(M, info) {
   const opaque = M.parts.map((p, i) => (p.material.kind === 'opaque' ? i : -1)).filter((i) => i >= 0);
   return {
     milky: milkyParts.length ? { ok: true, parts: milkyParts } : { ok: false, why: 'Milky 부품이 없음 — 부품 소재를 Milky 로 지정하세요' },
-    leds: M.light.kind === 'manual' ? { ok: true } : M.light.kind === 'step' ? (stepRefEmitter(M.light.step) ? { ok: true, note: 'LED STEP — 기준 LED 를 복사해 가상 배치' } : { ok: false, why: 'LED STEP — 기준이 될 LED 가 없음 · LED 발광면을 먼저 지정하세요' }) : { ok: false, why: '광원을 직접 배치로 지정하세요' },
+    leds: M.light.kind === 'manual' ? { ok: true } : M.light.kind === 'step' ? (stepRefEmitter(M.light.step) ? { ok: true, note: 'LED STEP — 기준 LED 를 복사해 개수·간격 조정' } : { ok: false, why: 'LED STEP — 기준이 될 LED 가 없음 · LED 발광면을 먼저 지정하세요' }) : { ok: false, why: '광원을 직접 배치로 지정하세요' },
     shape: shapeParts.length ? { ok: true, parts: shapeParts } : { ok: false, why: '관측 방향으로 2.5D 인 투과 부품이 없음' },
     height: heightAvail(M.light),
     housing: opaque.length ? { ok: true, parts: opaque } : { ok: false, why: '불투명 부품이 없음 — 케이스 부품 소재를 불투명으로 지정하세요' },
@@ -145,12 +145,12 @@ export function screenSummary(gains) {
   return `효과(선별): ${head}${off.length ? `${on.length ? ' — ' : ' '}${on.length ? off.map((k) => VAR_NAME[k]).join('·') + ' ' : ''}효과 없음` : ''}`;
 }
 // 비교표 — cur/best = { count, pitch, milky, Ulen, Uwid, eff, profile? }, shape = { dt, h, R, e?, c? } | null, cur.shape = 이미 적용된 형상(없으면 원본), screen = ③ 선별 이득 { dt, e, c, h? } | null
-// stepLeds = LED STEP 발광점 수(직접 배치면 null) · STEP 이면 열마다 stepOrig(true = 원래 위치, false = 가상 배치) · unchanged = 최종안이 현재안 그대로(나은 설계 없음) → 사유 표시 · [적용] 비활성
+// stepLeds = LED STEP 발광점 수(직접 배치면 null) · STEP 이면 열마다 stepOrig(true = 원래 위치, false = 기준 LED 복사 배치) · unchanged = 최종안이 현재안 그대로(나은 설계 없음) → 사유 표시 · [적용] 비활성
 // finish = ④ { cur, best }(면 처리) | null · height = ⑤ { dz, gap(현재 LED–커버 축 거리, NaN = 모름) } | null
 export function compareHtml({ cur, best, feasible, reason, shape, stepLeds = null, canRevert = false, unchanged = false, screen = null, finish = null, height = null, catalog = DEFAULT_FINISH_CATALOG }) {
   const tr = (label, a, b) => `<tr><th>${label}</th><td>${a}</td><td class="${a !== b ? 'chg' : ''}">${b}</td></tr>`;
   const lay = (x) => `${x.rows === 2 ? '2열 × ' : ''}${x.count}개 ${x.pitch > 0 ? `피치 ${x.pitch}` : '균등'}${x.rows === 2 ? ` (열 간격 ±${(x.rowGap ?? 0).toFixed(1)} mm)` : ''}`;   // 2열 = 열당 개수(spec P4 §2.2b)
-  const led = (x) => (stepLeds == null ? lay(x) : x.stepOrig === false ? `가상 ${lay(x)}` : `LED STEP 원래 ${x.count ?? stepLeds}개`);   // STEP: stepOrig = 원래 STEP 위치
+  const led = (x) => (stepLeds == null ? lay(x) : x.stepOrig === false ? `${lay(x)}` : `LED STEP 현재 ${x.count ?? stepLeds}개`);   // STEP: stepOrig = 원래 STEP 위치
   const curShape = cur.shape ? `적용된 형상 · ${shapeText(cur.shape)}` : '원본';
   return `<div class="m3-h">${unchanged ? '현재안 유지' : feasible ? '최적안' : '가장 가까운 안'} <span class="mut">${esc(reason)}</span></div>
     <table class="m3-cmp"><tr><th></th><th>현재</th><th>최적</th></tr>

@@ -20,7 +20,8 @@ import { partClearance, limitXform, axisLimits, TOL } from '../../engine/mech3d/
 import { renderPropertyPanel } from './property-panel.js';
 import { meshInfo, partToDbMaterial } from '../mech3d-panel.js';
 import { renderAdvanced } from '../l2-advanced.js';
-import { clampVirtual, defaultRowGap } from '../mech3d-light-panel.js';
+import { defaultRowGap } from '../mech3d-light-panel.js';
+import { positionsFromLayout, addPosition, alignPositions } from '../../engine/mech3d/led-edit.js';
 import { createResultsPanel } from './results-panel.js';
 import { renderStatusBar } from './status-bar.js';
 import { createAdRunner } from './autodesign-run.js';
@@ -413,7 +414,7 @@ function shapeModFor({ dt, h, R, e = 0, c = 0 }, M, line) {
   const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
   const centers = em.map((x) => [dot(x.pos, F.u), dot(x.pos, F.v)]);
   let P = adPaths.get(line); if (!P) adPaths.set(line, (P = pathFromLine(line, F)));
-  const lay = M.light.kind === 'manual' ? M.light.manual : M.light.kind === 'step' ? M.light.step?.virtual ?? null : null;
+  const lv = M.light.kind === 'step' ? M.light.step?.virtual ?? null : null, lay = M.light.kind === 'manual' ? M.light.manual : lv && !lv.positions ? lv : null;   // 편집한 배치 = 발광점 간격으로
   const ell = ledEll({ pitch: lay?.pitch ?? 0, count: lay?.count ?? 0, ss: centers.map(([x, y]) => swOnPath(P, x, y)[0]), L: P.L });
   return { frame: { u: F.u, v: F.v, d: F.d }, dt, h, R, e, c, centers, cell: 0.5, path: P.path, halfW: P.halfW, closed: P.closed, L: P.L, ell };
 }
@@ -454,7 +455,7 @@ async function adRun() {
   if (ps === 'pending') A.prog.cancel(); else A.prog.pause();
   st.running = { frac: 0, text: '준비' }; st.result = null; A.meshShown = null; renderView(); renderAuto();
   // LED STEP: 현재 = 가상이면 그 개수·피치, 아니면 현재 발광점 수·0(stepOrig = 원래 위치) · stepVirt = 설계가 가상 배치인가(② 가 STEP 에서 돌면 엔진이 true)
-  const stp = M0.light.kind === 'step', sv = stp ? M0.light.step?.virtual ?? null : null;
+  const stp = M0.light.kind === 'step', sv0 = stp ? M0.light.step?.virtual ?? null : null, sv = sv0 && !sv0.positions ? sv0 : null;   // STEP 에서 편집한 배치(positions) = 원래 배치처럼 '현재 그대로'
   let nOrig = 0; if (stp && !sv) { try { nOrig = L.currentEmitters(M0, line).length; } catch { nOrig = 0; } }
   const rsrc = stp ? sv : M0.light.manual, rows = rsrc?.rows === 2 ? 2 : 1;   // 열 배치 — STEP 원래 위치 = 1열
   const cur = { milky: ctx.mp != null ? M0.parts[ctx.mp].material.milky : null, count: stp ? (sv ? sv.count : nOrig) : M0.light.manual?.count ?? 0, pitch: stp ? sv?.pitch ?? 0 : M0.light.manual?.pitch ?? 0, rows, rowGap: rows === 2 ? rsrc.rowGap ?? 0 : 0, shape: null, finish: null, dz: 0, ...(stp ? { stepOrig: !sv, stepVirt: !!sv } : {}) };
@@ -632,7 +633,7 @@ function onPick(s) {
     if (n != null) { st.update('session', (_, x) => { x.ledSel = n; x.node = 'leds'; x.sel = null; }); return; }
   }
   if (s && s.part == null && pick !== 'led' && pick !== 'ledx') s = null;   // 선택 모드 빈 곳 클릭(광선만) — LED 모드에서만 씀
-  if ((pick === 'led' || pick === 'ledx') && s && M.light.step?.virtual) { say('가상 배치 중에는 원래 STEP 위치로 돌아가서 지정하세요'); return; }   // 클릭 번호 = 가상 부품
+  if ((pick === 'led' || pick === 'ledx') && s && M.light.step?.virtual) { say('배치를 편집한 상태 — [STEP 원래대로] 뒤에 지정하세요'); return; }   // 클릭 번호 = 가상 부품
   if ((pick === 'led' || pick === 'ledx') && s && s.part != null && s.part < nMech) { say('LED STEP 부품(PCB·LED)을 클릭하세요 — 기구 부품은 이 모드에서 선택되지 않음'); return; }
   if (pick === 'obs' && s && s.part < nMech) {
     st.update('observe', (m) => {
@@ -744,16 +745,8 @@ function propHandlers() {
       const s = m.light.step; (key[0] === 'o' ? s.offset : s.rot)['xyz'.indexOf(key[1])] = v;
       if (s.ref) { try { L.applyStepRecognition(m, x, s, s.ref); } catch (e) { s.emitters = []; x.ledInfo = `LED 인식 실패: ${e.message}`; } }
     }),
-    // LED STEP 가상 배치: v = { count, pitch } | null(원래 STEP 위치). 가상 중에는 발광면·제외 클릭을 끈다
-    onStepVirtual: (v) => st.update('light', (m, x) => {
-      const c = v ? clampVirtual(v, x.line) : null;   // 개수 상한 · (개수−1)·피치 ≤ 라인 길이 · 닫힌 라인 = 균등
-      m.light.step.virtual = c;
-      if (v && (x.pick === 'led' || x.pick === 'ledx')) { x.pick = null; x.status = '가상 배치 중에는 원래 STEP 위치로 돌아가서 지정하세요'; }
-      if (c && (c.count !== Math.round(v.count) || c.pitch !== v.pitch)) x.status = `가상 배치 보정: ${c.count}개 ${c.pitch > 0 ? `피치 ${c.pitch}mm` : '균등'}(라인 길이 안으로)`;
-      else if (c?.rows === 2 && v.rows === 2 && v.rowGap > 0 && c.rowGap !== v.rowGap) x.status = `열 간격 보정: ±${c.rowGap}mm(관측 폭 안으로)`;
-      const err = c ? L.stepLayout(m, x.line)?.err : null;
-      if (err) x.status = `가상 배치 실패 — 원래 STEP 위치로 계산: ${err}`;
-    }),
+    // LED STEP 배치 편집(spec m3-cad-ui §4b): 지금 배치(제외·개별 이동 반영)를 위치 목록으로 굳힌 뒤 추가·같은 간격 | orig = STEP 원래대로
+    onLedEdit: (op) => st.update('light', (m, x) => ledEdit(m, x, op)),
     onManual: (key, v) => st.update('light', (m, x) => {
       const Lm = m.light.manual;
       if (key === 'pcbKind') { Lm.pcb = v === 'depth' ? { kind: 'depth', depth: 10 } : { kind: 'face' }; if (x.pick === 'pcb') x.pick = null; }
@@ -769,9 +762,11 @@ function propHandlers() {
     onLedBeam: (a) => { const b = beamSpec(a); if (b) st.update('light', (m) => { Object.assign(m.light.spec, b); }); },   // 120 = 램버시안, 그 밖 = 가우시안
     onLedDist: (g) => ledDist(g),
     onLedAdjust: (n, adj) => st.update('light', (m) => { setLedAdjust(m.light, n, adj); }),
-    onLedExclude: (n) => st.update('light', (m) => {   // LED STEP 원래 배치만(가상 배치는 제외 없음) — 번호 n = step.leds 위치
-      const stp = m.light.step, p = stp?.leds?.[n];
-      if (p == null || stp.virtual) return;
+    // 이 LED 삭제: 원래 STEP = 제외 토글(번호 n = step.leds 위치) · 편집한 배치 = 목록에서 뺌
+    onLedExclude: (n) => st.update('light', (m, x) => {
+      const stp = m.light.step;
+      if (stp?.virtual) { ledEdit(m, x, 'del', n); return; }
+      const p = stp?.leds?.[n]; if (p == null) return;
       stp.excluded ??= []; const k = stp.excluded.indexOf(p); if (k >= 0) stp.excluded.splice(k, 1); else stp.excluded.push(p);
     }),
     onObs: (key, v) => st.update('observe', (m) => { m.observe[key] = v; }),
@@ -893,6 +888,21 @@ function cmdHandlers() {
 }
 
 // ---- LED 선택·속성(spec §4a) ----
+// LED STEP 배치 편집(store.update 안에서) — op: add | align | del(n) | orig. 개별 이동(ledAdjust)은 위치 목록에 녹이고 지움
+function ledEdit(m, x, op, n = null) {
+  const stp = m.light.kind === 'step' ? m.light.step : null;
+  if (!stp) return;
+  if (op === 'orig') { stp.virtual = null; m.light.ledAdjust = null; x.ledSel = null; x.status = 'LED 를 STEP 원래 배치로 되돌림'; return; }
+  const line = x.line, lay = line ? L.stepLayout(m, line) : null;
+  if (!lay || lay.err) { x.status = `LED 배치를 편집할 수 없음: ${lay?.err ?? '관측면(라인)을 먼저 지정하세요'}`; return; }
+  let P;
+  try { P = positionsFromLayout(lay, stp, line, op === 'del' ? n : null); } catch (e) { x.status = e.message; return; }
+  if (op === 'add') { const r = addPosition(P, line); P = r.positions; x.ledSel = r.index; x.node = 'leds'; x.sel = null; x.status = `LED 추가 — ${P.length}개(가장 넓은 빈자리)`; }
+  else if (op === 'align') { P = alignPositions(P, line); x.status = `같은 간격으로 정렬 — ${P.length}개`; }
+  else if (op === 'del') { if (!P.length) { x.status = '마지막 LED 는 삭제할 수 없음'; return; } x.ledSel = null; x.status = `LED 삭제 — ${P.length}개 남음`; }
+  if ((x.pick === 'led' || x.pick === 'ledx')) x.pick = null;   // 편집한 배치에서는 발광면·제외 클릭 안 씀
+  stp.virtual = { positions: P }; m.light.ledAdjust = null;
+}
 // 현재 배치의 LED 목록 — 번호 n: LED STEP(원래·가상) = lay.leds 위치(제외 LED 포함), 직접 배치 = 발광점 순서
 // → { lay, em(계산 발광점), list:[{ n, part(배치 부품 번호|null), e(발광점|null), excluded }] }
 function ledsNow(M = A.store.mspec, line = A.store.session.line) {

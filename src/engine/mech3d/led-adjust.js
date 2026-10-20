@@ -13,7 +13,7 @@ export function layoutKeyOf(light) {
   }
   if (k === 'step') {
     const s = light.step ?? {}, v = s.virtual;
-    return JSON.stringify({ kind: k, name: s.name ?? null, leds: s.leds ?? [], virtual: v ? { count: v.count, pitch: Number(v.pitch) || 0, ...rg(v) } : null });
+    return JSON.stringify({ kind: k, name: s.name ?? null, leds: s.leds ?? [], virtual: !v ? null : Array.isArray(v.positions) ? { positions: v.positions.map((q) => [q.s, q.w, q.dz ?? 0].map((x) => +(+x).toFixed(3))) } : { count: v.count, pitch: Number(v.pitch) || 0, ...rg(v) } });
   }
   return JSON.stringify({ kind: k });
 }

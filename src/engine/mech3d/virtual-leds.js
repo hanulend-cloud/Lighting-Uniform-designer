@@ -35,7 +35,7 @@ export function virtualLayout({ parts, step, line, count, pitch = 0, positions =
   const P0 = positions ? positions.map((q) => (typeof q === 'number' ? { s: q, w: 0 } : q)) : count === 0 ? [] : ledSPositions(line, count, pitch).flatMap((s) => ws.map((w) => ({ s, w })));
   for (const [k0, q] of P0.entries()) {
     const it = adjust?.[k0], s = it ? wrapS(line, q.s + it.ds) : q.s, dw = q.w;
-    const [x, y] = line.fromSW(s, w0 + dw), p = line.to3D(x, y, h0 + (it ? it.dz : 0)), da = angle(line, s) - a0, e = { s, pos: p, axis: rotDir(em.axis, F.d, da), xAxis: em.xAxis ? rotDir(em.xAxis, F.d, da) : em.xAxis };
+    const [x, y] = line.fromSW(s, w0 + dw), p = line.to3D(x, y, h0 + (q.dz ?? 0) + (it ? it.dz : 0)),da = angle(line, s) - a0, e = { s, pos: p, axis: rotDir(em.axis, F.d, da), xAxis: em.xAxis ? rotDir(em.xAxis, F.d, da) : em.xAxis };
     if (!bodies) { out.emitters.push({ part: null, ...e }); continue; }
     const P = body.positions, Q = new Float32Array(P.length);
     for (let i = 0; i < P.length; i += 3) {
@@ -66,7 +66,9 @@ export function stepLayoutOf({ parts, step, line, adjust = null }) {
   };
   if (!v || !line) return orig();
   try {
-    const r = virtualLayout({ parts, step, line, count: v.count, pitch: v.pitch, rows: v.rows ?? 1, rowGap: v.rowGap ?? 0, adjust });
+    // v = { count, pitch, rows?, rowGap? }(자동설계 ② 의 균등 배치) | { positions:[{s,w,dz}] }(STEP 에서 편집한 배치, led-edit.js)
+    const r = Array.isArray(v.positions) ? virtualLayout({ parts, step, line, positions: v.positions, adjust })
+      : virtualLayout({ parts, step, line, count: v.count, pitch: v.pitch, rows: v.rows ?? 1, rowGap: v.rowGap ?? 0, adjust });
     return { parts: r.parts, leds: r.leds, pcb: r.pcb, excluded: [], emitters: r.emitters, virtual: v, adjusted: !!adjust && Object.keys(adjust).length > 0, ref: r.ref };
   } catch (e) { return { ...orig(null), err: e.message }; }   // 조정은 가상 배치 번호 기준 → 원래 배치에는 적용 안 함
 }
