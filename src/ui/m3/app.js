@@ -452,8 +452,8 @@ async function adRun() {
       const r = await R.trace(adJob(Md, parts, ctx), { ...(precise ? { N: 3e6, maxMs: 6000 } : { N: 1.5e6, maxMs: 2000, minN: hi ? 5e4 : 1e5 }), rw: { part: ctx.mp, milkies: ms } });
       return milkyRows(G, obs, { milkies: ms, batches: r.rwBatches, ess: r.ess, emitted: r.ledger.emitted });
     },
-    // ② 후보 = (s, w) 격자(spec P4 §2.2b): s 2 mm × w ∈ {0, ±δk}, δk = 0.2/0.27/0.33·W(반폭 − 0.5 로 자름) — 후보 수 ≈ (L/2+1)·7, 후보당 1.2만 광자
-    async basis(d) {   // ① 이 켜져 있으면 실행기가 d.milky = 상한으로 넘김
+    // ② 후보 = (s, w) 격자(spec P4 §2.2b): s 2 mm × w ∈ {0, ±δk}, δk = 0.2/0.27/0.33·W(반폭 − 0.5 로 자름) — 후보 수 ≈ (L/2+1)·7, 후보당 ≤ 1.2만 광자(60 s 예산)
+    async basis(d) {   // ①·④ 를 함께 켜면 실행기가 d.milky = 거친 최고점 · d.finish = 최고 등급으로 넘김(§2.2c)
       const gaps = rowGapOptions(line), cand = candidateGrid(line, { sStep: 2, wOffsets: [0, ...gaps.flatMap((g) => [-g, g])] });
       const { M: Md, parts } = designScene({ ...d, rows: 1, rowGap: 0 }, ctx);
       let sets;
@@ -461,7 +461,8 @@ async function adRun() {
         sets = virtualEmittersAt({ parts: L.ledPartsNow(Md), step: Md.light.step, line, positions: cand }).map((e) => [e]);
         Md.light.step.virtual = { count: 0, pitch: 0 };
       } else sets = cand.map(({ s, w }) => [ledAtS(line, s, Md.light.manual, rt, w)]);
-      const r = await R.traceEach(adJob(Md, parts, ctx, { emitters: sets[0] }), sets, { N: 12000 });
+      // 시간 예산 60 s(spec §2.2c): 후보당 1.2만 광자, 넘치면 줄임(≥ 3000) — 지도는 후보마다 방출 1 기준(emitted = 1)
+      const r = await R.traceEach(adJob(Md, parts, ctx, { emitters: sets[0] }), sets, { N: 12000, maxMs: 60000, minN: 3000, onProgress: (i, n) => progress('leds', i / n, `LED 후보 위치 추적 ${i}/${n}`) });
       return { cand, maps: r.maps, emitted: r.emitted, gaps };
     },
     async evalShapes(d, cands, N, maxMs = 2500) {   // 단계별 광자·시간 제한은 halving 일정(6만/20만/60만 · 2.5/4/6초)

@@ -18,10 +18,23 @@ const fakePorts = (log, delay = 0) => Array.from({ length: 3 }, (_, w) => ({ sen
   ok(log.filter((x) => x.endsWith('scene')).length === 3 && log.filter((x) => x.endsWith('chunk')).length === 6, '장면 Worker 마다 1번, 청크 6개(60000/10000)');
   ok(r.batches.length === 4 && r.rwBatches.length === 4 && r.rwBatches[0].length === 2 * nCell && r.ledger.emitted === 60000 && Math.abs(r.ess[0] - 1) < 1e-12, '배치 4개로 나눠 합침 · 격자 지도 · ESS');
   const c = await R.traceEach(job, [[{ pos: [0, 0, 0] }], [{ pos: [1, 0, 0] }]], { N: 5000 });
-  ok(c.maps.length === 2 && c.maps[0] instanceof Float32Array && c.emitted === 5000, 'traceEach: 후보마다 지도(Float32), 후보당 방출');
+  ok(c.maps.length === 2 && c.maps[0] instanceof Float32Array && c.emitted === 1 && Math.abs(c.maps[0][0] - 1 / 5000) < 1e-9, 'traceEach: 후보마다 지도(Float32) · 방출 1 기준 정규화(emitted = 1)');
   ok(r.photons === 60000, '시간 제한 없음 = N 전부');
   R.cancel(); let thrown = ''; try { await R.trace(job, { N: 1000 }); } catch (e) { thrown = e.message; }
   ok(/중지/.test(thrown), 'cancel 뒤 호출 = 중지 오류'); }
+{ // traceEach 시간 예산(spec §2.2c): 가짜 시계 1 광자/ms · 포트 1개 — 후보마다 광자 = min(N, 남은 예산/남은 후보, ≥ minN), 지도는 후보 자신의 방출로 정규화
+  let t = 0; const Ns = [], prog = [];
+  const port = { send: async (m) => { if (m.type === 'scene') return { sceneKey: m.sceneKey, ready: true };
+    Ns.push(m.N); t += m.N;   // 같은 응답 모양(광자 수에 비례) — 정규화하면 같아야 함
+    return { sceneKey: m.sceneKey, acc: Float64Array.from({ length: nCell }, (_, i) => 0.5 * m.N * (i + 1)), cnt: new Uint32Array(nCell), ledger: { emitted: m.N, escaped: 0, absSurf: 0, absVol: 0, lost: 0, rrLoss: 0, rrGain: 0 }, ms: m.N }; } };
+  const R = createAdRunner({ ports: [port], now: () => t }), job = { sceneKey: 'kb', scene: { G: { ns: 2, nw: 2 } } }, sets = [0, 1, 2, 3].map((x) => [{ pos: [x, 0, 0] }]);
+  const c = await R.traceEach(job, sets, { N: 12000, maxMs: 30000, minN: 3000, onProgress: (i, n) => prog.push(`${i}/${n}`) });
+  ok(Ns.join() === '12000,6000,6000,6000' && c.emitted === 1, `예산 30 s: 후보 광자 ${Ns.join(' · ')}`);
+  ok(c.maps.every((m) => [...m].every((v, i) => Math.abs(v - 0.5 * (i + 1)) < 1e-6)), '광자 수가 달라도 정규화 지도는 같음');
+  ok(prog.join() === '1/4,2/4,3/4,4/4', `후보별 진행 ${prog.join(' ')}`);
+  Ns.length = 0; t = 0;
+  await R.traceEach(job, sets, { N: 12000, maxMs: 15000, minN: 3000 });
+  ok(Ns.join() === '12000,3000,3000,3000', `예산 부족 → 하한 3000: ${Ns.join(' · ')}`); }
 { // 시간 제한: 청크 5ms · 40ms 제한 → N 전에 멈추되 minN 이상, 실제 광자 수 보고
   const R = createAdRunner({ ports: fakePorts([], 5) }), job = { sceneKey: 'k2', scene: { G: { ns: 2, nw: 2 } } };
   const r = await R.trace(job, { N: 1e7, maxMs: 40, minN: 20000, chunkN: 2000, batches: 4 });

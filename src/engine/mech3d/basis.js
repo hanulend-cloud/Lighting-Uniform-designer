@@ -50,7 +50,7 @@ export function nearestRow(rows, obs, nMax) {
   return C.filter((r) => mL(r) >= needL).sort((a, c) => a.n - c.n || a.j - c.j || c.eff - a.eff)[0] ?? { n: nMax, pitch: 0, j: 0, stats: null, eff: NaN, margin: -Infinity };
 }
 // spare = 통과 개수 다음 몇 개까지 더 평가해 tried 에만 기록(결과 불변 — 최종 검증 실패 시 대안용)
-export function searchLeds({ G, obs, line, cand, maps, pitches = [0], pitchRange = null, nMax, emitted, milkies = null, spare = 0 }) {
+export function searchLeds({ G, obs, line, cand, maps, pitches = [0], pitchRange = null, nMax, emitted = 1, milkies = null, spare = 0 }) {   // emitted = 후보 지도 1개의 방출(방출 1 기준 지도면 1)
   const nCell = G.ns * G.nw, nJ = milkies ? milkies.length : 1, tried = [], rows = [];
   let found = null;
   for (let n = 1; n <= nMax; n++) {
@@ -113,7 +113,7 @@ export function layoutMap2(cand, maps, positions, { closed = false, L, off = 0, 
 // 열 수·열 간격·개수·피치 탐색: 총 LED 수 오름차순 → 같은 총수면 1열 먼저 → 그 안에서 여유 최고 → 효율. gaps = 2열 열 간격 δ 목록(±δ 가 격자에 있어야 함)
 // nMax = 총 LED 상한. 반환 { feasible, n(열당), rows, rowGap, pitch, total, stats, eff, margin, reason, tried:[{rows, rowGap, n, pitch, total, margin, eff}] }
 // spare = 통과 총수 다음 몇 개 총수까지 더 평가해 tried 에만 기록(결과 불변)
-export function searchLeds2({ G, obs, line, cand, maps, rowsOptions = [1, 2], gaps = [], pitches = [0], pitchRange = null, nMax, emitted, spare = 0 }) {
+export function searchLeds2({ G, obs, line, cand, maps, rowsOptions = [1, 2], gaps = [], pitches = [0], pitchRange = null, nMax, emitted = 1, spare = 0 }) {   // emitted: searchLeds 와 같음
   const nCell = G.ns * G.nw, tried = [], miss = [], RO = [...new Set(rowsOptions)].sort((a, b) => a - b);
   let found = null;
   for (let T = 1; T <= nMax; T++) {

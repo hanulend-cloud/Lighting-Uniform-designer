@@ -72,13 +72,13 @@ const peakRows = (ms, top, { len = 0.5, wid = 0.5, Uw = () => 0.9 } = {}) => ms.
   const G = { ns: 2, nw: 1, ds: 1, cell: 1, w0: -0.5, L: 2, closed: false, winS: 5, area: new Float64Array([1, 1]), valid: new Uint8Array([1, 1]) };
   const io2 = { ...io, basis: async (d) => { basisMilky = d.milky; return { cand: [0, 1, 2], maps: [0, 1, 2].map(() => Float32Array.from([1, 1])), emitted: 1 }; } };
   await runAutoDesign({ stages: { milky: true, leds: true }, obs: { targetLen: 0.8, targetWid: 0 }, current: { milky: 3, count: 5, pitch: 0 }, G, line: { length: 2, closed: false }, nMax: 4 }, io2);
-  ok(basisMilky === 5 && Math.max(...seen) === 9.9, `②+①: ② 기준 Milky ${basisMilky} · ① 탐색 ${Math.max(...seen)} 까지`); }
+  ok(basisMilky >= 4.7 && basisMilky <= 5 && Math.max(...seen) === 9.9, `②+①: ② 기준 Milky ${basisMilky}(거친 최고점 ≤ 5) · ① 탐색 ${Math.max(...seen)} 까지`); }
 { // ②+①: 후보 지도는 Milky 상한(5)에서 추적, 최소 개수 뒤 ① 이 Milky 를 낮춤
   let basisMilky = null;
   const G = { ns: 2, nw: 1, ds: 1, cell: 1, w0: -0.5, L: 2, closed: false, winS: 5, area: new Float64Array([1, 1]), valid: new Uint8Array([1, 1]) };
   const io = { basis: async (d) => { basisMilky = d.milky; return { cand: [0, 1, 2], maps: [0, 1, 2].map(() => Float32Array.from([1, 1])), emitted: 1 }; }, milkyRows: async (d, ms) => rowsOf(ms), verify: async () => ({ stats: st(0.9, 0.9), eff: 1 }), progress() {}, cancelled: () => false };
   const r = await runAutoDesign({ stages: { milky: true, leds: true }, obs: { targetLen: 0.8, targetWid: 0 }, current: { milky: 3, count: 5, pitch: 0 }, milkyMax: 5, G, line: { length: 2, closed: false }, nMax: 4 }, io);
-  ok(basisMilky === 5 && r.best.count === 1 && Math.abs(r.best.milky - 2.5) < 0.03, `②: 상한 ${basisMilky} 에서 최소 ${r.best.count}개 → ① Milky ${r.best.milky}`); }
+  ok(basisMilky >= 4.7 && basisMilky <= 5 && r.best.count === 1 && Math.abs(r.best.milky - 2.5) < 0.03, `②: 기준 ${basisMilky}(U 단조 → 상한 근처) 에서 최소 ${r.best.count}개 → ① Milky ${r.best.milky}`); }
 { // 단계적 압축: 27 → 6 → 2 → 1, 각 단계 광자 수 증가
   const seen = [];
   const evalFn = async (cands) => { return cands.map((c) => ({ cand: c, stats: st(0.7 + c.k / 100, 0.9), eff: 0.5 + c.k / 1000, ok: c.k !== 26 })); };
@@ -183,12 +183,12 @@ ok(halvingTotal(27) === 35 && halvingTotal(4) === 10 && halvingTotal(1) === 3, '
     basis: async () => { log.push('leds'); return { cand: [0, 1, 2], maps: [0, 1, 2].map(() => Float32Array.from([1, 1])), emitted: 1 }; },
     evalVariants: async (d, cs, N) => { const k = 'dz' in cs[0] ? 'height' : 'housing'; if (N === 6e4) log.push(k);
       return cs.map((c) => k === 'height' ? { cand: c, ok: true, stats: st(0.85, 0.9), eff: 0.5 - Math.abs(c.dz - 1.5) / 10 } : { cand: c, ok: true, stats: st(c.finish.R >= 0.9 ? 0.85 : 0.7, 0.9), eff: c.finish.R }); },
-    milkyRows: async (d, ms) => { if (!log.includes('milky')) log.push('milky'); return rowsOf(ms); },
+    milkyRows: async (d, ms) => { const k = log.includes('leds') ? 'milky' : 'ledsRef'; if (!log.includes(k)) log.push(k); return rowsOf(ms); },
     evalShapes: async (d, cs) => { if (!log.includes('shape')) log.push('shape'); return cs.map((c) => ({ cand: c, stats: st(0.9, 0.9), eff: 0.6, ok: true })); },
     verify: async (d) => ({ stats: st(d.dz ? 0.95 : 0.6, 0.9), eff: 0.6 }), progress: (s) => { if (prog.at(-1) !== s) prog.push(s); }, cancelled: () => false };
   const r = await runAutoDesign({ stages: { leds: true, height: true, housing: true, milky: true, shape: true }, obs: { targetLen: 0.8, targetWid: 0 }, current: { milky: 3, count: 5, pitch: 0, shape: null, finish: null, dz: 0 },
     milkyMax: 5, G, line: { length: 2, closed: false }, nMax: 4, heightRange: [-1, 3], finishCands: fins, housingPart: 1, shapePart: 0, shapeCands: [{ dt: 0.2, h: 0, R: 2.75, e: 0, c: 0 }] }, io);
-  ok(log.join() === 'leds,height,housing,milky,shape', `호출 순서: ${log.join()}`);
+  ok(log.join() === 'ledsRef,leds,height,housing,milky,shape', `호출 순서: ${log.join()}`);
   ok(prog.join() === 'current,leds,height,housing,milky,shape,verify', `진행 단계: ${prog.join()}`);
   ok(r.best.dz === 1.5 && r.best.finish?.part === 1 && r.best.finish.R === 0.9 && r.best.finish.kind === 'whiteDiffuse', `⑤ dz=${r.best.dz} · ④ ${JSON.stringify(r.best.finish)}(통과 중 최저 등급)`);
   ok(r.steps.some((x) => x.stage === 'height' && x.results1.length === 7) && r.steps.some((x) => x.stage === 'housing'), 'steps 에 height(후보 7개)·housing'); }
@@ -241,4 +241,27 @@ ok(halvingTotal(27) === 35 && halvingTotal(4) === 10 && halvingTotal(1) === 3, '
   const b = await run((d) => (d.rows === 2 && d.rowGap === 2 ? 0.75 : d.rows === 2 ? 0.7 : 0.6));
   ok(!b.r.feasible && b.r.best.rows === 2 && b.r.best.rowGap === 2 && b.calls.length <= 3 && /최종 정밀 재계산에서 목표 미달 — 길이 U 0\.75/.test(b.r.reason),
     `② 모두 미달 → 검증 최고(±${b.r.best.rowGap}) 유지 · verify ${b.calls.length}회: ${b.r.reason}`); }
+{ // ②+④+① (spec §2.2c): ② 기준 = 거친 최고점 Milky(상한 아님) · 케이스 최고 등급 → 개수 확정 뒤 ④ 최저 통과 등급 · ① 최소 Milky
+  const G = { ns: 2, nw: 1, ds: 1, cell: 1, w0: -0.5, L: 2, closed: false, winS: 5, area: new Float64Array([1, 1]), valid: new Uint8Array([1, 1]) };
+  const fins = [{ kind: 'whiteDiffuse', R: 0.85, current: true }, { kind: 'whiteDiffuse', R: 0.95 }, { kind: 'whiteDiffuse', R: 0.9 }];
+  const run = async (stages) => {
+    const basisD = [], bases = [], prog = [];
+    const io = { basis: async (d) => { basisD.push(d); return { cand: [0, 1, 2], maps: [0, 1, 2].map(() => Float32Array.from([1, 1])), emitted: 1 }; },
+      milkyRows: async (d, ms, o) => { if (!basisD.length && !o?.precise) bases.push(ms[10]); return peakRows(ms, 0.85); },
+      evalVariants: async (d, cs) => cs.map((c) => ({ cand: c, ok: true, stats: st(c.finish.R >= 0.9 ? 0.85 : 0.7, 0.9), eff: c.finish.R })),
+      verify: async () => ({ stats: st(0.9, 0.9), eff: 1 }), progress: (s, f, t) => prog.push(t), cancelled: () => false };
+    const r = await runAutoDesign({ stages, obs, current: { milky: 1, count: 5, pitch: 0, finish: null }, milkyMax: 5, G, line: { length: 2, closed: false }, nMax: 4, finishCands: fins, housingPart: 1 }, io);
+    return { r, basisD, bases, prog, ref: r.steps.find((x) => x.stage === 'ledsRef') };
+  };
+  const a = await run({ leds: true, housing: true, milky: true });
+  ok(a.basisD.length === 1 && Math.abs(a.basisD[0].milky - 4) <= 0.25 && a.basisD[0].finish?.R === 0.95 && a.basisD[0].finish.part === 1, `② 기준 d: Milky ${a.basisD[0]?.milky}(최고점 ≈4, 상한 5 아님) · 케이스 ${a.basisD[0]?.finish?.R}(최고 등급)`);
+  ok(a.bases.join() === '0.5,1.5,2.5,3.5,4.5' && a.prog.some((t) => /^② 기준 Milky 찾기 \(Milky 0\.5\)/.test(t)), `거친 최고점 탐색 ${a.bases.join(' → ')} (≤ 상한 5, 정밀 없음)`);
+  ok(a.ref && a.ref.milky === a.basisD[0].milky && a.ref.finish?.R === 0.95, `steps ledsRef: Milky ${a.ref?.milky} · 케이스 ${a.ref?.finish?.R}`);
+  ok(a.r.best.count === 1 && a.r.best.finish?.R === 0.9 && Math.abs(a.r.best.milky - 3) < 0.05, `개수 ${a.r.best.count} → ④ 최저 통과 ${a.r.best.finish?.R} → ① 최소 Milky ${a.r.best.milky}`);
+  const b = await run({ leds: true, milky: true });
+  ok(Math.abs(b.basisD[0].milky - 4) <= 0.25 && b.basisD[0].finish === null && b.ref?.finish === null, `②+①: 기준 Milky ${b.basisD[0].milky} · 케이스 그대로`);
+  const c = await run({ leds: true, housing: true });
+  ok(c.basisD[0].milky === 1 && c.basisD[0].finish?.R === 0.95 && c.bases.length === 0 && c.ref?.milky == null && c.r.best.finish?.R === 0.9 && c.r.best.milky === 1, `②+④: 기준 Milky ${c.basisD[0].milky}(현재) · 케이스 최고 → 최종 ${c.r.best.finish?.R}`);
+  const e = await run({ leds: true });
+  ok(e.basisD[0].milky === 1 && e.basisD[0].finish === null && !e.ref && e.bases.length === 0, '② 만: 기존 그대로(기준 탐색 없음)'); }
 done();

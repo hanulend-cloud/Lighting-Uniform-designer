@@ -1,5 +1,5 @@
 // P4 자동설계 단계 실행기 — spec §1·§2. 순서 ② → ⑤ LED 높이 → ④ 케이스 면 → ① → ③(§2.3c), 체크 안 한 항목은 현재 값 고정. 계산은 io 가 맡는다(Worker / 시험 가짜).
-// ① 재가중 창은 기준 ±0.25(ESS 한계, spec §2.1). U(Milky) 는 단봉형(§2.1a) — 거친 탐색으로 최고점을 지나면 멈추고, 오르는 구간에서만 할선/이분으로 최소 통과 Milky. ② 는 기준 Milky(기본 5)에서 최소 개수를 구한 뒤 ① 이 고른다.
+// ① 재가중 창은 기준 ±0.25(ESS 한계, spec §2.1). U(Milky) 는 단봉형(§2.1a) — 거친 탐색으로 최고점을 지나면 멈추고, 오르는 구간에서만 할선/이분으로 최소 통과 Milky. ② 는 기준(①·④ 함께면 거친 최고점 Milky ≤ 5·케이스 최고 등급, §2.2c)에서 최소 개수를 구한 뒤 ④·① 이 고른다.
 // io.milkyRows(d, ms, { precise }) — precise = 경계가 든 창의 재추적(광자 많이). 결과 { feasible, best(design), steps:[{stage, …}], reason, verified, current(현재안 io.verify), cancelled }
 import { milkyAxis } from './reweight.js';
 import { pickMilky, margin } from './milky-search.js';
@@ -142,9 +142,24 @@ export function limitText(row, obs) {
 }
 // ① 균일도 우선(spec §2.1a): 거친 탐색 0.5, 1.5, … ≤ 상한(최고점 뒤 두 번 연속 하락이면 멈춤 · 오르는 쪽에서 통과 창이 나오면 멈춤)
 // → 통과 없으면 최고점 주변 정밀 창 → 거기서 통과하면 오르는 구간에서 최소 통과 Milky. 반환 { found(pick), peak(행), cap } | null(중지)
+const coarseBases = (cap) => Array.from({ length: Math.max(1, Math.floor((cap - 0.5) / COARSE_STEP + 1e-9) + 1) }, (_, k) => Math.min(cap, 0.5 + k * COARSE_STEP));
+// ② 기준 Milky(spec §2.2c): 거친 창 0.5, 1.5, … ≤ cap 만(정밀 없음) — 최고점 뒤 처음 내려가면 멈춤. 반환 최고 믿는 행의 Milky | null(믿을 행 없음) | undefined(중지)
+async function coarsePeakMilky(d, cfg, io, steps, cap) {
+  let best = null, prev = -Infinity;
+  for (const m of coarseBases(cap)) {
+    if (io.cancelled?.()) return undefined;
+    io.progress?.('leds', 0, `② 기준 Milky 찾기 (Milky ${m.toFixed(1)})`);
+    const rows = await io.milkyRows(d, milkyAxis(m, MILKY_STEP, cap)), r = bestRow(rows), g = r?.margin ?? -Infinity;
+    steps.push({ stage: 'milky', phase: 'ledsRef', base: m, rows });
+    if (r && (!best || r.margin > best.margin)) best = r;
+    if (best && g < prev && g < best.margin) break;   // 최고점을 지나 내려감
+    prev = g;
+  }
+  return best ? best.milky : null;
+}
 async function searchMilkyPeak(d, cfg, io, steps, cap) {
   const obs = cfg.obs, S = [];   // 거친 표본 { m, row(창 최고 믿는 행), ms }
-  const nB = Math.max(1, Math.floor((cap - 0.5) / COARSE_STEP + 1e-9) + 1), bases = Array.from({ length: nB }, (_, k) => Math.min(cap, 0.5 + k * COARSE_STEP));
+  const bases = coarseBases(cap), nB = bases.length;
   let lo = 0.25;   // 지금까지 미달 창의 위 끝(오르는 구간 아래 경계)
   const rising = async (ms, pick, f0) => {   // 통과 창 → 최소 통과 Milky: 경계가 창 안이면 그대로, 창 맨 아래부터 통과면 [lo, 창 아래] 탐색
     if (pick.edge === null || ms[0] <= lo + 1e-9) return { found: pick };
@@ -207,9 +222,21 @@ export async function runAutoDesign(cfg, io) {
   io.progress?.('current', 0, '현재안 계산');   // 비교표 '현재' 열 — 최종안과 같은 추정기(io.verify). 수렴한 점진 결과가 있으면 재사용
   const currentVerified = cfg.currentVerified ?? await io.verify(d);
   if (stop()) return { cancelled: true };
-  if (stages.leds) {   // ② — ① 이 켜져 있으면 Milky 상한(확산 최대)에서 최소 개수
+  const hasFin = 'finish' in d, fin0 = d.finish;   // ④ 전에 되돌릴 현재 케이스 면
+  if (stages.leds) {   // ② — 함께 켠 ①·④ 는 유리한 쪽에서 개수를 정함(spec §2.2c): ① → 거친 최고점 Milky(≤ 상한), ④ → 케이스 최고 등급
+    const ref = stages.milky || (stages.housing && cfg.finishCands?.length);
+    if (stages.housing && cfg.finishCands?.length) {
+      const top = cfg.finishCands.reduce((a, f) => (gradeOf(f) > gradeOf(a) ? f : a));
+      d = { ...d, finish: top.current ? (cfg.current?.finish ?? null) : { part: cfg.housingPart ?? top.part, kind: top.kind, ...(top.R != null ? { R: top.R } : {}) } };
+    }
+    let mRef = null;
+    if (stages.milky) {
+      mRef = await coarsePeakMilky(d, cfg, io, steps, mCap);
+      if (mRef === undefined) return { cancelled: true };
+      d = { ...d, milky: Math.min(mCap, mRef ?? mCap) };
+    }
+    if (ref) steps.push({ stage: 'ledsRef', milky: mRef, finish: d.finish ?? null });
     io.progress?.('leds', 0, 'LED 후보 위치 추적');
-    if (stages.milky) d = { ...d, milky: mCap };
     const B = await io.basis(d);
     if (stop()) return { cancelled: true };
     // 후보가 {s, w} 면 (s, w) 격자 — 열 수·열 간격까지(searchLeds2, nMax = 총수 상한), 숫자면 1열(기존)
@@ -236,6 +263,7 @@ export async function runAutoDesign(cfg, io) {
   if (stages.housing && cfg.finishCands?.length) {   // ④ 케이스 면 — 후보 { finish }(current = 현재 면 처리), 통과 중 최저 등급
     const cands = cfg.finishCands.map(({ current, ...f }) => ({ finish: { part: cfg.housingPart ?? f.part, kind: f.kind, ...(f.R != null ? { R: f.R } : {}) }, current: !!current }));
     io.progress?.('housing', 0, `케이스 면 후보 ${cands.length}개 평가`);
+    if (hasFin) d = { ...d, finish: fin0 }; else delete (d = { ...d }).finish;   // ② 기준용 최고 등급 → 현재 면으로 되돌린 뒤 평가
     const r = await pickVariant(cands, evalV, obs, { prefer: 'lowestPassing', grade: (c) => gradeOf(c.finish), cancelled: stop, progress: (f, t) => io.progress?.('housing', f, `케이스 면 ${t}`) });
     if (stop()) return { cancelled: true };
     steps.push({ stage: 'housing', ...r });

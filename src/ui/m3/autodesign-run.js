@@ -1,5 +1,5 @@
 // 자동설계 Worker io — spec P4 §2. 기존 scene/chunk 프로토콜(chunk-host.js)을 그대로 쓰고 rw·emitters 만 덧붙인다.
-// trace(job, {N, maxMs, minN, chunkN, batches, rw}) → 배치별 합 + 격자 지도 + ESS + 실제 광자 수. traceEach(job, emitterSets, {N}) → 후보마다 지도(②).
+// trace(job, {N, maxMs, minN, chunkN, batches, rw}) → 배치별 합 + 격자 지도 + ESS + 실제 광자 수. traceEach(job, emitterSets, {N, maxMs, minN}) → 후보마다 방출 1 기준 지도(②, 시간 예산).
 // 시간 제한(maxMs): N 에 닿거나 (경과 ≥ maxMs 이고 ≥ minN 광자·배치마다 청크 1개) 이면 새 청크를 멈추고 진행 중 청크만 마저 받음.
 //   이때 청크 크기는 Worker 마다 잰 속도로 ≈chunkMs 분량(Milky 가 높으면 광자당 비용이 ~10배 → 고정 청크면 제한이 안 먹음).
 import { essRatio } from '../../engine/mech3d/reweight.js';
@@ -29,18 +29,6 @@ export function createAdRunner({ ports, now = () => globalThis.performance?.now?
     if (r.stale) throw new Error('장면이 바뀜 — 다시 실행하세요');
     return r;
   };
-  // 청크 목록을 Worker 들에 나눠 돌림(빈 Worker 가 다음 청크를 가져감)
-  async function runAll(job, chunks, onReply) {
-    let next = 0;
-    const ctl = { err: null };
-    await Promise.all(ports.map(guard(ctl, async (p) => {
-      while (next < chunks.length) {
-        check(ctl);
-        const k = next++;
-        onReply(k, await send(job, { p, body: chunks[k] }));
-      }
-    })));
-  }
   // chunkN 기본 = Worker 마다 청크 2개쯤(후보당 광자가 적어도 모든 Worker 가 일하게)
   async function trace(job, { N, maxMs = Infinity, minN = 0, chunkN = Math.max(2000, Math.ceil(N / (2 * ports.length))), chunkMs = Math.min(500, maxMs / 5), batches = 8, rw = null }) {
     await prepare(job);
@@ -73,16 +61,29 @@ export function createAdRunner({ ports, now = () => globalThis.performance?.now?
     const norm = (A) => keep.map((b) => { if (bDone[b] !== ref) { const s = ref / bDone[b]; for (let i = 0; i < A[b].length; i++) A[b][i] *= s; } return A[b]; });
     return { batches: norm(B), rwBatches: RB ? norm(RB) : null, ledger, ess: rw ? essRatio(sf, sf2, n) : null, photons: issued, ms: now() - t0 };
   }
-  // 후보마다 발광점 묶음 하나 → 지도(Float32, 격자면 격자 수 × 셀). emitted = 후보당 방출(모든 후보 같은 N)
-  async function traceEach(job, emitterSets, { N = 20000, rw = null } = {}) {
+  // 후보마다 발광점 묶음 하나 → 지도(Float32, 격자면 격자 수 × 셀) — 후보 자신의 방출로 나눈 방출 1 기준 지도(후보마다 광자 수가 달라도 됨) → emitted = 1
+  // 시간 예산(spec §2.2c): 후보 광자 = min(N, 지금까지 잰 처리량 × 남은 시간 / 남은 후보, ≥ minN) — 첫 후보들(아직 잰 값 없음)은 N. onProgress(끝난 수, 후보 수)
+  async function traceEach(job, emitterSets, { N = 20000, maxMs = Infinity, minN = 3000, rw = null, onProgress = null } = {}) {
     await prepare(job);
-    const maps = new Array(emitterSets.length);
-    let emitted = 0;
-    await runAll(job, emitterSets.map((em) => ({ N, emitters: em, ...(rw ? { rw } : {}) })), (k, r) => {
-      maps[k] = Float32Array.from(rw ? r.rw.acc : r.acc);
-      emitted = r.ledger.emitted;
-    });
-    return { maps, emitted };
+    const n = emitterSets.length, maps = new Array(n), t0 = now(), ctl = { err: null };
+    let next = 0, fin = 0, done = 0;
+    const size = (left) => {
+      const ms = now() - t0;
+      if (!Number.isFinite(maxMs) || done <= 0 || ms <= 0) return N;
+      return Math.max(Math.min(N, minN), Math.min(N, Math.floor((done / ms) * Math.max(0, maxMs - ms) / left)));
+    };
+    await Promise.all(ports.map(guard(ctl, async (p) => {
+      while (next < n) {
+        check(ctl);
+        const k = next++, m = size(n - k);
+        const r = await send(job, { p, body: { N: m, emitters: emitterSets[k], ...(rw ? { rw } : {}) } });
+        const src = rw ? r.rw.acc : r.acc, e = r.ledger.emitted > 0 ? r.ledger.emitted : m, mp = new Float32Array(src.length);
+        for (let i = 0; i < src.length; i++) mp[i] = src[i] / e;
+        maps[k] = mp; done += m; fin++;
+        onProgress?.(fin, n);
+      }
+    })));
+    return { maps, emitted: 1 };
   }
   return { trace, traceEach, cancel() { if (!stopped) { stopped = true; onStop(); } }, get stopped() { return stopped; } };
 }
