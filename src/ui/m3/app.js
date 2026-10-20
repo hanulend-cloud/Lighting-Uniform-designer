@@ -271,8 +271,8 @@ function renderMarkers() {
   for (const it of C.interference?.items ?? []) out.push({ type: 'ring', pos: it.pos, color: it.kind === 'potted' ? 0xffa000 : 0xff3b30, size: size('interference') });   // 포팅 LED(투과 부품 안) = 주황 경고
   for (const it of C.reach?.items ?? []) {
     const warn = it.reach < (M.checks?.minReach ?? 0.5), col = warn ? 0xffa000 : 0x4cd964;
-    // LED 방향 = 화살표, 길이는 빛 원뿔과 같게(cones 의 len 규칙: min(4, 0.4·간격))
-    if (it.dist != null) out.push({ type: 'arrow', pos: it.pos, axis: it.axis, len: Math.min(4, 0.4 * it.dist), color: col });
+    // LED 방향 = 화살표, 빛 원뿔(len = min(4, 0.4·간격))보다 1.6배 길게 — 단 닿는 면을 넘지 않게(간격의 90%)
+    if (it.dist != null) out.push({ type: 'arrow', pos: it.pos, axis: it.axis, len: Math.min(1.6 * Math.min(4, 0.4 * it.dist), 0.9 * it.dist), color: col });
     if (warn || f === 'reach') out.push({ type: 'ring', pos: it.pos, color: col, size: size('reach') });
   }
   if (C.wall?.pos && (C.wall.status === 'warn' || f === 'wall')) out.push({ type: 'ring', pos: C.wall.pos, color: 0xffa000, size: size('wall') });
