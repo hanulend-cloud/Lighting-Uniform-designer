@@ -1,0 +1,12 @@
+{
+ "version": 1,
+ "entries": [
+  { "id": "abs-white", "name": "백색 ABS", "kind": "whiteDiffuse", "status": "example", "R": 0.82, "Rmax": 0.85, "samples": [] },
+  { "id": "pc-white", "name": "백색 PC(일반 착색)", "kind": "whiteDiffuse", "status": "example", "R": 0.85, "Rmax": 0.9, "samples": [] },
+  { "id": "pbt-white", "name": "백색 PBT", "kind": "whiteDiffuse", "status": "example", "R": 0.85, "Rmax": 0.9, "samples": [] },
+  { "id": "pc-hr", "name": "고반사 백색 PC 그레이드", "kind": "whiteDiffuse", "status": "example", "R": 0.95, "Rmax": 0.97, "samples": [] },
+  { "id": "al-raw", "name": "알루미늄(무처리)", "kind": "metal", "status": "example", "R": 0.85, "Rmax": 0.88, "samples": [] },
+  { "id": "coat-white", "name": "고반사 백색 도장·반사 시트", "short": "고반사 도장", "kind": "whiteDiffuse", "status": "example", "R": null, "Rmax": 0.97, "special": true, "samples": [] },
+  { "id": "coat-metal", "name": "은·알루미늄 증착", "short": "금속 증착", "kind": "metal", "status": "example", "R": null, "Rmax": 0.95, "special": true, "samples": [] }
+ ]
+}

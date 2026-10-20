@@ -23,25 +23,13 @@ export const DEFAULT_FINISH_CATALOG = [
   { id: 'coat-white', name: '고반사 백색 도장·반사 시트', short: '고반사 도장', kind: 'whiteDiffuse', R: null, max: 0.97, special: true },
   { id: 'coat-metal', name: '은·알루미늄 증착', short: '금속 증착', kind: 'metal', R: null, max: 0.95, special: true },
 ];
-const r01 = (v) => (v == null || v === '' ? NaN : Number(v));
-const in01 = (v) => Number.isFinite(v) && v >= 0 && v <= 1;
-// 소재표 = 기본 행 + 저장 값(spec.mech3d.finishCatalog = [{ id, R, max }], 0~1 만) — 기본 R ≤ 상한
-export function catalogOf(mspec) {
-  const saved = Array.isArray(mspec?.finishCatalog) ? mspec.finishCatalog : [];
-  return DEFAULT_FINISH_CATALOG.map((e) => {
-    const o = saved.find((x) => x?.id === e.id), max = in01(r01(o?.max)) ? r01(o.max) : e.max;
-    const R = e.special ? null : Math.min(max, in01(r01(o?.R)) ? r01(o.R) : e.R);
-    return { ...e, R, max };
-  });
-}
-// 소재표 한 칸 고침(key = 'R' | 'max', 0~1 로 자름) → 저장용 [{ id, R, max }]. 상한을 내리면 기본 R 도 따라 내림
-export function setCatalogValue(cat, id, key, v) {
-  const x = Math.min(1, Math.max(0, Number(v) || 0));
-  return cat.map((e) => {
-    if (e.id !== id) return { id: e.id, R: e.R, max: e.max };
-    if (key === 'max') return { id: e.id, R: e.R == null ? null : Math.min(e.R, x), max: x };
-    return { id: e.id, R: e.special ? null : Math.min(x, e.max), max: e.max };
-  });
+// 소재표 = 반사 소재 DB(spec P4 §2.3e) 목록 → 행 { id, name, short, kind, R, max, special, status, nSamples, origin }.
+// src = DB(list()) | 항목 배열 | 없음(→ 기본 소재표, Node 시험·DB 로드 실패 대비). 기본 R ≤ 상한
+export function catalogOf(src) {
+  const list = Array.isArray(src) ? src : typeof src?.list === 'function' ? src.list() : null;
+  if (!list) return DEFAULT_FINISH_CATALOG.map((e) => ({ ...e, special: !!e.special, status: 'example', nSamples: 0, origin: 'base' }));
+  return list.map((e) => ({ id: e.id, name: e.name, ...(e.short ? { short: e.short } : {}), kind: e.kind, R: e.special || e.R == null ? null : Math.min(e.R, e.Rmax), max: e.Rmax,
+    special: !!e.special, status: e.status, nSamples: e.samples?.length ?? 0, origin: e.origin ?? 'base' }));
 }
 // ④ 후보 — 소재 종류 등급 중 R ≤ 상한 + 현재 + (허용 시) 특수 처리(상한 R, special · coating = id; 소재로 닿는 값이면 뺌). 소재 미지정 = finishOptions(호환)
 export function finishCandidatesFor({ catalog = DEFAULT_FINISH_CATALOG, materialId, current, allowSpecial = false } = {}) {

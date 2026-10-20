@@ -4,6 +4,7 @@ import { buildGeometry, combinedEffect, activeLevels, effectiveEdgeMargin } from
 import { computeField, computeCameraLuminance, evalGrid, l2Describe } from './engine/directLit.js';
 import { initL2, browserLoader, l2State, l2Raw, setMaterialDb, materialDb } from './engine/l2/runtime.js';
 import { createDb } from './model/materials-db.js';
+import { createReflectDb } from './model/reflect-db.js';
 import { renderL2Panel } from './ui/l2-panel.js';
 import { migrateMilkyV13 } from './engine/l2/material.js';
 import { milkyFromMusR } from './engine/l2/milky.js';
@@ -212,9 +213,10 @@ function clearShape() {
 }
 
 // ---- 3D 기구 모드 (spec 2026-10-14 §3, 2026-10-15 m3-cad-ui) — 화면·계산은 src/ui/m3/app.js ----
+let reflectDb = null;   // 반사 소재 DB — 시작 시 불러옴
 function m3ctx() {
   return {
-    mspec: spec.mech3d, persist, dbLists, materialDb, l2Table: () => l2State().table, l2Raw, milkyFromMusR,
+    mspec: spec.mech3d, persist, dbLists, materialDb, reflectDb: () => reflectDb, l2Table: () => l2State().table, l2Raw, milkyFromMusR,
     onImportMech3d: importMech3d,
     onExit: () => { spec.mode = 'flat'; persist(); applyMode(); schedule(); },
   };
@@ -730,6 +732,14 @@ await initL2(browserLoader());
   try { base = (await (await fetch('./data/materials-db.json')).json()).entries ?? []; } catch { base = []; }
   try { user = JSON.parse(localStorage.getItem(MAT_KEY) || '[]'); } catch { user = []; }
   setMaterialDb(createDb(base, user, (list) => { try { localStorage.setItem(MAT_KEY, JSON.stringify(list)); } catch {} }));
+}
+// 반사 소재 DB(spec P4 §2.3e): 공용(data/reflect-db.json) + 사용자(브라우저 저장) — 3D 모드 ctx.reflectDb()
+{
+  const REFL_KEY = 'uds.reflect.v1';
+  let base = [], user = [];
+  try { base = (await (await fetch('./data/reflect-db.json')).json()).entries ?? []; } catch { base = []; }
+  try { user = JSON.parse(localStorage.getItem(REFL_KEY) || '[]'); } catch { user = []; }
+  reflectDb = createReflectDb(base, user, (list) => { try { localStorage.setItem(REFL_KEY, JSON.stringify(list)); } catch {} });
 }
 spec = load() || structuredClone(DEFAULT_SPEC);
 migrate(spec);

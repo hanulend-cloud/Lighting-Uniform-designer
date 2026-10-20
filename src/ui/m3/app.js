@@ -24,7 +24,8 @@ import { createResultsPanel } from './results-panel.js';
 import { renderStatusBar } from './status-bar.js';
 import { createAdRunner } from './autodesign-run.js';
 import { renderAutoPanel, stageAvailability, clampCap, overallFrac, etaText, reusableCurrent, defaultHousingPart, applyDz, applyFinish, capDefault, nextFinish, finishText } from './autodesign-panel.js';
-import { ledHeightRange, heightCandidates, catalogOf, finishCandidatesFor, setReflMaterial, partFinishEdit, setCatalogValue } from '../../engine/mech3d/housing-led.js';
+import { ledHeightRange, heightCandidates, catalogOf, finishCandidatesFor, setReflMaterial, partFinishEdit } from '../../engine/mech3d/housing-led.js';
+import { migrateFinishCatalog, reflectPatch, copyAsUser } from '../../model/reflect-db.js';
 import { intersectRay } from '../../engine/mech3d/bvh.js';
 import { runAutoDesign, shapeTotal } from '../../engine/mech3d/autodesign.js';
 import { milkyRows } from '../../engine/mech3d/milky-search.js';
@@ -68,6 +69,8 @@ function getView() {
 }
 
 // ---- 마운트 ----
+// 반사 소재표 행 = 반사 소재 DB(없으면 기본 소재표)
+const reflCat = () => catalogOf(A?.ctx.reflectDb?.() ?? null);
 export async function mount(ctx) {
   if (A && A.ctx.mspec === ctx.mspec) { A.ctx = ctx; return; }   // 같은 기구 — 그대로
   unmount();
@@ -79,6 +82,12 @@ export async function mount(ctx) {
   const v0 = L.validateLedStep(ctx.mspec, store.session);   // main.js:982 의 시작 시 검증을 여기서
   if (v0.status) store.session.status = v0.status;
   if (v0.changed) ctx.persist();
+  // 프로젝트 소재표(finishCatalog, §2.3d) → 반사 소재 DB 사용자 항목으로 한 번 이관(spec P4 §2.3e)
+  if (ctx.mspec.finishCatalog != null && ctx.reflectDb?.()) {
+    const { moved } = migrateFinishCatalog(ctx.mspec, ctx.reflectDb());
+    store.session.status = moved.length ? `프로젝트 반사 소재표 → 반사 소재 DB 사용자 항목 ${moved.length}개로 옮김(${moved.map((x) => x.name).join(', ')})` : store.session.status;
+    ctx.persist();
+  }
   const a = A = { ctx, store, pool, view: null, meshShown: null, lineKey: '', Gc: null, obsShown: null, checks: {}, markKey: '', timing: { start: 0, first: null, noise5: null } };
   a.prog = createProgressive({ ports: pool.ports(), onUpdate: onCalc, opts: { targetNoise: ctx.mspec.observe.targetNoise ?? 0.02 } });
   a.results = createResultsPanel($('#m3-res'));
@@ -339,7 +348,7 @@ function renderAuto() {
   if (!st.running && !avail.shape.parts?.includes(st.sel.shapePart)) st.sel.shapePart = avail.shape.ok ? avail.shape.parts[0] : -1;   // 부품 소재·형상이 바뀌어 대상이 빠지면 첫 후보로
   if (!st.running && !avail.housing.parts?.includes(st.sel.housingPart)) { const k = defaultHousingPart(M, adInfo().boxes); st.sel.housingPart = avail.housing.ok ? (avail.housing.parts.includes(k) ? k : avail.housing.parts[0]) : -1; }   // ④ 기본 = 관측 부품을 감싸는 가장 큰 불투명 부품
   const mp = st.running ? st.milkyPart : adMilkyPart(M, avail), sel = { ...st.sel, milkyMax: st.sel.milkyMax ?? capDefault(st.sel, avail, mp != null ? M.parts[mp].material.milky : 0) };
-  const hm = st.sel.housingPart >= 0 ? catalogOf(M).find((e) => !e.special && e.id === M.parts[st.sel.housingPart]?.reflMaterial) : null;   // ④ 대상 반사 소재
+  const hm = st.sel.housingPart >= 0 ? reflCat().find((e) => !e.special && e.id === M.parts[st.sel.housingPart]?.reflMaterial) : null;   // ④ 대상 반사 소재
   renderAutoPanel(el, { avail, sel, running: st.running, result: st.result, names: M.parts.map((p) => p.name), canRevert: !!st.undo, noLine: !A.store.session.line, milkyPart: mp, housingMat: hm ? { name: hm.name, max: hm.max } : null }, {
     onSel: (k, v) => { if (st.running) return; st.sel[k] = k === 'milkyMax' ? clampCap(v) : v; renderAuto(); },
     onAction: (k) => ({ run: adRun, stop: adStop, close: () => { st.open = false; renderAuto(); }, apply: adApply, cancel: adCancel, revert: adRevert, step: adStep })[k]?.(),
@@ -433,7 +442,7 @@ async function adRun() {
   const cur = { milky: ctx.mp != null ? M0.parts[ctx.mp].material.milky : null, count: stp ? (sv ? sv.count : nOrig) : M0.light.manual?.count ?? 0, pitch: stp ? sv?.pitch ?? 0 : M0.light.manual?.pitch ?? 0, rows, rowGap: rows === 2 ? rsrc.rowGap ?? 0 : 0, shape: null, finish: null, dz: 0, ...(stp ? { stepOrig: !sv, stepVirt: !!sv } : {}) };
   ctx.cur = cur;
   // ④ 후보 = 반사 소재 상한 안(+ 특수 허용 시 특수 처리) — 소재 미지정 = 전체 등급(spec P4 §2.3d)
-  const finCands = (k) => finishCandidatesFor({ catalog: catalogOf(M0), materialId: M0.parts[k].reflMaterial, current: M0.parts[k].finish, allowSpecial: !!st.sel.housingSpecial });
+  const finCands = (k) => finishCandidatesFor({ catalog: reflCat(), materialId: M0.parts[k].reflMaterial, current: M0.parts[k].finish, allowSpecial: !!st.sel.housingSpecial });
   const finishCands = stages.housing ? finCands(hp) : null;
   const varTot = { height: (hInfo ? heightCandidates(hInfo.range, 7).length : 0) + 2, housing: (finishCands?.length ?? 0) + 2 }, varI = { height: 0, housing: 0 };   // 진행률 분모 = 1차 후보 + 정밀 2개
   const minWall = { ...defaultChecks(), ...(M0.checks ?? {}) }.minWall, t0 = performance.now();
@@ -650,11 +659,11 @@ function propHandlers() {
     }),
     // 면 처리: 반사 소재(또는 특수 처리) 상한을 넘으면 상한으로 자르고 알림(spec P4 §2.3d)
     onFinish: (i, face, f) => st.update('material', (m, x) => {
-      const r = partFinishEdit(m.parts[i], face, f, catalogOf(m));
+      const r = partFinishEdit(m.parts[i], face, f, reflCat());
       m.parts[i] = r.part;
       if (r.clamped) x.status = `소재 상한(${Math.round(r.max * 100)}%) 초과 — 특수 표면처리는 자동설계 ④ 에서 허용`;
     }),
-    onReflMaterial: (i, id) => st.update('material', (m) => { m.parts[i] = setReflMaterial(m.parts[i], id, catalogOf(m)); }),
+    onReflMaterial: (i, id) => st.update('material', (m) => { m.parts[i] = setReflMaterial(m.parts[i], id, reflCat()); }),
     // 크기·위치 조절: 장면을 바꾸고 접촉면을 다시 찾는다(같은 면 쌍은 모드 유지). xf = null → 원래대로
     // 새 간섭이 생기면 간섭 직전까지만 적용(limitXform). 직접 배치 LED 는 라인을 따라 다시 놓이므로 고정 LED(STEP)만 장애물
     onXform: (i, want, note = '') => st.update('material', (m, x) => {
@@ -704,7 +713,15 @@ function propHandlers() {
     onTarget: (key, v) => st.update('target', (m) => { m.observe[key] = v; }),
     onCheckParam: (key, v) => st.update('target', (m) => { m.checks[key] = v; }),
     // 반사 소재표 — id = null → 기본값으로(저장 삭제). 계산에는 영향 없음(자동설계 ④ 후보·부품 편집기 상한만)
-    onCatalog: (id, key, v) => st.update('target', (m) => { if (id == null) delete m.finishCatalog; else m.finishCatalog = setCatalogValue(catalogOf(m), id, key, v); }),
+    // 반사 소재 DB 칸 고침(spec P4 §2.3e) — 사용자 항목은 그대로, 공용 항목은 사용자 사본 "… (수정)" 을 만들어 고침. 부품 반사율은 그대로(다음 편집부터 새 상한)
+    onCatalog: (id, key, v) => st.update('session', (_, x) => {
+      const db = A.ctx.reflectDb?.(), e = db?.get(id);
+      if (!e) { x.status = '반사 소재 DB 없음'; return; }
+      try {
+        if (e.origin === 'user') db.update(id, reflectPatch(e, key, v));
+        else { const c = copyAsUser(e); db.add({ ...c, ...reflectPatch(c, key, v) }); x.status = `공용 소재는 고칠 수 없어 사용자 사본 "${c.name}" 을 만들었습니다`; }
+      } catch (err) { x.status = `반사 소재 고침 실패: ${err.message}`; }
+    }),
   };
 }
 // LED STEP 불러오기 (main.js:452-469)
@@ -776,7 +793,7 @@ function renderAll(tag = 'all') {
   }, lay);
   const pi = S.node?.startsWith('part:') ? +S.node.slice(5) : -1, clr = pi >= 0 ? clearanceOf(pi) : null;
   if (clr !== A.clrShown) { A.clrShown = clr; renderMarkers(); }
-  if (tag !== 'view') renderPropertyPanel($('#m3-props'), M, S, { dbList: A.ctx.materialDb()?.list() ?? [], auto: autoGrid(), dir: M.observe.dir ?? S.line?.frame.d, lineInfo: lineInfo(), clearance: clr, xfInfo: pi >= 0 ? xformInfoOf(pi) : null, meshInfo: pi >= 0 ? partMeshInfo(pi) : null, xfMsg: S.xfMsg?.part === pi ? S.xfMsg.text : '', lay: lay ?? null }, propHandlers());
+  if (tag !== 'view') renderPropertyPanel($('#m3-props'), M, S, { dbList: A.ctx.materialDb()?.list() ?? [], catalog: reflCat(), auto: autoGrid(), dir: M.observe.dir ?? S.line?.frame.d, lineInfo: lineInfo(), clearance: clr, xfInfo: pi >= 0 ? xformInfoOf(pi) : null, meshInfo: pi >= 0 ? partMeshInfo(pi) : null, xfMsg: S.xfMsg?.part === pi ? S.xfMsg.text : '', lay: lay ?? null }, propHandlers());
   if (tag === 'session' || tag === 'all') renderMarkers();
   A.cmd.update(S, S.calc);
   renderStatus();

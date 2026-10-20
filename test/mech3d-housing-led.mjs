@@ -1,5 +1,5 @@
 // ④ 케이스 면 후보·⑤ LED 높이 범위(순수): node test/mech3d-housing-led.mjs
-import { FINISH_GRADES, gradeOf, finishOptions, ledHeightRange, heightCandidates, DEFAULT_FINISH_CATALOG, catalogOf, finishCandidatesFor, setCatalogValue, setReflMaterial, finishLimit, partFinishEdit } from '../src/engine/mech3d/housing-led.js';
+import { FINISH_GRADES, gradeOf, finishOptions, ledHeightRange, heightCandidates, DEFAULT_FINISH_CATALOG, catalogOf, finishCandidatesFor, setReflMaterial, finishLimit, partFinishEdit } from '../src/engine/mech3d/housing-led.js';
 import { ok, done } from './mech3d-util.mjs';
 
 const lab = (f) => `${f.kind === 'metal' ? 'M' : f.kind === 'whiteDiffuse' ? 'W' : f.kind}${Math.round((f.R ?? 0) * 100)}`;
@@ -31,14 +31,9 @@ const lab = (f) => `${f.kind === 'metal' ? 'M' : f.kind === 'whiteDiffuse' ? 'W'
   ok(ids === 'abs-white,pc-white,pbt-white,pc-hr,al-raw,coat-white,coat-metal', `기본 카탈로그 id: ${ids}`);
   const pc = C.find((e) => e.id === 'pc-white'), cm = C.find((e) => e.id === 'coat-metal');
   ok(pc.kind === 'whiteDiffuse' && pc.R === 0.85 && pc.max === 0.9 && !pc.special && cm.special && cm.kind === 'metal' && cm.max === 0.95 && cm.R == null, '표 값(백색 PC 85/90 · 증착 특수 95)');
-  ok(catalogOf({}).every((e, k) => e.max === C[k].max) && catalogOf(null).length === 7, '저장 없음 → 기본');
-  const o = catalogOf({ finishCatalog: [{ id: 'pc-white', R: 0.88, max: 0.92 }, { id: 'zzz', R: 1, max: 1 }, { id: 'abs-white', R: 'x', max: 2 }] });
-  ok(o.length === 7 && o[1].R === 0.88 && o[1].max === 0.92 && o[0].R === 0.82 && o[0].max === 0.85, `저장 값 덮어씀 · 잘못된 값 무시: ${JSON.stringify(o.slice(0, 2))}`);
-  ok(catalogOf({ finishCatalog: [{ id: 'pc-white', R: 0.95, max: 0.9 }] })[1].R === 0.9, '기본 R > 상한 → 상한');
-  const s1 = setCatalogValue(C, 'pc-white', 'max', 0.8);
-  ok(s1.find((e) => e.id === 'pc-white').max === 0.8 && s1.find((e) => e.id === 'pc-white').R === 0.8 && s1.length === 7, '상한 낮추면 기본 R 도 따라 내림');
-  const s2 = setCatalogValue(C, 'pc-white', 'R', 0.99);
-  ok(s2.find((e) => e.id === 'pc-white').R === 0.9 && setCatalogValue(C, 'pc-hr', 'max', 1.5).find((e) => e.id === 'pc-hr').max === 1, '기본 R ≤ 상한 · 0~1 로 자름'); }
+  ok(catalogOf({}).every((e, k) => e.max === C[k].max) && catalogOf(null).length === 7 && catalogOf(null).every((e) => e.status === 'example'), 'DB 없음 → 기본');
+  const o = catalogOf([{ id: 'u1', name: '사내', kind: 'whiteDiffuse', status: 'measured', R: 0.95, Rmax: 0.9, samples: [{ R: 0.9 }], origin: 'user' }, { id: 's', name: 's', kind: 'metal', status: 'example', R: null, Rmax: 0.95, special: true, samples: [] }]);
+  ok(o.length === 2 && o[0].R === 0.9 && o[0].max === 0.9 && o[0].nSamples === 1 && o[0].origin === 'user' && o[1].special && o[1].R === null && o[1].origin === 'base', `DB 항목 → 행(R ≤ 상한): ${JSON.stringify(o)}`); }
 { const C = DEFAULT_FINISH_CATALOG, W = (R) => ({ kind: 'whiteDiffuse', R });
   const a = finishCandidatesFor({ catalog: C, materialId: 'pc-white', current: W(0.85), allowSpecial: false });
   ok(a.map(lab).join() === 'W85,W90' && a[0].current && !a.some((f) => f.special), `백색 PC: 상한 90 까지 백색만: ${a.map(lab)}`);
@@ -52,7 +47,7 @@ const lab = (f) => `${f.kind === 'metal' ? 'M' : f.kind === 'whiteDiffuse' ? 'W'
   ok(e.map(lab).join() === 'M85,M88', `알루미늄: 경면 88 까지: ${e.map(lab)}`);
   const f = finishCandidatesFor({ catalog: C, materialId: undefined, current: W(0.85), allowSpecial: true });
   ok(f.length === 6 && f.map(lab).join() === finishOptions(W(0.85)).map(lab).join(), '소재 미지정 → 기존 전체 등급(호환)');
-  const g = finishCandidatesFor({ catalog: catalogOf({ finishCatalog: [{ id: 'pc-white', max: 0.95 }] }), materialId: 'pc-white', current: W(0.85) });
+  const g = finishCandidatesFor({ catalog: catalogOf(catalogOf(null).map((e) => ({ ...e, Rmax: e.id === 'pc-white' ? 0.95 : e.max, samples: [] }))), materialId: 'pc-white', current: W(0.85) });
   ok(g.map(lab).join() === 'W85,W90,W95', `편집한 상한 반영: ${g.map(lab)}`); }
 { const C = DEFAULT_FINISH_CATALOG, p = { name: 'c', material: { kind: 'opaque' }, finish: { kind: 'whiteDiffuse', R: 0.9 }, faceFinish: { 3: { kind: 'black', R: 0.05 } }, coating: 'coat-white' };
   const q = setReflMaterial(p, 'abs-white', C);

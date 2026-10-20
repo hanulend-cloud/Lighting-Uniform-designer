@@ -33,13 +33,14 @@ ok(old.light.spec.fluxLm === 0 && old.observe.targetNoise === 0.02 && old.observ
   ok(a.manual.rows === 1 && a.manual.rowGap === 0 && a.step.virtual.rows === 1 && a.step.virtual.rowGap === 0, '없으면 1열·0');
   ok(b.manual.rows === 2 && b.manual.rowGap === 4 && b.step.virtual.rows === 2 && b.step.virtual.rowGap === 3.5, '2열·간격 유지');
   ok(c.manual.rows === 1 && c.manual.rowGap === 0 && c.step.virtual.rows === 1 && c.step.virtual.rowGap === 0, `잘못된 값 → 1열·0: ${JSON.stringify([c.manual, c.step.virtual])}`); }
-{ // ④ 반사 소재(spec P4 §2.3d): 불투명 부품의 유효한 소재 id 만 유지 · coating = 특수 id 만 · finishCatalog 배열 아니면 삭제
+{ // ④ 반사 소재(spec P4 §2.3d·e): 불투명 부품의 id 문자열만 유지(DB 사용자 id 포함) · finishCatalog 배열 아니면 삭제
   const op = { kind: 'opaque' }, m = { light: { spec: {} }, observe: {}, finishCatalog: 'x', parts: [
-    { material: op, reflMaterial: 'pc-white', coating: 'coat-white' }, { material: op, reflMaterial: 'nope', coating: 'pc-white' }, { material: { kind: 'milky' }, reflMaterial: 'pc-white' }, { material: op }] };
+    { material: op, reflMaterial: 'pc-white', coating: 'coat-white' }, { material: op, reflMaterial: 5, coating: '' }, { material: op, reflMaterial: 'user_x1', coating: 'user_c1' }, { material: { kind: 'milky' }, reflMaterial: 'pc-white' }, { material: op }] };
   migrateMech3d(m);
   ok(m.parts[0].reflMaterial === 'pc-white' && m.parts[0].coating === 'coat-white', '유효 id 유지');
-  ok(!('reflMaterial' in m.parts[1]) && !('coating' in m.parts[1]) && !('reflMaterial' in m.parts[2]) && !('reflMaterial' in m.parts[3]), '잘못된 id·불투명 아님 → 삭제');
+  ok(!('reflMaterial' in m.parts[1]) && !('coating' in m.parts[1]) && !('reflMaterial' in m.parts[3]) && !('reflMaterial' in m.parts[4]), '잘못된 id·불투명 아님 → 삭제');
+  ok(m.parts[2].reflMaterial === 'user_x1' && m.parts[2].coating === 'user_c1', '사용자 DB id 유지');
   ok(!('finishCatalog' in m), '소재표 형식 오류 → 기본');
   const k = { light: { spec: {} }, observe: {}, finishCatalog: [{ id: 'pc-white', R: 0.8, max: 0.88 }] }; migrateMech3d(k);
-  ok(k.finishCatalog.length === 1, '소재표 배열 유지'); }
+  ok(k.finishCatalog.length === 1, '소재표 배열 유지(이관은 mount)'); }
 done();

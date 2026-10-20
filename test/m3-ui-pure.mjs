@@ -7,7 +7,7 @@ import { ramp, NO_DATA } from '../src/ui/m3/colormap.js';
 import { defaultLight, defaultObserve, defaultChecks } from '../src/engine/mech3d/defs.js';
 import { defaultPart, setPartMaterial, setPartMaterialParam } from '../src/engine/mech3d/materials.js';
 import { clearanceHtml, meshInfo, partHeaderText, reflRowHtml } from '../src/ui/mech3d-panel.js';
-import { DEFAULT_FINISH_CATALOG, finishCandidatesFor } from '../src/engine/mech3d/housing-led.js';
+import { DEFAULT_FINISH_CATALOG, finishCandidatesFor, catalogOf } from '../src/engine/mech3d/housing-led.js';
 import { catalogTableHtml } from '../src/ui/mech3d-light-panel.js';
 import { stepLayoutRowHtml, clampVirtual, virtCountMax, ledRowsHtml, defaultRowGap } from '../src/ui/mech3d-light-panel.js';
 import { rowGapOptions } from '../src/engine/mech3d/placement.js';
@@ -241,6 +241,6 @@ ok(clampCap(12) === 9.9 && clampCap(0.1) === 0.5 && clampCap(3) === 3 && clampCa
   ok(reflRowHtml({ material: { kind: 'milky' } }, C) === '', '불투명 아님 → 반사 소재 없음');
   const q = setPartMaterial({ ...defaultPart(0, 'c', 1), reflMaterial: 'pc-white', coating: 'coat-white' }, 'opaque');
   ok(!('reflMaterial' in q) && !('coating' in q), '소재 종류 바꾸면 반사 소재·특수 표시 해제');
-  const t = catalogTableHtml(C, false), t1 = catalogTableHtml(C, true);
-  ok(t.includes('반사 소재표') && /data-lp-cat="pc-white" data-lp-catk="R"[^>]*value="85"|value="85"[^>]*data-lp-cat="pc-white" data-lp-catk="R"/.test(t) && /data-lp-cat="coat-white" data-lp-catk="max"/.test(t) && !/data-lp-cat="coat-white" data-lp-catk="R"/.test(t) && !t.includes('data-lp-catreset') && t1.includes('data-lp-catreset'), '소재표: 기본 R·상한 R 칸(특수 = 상한만) · 고친 뒤 기본값으로'); }
+  const t = catalogTableHtml(catalogOf(null)), t1 = catalogTableHtml([{ ...catalogOf(null)[1], id: 'u1', origin: 'user', status: 'measured', nSamples: 3 }]);
+  ok(t.includes('반사 소재표') && /data-lp-cat="pc-white" data-lp-catk="R"[^>]*value="85"|value="85"[^>]*data-lp-cat="pc-white" data-lp-catk="R"/.test(t) && /data-lp-cat="coat-white" data-lp-catk="max"/.test(t) && !/data-lp-cat="coat-white" data-lp-catk="R"/.test(t) && !t.includes('data-lp-catreset') && t.includes('예시') && t1.includes('사용자 · 실측 3회'), '소재표: 기본 R·상한 R 칸(특수 = 상한만) · 상태(사용자·실측 횟수)'); }
 done();
