@@ -8,29 +8,41 @@ import { MEAS_CONDS, reflStatusText, REFLECT_KINDS } from '../model/reflect-db.j
 const esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
 const XF_LOCK = new WeakMap();   // 패널 요소 → 비율 고정 체크(세션 동안)
 const REFL_FORM = new WeakMap();   // 패널 요소 → 반사 소재 추가 양식 { open, msg }
+// 접는 구역(<details>) 열림 상태 — 세션 동안 구역 id 별로 기억(패널은 innerHTML 로 자주 다시 그려짐)
+const SEC_OPEN = new Map();
+let SEC_FACE = null;   // 마지막으로 본 선택 면('부품:면') — 새 면이 선택되면 '면 처리' 구역을 자동으로 연다
+export const sectionOpen = (id) => SEC_OPEN.get(id) === true;
+export function resetSections() { SEC_OPEN.clear(); SEC_FACE = null; }
+const secHtml = (id, title, summary, body) => `<details class="m3-sec" data-m3-sec="${id}"${sectionOpen(id) ? ' open' : ''}><summary><span class="m3-sec-t">${title}</span>${summary ? ` <span class="m3-sec-s">${summary}</span>` : ''}</summary><div class="m3-sec-b">${body}</div></details>`;
+const n1 = (v) => String(+(+v).toFixed(1));
 const pct = (x) => Math.round(x * 1000) / 10;
 const opts = (obj, cur) => Object.entries(obj).map(([k, v]) => `<option value="${k}" ${k === cur ? 'selected' : ''}>${esc(v.label ?? k)}</option>`).join('');
 
 // lim = 반사율 상한 { kind, max, entry } | null — 같은 종류일 때 R 칸 옆에 표시
 function finishRow(f, scope, allowInherit, lim = null) {
   const k = f ? FINISH_KINDS[f.kind] : null, limTxt = lim && k?.hasR && f.kind === lim.kind ? ` <span class="mut">${lim.entry.special ? '특수 처리' : '소재'} 상한 ${pct(lim.max)}%</span>` : '';
-  return `<div class="m3-row"><select data-m3-finish="${scope}">
+  return `<div class="m3-row"><select data-m3-finish="${scope}" aria-label="${scope === 'face' ? '선택한 면' : '부품 기본'} 면 처리 종류">
       ${allowInherit ? `<option value="" ${f ? '' : 'selected'}>부품 기본 따름</option>` : ''}${opts(FINISH_KINDS, f?.kind)}</select>
-    ${k?.hasR ? `반사율 <input type="number" min="0" max="100" step="1" value="${esc(pct(f.R))}" data-m3-finishr="${scope}">%${limTxt}` : ''}</div>`;
+    ${k?.hasR ? `반사율 <input type="number" min="0" max="100" step="1" value="${esc(pct(f.R))}" data-m3-finishr="${scope}" aria-label="반사율 %">%${limTxt}` : ''}</div>`;
 }
 
 // 투과 부품: 실측 맞춤 대화상자(평판 모드 l2-advanced) 열기 — spec P4 §2.3e
-const FIT_BTN = '<button data-m3-fitdlg title="측정 → 피팅 → 실측소재 DB 저장 → 이 부품에 적용">＋ 실측 데이터로 소재 추가</button>';
+const FIT_BTN = '<button type="button" class="m3-link" data-m3-fitdlg title="측정 → 피팅 → 실측소재 DB 저장 → 이 부품을 그 실측 Milky 소재로">＋ 실측 데이터</button>';
+// 소재 종류 = 4 단추 분할 컨트롤(aria-pressed)
+export function kindSegHtml(kind) {
+  return `<div class="m3-seg" role="group" aria-label="부품 소재 종류">${Object.entries(PART_KINDS).map(([k, v]) => `<button type="button" data-m3-kind="${k}" aria-pressed="${k === kind ? 'true' : 'false'}">${esc(v.label)}</button>`).join('')}</div>`;
+}
 function materialParams(mat, dbList) {
-  const resin = `<select data-m3-mat="resin">${Object.keys(RESIN_N).map((r) => `<option ${r === mat.resin ? 'selected' : ''}>${r}</option>`).join('')}</select>`;
+  const resin = `<select data-m3-mat="resin" aria-label="수지">${Object.keys(RESIN_N).map((r) => `<option ${r === mat.resin ? 'selected' : ''}>${r}</option>`).join('')}</select>`;
   switch (mat.kind) {
     case 'milky':
-      return `<div class="m3-row">소재 <select data-m3-mat="dbId"><option value="">추상 Milky</option>${dbList.map((e) => `<option value="${esc(e.id)}" ${e.id === mat.dbId ? 'selected' : ''}>${esc(e.name)}</option>`).join('')}</select>
-        Milky <input type="number" min="0" max="10" step="0.1" value="${esc(mat.milky)}" data-m3-mat="milky"> ${FIT_BTN}</div>`;
+      return `<div class="m3-row">소재 <select data-m3-mat="dbId" aria-label="실측 소재"><option value="">추상 Milky</option>${dbList.map((e) => `<option value="${esc(e.id)}" ${e.id === mat.dbId ? 'selected' : ''}>${esc(e.name)}</option>`).join('')}</select>
+        Milky <input type="number" min="0" max="10" step="0.1" value="${esc(mat.milky)}" data-m3-mat="milky" aria-label="Milky 값"></div>
+        <div class="m3-links">${FIT_BTN}</div>`;
     case 'clear':
     case 'whiteTrans':
-      return `<div class="m3-row">${resin} 투과율 <input type="number" min="1" max="100" step="1" value="${esc(pct(mat.T))}" data-m3-mat="T">% @ <input type="number" min="0.1" step="0.1" value="${esc(mat.tRef)}" data-m3-mat="tRef">mm</div>
-        <div class="m3-row">${FIT_BTN} <span class="mut">저장하면 이 부품을 그 실측 Milky 소재로</span></div>`;
+      return `<div class="m3-row">투과율 <input type="number" min="1" max="100" step="1" value="${esc(pct(mat.T))}" data-m3-mat="T" aria-label="투과율 %">% @ <input type="number" min="0.1" step="0.1" value="${esc(mat.tRef)}" data-m3-mat="tRef" aria-label="기준 두께 mm">mm ${resin}</div>
+        <div class="m3-links">${FIT_BTN}</div>`;
     default:
       return '';
   }
@@ -62,23 +74,46 @@ export function reflRowHtml(p, catalog = DEFAULT_FINISH_CATALOG, form = {}) {
   const opt = (e) => { const st = reflStatusText(e); return `<option value="${esc(e.id)}"${e.id === p.reflMaterial ? ' selected' : ''}>${esc(e.name)}${st ? ` · ${st}` : ''}</option>`; };
   const grp = (label, list) => (list.length ? `<optgroup label="${label}">${list.map(opt).join('')}</optgroup>` : '');
   const base = plain.filter((e) => e.origin !== 'user'), user = plain.filter((e) => e.origin === 'user');
-  return `<div class="m3-row">반사 소재 <select data-m3-refl aria-label="반사 소재"><option value=""${p.reflMaterial ? '' : ' selected'}>— 미지정 —</option>${missing ? `<option value="${esc(p.reflMaterial)}" selected>없는 소재(${esc(p.reflMaterial)}) — 다시 고르세요</option>` : ''}${grp('기본', base)}${grp('사용자', user)}</select>${coat ? ` <span class="mut">특수: ${esc(coat.name)}</span>` : ''}</div>
-    <div class="m3-row">${cur && cur.origin !== 'user' ? '<button data-m3-reflcopy title="공용 항목은 고칠 수 없어 사용자 사본을 만들고 이 부품을 그 사본으로">복사해서 수정</button>' : ''}<button data-m3-refladd aria-expanded="${form.addOpen ? 'true' : 'false'}">＋ 측정값으로 소재 추가</button></div>
+  const f = p.finish, fk = f ? FINISH_KINDS[f.kind] : null, lim = finishLimit(p, catalog);
+  const rIn = fk?.hasR ? ` 반사율 <input type="number" min="0" max="100" step="1" value="${esc(pct(f.R))}" data-m3-finishr="part" aria-label="반사율 %">%${lim && f.kind === lim.kind ? ` <span class="mut">${lim.entry.special ? '특수 ' : ''}상한 ${pct(lim.max)}%</span>` : ''}` : '';
+  return `<div class="m3-row">반사 소재 <select data-m3-refl aria-label="반사 소재"><option value=""${p.reflMaterial ? '' : ' selected'}>— 미지정 —</option>${missing ? `<option value="${esc(p.reflMaterial)}" selected>없는 소재(${esc(p.reflMaterial)}) — 다시 고르세요</option>` : ''}${grp('기본', base)}${grp('사용자', user)}</select>${rIn}${coat ? ` <span class="mut">특수: ${esc(coat.name)}</span>` : ''}</div>
+    <div class="m3-links">${cur && cur.origin !== 'user' ? '<button type="button" class="m3-link" data-m3-reflcopy title="공용 항목은 고칠 수 없어 사용자 사본을 만들고 이 부품을 그 사본으로">복사해서 수정</button>' : ''}<button type="button" class="m3-link" data-m3-refladd aria-expanded="${form.addOpen ? 'true' : 'false'}" title="측정한 반사율로 사용자 소재를 만들고 이 부품에 적용">＋ 측정값</button></div>
     ${form.addOpen ? reflAddFormHtml(form.msg) : ''}`;
 }
 
+// 간격 한 줄 요약(순수) — 가장 가까운 부품·LED 부품(간섭 = 빨강) · LED 최소 거리
+export function clearanceSummaryHtml(c) {
+  if (!c) return '';
+  const key = (r) => (r.depth > 0 ? r.depth : -r.gap);
+  const near = [...c.rows, ...(c.leds ?? [])].reduce((a, r) => (!a || key(r) > key(a) ? r : a), null);
+  const what = !near ? '<span class="mut">20 mm 안에 다른 부품 없음</span>'
+    : `가장 가까운: ${esc(near.name)} <b class="${near.depth > 0 ? 'bad' : near.gap <= 0.02 ? 'touch' : ''}">${near.depth > 0 ? '간섭' : near.gap <= 0.02 ? '접촉' : `${n1(near.gap)} mm`}</b>`;
+  const led = c.ledMin ? ` · LED까지 <b class="led">${n1(c.ledMin.dist)} mm</b>` : '';
+  return `<div class="m3-clr">${what}${led}</div>`;
+}
+
+// 크기·위치 구역 요약 — 위치(외곽 중심)·크기 mm, 형상 변경 표시
+export function xfSummaryText(p, info) {
+  const o = p.xform?.offset ?? [0, 0, 0], s = p.xform?.scale ?? [1, 1, 1], z0 = info?.size0 ?? p.size ?? [0, 0, 0];
+  const pos = info?.center0 ? `위치 ${info.center0.map((c, k) => n1(c + o[k])).join(', ')} · ` : '';
+  return `${pos}크기 ${z0.map((v, k) => n1(v * s[k])).join('×')}${p.shapeMod ? ' · 형상 변경됨' : ''}`;
+}
+
 function partEditor(p, sel, dbList) {
-  const face = sel.face, cat = sel.catalog ?? DEFAULT_FINISH_CATALOG, lim = finishLimit(p, cat);
+  const face = sel.face, cat = sel.catalog ?? DEFAULT_FINISH_CATALOG, lim = finishLimit(p, cat), opaque = p.material.kind === 'opaque';
+  // 면 처리: 불투명 + 반사 소재 지정 → 종류는 소재가 정함(본 줄에 반사율) · 미지정 → 종류만 여기서 · 투과 부품 → 종류·반사율
+  const partFin = !opaque ? finishRow(p.finish, 'part', false, lim)
+    : p.reflMaterial ? '' : `<div class="m3-row"><span class="mut">부품 기본</span><select data-m3-finish="part" aria-label="부품 기본 면 처리 종류">${opts(FINISH_KINDS, p.finish?.kind)}</select></div>`;
+  const faceRow = face != null ? `<div class="m3-row"><span class="mut">선택한 면 #${face}${p.faceFinish[face] ? ' · 덮어씀' : ''}</span></div>${finishRow(p.faceFinish[face] ?? null, 'face', true, lim)}` : '';
+  const nOver = Object.keys(p.faceFinish ?? {}).length;
   return `<div class="m3-edit">
-    <div class="m3-sub">${esc(p.name)} — 부품 소재</div>
-    <div class="m3-row"><select data-m3-kind>${opts(PART_KINDS, p.material.kind)}</select></div>
+    <div class="m3-card">${kindSegHtml(p.material.kind)}
     ${materialParams(p.material, dbList)}
-    <div class="m3-sub">면 처리 (부품 기본)</div>
-    ${reflRowHtml(p, cat, sel.reflForm ?? {})}
-    ${finishRow(p.finish, 'part', false, lim)}
-    ${xformEditor(p, sel.xfInfo, sel.lock)}${sel.xfMsg ? `<div class="m3-warn" role="status">${esc(sel.xfMsg)}</div>` : ''}
-    ${clearanceHtml(sel.clearance)}
-    ${face != null ? `<div class="m3-sub">선택한 면 #${face}${p.faceFinish[face] ? ' · 덮어씀' : ''}</div>${finishRow(p.faceFinish[face] ?? null, 'face', true, lim)}` : '<div class="mut">3D 뷰에서 면을 클릭하면 그 면만 다르게 지정할 수 있습니다</div>'}
+    ${reflRowHtml(p, cat, sel.reflForm ?? {})}</div>
+    ${clearanceSummaryHtml(sel.clearance)}${sel.xfMsg ? `<div class="m3-warn" role="status">${esc(sel.xfMsg)}</div>` : ''}
+    ${secHtml('xf', '크기·위치', esc(xfSummaryText(p, sel.xfInfo)), xformEditor(p, sel.xfInfo, sel.lock))}
+    ${secHtml('finish', '면 처리', face != null ? `면 #${face} 선택` : nOver ? `면 ${nOver}개 덮어씀` : '', `${partFin}${faceRow}<div class="mut m3-note">3D 뷰에서 면을 클릭하면 그 면만 다르게 지정할 수 있습니다</div>`)}
+    ${sel.clearance ? secHtml('gap', '간격 상세', '', clearanceHtml(sel.clearance)) : ''}
   </div>`;
 }
 
@@ -112,7 +147,7 @@ export function clearanceHtml(c) {
   const row = (r) => `<div class="m3-gap ${r.depth > 0 ? 'bad' : r.gap <= 0.02 ? 'touch' : ''}"><span>${esc(r.name)}</span><b>${r.depth > 0 ? '간섭' : r.gap <= 0.02 ? '접촉' : mm(r.gap)}</b></div>`;
   const led = c.ledMin ? `<div class="m3-gap led"><span>LED 최소 거리 (LED ${c.ledMin.led + 1})</span><b>${mm(c.ledMin.dist)}</b></div>` : '';
   const ax = c.ledAxial ? `<div class="m3-gap led"><span>LED 축 방향 (LED ${c.ledAxial.led + 1})</span><b>${mm(c.ledAxial.dist)}</b></div>` : '';
-  return `<div class="m3-sub">간격 <span class="mut">(20 mm 안 · 3D 하늘색 선)</span></div>
+  return `<div class="mut m3-note">20 mm 안 · 3D 하늘색 선</div>
     <div class="m3-gaps">${c.rows.map(row).join('') || '<div class="mut">20 mm 안에 다른 부품 없음</div>'}${c.leds.map(row).join('')}${led}${ax}</div>`;
 }
 const f2 = (v) => (Math.round(v * 100) / 100).toFixed(2);
@@ -124,7 +159,7 @@ export function xformEditor(p, info, lock = false) {
   const cell = (key, v, lo, hi, label) => `<input type="number" step="0.1" value="${f2(v)}" data-m3-xf="${key}" aria-label="${label}"${Number.isFinite(lo) ? ` min="${f2(lo)}"` : ''}${Number.isFinite(hi) ? ` max="${f2(hi)}"` : ''}>`;
   const posLo = (k) => cen[k] + (lim?.move?.[k]?.[0] ?? -Infinity), posHi = (k) => cen[k] + (lim?.move?.[k]?.[1] ?? Infinity);
   const sizeHi = (k) => (lock ? siz[k] * (lim?.uniform ?? Infinity) : lim?.size?.[k] ?? Infinity);
-  return `<div class="m3-sub">크기·위치 <span class="mut">(mm · 위치 = 부품 외곽 중심)</span></div>
+  return `<div class="mut m3-note">mm · 위치 = 부품 외곽 중심</div>
     <div class="m3-xf">
       <span></span><b>X</b><b>Y</b><b>Z</b>
       <span>위치</span>${[0, 1, 2].map((k) => cell(`c${k}`, cen[k], posLo(k), posHi(k), `위치 ${'XYZ'[k]} mm`)).join('')}
@@ -143,6 +178,11 @@ export function meshInfo(mesh) {
   const b = bounds(mesh.positions);
   return { size: [0, 1, 2].map((k) => b[k + 3] - b[k]), volume: Math.abs(meshVolume(mesh.positions, mesh.triangles)) };
 }
+// 속성 제목 — '부품 2 · 116×16×2 mm'(부피·형상 변경은 partHeaderText → 툴팁)
+export function partTitleText(p, info) {
+  const sc = p.xform?.scale ?? [1, 1, 1], size = info?.size ?? (p.size ?? []).map((v, k) => v * sc[k]);
+  return `${p.name} · ${size.map(n1).join('×')} mm`;
+}
 // 속성 머리 — info = meshInfo(실제 메쉬) | null(없으면 원본 × 배율). shapeMod 가 있으면 ' · 형상 변경됨'
 export function partHeaderText(p, info) {
   const sc = p.xform?.scale ?? [1, 1, 1];
@@ -156,9 +196,13 @@ export function renderPartProps(el, m, sel0, dbList, h) {
   const sel = { ...sel0, lock: XF_LOCK.get(el.ownerDocument ?? XF_LOCK) ?? false, reflForm: REFL_FORM.get(el)?.part === sel0.part ? REFL_FORM.get(el) : {} };   // 비율 고정: 기본 꺼짐(한 치수만 바꾸는 경우가 대부분), 켜면 다시 그려도 유지
   const p = m.parts[sel.part];
   if (!p) { el.innerHTML = '<div class="mut">부품을 찾을 수 없음</div>'; return; }
-  el.innerHTML = `<div class="m3-h">속성 · ${esc(p.name)} <span class="mut">${esc(partHeaderText(p, sel.meshInfo ?? null))}</span></div>${partEditor(p, sel, dbList)}`;
+  const fk = sel.face != null ? `${sel.part}:${sel.face}` : null;
+  if (fk && fk !== SEC_FACE) SEC_OPEN.set('finish', true);   // 새 면 선택 → 면 처리 구역 자동 열기
+  SEC_FACE = fk;
+  el.innerHTML = `<div class="m3-h m3-title" title="${esc(partHeaderText(p, sel.meshInfo ?? null))}">${esc(partTitleText(p, sel.meshInfo ?? null))}</div>${partEditor(p, sel, dbList)}`;
   const i = sel.part;
-  el.querySelector('[data-m3-kind]').onchange = (e) => h.onKind(i, e.target.value);
+  el.querySelectorAll('details[data-m3-sec]').forEach((d) => d.addEventListener('toggle', () => SEC_OPEN.set(d.dataset.m3Sec, d.open)));
+  el.querySelectorAll('[data-m3-kind]').forEach((b) => { b.onclick = () => { if (b.dataset.m3Kind !== p.material.kind) h.onKind(i, b.dataset.m3Kind); }; });
   el.querySelectorAll('[data-m3-mat]').forEach((x) => {
     x.onchange = () => {
       const k = x.dataset.m3Mat;

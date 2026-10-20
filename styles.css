@@ -300,6 +300,31 @@ main:has(#mech3d-wrap:not([hidden])) { grid-template-rows: minmax(0, 1fr); }
 .m3-gap.led b { color: #1f9d45; }
 .m3-xfhint { font-size: 11px; color: var(--m3-mut); margin: 0 0 3px; }
 .m3-warn { font-size: 12px; color: #b54708; background: #fff6e5; border-radius: 4px; padding: 3px 6px; margin: 2px 0 4px; }
+/* 부품 속성: 필수 항목만 보이고 나머지는 접는 구역(<details>) */
+.m3-title { font-size: 12.5px; font-weight: 600; color: inherit; margin: 0 0 6px; overflow-wrap: anywhere; }
+.m3-card { border: 1px solid var(--m3-line); border-radius: 6px; padding: 5px 6px; margin-bottom: 6px; }
+.m3-card .m3-row { margin: 3px 0; font-size: 12px; }
+.m3-props select { max-width: 100%; min-width: 0; }
+.m3-props .m3-card select[data-m3-refl], .m3-props .m3-card select[data-m3-mat=dbId] { flex: 1 1 90px; }
+.m3-seg { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border: 1px solid var(--m3-line); border-radius: 5px; overflow: hidden; margin-bottom: 4px; }
+.m3-seg button { border: 0; border-left: 1px solid var(--m3-line); border-radius: 0; background: transparent; padding: 3px 2px; font-size: 11px; line-height: 1.2; min-width: 0; white-space: normal; word-break: keep-all; cursor: pointer; }
+.m3-seg button:first-child { border-left: 0; }
+.m3-seg button[aria-pressed=true] { background: var(--m3-accbg); color: var(--m3-acc); font-weight: 600; }
+.m3-seg button:focus-visible, .m3-sec > summary:focus-visible, .m3-link:focus-visible { outline: 2px solid var(--m3-acc); outline-offset: -2px; }
+.m3-links { display: flex; gap: 10px; flex-wrap: wrap; margin: 1px 0 0; }
+.m3-link { border: 0; background: none; padding: 0; font-size: 11px; color: var(--m3-acc); cursor: pointer; }
+.m3-link:hover { text-decoration: underline; }
+.m3-clr { font-size: 11.5px; color: var(--m3-mut); margin: 2px 0 6px; overflow-wrap: anywhere; }
+.m3-clr b { font-weight: 600; color: #18a0fb; } .m3-clr b.touch { color: var(--m3-mut); } .m3-clr b.bad { color: #d92d20; } .m3-clr b.led { color: #1f9d45; }
+.m3-sec { border-top: 1px solid var(--m3-line); }
+.m3-sec > summary { cursor: pointer; font-size: 12px; padding: 5px 0; list-style: none; display: flex; gap: 6px; align-items: baseline; min-width: 0; }
+.m3-sec > summary::-webkit-details-marker { display: none; }
+.m3-sec > summary::before { content: "▸"; color: var(--m3-mut); font-size: 10px; flex: none; }
+.m3-sec[open] > summary::before { content: "▾"; }
+.m3-sec-t { opacity: 0.8; flex: none; }
+.m3-sec-s { font-size: 11px; color: var(--m3-mut); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.m3-sec-b { padding: 0 0 6px; }
+.m3-note { font-size: 11px; margin: 2px 0; }
 .m3-eye { width: 18px; text-align: center; font-size: 12px; cursor: pointer; border-radius: 4px; flex: none; }
 .m3-eye:hover, .m3-eye:focus-visible { background: #e3e8f2; }
 .m3-eye.off { color: var(--m3-mut); }

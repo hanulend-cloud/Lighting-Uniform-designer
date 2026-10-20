@@ -6,7 +6,7 @@ import { checkLabels, statusWord, statusIcon, checkAria, isActivateKey, esc as e
 import { ramp, NO_DATA } from '../src/ui/m3/colormap.js';
 import { defaultLight, defaultObserve, defaultChecks } from '../src/engine/mech3d/defs.js';
 import { defaultPart, setPartMaterial, setPartMaterialParam } from '../src/engine/mech3d/materials.js';
-import { clearanceHtml, meshInfo, partHeaderText, reflRowHtml, reflAddFormHtml, partToDbMaterial } from '../src/ui/mech3d-panel.js';
+import { clearanceHtml, meshInfo, partHeaderText, reflRowHtml, reflAddFormHtml, partToDbMaterial, renderPartProps, kindSegHtml, clearanceSummaryHtml, partTitleText, xfSummaryText, sectionOpen, resetSections } from '../src/ui/mech3d-panel.js';
 import { DEFAULT_FINISH_CATALOG, finishCandidatesFor, catalogOf } from '../src/engine/mech3d/housing-led.js';
 import { reflDbHtml } from '../src/ui/mech3d-light-panel.js';
 import { stepLayoutRowHtml, clampVirtual, virtCountMax, ledRowsHtml, defaultRowGap } from '../src/ui/mech3d-light-panel.js';
@@ -58,7 +58,7 @@ ok(calcLabel({ state: 'running' }) === '⏸ 계산 중' && calcLabel({ state: 'p
   el.listeners.click({ target: tgt({ eye: 'part:0', node: 'part:0' }), shiftKey: true, stopPropagation() {} });
   ok(eye?.[0] === 'part:0' && eye[1] === true && node === null, '눈 단추 클릭 → onEye(Shift), 노드 선택 안 함'); }
 { const h = clearanceHtml({ rows: [{ name: '<b>', gap: 0, depth: 0.5 }, { name: '커버', gap: 0.01, depth: 0 }, { name: '가이드', gap: 1.234, depth: 0 }], leds: [], ledMin: { led: 2, dist: 3.5 }, ledAxial: null });
-  ok(h.includes('<b>간섭</b>') && h.includes('접촉') && h.includes('1.23 mm') && h.includes('LED 최소 거리 (LED 3)') && h.includes('&lt;b>') && !h.includes('LED 축'), '간격 표: 간섭·접촉·간격·LED·escape');
+  ok(h.includes('<b>간섭</b>') && h.includes('접촉') && h.includes('1.23 mm') && h.includes('LED 최소 거리 (LED 3)') && h.includes('&lt;b>') && !h.includes('LED 축') && !h.includes('m3-sub'), '간격 표: 간섭·접촉·간격·LED·escape(제목은 접는 구역)');
   ok(clearanceHtml(null) === '' && clearanceHtml({ rows: [], leds: [], ledMin: null, ledAxial: null }).includes('20 mm 안에 다른 부품 없음'), '간격 표: 없음'); }
 ok(statusWord('ok') === '양호' && statusWord('warn') === '경고' && statusWord('bad') === '불량' && statusWord('na') === '미계산' && statusWord('?') === '미계산'
   && statusIcon('ok') === '✓' && statusIcon('warn') === '!' && statusIcon('bad') === '✕' && statusIcon('na') === '–' && checkAria({ text: '살두께 0.50 mm', st: 'warn' }) === '살두께 0.50 mm — 경고', '배지 상태 단어 · 기호');
@@ -261,4 +261,40 @@ ok(clampCap(12) === 9.9 && clampCap(0.1) === 0.5 && clampCap(3) === 3 && clampCa
   // 투과 부품에 실측 소재 적용 — 투명·백색 투과 → Milky 로
   const mk = partToDbMaterial({ ...defaultPart(0, 'a', 1), material: { kind: 'milky', dbId: '', milky: 2, resin: 'PC' } }, 'm1'), cl = partToDbMaterial(setPartMaterial(defaultPart(0, 'b', 1), 'clear'), 'm1');
   ok(mk.material.dbId === 'm1' && mk.material.milky === 2 && cl.material.kind === 'milky' && cl.material.dbId === 'm1', '실측 소재 적용: Milky 유지 · 투명 → Milky'); }
+{ // 부품 속성 정리: 제목 · 소재 종류 분할 단추 · 간격 한 줄 · 접는 구역(다시 그려도 열림 유지)
+  ok(partTitleText({ name: '부품 2', size: [116, 16, 2] }, null) === '부품 2 · 116×16×2 mm' && partTitleText({ name: 'a', size: [20, 5, 1], xform: { scale: [2, 2, 2] } }, { size: [40.04, 10, 2.25] }) === 'a · 40×10×2.3 mm', '제목: 이름 · 크기 mm(부피 없음)');
+  const seg = kindSegHtml('opaque');
+  ok((seg.match(/<button/g) ?? []).length === 4 && seg.includes('data-m3-kind="opaque" aria-pressed="true"') && seg.includes('data-m3-kind="milky" aria-pressed="false"') && seg.includes('>반투과 백색<') && seg.includes('role="group"'), '소재 종류: 4 단추 · aria-pressed');
+  const cs = (rows, leds = [], ledMin = null) => clearanceSummaryHtml({ rows, leds, ledMin, ledAxial: null });
+  const touch = cs([{ name: '부품 2', gap: 0, depth: 0 }, { name: '커버', gap: 3, depth: 0 }], [], { led: 0, dist: 1.5 });
+  ok(touch.includes('가장 가까운: 부품 2 <b class="touch">접촉</b>') && touch.includes('LED까지 <b class="led">1.5 mm</b>'), '간격 한 줄: 접촉 · LED 거리');
+  ok(cs([{ name: '커버', gap: 3.04, depth: 0 }, { name: '가이드', gap: 1.26, depth: 0 }]).includes('가장 가까운: 가이드 <b class="">1.3 mm</b>') && !cs([{ name: 'x', gap: 1, depth: 0 }]).includes('LED'), '간격 한 줄: 가장 가까운 간격 · LED 없음');
+  ok(cs([{ name: '커버', gap: 0, depth: 0 }, { name: '<b>', gap: 0, depth: 0.3 }]).includes('&lt;b> <b class="bad">간섭</b>'), '간격 한 줄: 간섭 우선(빨강) · escape');
+  ok(cs([]).includes('20 mm 안에 다른 부품 없음') && cs([], [{ name: 'LED 1', gap: 0.8, depth: 0 }]).includes('LED 1 <b class="">0.8 mm</b>') && clearanceSummaryHtml(null) === '', '간격 한 줄: 없음 · LED 부품');
+  ok(xfSummaryText({ size: [20, 10, 2], xform: { offset: [2, 0, 0], scale: [1, 1, 3] }, shapeMod: {} }, { center0: [10, 5, 1], size0: [20, 10, 2] }) === '위치 12, 5, 1 · 크기 20×10×6 · 형상 변경됨' && xfSummaryText({ size: [20, 10, 2] }, null) === '크기 20×10×2', '크기·위치 요약');
+  resetSections();
+  const secs = {}; let html = '';
+  const el = { ownerDocument: null, querySelector: () => null, set innerHTML(v) { html = v; }, get innerHTML() { return html; },
+    querySelectorAll: (q) => (q === 'details[data-m3-sec]' ? [...html.matchAll(/data-m3-sec="(\w+)"/g)].map(([, id]) => (secs[id] = { dataset: { m3Sec: id }, open: false, addEventListener(k, fn) { this[k] = fn; } })) : []) };
+  const P = { ...M, parts: [M.parts[0], { ...M.parts[1], reflMaterial: 'pc-white', finish: { kind: 'whiteDiffuse', R: 0.85 } }] };
+  const clr = { rows: [{ name: '커버', gap: 0, depth: 0 }], leds: [], ledMin: { led: 0, dist: 1.5 }, ledAxial: null };
+  const sel = { part: 1, face: null, clearance: clr, xfInfo: { center0: [0, 0, 0], size0: [10, 10, 2], lim: null }, catalog: catalogOf(null), meshInfo: null };
+  renderPartProps(el, P, sel, [], {});
+  ok(['xf', 'finish', 'gap'].every((k) => html.includes(`data-m3-sec="${k}"`)) && !/<details[^>]* open/.test(html) && html.includes('<summary>'), '구역: 크기·위치 · 면 처리 · 간격 상세 = 기본 닫힘');
+  ok(html.includes('>부품 2 · ') || html.includes(`>${P.parts[1].name} · `), '제목 = 이름 · 크기');
+  ok(html.includes('data-m3-refl') && html.includes('data-m3-finishr="part"') && html.includes('상한 ') && !html.includes('data-m3-finish="part"') && html.includes('가장 가까운: 커버'), '불투명 + 반사 소재: 본 줄 = 소재 · 반사율 · 상한, 종류 선택 숨김');
+  secs.xf.open = true; secs.xf.toggle();
+  renderPartProps(el, P, sel, [], {});
+  ok(/data-m3-sec="xf" open/.test(html) && !/data-m3-sec="gap" open/.test(html) && sectionOpen('xf'), '열린 구역: 다시 그려도 열림 유지(1)');
+  renderPartProps(el, P, sel, [], {});
+  ok(/data-m3-sec="xf" open/.test(html), '열린 구역: 다시 그려도 열림 유지(2)');
+  secs.xf.open = false; secs.xf.toggle(); renderPartProps(el, P, sel, [], {});
+  ok(!/data-m3-sec="xf" open/.test(html), '닫으면 닫힘 유지');
+  renderPartProps(el, P, { ...sel, face: 3 }, [], {});
+  ok(/data-m3-sec="finish" open/.test(html) && html.includes('선택한 면 #3') && html.includes('data-m3-finish="face"'), '면 선택 → 면 처리 구역 자동 열기');
+  const P0 = { ...P, parts: [P.parts[0], { ...P.parts[1], reflMaterial: undefined }] }; renderPartProps(el, P0, sel, [], {});
+  ok(html.includes('data-m3-finish="part"') && html.includes('— 미지정 —'), '반사 소재 미지정 → 면 처리 구역에 종류 선택');
+  renderPartProps(el, P, { ...sel, part: 0 }, [], {});
+  ok(html.includes('data-m3-mat="milky"') && html.includes('data-m3-fitdlg') && html.includes('＋ 실측 데이터') && html.includes('data-m3-kind="milky" aria-pressed="true"'), 'Milky: 소재 · Milky 값 · 실측 링크');
+  resetSections(); }
 done();
