@@ -15,10 +15,15 @@ export function ledSPositions(line, count, pitch) {
   return Array.from({ length: count }, (_, i) => ((i + 0.5) * L) / count);
 }
 
-// 라인 위 s 한 곳의 LED — manualLeds 와 P4 ② 후보 위치가 같이 씀. 반환 { s, pos, axis, xAxis }
-export function ledAtS(line, s, { side = 'direct', pcb }, rt = null) {
+// 폭 방향 열(spec P4 §2.2b): 열 간격 δ 는 0 ~ 라인 반폭 − 0.5 mm
+export const clampRowGap = (line, g) => Math.max(0, Math.min(Number(g) || 0, (line.width ?? 0) / 2 - 0.5));
+// 열 오프셋 w 목록: 1열 [0], 2열 [−δ, +δ]
+export const rowOffsets = (rows, gap) => (rows === 2 ? [-gap, gap] : [0]);
+
+// 라인 위 (s, w) 한 곳의 LED — manualLeds 와 P4 ② 후보 위치가 같이 씀. w = 중심선 오프셋. 반환 { s, pos, axis, xAxis }
+export function ledAtS(line, s, { side = 'direct', pcb }, rt = null, w = 0) {
   const F = line.frame;
-  const [x, y] = line.fromSW(s, 0), [tx, ty] = line.tangentAt(s);
+  const [x, y] = line.fromSW(s, w), [tx, ty] = line.tangentAt(s);
   let pos, hitN = null;
   if (pcb.kind === 'depth') pos = line.to3D(x, y, -pcb.depth);
   else {
@@ -39,9 +44,11 @@ export function ledAtS(line, s, { side = 'direct', pcb }, rt = null) {
   return { s, pos, axis, xAxis: T3 };
 }
 
-export function manualLeds(line, { count, pitch = 0, side = 'direct', pcb }, rt = null) {
+// rows 2 → 같은 s 에 w = −δ, +δ 두 개(순서: s 오름차순, 각 s 에서 −δ → +δ)
+export function manualLeds(line, { count, pitch = 0, side = 'direct', pcb, rows = 1, rowGap = 0 }, rt = null) {
   if (pcb.kind === 'depth' && !(pcb.depth > 0)) throw new Error('PCB 깊이는 0 보다 커야 함');
-  return ledSPositions(line, count, pitch).map((s) => ledAtS(line, s, { side, pcb }, rt));
+  const ws = rowOffsets(rows, rows === 2 ? clampRowGap(line, rowGap) : 0);
+  return ledSPositions(line, count, pitch).flatMap((s) => ws.map((w) => ledAtS(line, s, { side, pcb }, rt, w)));
 }
 
 // 가상 PCB(깊이 지정): 관측 라인 외곽 + margin, 두께 1mm, 윗면 = LED 높이(관측면 최저점 − depth)

@@ -76,3 +76,64 @@ export function searchLeds({ G, obs, line, cand, maps, pitches = [0], pitchRange
   const st = b.stats;
   return { feasible: false, ...b, tried, reason: `LED ${nMax}개까지 늘려도 목표 미달 — 가장 가까운 ${b.n}개: 길이 U ${st ? st.Ulen.toFixed(2) : '–'}${st?.Uwid == null ? '' : ` · 폭 U ${st.Uwid.toFixed(2)}`} — ${st && st.Uwid != null && st.Uwid - obs.targetWid < st.Ulen - obs.targetLen ? '폭 방향 확산 부족: ③ 형상 또는 Milky 상향 권장' : '길이 방향 리플: Milky 상향 또는 LED–커버 거리 확대 권장'}` };
 }
+
+// ── 폭 방향 열(spec P4 §2.2b): 후보 = (s, w) 격자, 보간은 같은 w 줄 안 s 방향만 ──
+// 후보 격자: w 줄마다(wOffsets 순서) candidatePositions(sStep) → [{s, w}] (w 줄이 이어서 놓임)
+export function candidateGrid(line, { sStep = 2, wOffsets = [0] } = {}) {
+  const S = candidatePositions(line, sStep);
+  return wOffsets.flatMap((w) => S.map((s) => ({ s, w })));
+}
+const W_TOL = 1e-9, rowsCache = new WeakMap();
+// w 줄별 { w, s:[…], idx:[…] } (격자 순서대로)
+function wLines(cand) {
+  let R = rowsCache.get(cand);
+  if (R) return R;
+  R = [];
+  cand.forEach(({ s, w }, i) => { let r = R.find((q) => Math.abs(q.w - w) < W_TOL); if (!r) R.push((r = { w, s: [], idx: [] })); r.s.push(s); r.idx.push(i); });
+  rowsCache.set(cand, R);
+  return R;
+}
+// 위치 [{s, w}] → 합 지도. w 는 후보 격자에 정확히 있는 값만(없으면 오류)
+export function layoutMap2(cand, maps, positions, { closed = false, L, off = 0, len = maps[0].length } = {}) {
+  const R = wLines(cand), out = new Float64Array(len);
+  for (const { s, w } of positions) {
+    const r = R.find((q) => Math.abs(q.w - w) < W_TOL);
+    if (!r) throw new Error(`후보 격자에 w = ${w}mm 줄이 없음`);
+    for (const [c, a] of interpWeights(r.s, s, closed, L ?? r.s.at(-1))) {
+      const m = maps[r.idx[c]];
+      for (let k = 0; k < len; k++) out[k] += a * m[off + k];
+    }
+  }
+  return out;
+}
+// 열 수·열 간격·개수·피치 탐색: 총 LED 수 오름차순 → 같은 총수면 1열 먼저 → 그 안에서 여유 최고 → 효율. gaps = 2열 열 간격 δ 목록(±δ 가 격자에 있어야 함)
+// nMax = 총 LED 상한. 반환 { feasible, n(열당), rows, rowGap, pitch, total, stats, eff, margin, reason, tried:[{rows, rowGap, n, pitch, total, margin, eff}] }
+export function searchLeds2({ G, obs, line, cand, maps, rowsOptions = [1, 2], gaps = [], pitches = [0], pitchRange = null, nMax, emitted }) {
+  const nCell = G.ns * G.nw, tried = [], miss = [], RO = [...new Set(rowsOptions)].sort((a, b) => a - b);
+  for (let T = 1; T <= nMax; T++) {
+    for (const rows of RO) {
+      if (T % rows) continue;
+      const n = T / rows;
+      let hit = null;
+      for (const g of rows === 1 ? [0] : gaps) for (const p of pitchRange ? pitchOptions(line, n, pitchRange) : pitches) {
+        let ss; try { ss = ledSPositions(line, n, p); } catch { continue; }
+        const ws = rows === 2 ? [-g, g] : [0], pos = ss.flatMap((s) => ws.map((w) => ({ s, w })));
+        const sum = layoutMap2(cand, maps, pos, { closed: line.closed, L: line.length, len: nCell });
+        const st = tallyStats(G, [sum], obs);
+        if (st.empty) continue;
+        let tot = 0; for (let k = 0; k < nCell; k++) tot += sum[k];
+        const row = { n, rows, rowGap: rows === 2 ? g : 0, pitch: p, total: T, stats: st, eff: tot / (emitted * T), margin: margin(st, obs) };
+        tried.push({ rows, rowGap: row.rowGap, n, pitch: p, total: T, margin: row.margin, eff: row.eff });
+        if (row.margin >= 0) { if (!hit || row.margin > hit.margin || (row.margin === hit.margin && row.eff > hit.eff)) hit = row; }
+        else miss.push(row);
+      }
+      if (hit) return { feasible: true, ...hit, reason: '', tried };
+    }
+  }
+  // 가장 가까운 안: nearestRow 를 총수(n 자리)·열 수(j 자리 = rows − 1 → 같은 총수면 1열 먼저)로
+  const b0 = nearestRow(miss.map((r) => ({ ...r, nRow: r.n, n: r.total, j: r.rows - 1 })), obs, nMax);
+  const b = b0.nRow == null ? { ...b0, n: nMax, rows: 1, rowGap: 0, total: nMax } : { ...b0, n: b0.nRow };
+  delete b.nRow; delete b.j;
+  const st = b.stats, lay = b.rows === 2 ? `2열 × ${b.n}개(±${b.rowGap.toFixed(1)}mm)` : `${b.total}개`;
+  return { feasible: false, ...b, tried, reason: `LED 총 ${nMax}개까지 늘려도 목표 미달 — 가장 가까운 ${lay}: 길이 U ${st ? st.Ulen.toFixed(2) : '–'}${st?.Uwid == null ? '' : ` · 폭 U ${st.Uwid.toFixed(2)}`} — ${st && st.Uwid != null && st.Uwid - obs.targetWid < st.Ulen - obs.targetLen ? '폭 방향 확산 부족: ③ 형상 또는 Milky 상향 권장' : '길이 방향 리플: Milky 상향 또는 LED–커버 거리 확대 권장'}` };
+}

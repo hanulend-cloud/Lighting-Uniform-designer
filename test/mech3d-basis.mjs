@@ -1,5 +1,5 @@
 // ② LED 개수·피치(후보 응답 합산): node test/mech3d-basis.mjs
-import { candidatePositions, interpWeights, layoutMap, searchLeds, pitchOptions, nearestRow } from '../src/engine/mech3d/basis.js';
+import { candidatePositions, interpWeights, layoutMap, searchLeds, pitchOptions, nearestRow, candidateGrid, layoutMap2, searchLeds2 } from '../src/engine/mech3d/basis.js';
 import { ok, done } from './mech3d-util.mjs';
 import { loadTable } from './l2-util.mjs';
 import { plateFixture } from './m3-fixture.mjs';
@@ -58,4 +58,32 @@ const line = { length: 100, closed: false };
   for (let j = 0; j < F.G.ns; j++) { const f = row(j); if (!dirB.some((x) => f(x) > 0)) continue; nRows++; zRow = Math.max(zRow, zOf(sumB.map(f), dirB.map(f))); }
   const lim = 3.5 + 0.5 * Math.log10(nRows);
   ok(zTot < 3 && zRow < lim, `A-2 후보 합 = 다중 LED 직접: 총광량 z ${zTot.toFixed(2)} · 행 최대 z ${zRow.toFixed(2)} < ${lim.toFixed(2)} (행 ${nRows})`); }
+{ // 2D 후보 격자(s × w) · layoutMap2 = 위치별 지도 합(s 만 보간)
+  const g = candidateGrid(line, { sStep: 2, wOffsets: [0, -2, 2] });
+  ok(g.length === 51 * 3 && g[0].s === 0 && g[0].w === 0 && g[51].w === -2 && g.at(-1).s === 100 && g.at(-1).w === 2, '후보 격자: w 줄마다 s 2mm');
+  const maps = g.map((c, i) => Float64Array.from({ length: 3 }, (_, k) => i * 10 + k));
+  const m = layoutMap2(g, maps, [{ s: 10, w: -2 }, { s: 11, w: 2 }]), a = 51 + 5, b0 = 102 + 5, b1 = 102 + 6;
+  ok([0, 1, 2].every((k) => Math.abs(m[k] - (maps[a][k] + 0.5 * maps[b0][k] + 0.5 * maps[b1][k])) < 1e-9), 'layoutMap2 = 같은 w 줄 안 s 보간 합');
+  let thr = false; try { layoutMap2(g, maps, [{ s: 10, w: 1 }]); } catch { thr = true; }
+  ok(thr, '격자에 없는 w → 오류'); }
+{ // 합성 2열: 폭 4칸(w 중심 −3·−1·1·3), LED 지도 = 가우시안(s σ6) × 가우시안(w σw). 분리형이라 폭 U = 폭 분포 비, 길이 U = 1열 n 의 U
+  const nw = 4, G = { ns: 100, nw, ds: 1, cell: 2, w0: -4, L: 100, closed: false, winS: 10, area: new Float64Array(100 * nw).fill(1), valid: new Uint8Array(100 * nw).fill(1) };
+  const sig = 6, wc = [-3, -1, 1, 3], gaps = [1, 2, 3], wOffsets = [0, ...gaps.flatMap((d) => [-d, d])];
+  const mk = (sw) => { const cand = candidateGrid(line, { sStep: 1, wOffsets }); return { cand, maps: cand.map(({ s, w }) => Float32Array.from({ length: 100 * nw }, (_, k) => Math.exp(-(((k / nw | 0) + 0.5 - s) ** 2) / (2 * sig * sig)) * Math.exp(-((wc[k % nw] - w) ** 2) / (2 * sw * sw)))) }; };
+  const U = (n) => { const ss = Array.from({ length: n }, (_, i) => ((i + 0.5) * 100) / n), p = Array.from({ length: 100 }, (_, i) => ss.reduce((a, s) => a + Math.exp(-(((i + 0.5) - s) ** 2) / (2 * sig * sig)), 0)); return Math.min(...p) / Math.max(...p); };
+  let want = 1; while (U(want) < 0.5 && want < 40) want++;
+  const Uw = (sw, ws) => { const f = wc.map((x) => ws.reduce((a, w) => a + Math.exp(-((x - w) ** 2) / (2 * sw * sw)), 0)); return Math.min(...f) / Math.max(...f); };
+  const obs = { targetLen: 0.5, targetWid: 0.8 }, sw = 1.5;
+  const passG = gaps.filter((d) => Uw(sw, [-d, d]) >= 0.8);
+  ok(Uw(sw, [0]) < 0.8 && passG.length >= 1, `해석: 1열 폭 U ${Uw(sw, [0]).toFixed(2)} · 2열 통과 δ ${passG}`);
+  const A = mk(sw), r = searchLeds2({ G, obs, line, cand: A.cand, maps: A.maps, rowsOptions: [1, 2], gaps, pitches: [0], nMax: 40, emitted: 1 });
+  const bestG = passG.reduce((a, d) => (Uw(sw, [-d, d]) > Uw(sw, [-a, a]) ? d : a));
+  ok(r.feasible && r.rows === 2 && r.n === want && r.total === 2 * want && r.rowGap === bestG && Math.abs(r.stats.Uwid - Uw(sw, [-bestG, bestG])) < 1e-6,
+    `1열 불가 → 2열 최소 총수: ${r.rows}열 × ${r.n}개(총 ${r.total}, ±${r.rowGap}) = 해석 2 × ${want}, ±${bestG}`);
+  const B = mk(20), r1 = searchLeds2({ G, obs, line, cand: B.cand, maps: B.maps, rowsOptions: [1, 2], gaps, pitches: [0], nMax: 40, emitted: 1 });
+  ok(r1.feasible && r1.rows === 1 && r1.n === want && r1.total === want && r1.rowGap === 0, `1열로 되면 1열: ${r1.rows}열 × ${r1.n}`);
+  const r0 = searchLeds2({ G, obs: { targetLen: 0.5, targetWid: 0.95 }, line, cand: A.cand, maps: A.maps, rowsOptions: [1, 2], gaps, pitches: [0], nMax: 12, emitted: 1 });
+  ok(!r0.feasible && /LED 총 12개까지/.test(r0.reason) && r0.total === r0.rows * r0.n && r0.total <= 12, `불가 → 가장 가까운 안(총수 기준): ${r0.reason}`);
+  const legacy = searchLeds2({ G, obs, line, cand: B.cand, maps: B.maps, rowsOptions: [1], gaps: [], pitches: [0], nMax: 40, emitted: 1 });
+  ok(legacy.rows === 1 && legacy.n === want && legacy.tried.every((t) => t.rows === 1), '1열만: 기존 탐색과 같은 개수'); }
 done();

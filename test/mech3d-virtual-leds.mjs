@@ -57,4 +57,20 @@ const step = { leds: [1, 2], pcb: 0, excluded: [], emitters: [{ part: 1, pos: [2
   const t = stepLayoutOf({ parts, step: { ...step, virtual: { count: 3, pitch: 80 } }, line: strip });
   ok(t.virtual === null && /라인 길이/.test(t.err ?? '') && t.parts === parts && t.emitters.length === 2, `피치가 너무 김 → 원래 배치 + 오류: ${t.err}`); }
 ok(stepRefEmitter({ excluded: [1], emitters: [{ part: 0, needsCheck: true }, { part: 1 }, { part: 2 }] })?.part === 2 && stepRefEmitter({ emitters: [] }) === null && stepRefEmitter(null) === null, 'stepRefEmitter: 확인 필요·제외 아닌 첫 발광점');
+{ // 폭 방향 2열: 기준 w0 ± δ(w0 ≠ 0 이면 그 오프셋 유지) · 2·count 개 · 순서 s 오름차순, −δ → +δ
+  const off = (x) => boxMesh(x - 1, 3.5, 1, 2, 2, 1.5), P = [pcb, off(20), off(60)];
+  const stp = { leds: [1, 2], pcb: 0, excluded: [], emitters: [{ part: 1, pos: [20, 4.5, 2.5], axis: [0, 0, 1], xAxis: [1, 0, 0] }] };
+  const v = virtualLayout({ parts: P, step: stp, line: strip, count: 3, pitch: 20, rows: 2, rowGap: 1 }), w0 = strip.toSW(20, 4.5)[1], s = ledSPositions(strip, 3, 20);
+  const ok2 = v.emitters.length === 6 && v.leds.length === 6 && v.emitters.every((e, k) => { const q = strip.fromSW(s[k >> 1], w0 + (k & 1 ? 1 : -1)); return Math.abs(e.s - s[k >> 1]) < 1e-9 && Math.abs(e.pos[0] - q[0]) < 1e-6 && Math.abs(e.pos[1] - q[1]) < 1e-6 && Math.abs(e.pos[2] - 2.5) < 1e-6; });
+  const ys = v.emitters.map((e) => e.pos[1].toFixed(2));
+  ok(ok2 && new Set(ys).size === 2 && ys.includes('3.50') && ys.includes('5.50'), `2열 발광점: y ${ys.join()}`);
+  ok(v.leds.every((k, i) => { const b = bounds(v.parts[k].positions), e = v.emitters[i]; return Math.abs(b[1] - (e.pos[1] - 1)) < 1e-5 && Math.abs(b[4] - (e.pos[1] + 1)) < 1e-5 && Math.abs((b[0] + b[3]) / 2 - e.pos[0]) < 1e-5; }), '2열 몸체 = 발광점 따라 이동');
+  const at = virtualEmittersAt({ parts: P, step: stp, line: strip, positions: [{ s: s[1], w: 1 }] });
+  ok(at.length === 1 && at[0].pos.every((c, j) => Math.abs(c - v.emitters[3].pos[j]) < 1e-9), 'positions {s, w}: w = 기준 w0 에서의 오프셋');
+  const big = virtualLayout({ parts: P, step: stp, line: strip, count: 1, rows: 2, rowGap: 9 }), hw = strip.width / 2 - 0.5;
+  ok(Math.abs(Math.abs(big.emitters[1].pos[1] - big.emitters[0].pos[1]) - 2 * hw) < 1e-6, `열 간격 제한 ±${hw.toFixed(2)}`);
+  const one = virtualLayout({ parts: P, step: stp, line: strip, count: 3, pitch: 20, rows: 1, rowGap: 1 });
+  ok(one.emitters.length === 3 && one.emitters.every((e) => Math.abs(e.pos[1] - 4.5) < 1e-6), '1열이면 열 간격 무시');
+  const L = stepLayoutOf({ parts: P, step: { ...stp, virtual: { count: 3, pitch: 20, rows: 2, rowGap: 1 } }, line: strip });
+  ok(L.emitters.length === 6 && L.leds.length === 6 && L.virtual.rows === 2, 'stepLayoutOf: virtual.rows·rowGap 전달'); }
 done();

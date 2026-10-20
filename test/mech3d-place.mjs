@@ -47,4 +47,15 @@ const strip = recognizeLine([topFaceMesh(rectTris(0, 0, 100, 6), 12)], faces, [0
 { const em = manualLeds(strip, { count: 3, pitch: 0, side: 'direct', pcb: { kind: 'depth', depth: 4 } });
   const one = ledAtS(strip, em[1].s, { side: 'direct', pcb: { kind: 'depth', depth: 4 } });
   ok(JSON.stringify(one) === JSON.stringify(em[1]), 'ledAtS(s) = manualLeds 의 같은 s 결과'); }
+{ // 폭 방향 2열(±δ): 같은 s 에 −δ, +δ · s 오름차순 · δ ≤ 반폭 − 0.5
+  const pc = { kind: 'depth', depth: 4 }, near = (p, q) => Math.abs(p[0] - q[0]) < 1e-9 && Math.abs(p[1] - q[1]) < 1e-9;
+  const L = manualLeds(strip, { count: 3, pitch: 20, side: 'direct', pcb: pc, rows: 2, rowGap: 2 }), s = [30, 50, 70];
+  ok(L.length === 6 && L.every((e, k) => Math.abs(e.s - s[k >> 1]) < 1e-9 && near(e.pos, strip.fromSW(s[k >> 1], k & 1 ? 2 : -2)) && Math.abs(e.pos[2] - 8) < 1e-9),
+    `2열 3개: 위치·순서 (y ${L.map((e) => e.pos[1].toFixed(2)).join()})`);
+  const C = manualLeds(strip, { count: 1, pitch: 0, side: 'direct', pcb: pc, rows: 2, rowGap: 10 }), hw = strip.width / 2 - 0.5;
+  ok(near(C[0].pos, strip.fromSW(C[0].s, -hw)) && near(C[1].pos, strip.fromSW(C[1].s, hw)), `열 간격 제한: ±${hw.toFixed(2)} (반폭 ${(strip.width / 2).toFixed(2)})`);
+  const one = manualLeds(strip, { count: 3, pitch: 20, side: 'direct', pcb: pc, rows: 1, rowGap: 2 }), base = manualLeds(strip, { count: 3, pitch: 20, side: 'direct', pcb: pc });
+  ok(JSON.stringify(one) === JSON.stringify(base), '1열이면 열 간격 무시 = 기존 결과');
+  const w = ledAtS(strip, 40, { side: 'direct', pcb: pc }, null, 1.5);
+  ok(near(w.pos, strip.fromSW(40, 1.5)), 'ledAtS w 오프셋 = fromSW(s, w)'); }
 done();

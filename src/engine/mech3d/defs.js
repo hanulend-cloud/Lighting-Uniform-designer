@@ -7,7 +7,7 @@ export function defaultLight() {
     kind: 'none', solder: '백색',
     spec: { model: 'lambertian', beam: 120, sizeX: 2, sizeY: 2, fluxLm: 0 },   // fluxLm: LED 1개 광속(lm), 0 = 상대값
     step: null,
-    manual: { pcb: { kind: 'depth', depth: 10 }, count: 10, pitch: 0, side: 'direct' },
+    manual: { pcb: { kind: 'depth', depth: 10 }, count: 10, pitch: 0, side: 'direct', rows: 1, rowGap: 0 },   // rows 1|2, rowGap = 열 간격 ±δ mm
   };
 }
 export function defaultObserve() {
@@ -27,10 +27,13 @@ export function migrateMech3d(m) {
   m.observe.targetLum ??= null;
   m.observe.targetNoise ??= 0.02;
   m.checks = { ...defaultChecks(), ...(m.checks ?? {}) };
-  const st = m.light.step;   // LED STEP 가상 배치(spec P4 §2.2a): { count 정수 ≥ 1, pitch ≥ 0 } | null
+  // 열 배치(spec P4 §2.2b): rows 1|2(그 밖 = 1), rowGap 유한 ≥ 0(그 밖 = 0). 라인 반폭 제한은 배치 때
+  const rowsOf = (o) => { const g = Number(o?.rowGap); return { rows: o?.rows === 2 ? 2 : 1, rowGap: Number.isFinite(g) && g > 0 ? g : 0 }; };
+  if (m.light.manual && typeof m.light.manual === 'object') Object.assign(m.light.manual, rowsOf(m.light.manual));
+  const st = m.light.step;   // LED STEP 가상 배치(spec P4 §2.2a): { count 정수 ≥ 1, pitch ≥ 0, rows, rowGap } | null
   if (st) {
     const v = st.virtual, c = Math.round(Number(v?.count)), p = Number(v?.pitch);
-    st.virtual = v && typeof v === 'object' ? { count: Number.isFinite(c) && c >= 1 ? c : 1, pitch: Number.isFinite(p) && p > 0 ? p : 0 } : null;
+    st.virtual = v && typeof v === 'object' ? { count: Number.isFinite(c) && c >= 1 ? c : 1, pitch: Number.isFinite(p) && p > 0 ? p : 0, ...rowsOf(v) } : null;
   }
   return m;
 }

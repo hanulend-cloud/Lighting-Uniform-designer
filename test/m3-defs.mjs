@@ -26,4 +26,11 @@ ok(old.light.spec.fluxLm === 0 && old.observe.targetNoise === 0.02 && old.observ
   ok(a === null && b.count === 6 && b.pitch === 15 && c.count === 1 && c.pitch === 0 && d.count === 1 && d.pitch === 0 && e === null, `step.virtual 정리: ${JSON.stringify([a, b, c, d, e])}`);
   const n = { light: { spec: {}, step: null }, observe: {} }; migrateMech3d(n);
   ok(n.light.step === null, 'step 없음 → 그대로'); }
+{ // 열 배치(rows 1|2, rowGap ≥ 0) 정리 — 직접 배치·가상 배치
+  ok(defaultLight().manual.rows === 1 && defaultLight().manual.rowGap === 0, '직접 배치 기본 1열·간격 0');
+  const mk = (man, v) => { const m = { light: { spec: {}, manual: man, step: { virtual: v } }, observe: {} }; migrateMech3d(m); return m.light; };
+  const a = mk({ count: 5 }, { count: 3, pitch: 0 }), b = mk({ count: 5, rows: 2, rowGap: 4 }, { count: 3, rows: 2, rowGap: 3.5 }), c = mk({ count: 5, rows: 3, rowGap: -1 }, { count: 3, rows: 'x', rowGap: NaN });
+  ok(a.manual.rows === 1 && a.manual.rowGap === 0 && a.step.virtual.rows === 1 && a.step.virtual.rowGap === 0, '없으면 1열·0');
+  ok(b.manual.rows === 2 && b.manual.rowGap === 4 && b.step.virtual.rows === 2 && b.step.virtual.rowGap === 3.5, '2열·간격 유지');
+  ok(c.manual.rows === 1 && c.manual.rowGap === 0 && c.step.virtual.rows === 1 && c.step.virtual.rowGap === 0, `잘못된 값 → 1열·0: ${JSON.stringify([c.manual, c.step.virtual])}`); }
 done();
