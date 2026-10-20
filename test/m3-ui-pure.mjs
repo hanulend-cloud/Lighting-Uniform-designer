@@ -7,7 +7,8 @@ import { ramp, NO_DATA } from '../src/ui/m3/colormap.js';
 import { defaultLight, defaultObserve, defaultChecks } from '../src/engine/mech3d/defs.js';
 import { defaultPart, setPartMaterial, setPartMaterialParam } from '../src/engine/mech3d/materials.js';
 import { clearanceHtml, meshInfo, partHeaderText } from '../src/ui/mech3d-panel.js';
-import { stepLayoutRowHtml, clampVirtual, virtCountMax } from '../src/ui/mech3d-light-panel.js';
+import { stepLayoutRowHtml, clampVirtual, virtCountMax, ledRowsHtml, defaultRowGap } from '../src/ui/mech3d-light-panel.js';
+import { rowGapOptions } from '../src/engine/mech3d/placement.js';
 import { ok, done } from './mech3d-util.mjs';
 import { stageAvailability, autoCardHtml, compareHtml, clampCap, overallFrac, etaText, profileSvg, shapeText, screenSummary, reusableCurrent, defaultHousingPart, finishText, applyDz, applyFinish, capDefault, nextFinish } from '../src/ui/m3/autodesign-panel.js';
 
@@ -197,4 +198,22 @@ ok(clampCap(12) === 9.9 && clampCap(0.1) === 0.5 && clampCap(3) === 3 && clampCa
   const P = { parts: [{ finish: { kind: 'gloss' }, faceFinish: {} }, { finish: { kind: 'whiteDiffuse', R: 0.85 }, faceFinish: { 3: { kind: 'black', R: 0.05 } } }] };
   applyFinish(P, { part: 1, kind: 'metal', R: 0.95 });
   ok(P.parts[1].finish.kind === 'metal' && P.parts[1].finish.R === 0.95 && P.parts[1].faceFinish[3].kind === 'black' && P.parts[0].finish.kind === 'gloss', '면 처리 적용: 기본 면만 교체 · 면별 덮어쓰기 유지'); }
+{ // LED 열 배치(spec P4 §2.2b): 열 수·열 간격 입력 · 배지 · 비교표 · 열 간격 후보
+  const ln = { length: 116, closed: false, width: 16 };
+  const r1 = ledRowsHtml({ rows: 1, rowGap: 0 }, ln, 'man'), r2 = ledRowsHtml({ rows: 2, rowGap: 5 }, ln, 'man'), rv = ledRowsHtml({ rows: 2, rowGap: 4.3 }, null, 'virt');
+  ok(/data-lp-man="rows"/.test(r1) && /<option value="1" selected>1열/.test(r1) && !/data-lp-man="rowGap"/.test(r1), '열 입력: 1열 = 열 간격 칸 없음');
+  ok(/<option value="2" selected>2열/.test(r2) && /max="7.5"[^>]*value="5" data-lp-man="rowGap"/.test(r2) && r2.includes('최대 ±7.5 mm'), `열 입력: 2열 = 열 간격 ±δ · 최대 = 반폭 − 0.5 (${r2.match(/<span class="mut">[^<]*/)?.[0]})`);
+  ok(/value="4.3" data-lp-virt="rowGap"/.test(rv) && !/max=/.test(rv), '열 입력: 가상 배치(data-lp-virt) · 라인 없으면 상한 없음');
+  const st = { name: 'a.stp', offset: [0, 0, 0], rot: [0, 0, 0], leds: [1, 2, 3], excluded: [], pcb: 0, emitters: [{ part: 1 }], virtual: { count: 10, pitch: 0, rows: 2, rowGap: 5 } };
+  ok(/data-lp-virt="rows"/.test(stepLayoutRowHtml(st, ln)) && /data-lp-virt="rowGap"/.test(stepLayoutRowHtml(st, ln)) && !/data-lp-virt="rows"/.test(stepLayoutRowHtml({ ...st, virtual: null }, ln)), '배치 행: 가상이면 열 수·열 간격');
+  const cv = clampVirtual({ count: 10, pitch: 0, rows: 2, rowGap: 20 }, ln), cd = clampVirtual({ count: 10, pitch: 0, rows: 2, rowGap: 0 }, ln), c1 = clampVirtual({ count: 10, pitch: 0, rows: 1, rowGap: 5 }, ln);
+  ok(cv.rows === 2 && cv.rowGap === 7.5 && cd.rowGap === 4.3 && c1.rows === 1 && c1.rowGap === 0, `clampVirtual 열: 상한 ${cv.rowGap} · 0 → 기본 ${cd.rowGap}(0.27·W) · 1열 = 0`);
+  ok(defaultRowGap(ln) === 4.3 && JSON.stringify(rowGapOptions(ln)) === '[3.2,4.3,5.2]' && JSON.stringify(rowGapOptions({ width: 2 })) === '[0.4,0.5]' && rowGapOptions({ width: 0.5 }).length === 0, `열 간격 후보 0.2/0.27/0.33·W (${rowGapOptions(ln)}) · 상한으로 자르고 중복 제거`);
+  const man = treeNodes({ ...M, light: { ...defaultLight(), kind: 'manual', manual: { ...defaultLight().manual, count: 10, rows: 2, rowGap: 5 } } }, { node: null, line: null }).find((n) => n.id === 'leds');
+  const vt = treeNodes({ ...M, light: { ...defaultLight(), kind: 'step', step: st } }, { node: null, line: null }).find((n) => n.id === 'leds');
+  ok(man.label === 'LED ×20' && man.badge === '2열 × 10개 균등' && vt.label === 'LED ×20' && vt.badge === '가상 2열 × 10개 균등', `배지: ${man.label} ${man.badge} / ${vt.label} ${vt.badge}`);
+  const e = { milky: 2, Ulen: 0.8, Uwid: 0.7, eff: 0.5 };
+  const cm = compareHtml({ cur: { ...e, count: 10, pitch: 0, rows: 1 }, best: { ...e, count: 10, pitch: 0, rows: 2, rowGap: 5 }, feasible: true, reason: '', shape: null });
+  const cs = compareHtml({ cur: { ...e, count: 10, pitch: 0, stepOrig: true }, best: { ...e, count: 10, pitch: 0, stepOrig: false, rows: 2, rowGap: 5 }, feasible: true, reason: '', shape: null, stepLeds: 10 });
+  ok(cm.includes('<td>10개 균등</td>') && cm.includes('2열 × 10개 균등 (열 간격 ±5.0 mm)') && cs.includes('LED STEP 원래 10개') && cs.includes('가상 2열 × 10개 균등 (열 간격 ±5.0 mm)'), '비교표: 2열 × n개 (열 간격 ±δ) · STEP 원래 → 가상 2열'); }
 done();

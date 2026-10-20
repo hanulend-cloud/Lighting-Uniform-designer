@@ -19,6 +19,9 @@ export function ledSPositions(line, count, pitch) {
 export const clampRowGap = (line, g) => Math.max(0, Math.min(Number(g) || 0, (line.width ?? 0) / 2 - 0.5));
 // 열 오프셋 w 목록: 1열 [0], 2열 [−δ, +δ]
 export const rowOffsets = (rows, gap) => (rows === 2 ? [-gap, gap] : [0]);
+// 자동설계 ② 열 간격 후보 δ = ks·W(W = 관측 폭) — 상한으로 자르고 0.1 mm 내림 · 중복·0 제거(후보 격자 w 값과 정확히 같게)
+export const ROW_GAP_KS = [0.2, 0.27, 0.33];
+export const rowGapOptions = (line, ks = ROW_GAP_KS) => [...new Set(ks.map((k) => Math.floor(clampRowGap(line, k * (line.width ?? 0)) * 10 + 1e-9) / 10))].filter((g) => g > 0);
 
 // 라인 위 (s, w) 한 곳의 LED — manualLeds 와 P4 ② 후보 위치가 같이 씀. w = 중심선 오프셋. 반환 { s, pos, axis, xAxis }
 export function ledAtS(line, s, { side = 'direct', pcb }, rt = null, w = 0) {

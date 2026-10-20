@@ -204,4 +204,19 @@ ok(halvingTotal(27) === 35 && halvingTotal(4) === 10 && halvingTotal(1) === 3, '
   const r = await runAutoDesign({ stages: { height: true }, obs, current: { milky: 3, count: 5, pitch: 0, dz: 0 }, heightRange: [0, 3] }, io);
   const g = r.steps.find((x) => x.stage === 'guard');
   ok(r.unchanged && r.best.dz === 0 && g?.tried.dz === 3 && /현재안 유지/.test(r.reason), `⑤ 이득 없음 → 현재안 유지 (시도 dz ${g?.tried.dz})`); }
+{ // ② 2D 후보 격자(spec P4 §2.2b): 1열(w 0)은 리플, ±1 줄은 고름 → 2열 × 1개(±1) · d 에 rows·rowGap · sameDesign
+  const G = { ns: 2, nw: 1, ds: 1, cell: 1, w0: -0.5, L: 2, closed: false, winS: 5, area: new Float64Array([1, 1]), valid: new Uint8Array([1, 1]) };
+  const cand = [0, -1, 1].flatMap((w) => [0, 1, 2].map((s) => ({ s, w }))), maps = cand.map(({ w }) => Float32Array.from(w === 0 ? [1, 0.1] : [1, 1]));
+  const B = { cand, maps, emitted: 1, gaps: [1] }, line = { length: 2, closed: false, width: 4 };
+  const io = { basis: async () => B, verify: async (d) => ({ stats: st(d.rows === 2 ? 0.95 : 0.5, 0.9), eff: 1 }), progress() {}, cancelled: () => false };
+  const r = await runAutoDesign({ stages: { leds: true }, obs: { targetLen: 0.8, targetWid: 0 }, current: { milky: 3, count: 2, pitch: 0 }, G, line, nMax: 4 }, io);
+  const s2 = r.steps.find((x) => x.stage === 'leds');
+  ok(!r.unchanged && r.best.count === 1 && r.best.rows === 2 && r.best.rowGap === 1 && s2.total === 2, `② 2D: 2열 × ${r.best.count}개 ±${r.best.rowGap} (총 ${s2.total})`);
+  // fewer 는 총수 비교: 현재 1열 2개(총 2) vs 2열 × 1개(총 2) — 점수 같으면 현재안 유지(열당 1 < 2 로 속지 않음)
+  const io2 = { ...io, verify: async () => ({ stats: st(0.95, 0.9), eff: 1 }) };
+  const r2 = await runAutoDesign({ stages: { leds: true }, obs: { targetLen: 0.8, targetWid: 0 }, current: { milky: 3, count: 2, pitch: 0, rows: 1 }, G, line, nMax: 4 }, io2);
+  const r3 = await runAutoDesign({ stages: { leds: true }, obs: { targetLen: 0.8, targetWid: 0 }, current: { milky: 3, count: 3, pitch: 0, rows: 1 }, G, line, nMax: 4 }, io2);
+  ok(r2.unchanged && !r3.unchanged && r3.best.rows === 2, 'fewer = 총 LED 수(rows·count): 총 2 = 2 → 유지, 총 2 < 3 → 추천');
+  ok(sameDesign({ count: 2, pitch: 0 }, { count: 2, pitch: 0, rows: 1, rowGap: 0 }) && sameDesign({ count: 2, pitch: 0, rows: 1, rowGap: 3 }, { count: 2, pitch: 0 }) && !sameDesign({ count: 2, pitch: 0, rows: 2, rowGap: 3 }, { count: 2, pitch: 0 })
+    && !sameDesign({ count: 2, pitch: 0, rows: 2, rowGap: 3 }, { count: 2, pitch: 0, rows: 2, rowGap: 4 }) && sameDesign({ count: 2, pitch: 0, rows: 2, rowGap: 3 }, { count: 2, pitch: 0, rows: 2, rowGap: 3 }), 'sameDesign: rows(없음 = 1)·rowGap(1열이면 무시)'); }
 done();

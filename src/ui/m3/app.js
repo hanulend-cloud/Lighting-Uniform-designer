@@ -19,7 +19,7 @@ import { renderFeatureTree, toggleVisibility } from './feature-tree.js';
 import { partClearance, limitXform, axisLimits, TOL } from '../../engine/mech3d/clearance.js';
 import { renderPropertyPanel } from './property-panel.js';
 import { meshInfo } from '../mech3d-panel.js';
-import { clampVirtual } from '../mech3d-light-panel.js';
+import { clampVirtual, defaultRowGap } from '../mech3d-light-panel.js';
 import { createResultsPanel } from './results-panel.js';
 import { renderStatusBar } from './status-bar.js';
 import { createAdRunner } from './autodesign-run.js';
@@ -28,8 +28,8 @@ import { finishOptions, ledHeightRange, heightCandidates } from '../../engine/me
 import { intersectRay } from '../../engine/mech3d/bvh.js';
 import { runAutoDesign, shapeTotal } from '../../engine/mech3d/autodesign.js';
 import { milkyRows } from '../../engine/mech3d/milky-search.js';
-import { candidatePositions } from '../../engine/mech3d/basis.js';
-import { ledAtS } from '../../engine/mech3d/placement.js';
+import { candidateGrid } from '../../engine/mech3d/basis.js';
+import { ledAtS, clampRowGap, rowGapOptions } from '../../engine/mech3d/placement.js';
 import { virtualEmittersAt } from '../../engine/mech3d/virtual-leds.js';
 import { heightsFor, deformPart, refinedFor, minThickness, shapeVarRanges, pathFromLine, swOnPath, ledEll, lineVarH, splineInput } from '../../engine/mech3d/shape-opt.js';
 import { interferenceKeys, travelDistance } from '../../engine/mech3d/clearance.js';
@@ -364,8 +364,9 @@ const adShapeMesh = (base, mod, hDiv = 8) => deformPart(refinedFor(base, mod.fra
 function designScene(d, ctx) {
   const M = adClone(ctx.M0), rt = ctx.rt, mp = ctx.mp;
   if (mp != null && d.milky != null) M.parts[mp] = setPartMaterialParam(M.parts[mp], 'milky', d.milky);
-  if (M.light.kind === 'manual' && d.count != null) { M.light.manual.count = d.count; M.light.manual.pitch = d.pitch; }
-  if (M.light.kind === 'step' && M.light.step && d.count != null && d.stepVirt) M.light.step.virtual = { count: d.count, pitch: d.pitch };
+  const rw = { rows: d.rows === 2 ? 2 : 1, rowGap: d.rows === 2 ? d.rowGap ?? 0 : 0 };   // 열 배치(spec P4 §2.2b) — d.rows 없음 = 1열
+  if (M.light.kind === 'manual' && d.count != null) Object.assign(M.light.manual, { count: d.count, pitch: d.pitch }, d.rows != null ? rw : {});
+  if (M.light.kind === 'step' && M.light.step && d.count != null && d.stepVirt) M.light.step.virtual = { count: d.count, pitch: d.pitch, ...rw };
   if (d.finish) applyFinish(M, d.finish);   // ④ 그 부품 기본 면 처리
   if (d.dz) applyDz(M, d.dz, ctx.line.frame.d);   // ⑤ STEP offset(+발광점) / 직접 배치 깊이 — 가상 배치는 stepLayout 이 offset 을 따름
   let parts = rt.parts;
@@ -427,7 +428,8 @@ async function adRun() {
   // LED STEP: 현재 = 가상이면 그 개수·피치, 아니면 현재 발광점 수·0(stepOrig = 원래 위치) · stepVirt = 설계가 가상 배치인가(② 가 STEP 에서 돌면 엔진이 true)
   const stp = M0.light.kind === 'step', sv = stp ? M0.light.step?.virtual ?? null : null;
   let nOrig = 0; if (stp && !sv) { try { nOrig = L.currentEmitters(M0, line).length; } catch { nOrig = 0; } }
-  const cur = { milky: ctx.mp != null ? M0.parts[ctx.mp].material.milky : null, count: stp ? (sv ? sv.count : nOrig) : M0.light.manual?.count ?? 0, pitch: stp ? sv?.pitch ?? 0 : M0.light.manual?.pitch ?? 0, shape: null, finish: null, dz: 0, ...(stp ? { stepOrig: !sv, stepVirt: !!sv } : {}) };
+  const rsrc = stp ? sv : M0.light.manual, rows = rsrc?.rows === 2 ? 2 : 1;   // 열 배치 — STEP 원래 위치 = 1열
+  const cur = { milky: ctx.mp != null ? M0.parts[ctx.mp].material.milky : null, count: stp ? (sv ? sv.count : nOrig) : M0.light.manual?.count ?? 0, pitch: stp ? sv?.pitch ?? 0 : M0.light.manual?.pitch ?? 0, rows, rowGap: rows === 2 ? rsrc.rowGap ?? 0 : 0, shape: null, finish: null, dz: 0, ...(stp ? { stepOrig: !sv, stepVirt: !!sv } : {}) };
   ctx.cur = cur;
   const finishCands = stages.housing ? finishOptions(M0.parts[hp].finish) : null;
   const varTot = { height: (hInfo ? heightCandidates(hInfo.range, 7).length : 0) + 2, housing: (finishCands?.length ?? 0) + 2 }, varI = { height: 0, housing: 0 };   // 진행률 분모 = 1차 후보 + 정밀 2개
@@ -450,15 +452,17 @@ async function adRun() {
       const r = await R.trace(adJob(Md, parts, ctx), { ...(precise ? { N: 3e6, maxMs: 6000 } : { N: 1.5e6, maxMs: 2000, minN: hi ? 5e4 : 1e5 }), rw: { part: ctx.mp, milkies: ms } });
       return milkyRows(G, obs, { milkies: ms, batches: r.rwBatches, ess: r.ess, emitted: r.ledger.emitted });
     },
+    // ② 후보 = (s, w) 격자(spec P4 §2.2b): s 2 mm × w ∈ {0, ±δk}, δk = 0.2/0.27/0.33·W(반폭 − 0.5 로 자름) — 후보 수 ≈ (L/2+1)·7, 후보당 1.2만 광자
     async basis(d) {   // ① 이 켜져 있으면 실행기가 d.milky = 상한으로 넘김
-      const { M: Md, parts } = designScene(d, ctx), cand = candidatePositions(line, 1);
+      const gaps = rowGapOptions(line), cand = candidateGrid(line, { sStep: 2, wOffsets: [0, ...gaps.flatMap((g) => [-g, g])] });
+      const { M: Md, parts } = designScene({ ...d, rows: 1, rowGap: 0 }, ctx);
       let sets;
       if (Md.light.kind === 'step') {   // 기준 LED 발광점을 후보 위치로 · 장면은 LED 몸체 없이(PCB·기타만 = 가상 0개)
         sets = virtualEmittersAt({ parts: L.ledPartsNow(Md), step: Md.light.step, line, positions: cand }).map((e) => [e]);
         Md.light.step.virtual = { count: 0, pitch: 0 };
-      } else sets = cand.map((s) => [ledAtS(line, s, Md.light.manual, rt)]);
-      const r = await R.traceEach(adJob(Md, parts, ctx, { emitters: sets[0] }), sets, { N: 20000 });
-      return { cand, maps: r.maps, emitted: r.emitted };
+      } else sets = cand.map(({ s, w }) => [ledAtS(line, s, Md.light.manual, rt, w)]);
+      const r = await R.traceEach(adJob(Md, parts, ctx, { emitters: sets[0] }), sets, { N: 12000 });
+      return { cand, maps: r.maps, emitted: r.emitted, gaps };
     },
     async evalShapes(d, cands, N, maxMs = 2500) {   // 단계별 광자·시간 제한은 halving 일정(6만/20만/60만 · 2.5/4/6초)
       const out = [], base = adBaseMesh(sp, ctx), H = heightsFor(base, line.frame, 0.5);
@@ -536,9 +540,10 @@ function adApply() {
   if (!d || r.unchanged) return;
   const M = A.store.mspec, mp = r.ctx.mp, Lm = M.light.manual;
   const milkyCh = mp != null && d.milky != null && d.milky !== M.parts[mp].material.milky;
-  const lightCh = !!r.stages?.leds && M.light.kind === 'manual' && d.count != null && (d.count !== Lm.count || d.pitch !== Lm.pitch);
+  const rw = { rows: d.rows === 2 ? 2 : 1, rowGap: d.rows === 2 ? d.rowGap ?? 0 : 0 }, rowsCh = (o) => (o?.rows === 2 ? 2 : 1) !== rw.rows || (rw.rows === 2 && o.rowGap !== rw.rowGap);   // 열 배치도 비교
+  const lightCh = !!r.stages?.leds && M.light.kind === 'manual' && d.count != null && (d.count !== Lm.count || d.pitch !== Lm.pitch || rowsCh(Lm));
   const sv = M.light.kind === 'step' ? M.light.step?.virtual ?? null : null;   // LED STEP: 가상 배치로 바뀌었고 이전과 다르면
-  const stepCh = !!r.stages?.leds && M.light.kind === 'step' && !!M.light.step && d.count != null && !!d.stepVirt && (!sv || sv.count !== d.count || sv.pitch !== d.pitch);
+  const stepCh = !!r.stages?.leds && M.light.kind === 'step' && !!M.light.step && d.count != null && !!d.stepVirt && (!sv || sv.count !== d.count || sv.pitch !== d.pitch || rowsCh(sv));
   const mod = d.shape ? adPreview().M.parts[d.shape.part].shapeMod : null;
   const fp = d.finish?.part, pf = fp != null ? M.parts[fp]?.finish : null, finCh = fp != null && !(pf?.kind === d.finish.kind && (pf?.R ?? null) === (d.finish.R ?? null));   // ④ 면 처리가 다르면
   const dzCh = Math.abs(d.dz ?? 0) > 1e-9 && (M.light.kind === 'step' ? !!M.light.step : M.light.manual?.pcb?.kind === 'depth');   // ⑤ 이동 있음
@@ -547,8 +552,8 @@ function adApply() {
   st.result = null; A.meshShown = null;
   if (undo.milky || undo.manual || undo.stepVirt || undo.shape || undo.finish || undo.dz) st.undo = undo;
   if (milkyCh) A.store.update('material', (m) => { m.parts[mp] = setPartMaterialParam(m.parts[mp], 'milky', d.milky); });
-  if (lightCh) A.store.update('light', (m) => { m.light.manual.count = d.count; m.light.manual.pitch = d.pitch; });
-  if (stepCh) A.store.update('light', (m, x) => { m.light.step.virtual = { count: d.count, pitch: d.pitch }; if (x.pick === 'led' || x.pick === 'ledx') x.pick = null; });   // 가상 중엔 발광면·제외 클릭 끔
+  if (lightCh) A.store.update('light', (m) => { Object.assign(m.light.manual, { count: d.count, pitch: d.pitch }, rw); });
+  if (stepCh) A.store.update('light', (m, x) => { m.light.step.virtual = { count: d.count, pitch: d.pitch, ...rw }; if (x.pick === 'led' || x.pick === 'ledx') x.pick = null; });   // 가상 중엔 발광면·제외 클릭 끔
   if (mod) A.store.update('material', (m) => { m.parts[d.shape.part].shapeMod = mod; applyPartMods(m.parts); m.contacts = redetectContacts(m.contacts); });
   if (finCh) A.store.update('material', (m) => { applyFinish(m, d.finish); });
   if (dzCh) A.store.update('light', (m) => { applyDz(m, d.dz, r.ctx.line.frame.d); });   // STEP: 발광점도 같은 이동(재인식과 같음)
@@ -667,6 +672,7 @@ function propHandlers() {
       m.light.step.virtual = c;
       if (v && (x.pick === 'led' || x.pick === 'ledx')) { x.pick = null; x.status = '가상 배치 중에는 원래 STEP 위치로 돌아가서 지정하세요'; }
       if (c && (c.count !== Math.round(v.count) || c.pitch !== v.pitch)) x.status = `가상 배치 보정: ${c.count}개 ${c.pitch > 0 ? `피치 ${c.pitch}mm` : '균등'}(라인 길이 안으로)`;
+      else if (c?.rows === 2 && v.rows === 2 && v.rowGap > 0 && c.rowGap !== v.rowGap) x.status = `열 간격 보정: ±${c.rowGap}mm(관측 폭 안으로)`;
       const err = c ? L.stepLayout(m, x.line)?.err : null;
       if (err) x.status = `가상 배치 실패 — 원래 STEP 위치로 계산: ${err}`;
     }),
@@ -674,6 +680,8 @@ function propHandlers() {
       const Lm = m.light.manual;
       if (key === 'pcbKind') { Lm.pcb = v === 'depth' ? { kind: 'depth', depth: 10 } : { kind: 'face' }; if (x.pick === 'pcb') x.pick = null; }
       else if (key === 'depth') Lm.pcb.depth = v;
+      else if (key === 'rows') { Lm.rows = v === 2 ? 2 : 1; if (Lm.rows === 2 && !(Lm.rowGap > 0)) Lm.rowGap = defaultRowGap(x.line); }   // 처음 2열 = 0.27·W
+      else if (key === 'rowGap') { const g = x.line ? Math.floor(clampRowGap(x.line, v) * 10 + 1e-9) / 10 : Math.max(0, v); Lm.rowGap = g; if (g !== v) x.status = `열 간격 보정: ±${g}mm(관측 폭 안으로)`; }
       else Lm[key] = key === 'count' ? Math.max(1, Math.round(v)) : v;
     }),
     onSolder: (v) => st.update('light', (m) => { m.light.solder = v; }),

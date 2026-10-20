@@ -3,7 +3,7 @@
 // io.milkyRows(d, ms, { precise }) — precise = 경계가 든 창의 재추적(광자 많이). 결과 { feasible, best(design), steps:[{stage, …}], reason, verified, current(현재안 io.verify), cancelled }
 import { milkyAxis } from './reweight.js';
 import { pickMilky, margin } from './milky-search.js';
-import { searchLeds } from './basis.js';
+import { searchLeds, searchLeds2 } from './basis.js';
 import { gridCandidates } from './shape-opt.js';
 import { gradeOf, heightCandidates } from './housing-led.js';
 
@@ -26,8 +26,12 @@ export const shapeScore = (r, obs) => (!r.ok ? -Infinity : margin(r.stats, obs) 
 export const SCORE_EPS = 0.01;   // 최종안이 현재안보다 이만큼은 나아야 추천
 // stepVirt = LED STEP 가상 배치 여부(② 가 STEP 에서 돌면 true, current 는 현재 배치가 가상인지) — 개수가 같아도 원래 ↔ 가상은 다른 설계
 // dz = LED 높이 이동(mm, 없음 = 0), finish = ④ 케이스 면 { part, kind, R } | null
+// 열 배치(spec P4 §2.2b): rows 없음 = 1, 열 간격은 2열일 때만 의미 · 총 LED 수 = rows·count
+const rowsOf = (x) => (x?.rows === 2 ? 2 : 1), gapOf = (x) => (rowsOf(x) === 2 ? x.rowGap ?? 0 : 0);
+export const totalLeds = (x) => (x?.count ?? 0) * rowsOf(x);
 const sameFinish = (f, g) => (!f && !g) || (!!f && !!g && f.part === g.part && f.kind === g.kind && (f.R ?? null) === (g.R ?? null));
 export const sameDesign = (a, b) => ['count', 'pitch', 'milky'].every((k) => (a?.[k] ?? null) === (b?.[k] ?? null)) && !!a?.stepVirt === !!b?.stepVirt && JSON.stringify(a?.shape ?? null) === JSON.stringify(b?.shape ?? null)
+  && rowsOf(a) === rowsOf(b) && Math.abs(gapOf(a) - gapOf(b)) < 1e-6
   && Math.abs((a?.dz ?? 0) - (b?.dz ?? 0)) < 1e-6 && sameFinish(a?.finish ?? null, b?.finish ?? null);
 
 // 단계적 압축: schedule = [[남길 수(첫 단계는 전체), 광자 수, 후보당 시간 제한 ms?]…]. 각 단계 결과 점수로 다음 단계 후보를 줄임
@@ -200,9 +204,11 @@ export async function runAutoDesign(cfg, io) {
     if (stages.milky) d = { ...d, milky: mCap };
     const B = await io.basis(d);
     if (stop()) return { cancelled: true };
-    const r = searchLeds({ G: cfg.G, obs, line: cfg.line, cand: B.cand, maps: B.maps, pitchRange: cfg.pitchRange ?? null, nMax: cfg.nMax, emitted: B.emitted });
+    // 후보가 {s, w} 면 (s, w) 격자 — 열 수·열 간격까지(searchLeds2, nMax = 총수 상한), 숫자면 1열(기존)
+    const two = typeof B.cand[0] === 'object', a = { G: cfg.G, obs, line: cfg.line, cand: B.cand, maps: B.maps, pitchRange: cfg.pitchRange ?? null, nMax: cfg.nMax, emitted: B.emitted };
+    const r = two ? searchLeds2({ ...a, gaps: B.gaps ?? [] }) : searchLeds(a);
     steps.push({ stage: 'leds', ...r });
-    d = { ...d, count: r.n, pitch: r.pitch, stepVirt: !!cfg.stepMode };   // cfg.stepMode = LED STEP(② 는 가상 배치를 점수 매김)
+    d = { ...d, count: r.n, pitch: r.pitch, rows: two ? r.rows : 1, rowGap: two ? r.rowGap : 0, stepVirt: !!cfg.stepMode };   // cfg.stepMode = LED STEP(② 는 가상 배치를 점수 매김)
     if (!r.feasible) { feasible = false; reason = r.reason; }
   }
   const evalV = (cands, N, ms) => io.evalVariants(d, cands, N, ms), uText = (s) => `길이 U ${s.Ulen.toFixed(2)}${s.Uwid == null ? '' : ` · 폭 U ${s.Uwid.toFixed(2)}`}`;
@@ -279,9 +285,9 @@ export async function runAutoDesign(cfg, io) {
   io.progress?.('verify', 0, '최종안 정밀 재계산');
   if (sameDesign(d, cfg.current)) return { feasible: feasible && margin(currentVerified.stats, obs) >= 0, best: { ...cfg.current }, steps, reason, verified: currentVerified, current: currentVerified, unchanged: true, cancelled: false, hint };
   const verified = await io.verify(d);
-  // 잡음 방어(①②③ 공통): 검증값이 현재안보다 SCORE_EPS 이상 낫지 않으면 현재안 유지. 둘 다 통과면 LED 개수 감소도 이득
+  // 잡음 방어(①②③ 공통): 검증값이 현재안보다 SCORE_EPS 이상 낫지 않으면 현재안 유지. 둘 다 통과면 총 LED 수(rows·count) 감소도 이득
   const sc = (v) => shapeScore({ ok: !v.stats.empty, stats: v.stats, eff: v.eff }, obs);
-  const fewer = margin(verified.stats, obs) >= 0 && margin(currentVerified.stats, obs) >= 0 && d.count < (cfg.current.count ?? 0);
+  const fewer = margin(verified.stats, obs) >= 0 && margin(currentVerified.stats, obs) >= 0 && totalLeds(d) < totalLeds(cfg.current);
   if (!fewer && !(sc(verified) - sc(currentVerified) >= SCORE_EPS)) {
     steps.push({ stage: 'guard', tried: d, triedVerified: verified, triedReason: reason });
     return { feasible: margin(currentVerified.stats, obs) >= 0, best: { ...cfg.current }, steps, reason: `현재안보다 나은 설계를 찾지 못함 — 현재안 유지${reason ? ` (${reason})` : ''}`, verified: currentVerified, current: currentVerified, unchanged: true, cancelled: false, hint };

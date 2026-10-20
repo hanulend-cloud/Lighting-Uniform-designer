@@ -22,9 +22,10 @@ export function treeNodes(M, S, lay) {
   if (L.kind !== 'none') {
     const ex = L.step?.excluded ?? [], vt = L.kind === 'step' ? L.step?.virtual : null;
     const failed = !!vt && lay !== undefined && !lay?.virtual && (!!lay?.err || !!S.line);   // 라인 대기 중은 실패 아님
-    const n = vt && !failed ? (lay?.virtual ? lay.leds.length : vt.count) : L.kind === 'step' ? (L.step?.leds ?? []).filter((i) => !ex.includes(i)).length : L.manual.count;
+    const nr = (o) => o.count * (o.rows === 2 ? 2 : 1), rw = (o) => (o.rows === 2 ? `2열 × ${o.count}개` : `${o.count}개`);   // 총 LED = 열 수 × 열당 개수(spec P4 §2.2b)
+    const n = vt && !failed ? (lay?.virtual ? lay.leds.length : nr(vt)) : L.kind === 'step' ? (L.step?.leds ?? []).filter((i) => !ex.includes(i)).length : nr(L.manual);
     const pit = (p) => (p > 0 ? `피치 ${+(+p).toFixed(1)}` : '균등');
-    node('leds', `LED ×${n}`, L.kind === 'manual' ? pit(L.manual.pitch) : failed ? '가상 배치 실패' : vt ? `가상 ${vt.count}개 ${pit(vt.pitch)}` : `${L.spec.beam}°`, true, 'led', L.kind === 'step' ? (S.hideLeds ? 'off' : 'on') : undefined);
+    node('leds', `LED ×${n}`, L.kind === 'manual' ? (L.manual.rows === 2 ? `${rw(L.manual)} ${pit(L.manual.pitch)}` : pit(L.manual.pitch)) : failed ? '가상 배치 실패' : vt ? `가상 ${rw(vt)} ${pit(vt.pitch)}` : `${L.spec.beam}°`, true, 'led', L.kind === 'step' ? (S.hideLeds ? 'off' : 'on') : undefined);
   }
   const ln = S.line;
   node('obs', '▾ 관측면', ln ? `${LINE_KIND[ln.kind] ?? ln.kind} ${ln.length.toFixed(0)}×${ln.width.toFixed(0)}` : O.faces.length ? '인식 중' : '미지정');
