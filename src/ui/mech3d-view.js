@@ -7,7 +7,7 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
 const KIND_COLOR = { milky: 0xdfe9f2, clear: 0x8cc8ff, whiteTrans: 0xf2efe6, opaque: 0x8a909c, pcb: 0x2f6b3a, led: 0xffcf3f };
 const KIND_OPACITY = { milky: 0.85, clear: 0.35, whiteTrans: 0.95, opaque: 1, pcb: 1, led: 1 };
-const LED_SEL = new THREE.Color(0xff7a1a), CONE_COLOR = 0x3fd0ff, CONE_SEL = 0xff7a1a, CONE_SEG = 16;   // 선택 LED 몸체·빛 원뿔 = 주황, 나머지 원뿔 = 하늘색(광량 색지도의 노랑~빨강과 겹치지 않게)
+const LED_SEL = new THREE.Color(0xff7a1a), CONE_COLOR = 0xffd84a, CONE_SEL = 0xff7a1a, CONE_SEG = 16, CONE_RAYS = 6;   // 빛 원뿔 = 노란 점선(흐리게), 선택 LED 몸체·원뿔 = 주황 점선
 const SEL_TINT = new THREE.Color(0xffb020), FACE_COLOR = new THREE.Color(0xff5a36), OBS_COLOR = new THREE.Color(0x29d3e0);
 // 보기 방향(카메라 쪽). 평면은 z 축과 아주 조금 어긋나게 — up(z) 을 바꾸지 않으려고(OrbitControls 회전축은 생성 때 up 으로 고정)
 const VIEW_DIR = { top: [0, -1e-3, 1], front: [0, -1, 0], side: [1, 0, 0], iso: [0.7, -1.1, 0.9] };
@@ -162,9 +162,25 @@ export function createMech3dView(canvas, { onPick, gizmo = null }) {
       }
     });
     const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(P, 3)); g.setIndex(new THREE.BufferAttribute(I, 1));
-    const m = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ color, transparent: true, opacity, depthWrite: false, depthTest: false, side: THREE.DoubleSide }));
+    // 면은 그리지 않고 클릭 판정에만 쓴다(colorWrite 끔) — 보이는 것은 coneLines 의 점선
+    const m = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0, colorWrite: false, depthWrite: false, depthTest: false, side: THREE.DoubleSide }));
     m.renderOrder = 2; m.userData.nums = list.map((c) => c.n);
     return m;
+  }
+  // 원뿔 윤곽 점선: 테두리 원 + 꼭짓점→테두리 선 CONE_RAYS 개
+  function coneLines(list, color, opacity) {
+    const pts = [];
+    list.forEach((c) => {
+      const a = new THREE.Vector3(...c.axis).normalize(), u = new THREE.Vector3(Math.abs(a.x) < 0.9 ? 1 : 0, Math.abs(a.x) < 0.9 ? 0 : 1, 0).cross(a).normalize(), w = a.clone().cross(u);
+      const len = c.len > 0 ? c.len : 4, r = len * Math.tan((Math.min(80, Math.max(1, c.half)) * Math.PI) / 180), o = new THREE.Vector3(...c.pos);
+      const rim = (t) => o.clone().addScaledVector(a, len).addScaledVector(u, r * Math.cos(t)).addScaledVector(w, r * Math.sin(t));
+      for (let i = 0; i < CONE_SEG; i++) pts.push(rim((2 * Math.PI * i) / CONE_SEG), rim((2 * Math.PI * (i + 1)) / CONE_SEG));
+      for (let i = 0; i < CONE_RAYS; i++) pts.push(o.clone(), rim((2 * Math.PI * i) / CONE_RAYS));
+    });
+    const g = new THREE.BufferGeometry().setFromPoints(pts);
+    const ls = new THREE.LineSegments(g, new THREE.LineDashedMaterial({ color, dashSize: 0.5, gapSize: 0.35, transparent: true, opacity, depthWrite: false, depthTest: false }));
+    ls.computeLineDistances(); ls.renderOrder = 2;
+    return ls;
   }
   // over = { obsFaces:[{part,face}], line3d: Float32Array(x,y,z...) | null, cones:[{pos,axis,half(°),len,n}], coneSel: LED 번호 | null } — 관측면 강조, 라인, LED 빛 원뿔
   // 원뿔은 표시 전용(관측면 색지도·점검 표식과 별개 무리) · 선택 모드가 아닐 때 클릭하면 onPick({ led: n })
@@ -179,8 +195,8 @@ export function createMech3dView(canvas, { onPick, gizmo = null }) {
       ln.renderOrder = 2; overlay.add(ln);
     }
     const cs = over.cones ?? [], on = cs.filter((c) => c.n === over.coneSel), off = cs.filter((c) => c.n !== over.coneSel);
-    if (off.length) coneMeshes.push(coneMesh(off, CONE_COLOR, 0.35));
-    if (on.length) coneMeshes.push(coneMesh(on, CONE_SEL, 0.5));
+    if (off.length) { coneMeshes.push(coneMesh(off, CONE_COLOR, 0)); overlay.add(coneLines(off, CONE_COLOR, 0.45)); }
+    if (on.length) { coneMeshes.push(coneMesh(on, CONE_SEL, 0)); overlay.add(coneLines(on, CONE_SEL, 0.9)); }
     coneMeshes.forEach((m) => overlay.add(m));
     scene.add(overlay);
     const touched = new Set([...prev, ...obsSet].map((k) => +k.split('|')[0]));
