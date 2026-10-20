@@ -1,11 +1,16 @@
 // 자동설계 카드 — spec P4 §3. 체크 5개(①~⑤) · ③·④ 대상 부품 · [실행]/[중지] · 진행 · 현재|최적 비교 · [적용][취소][되돌리기][STEP]
 import { stepRefEmitter } from '../../engine/mech3d/virtual-leds.js';   // 가상 배치 기준 LED(엔진과 같은 규칙)
 import { setPartFinish } from '../../engine/mech3d/materials.js';
+import { FINISH_GRADES, gradeOf } from '../../engine/mech3d/housing-led.js';
 const esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 const f2 = (v) => (Number.isFinite(v) ? v.toFixed(2) : '–');
 
 // Milky 상한 입력 — 0.5~9.9 로 자름. 빈칸·0·음수·NaN = null(기본값)
 export const clampCap = (v) => (Number.isFinite(v) && v > 0 ? Math.min(9.9, Math.max(0.5, v)) : null);
+// 상한 기본값(입력 없음) — ① 만 = 9.9(균일도 최고점까지), ② 함께 = max(현재, 5)(② 기준 Milky · 계산 시간) — spec §2.1a
+export const capDefault = (sel, avail, curMilky = 0) => (sel.leds && avail.leds?.ok ? Math.max(curMilky ?? 0, 5) : 9.9);
+// ④ 보완 계산 후보 — 현재보다 높은 등급 중 가장 낮은 것(없으면 null)
+export const nextFinish = (cur) => { const g = gradeOf(cur); return [...FINISH_GRADES].sort((a, b) => gradeOf(a) - gradeOf(b)).find((x) => gradeOf(x) > g) ?? null; };
 // 전체 진행률 — 단계 무게(현재안 5 · ② 35 · ⑤ 20 · ④ 20 · ① 35 · ③ 50 · 최종 10)를 켠 단계로 정규화. 순서 = 실행 순서
 const STAGE_W = [['current', 5], ['leds', 35], ['height', 20], ['housing', 20], ['milky', 35], ['shape', 50], ['verify', 10]];
 export function overallFrac(stages, stage, frac) {
@@ -99,7 +104,7 @@ export function autoCardHtml({ avail, sel, running, names = [], canRevert = fals
     return `<label class="m3-ad-item${a.ok ? '' : ' off'}"><input type="checkbox" data-ad="${k}"${sel[k] && a.ok ? ' checked' : ''}${a.ok ? dis : ' disabled'}> ${label}${a.ok ? (a.note ? ` <span class="mut">— ${esc(a.note)}</span>` : '') : ` <span class="mut">— ${esc(a.why)}</span>`}</label>`;
   };
   const mTarget = sel.milky && avail.milky.ok && milkyPart != null ? `<div class="m3-row mut">① 대상: ${pname(milkyPart)}</div>` : '';
-  const cap = (sel.milky && avail.milky.ok) || (sel.leds && avail.leds.ok) ? `<div class="m3-row">Milky 상한 <input type="number" min="0.5" max="9.9" step="0.5" value="${sel.milkyMax ?? 5}" data-ad="milkyMax" aria-label="Milky 상한"${dis}> <span class="mut">② 는 이 값(확산 최대)에서 개수를 정하고 ① 이 낮춤</span></div>` : '';
+  const cap = (sel.milky && avail.milky.ok) || (sel.leds && avail.leds.ok) ? `<div class="m3-row">Milky 상한 <input type="number" min="0.5" max="9.9" step="0.5" value="${sel.milkyMax ?? capDefault(sel, avail)}" data-ad="milkyMax" aria-label="Milky 상한"${dis}> <span class="mut">${sel.leds && avail.leds.ok ? '② 는 이 값(확산 최대)에서 개수를 정하고 ① 이 고름' : '① 은 이 값까지 균일도 최고점을 찾음(투과율은 희생)'}</span></div>` : '';
   const part = avail.shape.ok ? `<div class="m3-row">③ 대상 <select data-ad="shapePart" aria-label="③ 대상 부품"${dis}>${avail.shape.parts.map((i) => `<option value="${i}"${i === sel.shapePart ? ' selected' : ''}>${pname(i)}</option>`).join('')}</select></div>` : '';
   const hPart = avail.housing?.ok && sel.housing ? `<div class="m3-row">④ 대상 <select data-ad="housingPart" aria-label="④ 대상 부품"${dis}>${avail.housing.parts.map((i) => `<option value="${i}"${i === sel.housingPart ? ' selected' : ''}>${pname(i)}</option>`).join('')}</select></div>` : '';
   const any = ITEMS.some(([k]) => sel[k] && avail[k]?.ok);

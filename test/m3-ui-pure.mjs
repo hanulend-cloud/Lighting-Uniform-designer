@@ -9,7 +9,7 @@ import { defaultPart, setPartMaterial, setPartMaterialParam } from '../src/engin
 import { clearanceHtml, meshInfo, partHeaderText } from '../src/ui/mech3d-panel.js';
 import { stepLayoutRowHtml, clampVirtual, virtCountMax } from '../src/ui/mech3d-light-panel.js';
 import { ok, done } from './mech3d-util.mjs';
-import { stageAvailability, autoCardHtml, compareHtml, clampCap, overallFrac, etaText, profileSvg, shapeText, screenSummary, reusableCurrent, defaultHousingPart, finishText, applyDz, applyFinish } from '../src/ui/m3/autodesign-panel.js';
+import { stageAvailability, autoCardHtml, compareHtml, clampCap, overallFrac, etaText, profileSvg, shapeText, screenSummary, reusableCurrent, defaultHousingPart, finishText, applyDz, applyFinish, capDefault, nextFinish } from '../src/ui/m3/autodesign-panel.js';
 
 const M = {
   name: 't', contacts: [{ a: 0, b: 1, mode: 'contact' }], checks: defaultChecks(),
@@ -103,6 +103,15 @@ ok(judgeText(0.8004, 0.8009).cls === 'ok' && judgeText(0.7999, 0.8).cls === 'bad
   ok(cv.includes('<td>LED STEP 원래 10개</td>') && cv.includes('가상 8개 피치 14') && cg.includes('가상 6개 균등') && cg.includes('가상 5개 균등'), '비교표: LED STEP 원래 → 가상 개수·피치(0 = 균등)');
   const cu = compareHtml({ cur: { count: 5, pitch: 0, milky: 3, Ulen: 0.75, Uwid: 0.9, eff: 0.6 }, best: { count: 5, pitch: 0, milky: 3, Ulen: 0.75, Uwid: 0.9, eff: 0.6 }, feasible: false, reason: '현재안보다 나은 설계를 찾지 못함 — 현재안 유지', shape: null, unchanged: true });
   ok(cu.includes('현재안 유지') && /data-ad="apply"[^>]*disabled/.test(cu) && !/data-ad="apply"[^>]*disabled/.test(c), '비교표: 현재안 유지 → 사유 표시 · 적용 비활성'); }
+{ // Milky 상한 기본: ① 만 = 9.9 · ② 함께 = max(현재, 5) · 카드 값도 같음
+  const a = { milky: { ok: true }, leds: { ok: true }, shape: { ok: false } };
+  ok(capDefault({ milky: true }, a, 3) === 9.9 && capDefault({ milky: true, leds: true }, a, 3) === 5 && capDefault({ milky: true, leds: true }, a, 6) === 6 && capDefault({ milky: true, leds: true }, { ...a, leds: { ok: false } }, 3) === 9.9, 'Milky 상한 기본: ① 만 9.9 · ② 함께 5');
+  const h1 = autoCardHtml({ avail: a, sel: { milky: true }, running: null }), h2 = autoCardHtml({ avail: a, sel: { milky: true, leds: true }, running: null });
+  ok(h1.includes('value="9.9" data-ad="milkyMax"') && h1.includes('Milky 상한'), '카드: ① 만 → 상한 9.9');
+  ok(h2.includes('value="5" data-ad="milkyMax"'), '카드: ② 함께 → 상한 5'); }
+// ④ 보완 계산 후보: 현재보다 높은 등급(gradeOf) 중 가장 낮은 것 · 최고 등급이면 null
+ok(nextFinish({ kind: 'whiteDiffuse', R: 0.85 })?.kind === 'metal' && nextFinish({ kind: 'metal', R: 0.88 })?.R === 0.9 && nextFinish({ kind: 'metal', R: 0.95 })?.R === 0.97 && nextFinish({ kind: 'whiteDiffuse', R: 0.97 }) === null
+  && nextFinish(null)?.R === 0.85 && nextFinish({ kind: 'gloss' })?.R === 0.85, '④ 한 단계 위: 등급 순 백색 85→경면 88→백색 90 · 백색 97 → 없음');
 ok(clampCap(12) === 9.9 && clampCap(0.1) === 0.5 && clampCap(3) === 3 && clampCap(0) === null && clampCap(-2) === null && clampCap(NaN) === null, 'Milky 상한: 0.5~9.9 로 자름 · 0/음수/NaN = 기본');
 { const all = { milky: true, leds: true, shape: true }, m = { milky: true };
   ok(overallFrac(m, 'current', 0) === 0 && Math.abs(overallFrac(m, 'milky', 0) - 5 / 50) < 1e-12 && Math.abs(overallFrac(m, 'milky', 0.5) - 22.5 / 50) < 1e-12 && overallFrac(m, 'verify', 1) === 1, '전체 진행률: 켠 단계만 정규화(① 만 = 5+35+10)');

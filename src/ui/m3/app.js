@@ -23,7 +23,7 @@ import { clampVirtual } from '../mech3d-light-panel.js';
 import { createResultsPanel } from './results-panel.js';
 import { renderStatusBar } from './status-bar.js';
 import { createAdRunner } from './autodesign-run.js';
-import { renderAutoPanel, stageAvailability, clampCap, overallFrac, etaText, reusableCurrent, defaultHousingPart, applyDz, applyFinish } from './autodesign-panel.js';
+import { renderAutoPanel, stageAvailability, clampCap, overallFrac, etaText, reusableCurrent, defaultHousingPart, applyDz, applyFinish, capDefault, nextFinish, finishText } from './autodesign-panel.js';
 import { finishOptions, ledHeightRange, heightCandidates } from '../../engine/mech3d/housing-led.js';
 import { intersectRay } from '../../engine/mech3d/bvh.js';
 import { runAutoDesign, shapeTotal } from '../../engine/mech3d/autodesign.js';
@@ -338,7 +338,7 @@ function renderAuto() {
   const M = A.store.mspec, avail = stageAvailability(M, adInfo());
   if (!st.running && !avail.shape.parts?.includes(st.sel.shapePart)) st.sel.shapePart = avail.shape.ok ? avail.shape.parts[0] : -1;   // 부품 소재·형상이 바뀌어 대상이 빠지면 첫 후보로
   if (!st.running && !avail.housing.parts?.includes(st.sel.housingPart)) { const k = defaultHousingPart(M, adInfo().boxes); st.sel.housingPart = avail.housing.ok ? (avail.housing.parts.includes(k) ? k : avail.housing.parts[0]) : -1; }   // ④ 기본 = 관측 부품을 감싸는 가장 큰 불투명 부품
-  const mp = st.running ? st.milkyPart : adMilkyPart(M, avail), sel = { ...st.sel, milkyMax: st.sel.milkyMax ?? Math.max(mp != null ? M.parts[mp].material.milky : 0, 5) };
+  const mp = st.running ? st.milkyPart : adMilkyPart(M, avail), sel = { ...st.sel, milkyMax: st.sel.milkyMax ?? capDefault(st.sel, avail, mp != null ? M.parts[mp].material.milky : 0) };
   renderAutoPanel(el, { avail, sel, running: st.running, result: st.result, names: M.parts.map((p) => p.name), canRevert: !!st.undo, noLine: !A.store.session.line, milkyPart: mp }, {
     onSel: (k, v) => { if (st.running) return; st.sel[k] = k === 'milkyMax' ? clampCap(v) : v; renderAuto(); },
     onAction: (k) => ({ run: adRun, stop: adStop, close: () => { st.open = false; renderAuto(); }, apply: adApply, cancel: adCancel, revert: adRevert, step: adStep })[k]?.(),
@@ -446,7 +446,8 @@ async function adRun() {
     shapePlan: ({ screen, total }) => { shapeScr = screen; shapeTot = Math.max(1, total ?? shapeTotal(screen, 27)); },
     async milkyRows(d, ms, { precise = false } = {}) {   // 재가중 기준 = 창 가운데. 시간 제한(Milky 4~5 는 광자당 ~10배) — 경계가 든 창은 정밀 재추적
       const { M: Md, parts } = designScene({ ...d, milky: ms[Math.floor(ms.length / 2)] }, ctx);
-      const r = await R.trace(adJob(Md, parts, ctx), { ...(precise ? { N: 3e6, maxMs: 6000 } : { N: 1.5e6, maxMs: 2000, minN: 1e5 }), rw: { part: ctx.mp, milkies: ms } });
+      const hi = ms[Math.floor(ms.length / 2)] >= 6;   // 높은 Milky 는 광자당 매우 느림 — 탐색 창은 최소 광자를 낮춤(정밀 창은 그대로)
+      const r = await R.trace(adJob(Md, parts, ctx), { ...(precise ? { N: 3e6, maxMs: 6000 } : { N: 1.5e6, maxMs: 2000, minN: hi ? 5e4 : 1e5 }), rw: { part: ctx.mp, milkies: ms } });
       return milkyRows(G, obs, { milkies: ms, batches: r.rwBatches, ess: r.ess, emitted: r.ledger.emitted });
     },
     async basis(d) {   // ① 이 켜져 있으면 실행기가 d.milky = 상한으로 넘김
@@ -479,7 +480,7 @@ async function adRun() {
       const out = [], stg = cands.length && 'dz' in cands[0] ? 'height' : 'housing', nm = stg === 'height' ? 'LED 높이' : '케이스 면';
       for (const c of cands) {
         if (R.stopped) break;
-        const k = ++varI[stg]; progress(stg, Math.min(1, (k - 1) / varTot[stg]), `${nm} 후보 ${Math.min(k, varTot[stg])}/${varTot[stg]}`);
+        if (stages[stg]) { const k = ++varI[stg]; progress(stg, Math.min(1, (k - 1) / varTot[stg]), `${nm} 후보 ${Math.min(k, varTot[stg])}/${varTot[stg]}`); }   // ① 보완 계산(④ 미선택)은 ① 진행률 그대로
         const { M: Md, parts } = designScene({ ...d, ...('dz' in c ? { dz: c.dz } : { finish: c.finish }) }, ctx);
         const r = await R.trace(adJob(Md, parts, ctx), { N, maxMs, minN: Math.min(N, 3e4), batches: 4 }), stt = tallyStats(G, r.batches, obs);
         out.push({ cand: c, ok: !stt.empty, stats: stt, eff: adEff(r) });
@@ -492,10 +493,16 @@ async function adRun() {
       return { stats: tallyStats(G, r.batches, obs), eff: adEff(r) };
     },
   };
+  // ① 보완 계산 — ④ 를 안 쓸 때만: 기본 케이스 부품의 면 처리 한 단계 위(최고 등급이면 생략)
+  let housingProbe = null;
+  if (stages.milky && !stages.housing && avail.housing?.ok) {
+    const k = defaultHousingPart(M0, adInfo().boxes), nf = avail.housing.parts.includes(k) ? nextFinish(M0.parts[k].finish) : null;
+    if (nf) housingProbe = { part: k, kind: nf.kind, R: nf.R };
+  }
   let res = null;
   try {
     res = await runAutoDesign({
-      stages, obs, G, line, current: cur, milkyMax: st.sel.milkyMax ?? Math.max(cur.milky ?? 0, 5), nMax: Math.max(1, Math.min(60, Math.floor(line.length / 2))), pitchRange: null, stepMode: stp,
+      stages, obs, G, line, current: cur, milkyMax: st.sel.milkyMax ?? null, housingProbe, finishText, nMax: Math.max(1, Math.min(60, Math.floor(line.length / 2))), pitchRange: null, stepMode: stp,
       shapePart: sp, shapeRanges, currentVerified, heightRange: hInfo?.range ?? null, housingPart: hp, finishCands,
     }, io);
   } catch (e) { if (A === a && !R.stopped) setStatus(`자동설계 실패: ${e.message}`); }
@@ -505,7 +512,7 @@ async function adRun() {
     const C = res.current;   // 현재안 = 최종안과 같은 추정기
     let nStep = null; if (M0.light.kind === 'step') { try { nStep = L.currentEmitters(M0, line).length; } catch { nStep = 0; } }
     const smI = sp >= 0 && M0.parts[sp]?.shapeMod ? sp : M0.parts.findIndex((p) => p.shapeMod), sm = smI >= 0 ? M0.parts[smI].shapeMod : null;   // 비교표 '현재' 열 — 이미 적용된 형상(표시만)
-    st.result = { design: res.best, feasible: res.feasible, reason: res.reason, shape: res.best.shape ?? null, screen: res.steps?.find((x) => x.stage === 'shapeScreen')?.gains ?? null, stepLeds: nStep, unchanged: !!res.unchanged, ctx, stages,
+    st.result = { design: res.best, feasible: res.feasible, reason: res.reason, hint: res.hint ?? null, shape: res.best.shape ?? null, screen: res.steps?.find((x) => x.stage === 'shapeScreen')?.gains ?? null, stepLeds: nStep, unchanged: !!res.unchanged, ctx, stages,
       finish: stages.housing ? { cur: M0.parts[hp].finish, best: res.best.finish ?? M0.parts[hp].finish } : null, height: stages.height && hInfo ? { dz: res.best.dz ?? 0, gap: hInfo.gap } : null,
       cur: { ...cur, shape: sm ? { dt: sm.dt, h: sm.h, R: sm.R, e: sm.e ?? 0, c: sm.c ?? 0 } : null, Ulen: C?.stats?.Ulen, Uwid: C?.stats?.Uwid, eff: C?.eff ?? NaN, profile: C?.stats?.profile ?? null },
       best: { ...res.best, ...(stp ? { stepOrig: !res.best.stepVirt } : {}), Ulen: res.verified.stats.Ulen, Uwid: res.verified.stats.Uwid, eff: res.verified.eff, profile: res.verified.stats.profile ?? null } };
