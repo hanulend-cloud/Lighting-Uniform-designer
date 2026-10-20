@@ -10,7 +10,13 @@ export const clampCap = (v) => (Number.isFinite(v) && v > 0 ? Math.min(9.9, Math
 // 상한 기본값(입력 없음) — ① 만 = 9.9(균일도 최고점까지), ② 함께 = max(현재, 5)(② 기준 Milky · 계산 시간) — spec §2.1a
 export const capDefault = (sel, avail, curMilky = 0) => (sel.leds && avail.leds?.ok ? Math.max(curMilky ?? 0, 5) : 9.9);
 // ④ 보완 계산 후보 — 현재보다 높은 등급 중 가장 낮은 것(없으면 null)
-export const nextFinish = (cur) => { const g = gradeOf(cur); return [...FINISH_GRADES].sort((a, b) => gradeOf(a) - gradeOf(b)).find((x) => gradeOf(x) > g) ?? null; };
+// ④ 보완 안내용 면 처리: 같은 종류(없으면 백색)에서 반사율 +0.10 이상 중 가장 낮은 것, 없으면 그 종류 최고(현재보다 높을 때만).
+//   실측: 백색 85 → 95 % 가 길이·폭 모두 개선, 경면 88 % 는 폭 U 를 낮춤 — 종류를 바꾸지 않는다
+export const nextFinish = (cur) => {
+  const kind = cur?.kind === 'metal' ? 'metal' : 'whiteDiffuse', R = cur?.R ?? 0;
+  const same = FINISH_GRADES.filter((x) => x.kind === kind && x.R > R + 1e-9).sort((a, b) => a.R - b.R);
+  return same.find((x) => x.R >= R + 0.1 - 1e-9) ?? same.at(-1) ?? null;
+};
 // 전체 진행률 — 단계 무게(현재안 5 · ② 35 · ⑤ 20 · ④ 20 · ① 35 · ③ 50 · 최종 10)를 켠 단계로 정규화. 순서 = 실행 순서
 const STAGE_W = [['current', 5], ['leds', 35], ['height', 20], ['housing', 20], ['milky', 35], ['shape', 50], ['verify', 10]];
 export function overallFrac(stages, stage, frac) {

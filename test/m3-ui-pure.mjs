@@ -110,8 +110,8 @@ ok(judgeText(0.8004, 0.8009).cls === 'ok' && judgeText(0.7999, 0.8).cls === 'bad
   ok(h1.includes('value="9.9" data-ad="milkyMax"') && h1.includes('Milky 상한'), '카드: ① 만 → 상한 9.9');
   ok(h2.includes('value="5" data-ad="milkyMax"'), '카드: ② 함께 → 상한 5'); }
 // ④ 보완 계산 후보: 현재보다 높은 등급(gradeOf) 중 가장 낮은 것 · 최고 등급이면 null
-ok(nextFinish({ kind: 'whiteDiffuse', R: 0.85 })?.kind === 'metal' && nextFinish({ kind: 'metal', R: 0.88 })?.R === 0.9 && nextFinish({ kind: 'metal', R: 0.95 })?.R === 0.97 && nextFinish({ kind: 'whiteDiffuse', R: 0.97 }) === null
-  && nextFinish(null)?.R === 0.85 && nextFinish({ kind: 'gloss' })?.R === 0.85, '④ 한 단계 위: 등급 순 백색 85→경면 88→백색 90 · 백색 97 → 없음');
+ok(nextFinish({ kind: 'whiteDiffuse', R: 0.85 })?.R === 0.95 && nextFinish({ kind: 'whiteDiffuse', R: 0.85 }).kind === 'whiteDiffuse' && nextFinish({ kind: 'whiteDiffuse', R: 0.9 })?.R === 0.97
+  && nextFinish({ kind: 'metal', R: 0.88 })?.R === 0.95 && nextFinish({ kind: 'whiteDiffuse', R: 0.97 }) === null && nextFinish(null)?.R === 0.85 && nextFinish({ kind: 'gloss' })?.R === 0.85, '④ 보완 안내: 같은 종류 +0.10 이상 최저(백색 85→95, 90→97) · 최고면 없음');
 ok(clampCap(12) === 9.9 && clampCap(0.1) === 0.5 && clampCap(3) === 3 && clampCap(0) === null && clampCap(-2) === null && clampCap(NaN) === null, 'Milky 상한: 0.5~9.9 로 자름 · 0/음수/NaN = 기본');
 { const all = { milky: true, leds: true, shape: true }, m = { milky: true };
   ok(overallFrac(m, 'current', 0) === 0 && Math.abs(overallFrac(m, 'milky', 0) - 5 / 50) < 1e-12 && Math.abs(overallFrac(m, 'milky', 0.5) - 22.5 / 50) < 1e-12 && overallFrac(m, 'verify', 1) === 1, '전체 진행률: 켠 단계만 정규화(① 만 = 5+35+10)');
