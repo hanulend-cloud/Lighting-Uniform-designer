@@ -189,11 +189,19 @@ async function searchMilkyPeak(d, cfg, io, steps, cap) {
   return { found: null, peak: bestRow(peakRows) ?? S[ib].row, cap };
 }
 
+// ② 대안(검증 실패 시): 고른 안을 뺀 tried — 같은 총수(기저 여유 순) → 다음 총수(총수 오름 → 여유 순). 1열 searchLeds 는 total = n
+function ledAlternatives(r, two) {
+  const tot = (e) => (two ? e.total : e.n), T0 = tot(r), mg = (e) => (Number.isFinite(e.margin) ? e.margin : -Infinity);
+  const same = (e) => e.n === r.n && e.pitch === r.pitch && (!two || (e.rows === r.rows && e.rowGap === r.rowGap));
+  const seen = new Set(), key = (e) => `${e.n}|${e.pitch}|${two ? `${e.rows}|${e.rowGap}` : ''}`;
+  return (r.tried ?? []).filter((e) => !same(e) && tot(e) >= T0 && !seen.has(key(e)) && seen.add(key(e)))
+    .sort((a, b) => tot(a) - tot(b) || mg(b) - mg(a));   // tot ≥ T0 이므로 총수 오름 = 같은 총수 먼저
+}
 // 상한: ① 탐색 = cfg.milkyMax ?? 9.9 · ② 기준 Milky = cfg.milkyMax ?? max(현재, 5)(계산 시간) — spec §2.1a
 export const MILKY_SEARCH_MAX = 9.9;
 export async function runAutoDesign(cfg, io) {
   const { stages, obs } = cfg, steps = [], mCap = cfg.milkyMax ?? Math.max(cfg.current?.milky ?? 0, 5), sCap = cfg.milkyMax ?? MILKY_SEARCH_MAX;
-  let d = { ...cfg.current }, feasible = true, reason = '', hint = null;
+  let d = { ...cfg.current }, feasible = true, reason = '', hint = null, ledAlts = null;
   const stop = () => io.cancelled?.();
   if (stop()) return { cancelled: true };
   io.progress?.('current', 0, '현재안 계산');   // 비교표 '현재' 열 — 최종안과 같은 추정기(io.verify). 수렴한 점진 결과가 있으면 재사용
@@ -206,9 +214,11 @@ export async function runAutoDesign(cfg, io) {
     if (stop()) return { cancelled: true };
     // 후보가 {s, w} 면 (s, w) 격자 — 열 수·열 간격까지(searchLeds2, nMax = 총수 상한), 숫자면 1열(기존)
     const two = typeof B.cand[0] === 'object', a = { G: cfg.G, obs, line: cfg.line, cand: B.cand, maps: B.maps, pitchRange: cfg.pitchRange ?? null, nMax: cfg.nMax, emitted: B.emitted };
-    const r = two ? searchLeds2({ ...a, gaps: B.gaps ?? [] }) : searchLeds(a);
+    const r = two ? searchLeds2({ ...a, gaps: B.gaps ?? [], spare: 1 }) : searchLeds({ ...a, spare: 1 });   // spare: 다음 총수까지 tried 에(검증 실패 시 대안)
     steps.push({ stage: 'leds', ...r });
-    d = { ...d, count: r.n, pitch: r.pitch, rows: two ? r.rows : 1, rowGap: two ? r.rowGap : 0, stepVirt: !!cfg.stepMode };   // cfg.stepMode = LED STEP(② 는 가상 배치를 점수 매김)
+    const lay = (e) => ({ count: e.n, pitch: e.pitch, rows: two ? e.rows : 1, rowGap: two ? e.rowGap : 0 });
+    d = { ...d, ...lay(r), stepVirt: !!cfg.stepMode };
+    ledAlts = ledAlternatives(r, two).map(lay);   // cfg.stepMode = LED STEP(② 는 가상 배치를 점수 매김)
     if (!r.feasible) { feasible = false; reason = r.reason; }
   }
   const evalV = (cands, N, ms) => io.evalVariants(d, cands, N, ms), uText = (s) => `길이 U ${s.Ulen.toFixed(2)}${s.Uwid == null ? '' : ` · 폭 U ${s.Uwid.toFixed(2)}`}`;
@@ -284,7 +294,20 @@ export async function runAutoDesign(cfg, io) {
   if (stop()) return { cancelled: true };
   io.progress?.('verify', 0, '최종안 정밀 재계산');
   if (sameDesign(d, cfg.current)) return { feasible: feasible && margin(currentVerified.stats, obs) >= 0, best: { ...cfg.current }, steps, reason, verified: currentVerified, current: currentVerified, unchanged: true, cancelled: false, hint };
-  const verified = await io.verify(d);
+  let verified = await io.verify(d);
+  if (ledAlts?.length && margin(verified.stats, obs) < 0) {   // ② 재확인: 정밀 검증 미달이면 기저 순위의 다음 후보(같은 총수 → 다음 총수) 최대 2개 — 다른 필드(①③⑤④ 결과)는 그대로
+    const tried = [{ design: d, verified }], scV = (v) => shapeScore({ ok: !v.stats.empty, stats: v.stats, eff: v.eff }, obs);
+    for (const [i, L] of ledAlts.slice(0, 2).entries()) {
+      if (stop()) return { cancelled: true };
+      io.progress?.('verify', (i + 1) / 3, `② 후보 재확인 (${i + 2}/3)`);
+      const e = { ...d, ...L }, v = await io.verify(e);
+      tried.push({ design: e, verified: v });
+      if (margin(v.stats, obs) >= 0) break;
+    }
+    steps.push({ stage: 'ledsVerify', tried });
+    const pick = tried.find((t) => margin(t.verified.stats, obs) >= 0) ?? tried.reduce((a, b) => (scV(b.verified) > scV(a.verified) ? b : a));
+    d = pick.design; verified = pick.verified;
+  }
   // 잡음 방어(①②③ 공통): 검증값이 현재안보다 SCORE_EPS 이상 낫지 않으면 현재안 유지. 둘 다 통과면 총 LED 수(rows·count) 감소도 이득
   const sc = (v) => shapeScore({ ok: !v.stats.empty, stats: v.stats, eff: v.eff }, obs);
   const fewer = margin(verified.stats, obs) >= 0 && margin(currentVerified.stats, obs) >= 0 && totalLeds(d) < totalLeds(cfg.current);
@@ -295,6 +318,12 @@ export async function runAutoDesign(cfg, io) {
   // 판정·문구는 정밀 재계산 값 기준(후보 평가값은 광자가 적어 잡음이 큼)
   const vs = verified.stats, ok = margin(vs, obs) >= 0;
   if (ok) { feasible = true; reason = ''; }
-  else if (reason.startsWith('형상 최적안도')) { feasible = false; reason = `형상 최적안도 목표 미달 — 길이 U ${vs.Ulen.toFixed(2)}${vs.Uwid == null ? '' : ` · 폭 U ${vs.Uwid.toFixed(2)}`}`; }
+  else {   // 단계가 통과로 끝났어도 정밀 재계산 미달이면 불가
+    feasible = false;
+    const vt = uText(vs);
+    if (reason.startsWith('형상 최적안도')) reason = `형상 최적안도 목표 미달 — ${vt}`;
+    else if (!reason) reason = `최종 정밀 재계산에서 목표 미달 — ${vt} (후보 평가와 차이: 잡음·LED 몸체 영향)`;
+    else if (!reason.includes(vt)) reason += ` (최종 정밀 재계산: ${vt})`;
+  }
   return { feasible, best: d, steps, reason, verified, current: currentVerified, cancelled: false, hint };
 }

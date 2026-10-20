@@ -49,9 +49,12 @@ export function nearestRow(rows, obs, nMax) {
   const mL = (r) => r.stats.Ulen - obs.targetLen, bestL = C.reduce((m, r) => Math.max(m, mL(r)), -Infinity), needL = bestL >= 0 ? 0 : bestL - NEAR_TOL;
   return C.filter((r) => mL(r) >= needL).sort((a, c) => a.n - c.n || a.j - c.j || c.eff - a.eff)[0] ?? { n: nMax, pitch: 0, j: 0, stats: null, eff: NaN, margin: -Infinity };
 }
-export function searchLeds({ G, obs, line, cand, maps, pitches = [0], pitchRange = null, nMax, emitted, milkies = null }) {
+// spare = 통과 개수 다음 몇 개까지 더 평가해 tried 에만 기록(결과 불변 — 최종 검증 실패 시 대안용)
+export function searchLeds({ G, obs, line, cand, maps, pitches = [0], pitchRange = null, nMax, emitted, milkies = null, spare = 0 }) {
   const nCell = G.ns * G.nw, nJ = milkies ? milkies.length : 1, tried = [], rows = [];
+  let found = null;
   for (let n = 1; n <= nMax; n++) {
+    if (found && n > found.n + spare) break;
     let hit = null;
     for (const p of pitchRange ? pitchOptions(line, n, pitchRange) : pitches) {
       let pos; try { pos = ledSPositions(line, n, p); } catch { continue; }
@@ -70,8 +73,9 @@ export function searchLeds({ G, obs, line, cand, maps, pitches = [0], pitchRange
         rows.push(row);
       }
     }
-    if (hit) return { feasible: true, ...hit, reason: '', tried };
+    if (hit && !found) found = hit;
   }
+  if (found) return { feasible: true, ...found, reason: '', tried };
   const b = nearestRow(rows, obs, nMax);
   const st = b.stats;
   return { feasible: false, ...b, tried, reason: `LED ${nMax}개까지 늘려도 목표 미달 — 가장 가까운 ${b.n}개: 길이 U ${st ? st.Ulen.toFixed(2) : '–'}${st?.Uwid == null ? '' : ` · 폭 U ${st.Uwid.toFixed(2)}`} — ${st && st.Uwid != null && st.Uwid - obs.targetWid < st.Ulen - obs.targetLen ? '폭 방향 확산 부족: ③ 형상 또는 Milky 상향 권장' : '길이 방향 리플: Milky 상향 또는 LED–커버 거리 확대 권장'}` };
@@ -108,10 +112,14 @@ export function layoutMap2(cand, maps, positions, { closed = false, L, off = 0, 
 }
 // 열 수·열 간격·개수·피치 탐색: 총 LED 수 오름차순 → 같은 총수면 1열 먼저 → 그 안에서 여유 최고 → 효율. gaps = 2열 열 간격 δ 목록(±δ 가 격자에 있어야 함)
 // nMax = 총 LED 상한. 반환 { feasible, n(열당), rows, rowGap, pitch, total, stats, eff, margin, reason, tried:[{rows, rowGap, n, pitch, total, margin, eff}] }
-export function searchLeds2({ G, obs, line, cand, maps, rowsOptions = [1, 2], gaps = [], pitches = [0], pitchRange = null, nMax, emitted }) {
+// spare = 통과 총수 다음 몇 개 총수까지 더 평가해 tried 에만 기록(결과 불변)
+export function searchLeds2({ G, obs, line, cand, maps, rowsOptions = [1, 2], gaps = [], pitches = [0], pitchRange = null, nMax, emitted, spare = 0 }) {
   const nCell = G.ns * G.nw, tried = [], miss = [], RO = [...new Set(rowsOptions)].sort((a, b) => a - b);
+  let found = null;
   for (let T = 1; T <= nMax; T++) {
+    if (found && T > found.total + spare) break;
     for (const rows of RO) {
+      if (found && T === found.total) break;   // 통과 총수: 1열 통과면 2열은 안 봄(기존과 같음)
       if (T % rows) continue;
       const n = T / rows;
       let hit = null;
@@ -125,11 +133,12 @@ export function searchLeds2({ G, obs, line, cand, maps, rowsOptions = [1, 2], ga
         const row = { n, rows, rowGap: rows === 2 ? g : 0, pitch: p, total: T, stats: st, eff: tot / (emitted * T), margin: margin(st, obs) };
         tried.push({ rows, rowGap: row.rowGap, n, pitch: p, total: T, margin: row.margin, eff: row.eff });
         if (row.margin >= 0) { if (!hit || row.margin > hit.margin || (row.margin === hit.margin && row.eff > hit.eff)) hit = row; }
-        else miss.push(row);
+        else if (!found) miss.push(row);
       }
-      if (hit) return { feasible: true, ...hit, reason: '', tried };
+      if (hit && !found) found = hit;
     }
   }
+  if (found) return { feasible: true, ...found, reason: '', tried };
   // 가장 가까운 안: nearestRow 를 총수(n 자리)·열 수(j 자리 = rows − 1 → 같은 총수면 1열 먼저)로
   const b0 = nearestRow(miss.map((r) => ({ ...r, nRow: r.n, n: r.total, j: r.rows - 1 })), obs, nMax);
   const b = b0.nRow == null ? { ...b0, n: nMax, rows: 1, rowGap: 0, total: nMax } : { ...b0, n: b0.nRow };

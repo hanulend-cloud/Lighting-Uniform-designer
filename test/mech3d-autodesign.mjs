@@ -44,8 +44,8 @@ const rowsOf = (ms, U = (m) => 0.5 + 0.12 * m) => ms.map((m) => ({ milky: m, Ule
 const peakRows = (ms, top, { len = 0.5, wid = 0.5, Uw = () => 0.9 } = {}) => ms.map((m) => { const Ulen = top - 0.05 * (m - 4) ** 2, Uwid = Uw(m);
   return { milky: m, Ulen, Uwid, eff: 1 - m / 12, ess: 1, trusted: true, margin: Math.min(Ulen - 0.8, Uwid - 0.6), dark: { len, wid } }; });
 { // 단봉형·통과: 최소 통과 Milky 는 오르는 쪽(3.0) — 최고점(4) 너머(5.0) 가 아님
-  const bases = [], U = (m) => 0.85 - 0.05 * (m - 4) ** 2;
-  const io = { milkyRows: async (d, ms, o) => { if (!o?.precise) bases.push(ms[10]); return peakRows(ms, 0.85); }, verify: async (d) => ({ stats: st(U(d.milky ?? 1), 0.9), eff: 1 }), progress() {}, cancelled: () => false };
+  const bases = [], U = (m) => 0.85 - 0.05 * (m - 4) ** 2;   // verify +0.001: 경계 3.0 의 부동소수 0.7999… 가 정밀 판정에서 미달로 잡히지 않게
+  const io = { milkyRows: async (d, ms, o) => { if (!o?.precise) bases.push(ms[10]); return peakRows(ms, 0.85); }, verify: async (d) => ({ stats: st(U(d.milky ?? 1) + 0.001, 0.9), eff: 1 }), progress() {}, cancelled: () => false };
   const r = await runAutoDesign({ stages: { milky: true }, obs, current: { milky: 1 } }, io);
   ok(r.feasible && Math.abs(r.best.milky - 3) < 0.03 && Math.max(...bases) <= 3.5 + 1e-9, `단봉형 통과 → 최소 Milky ${r.best.milky} (기준 ${bases.map((b) => b.toFixed(2)).join(' → ')})`); }
 { // 단봉형·미달(길이 끝단이 가장 어두움) → 최고점 Milky ≈ 4 · '가장자리 감쇠' · 거친 탐색은 최고점 뒤 두 번 내려가면 멈춤
@@ -219,4 +219,26 @@ ok(halvingTotal(27) === 35 && halvingTotal(4) === 10 && halvingTotal(1) === 3, '
   ok(r2.unchanged && !r3.unchanged && r3.best.rows === 2, 'fewer = 총 LED 수(rows·count): 총 2 = 2 → 유지, 총 2 < 3 → 추천');
   ok(sameDesign({ count: 2, pitch: 0 }, { count: 2, pitch: 0, rows: 1, rowGap: 0 }) && sameDesign({ count: 2, pitch: 0, rows: 1, rowGap: 3 }, { count: 2, pitch: 0 }) && !sameDesign({ count: 2, pitch: 0, rows: 2, rowGap: 3 }, { count: 2, pitch: 0 })
     && !sameDesign({ count: 2, pitch: 0, rows: 2, rowGap: 3 }, { count: 2, pitch: 0, rows: 2, rowGap: 4 }) && sameDesign({ count: 2, pitch: 0, rows: 2, rowGap: 3 }, { count: 2, pitch: 0, rows: 2, rowGap: 3 }), 'sameDesign: rows(없음 = 1)·rowGap(1열이면 무시)'); }
+{ // 최종 판정: 단계는 통과(⑤ 후보 0.9)였어도 정밀 재계산이 미달이면 feasible=false + 사유
+  const io = { evalVariants: async (d, cs) => cs.map((c) => ({ cand: c, ok: true, stats: st(0.85 + c.dz / 100, 0.9), eff: 0.5 + c.dz / 100 })),
+    verify: async (d) => ({ stats: st(d.dz ? 0.77 : 0.5, 0.92), eff: 0.5 }), progress() {}, cancelled: () => false };
+  const r = await runAutoDesign({ stages: { height: true }, obs, current: { milky: 3, count: 5, pitch: 0, dz: 0 }, heightRange: [0, 3] }, io);
+  ok(!r.unchanged && !r.feasible && /최종 정밀 재계산에서 목표 미달 — 길이 U 0\.77 · 폭 U 0\.92/.test(r.reason), `정밀 재계산 미달 → 불가: ${r.reason}`); }
+{ // ② 재확인: 첫 후보(±1) 검증 미달 → 같은 총수 다른 열 간격(±2) 검증 통과 → 그것
+  const G = { ns: 2, nw: 1, ds: 1, cell: 1, w0: -0.5, L: 2, closed: false, winS: 5, area: new Float64Array([1, 1]), valid: new Uint8Array([1, 1]) };
+  const cand = [0, -1, 1, -2, 2].flatMap((w) => [0, 1, 2].map((s) => ({ s, w }))), maps = cand.map(({ w }) => Float32Array.from(w === 0 ? [1, 0.1] : [1, 1]));
+  const B = { cand, maps, emitted: 1, gaps: [1, 2] }, line = { length: 2, closed: false, width: 4 }, cv = { stats: st(0.5, 0.9), eff: 1 };
+  const run = async (U) => {
+    const calls = [], prog = [];
+    const io = { basis: async () => B, verify: async (d) => { calls.push(d); return { stats: st(U(d), 0.9), eff: 1 }; }, progress: (s, f, t) => prog.push(t), cancelled: () => false };
+    const r = await runAutoDesign({ stages: { leds: true }, obs: { targetLen: 0.8, targetWid: 0 }, current: { milky: 3, count: 3, pitch: 0, rows: 1 }, currentVerified: cv, G, line, nMax: 4 }, io);
+    return { r, calls, prog };
+  };
+  const a = await run((d) => (d.rows === 2 && d.rowGap === 2 ? 0.95 : d.rows === 2 ? 0.7 : 0.6));
+  const sv = a.r.steps.find((x) => x.stage === 'ledsVerify');
+  ok(a.r.feasible && a.r.best.rows === 2 && a.r.best.rowGap === 2 && a.calls.length === 2 && sv?.tried.length === 2 && sv.tried[1].verified.stats.Ulen === 0.95 && a.prog.includes('② 후보 재확인 (2/3)'),
+    `② 첫 후보 미달 → 두 번째(±${a.r.best.rowGap}) 통과 (verify ${a.calls.length}회)`);
+  const b = await run((d) => (d.rows === 2 && d.rowGap === 2 ? 0.75 : d.rows === 2 ? 0.7 : 0.6));
+  ok(!b.r.feasible && b.r.best.rows === 2 && b.r.best.rowGap === 2 && b.calls.length <= 3 && /최종 정밀 재계산에서 목표 미달 — 길이 U 0\.75/.test(b.r.reason),
+    `② 모두 미달 → 검증 최고(±${b.r.best.rowGap}) 유지 · verify ${b.calls.length}회: ${b.r.reason}`); }
 done();
