@@ -7,6 +7,7 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
 const KIND_COLOR = { milky: 0xdfe9f2, clear: 0x8cc8ff, whiteTrans: 0xf2efe6, opaque: 0x8a909c, pcb: 0x2f6b3a, led: 0xffcf3f };
 const KIND_OPACITY = { milky: 0.85, clear: 0.35, whiteTrans: 0.95, opaque: 1, pcb: 1, led: 1 };
+const LED_SEL = new THREE.Color(0xff7a1a), CONE_COLOR = 0xffcf3f, CONE_SEL = 0xff7a1a, CONE_SEG = 16;   // 선택 LED 몸체·빛 원뿔 = 주황
 const SEL_TINT = new THREE.Color(0xffb020), FACE_COLOR = new THREE.Color(0xff5a36), OBS_COLOR = new THREE.Color(0x29d3e0);
 // 보기 방향(카메라 쪽). 평면은 z 축과 아주 조금 어긋나게 — up(z) 을 바꾸지 않으려고(OrbitControls 회전축은 생성 때 up 으로 고정)
 const VIEW_DIR = { top: [0, -1e-3, 1], front: [0, -1, 0], side: [1, 0, 0], iso: [0.7, -1.1, 0.9] };
@@ -63,7 +64,7 @@ export function createMech3dView(canvas, { onPick, gizmo = null }) {
   }
   controls.addEventListener('change', () => { fitDepth(); render(); });
 
-  let meshes = [], partsRef = [], kinds = [], sel = null, obsSet = new Set(), overlay = null, obsMesh = null, markers = null;
+  let meshes = [], partsRef = [], kinds = [], sel = null, obsSet = new Set(), overlay = null, obsMesh = null, markers = null, coneMeshes = [];
 
   function resize() {
     if (canvas.clientWidth === 0) return;
@@ -82,7 +83,7 @@ export function createMech3dView(canvas, { onPick, gizmo = null }) {
   function colorize(i) {
     const m = meshes[i], p = partsRef[i], col = m.geometry.getAttribute('color');
     const base = new THREE.Color(KIND_COLOR[kinds[i]]);
-    const partCol = sel?.part === i ? base.clone().lerp(SEL_TINT, 0.6) : base;
+    const partCol = sel?.part === i ? (kinds[i] === 'led' ? LED_SEL : base.clone().lerp(SEL_TINT, 0.6)) : base;
     const T = p.triangles;
     for (let t = 0; t < T.length / 3; t++) {
       const isSel = sel?.part === i && sel.face === p.faceIds[t];
@@ -146,22 +147,41 @@ export function createMech3dView(canvas, { onPick, gizmo = null }) {
     const old = kinds; kinds = kindsOf.slice();
     meshes.forEach((_, i) => { if (old[i] !== kinds[i]) colorize(i); }); render();
   }
-  // over = { obsFaces:[{part,face}], line3d: Float32Array(x,y,z...) | null, arrows:[{pos,axis}] } — 관측면 강조, 라인·LED 발광 화살표
+  // LED 빛 원뿔(spec m3-cad-ui §4a) — 꼭짓점 = 발광점, 축 = 발광 방향, 반각 = 배광/2(그림은 80° 까지), 길이 len(축 방향).
+  // 원뿔 여럿을 기하 하나로 합친다(LED ~120개도 메쉬 1개). 삼각형 k·CONE_SEG… = 원뿔 k → userData.nums[k] = LED 번호(클릭용)
+  function coneMesh(list, color, opacity) {
+    const P = new Float32Array(list.length * (CONE_SEG + 1) * 3), I = new Uint32Array(list.length * CONE_SEG * 3);
+    list.forEach((c, k) => {
+      const a = new THREE.Vector3(...c.axis).normalize(), u = new THREE.Vector3(Math.abs(a.x) < 0.9 ? 1 : 0, Math.abs(a.x) < 0.9 ? 0 : 1, 0).cross(a).normalize(), w = a.clone().cross(u);
+      const len = c.len > 0 ? c.len : 4, r = len * Math.tan((Math.min(80, Math.max(1, c.half)) * Math.PI) / 180), b0 = k * (CONE_SEG + 1);
+      P.set(c.pos, b0 * 3);
+      for (let i = 0; i < CONE_SEG; i++) {
+        const t = (2 * Math.PI * i) / CONE_SEG, q = (b0 + 1 + i) * 3;
+        for (let j = 0; j < 3; j++) P[q + j] = c.pos[j] + a.getComponent(j) * len + r * (Math.cos(t) * u.getComponent(j) + Math.sin(t) * w.getComponent(j));
+        I.set([b0, b0 + 1 + i, b0 + 1 + ((i + 1) % CONE_SEG)], (k * CONE_SEG + i) * 3);
+      }
+    });
+    const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(P, 3)); g.setIndex(new THREE.BufferAttribute(I, 1));
+    const m = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ color, transparent: true, opacity, depthWrite: false, depthTest: false, side: THREE.DoubleSide }));
+    m.renderOrder = 2; m.userData.nums = list.map((c) => c.n);
+    return m;
+  }
+  // over = { obsFaces:[{part,face}], line3d: Float32Array(x,y,z...) | null, cones:[{pos,axis,half(°),len,n}], coneSel: LED 번호 | null } — 관측면 강조, 라인, LED 빛 원뿔
+  // 원뿔은 표시 전용(관측면 색지도·점검 표식과 별개 무리) · 선택 모드가 아닐 때 클릭하면 onPick({ led: n })
   function setOverlay(over) {
     const prev = obsSet;
     obsSet = new Set((over.obsFaces ?? []).map((f) => `${f.part}|${f.face}`));
     if (overlay) { scene.remove(overlay); overlay.traverse((o) => { o.geometry?.dispose(); o.material?.dispose(); }); }
-    overlay = new THREE.Group();
+    overlay = new THREE.Group(); coneMeshes = [];
     if (over.line3d?.length) {
       const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(over.line3d, 3));
       const ln = new THREE.Line(g, new THREE.LineBasicMaterial({ color: 0x29d3e0, depthTest: false }));
       ln.renderOrder = 2; overlay.add(ln);
     }
-    for (const a of over.arrows ?? []) {
-      const ar = new THREE.ArrowHelper(new THREE.Vector3(...a.axis).normalize(), new THREE.Vector3(...a.pos), 4, 0xffcf3f, 1.2, 0.8);
-      ar.traverse((o) => { if (o.material) { o.material.depthTest = false; o.renderOrder = 2; } });
-      overlay.add(ar);
-    }
+    const cs = over.cones ?? [], on = cs.filter((c) => c.n === over.coneSel), off = cs.filter((c) => c.n !== over.coneSel);
+    if (off.length) coneMeshes.push(coneMesh(off, CONE_COLOR, 0.25));
+    if (on.length) coneMeshes.push(coneMesh(on, CONE_SEL, 0.5));
+    coneMeshes.forEach((m) => overlay.add(m));
     scene.add(overlay);
     const touched = new Set([...prev, ...obsSet].map((k) => +k.split('|')[0]));
     meshes.forEach((_, i) => { if (touched.has(i)) colorize(i); }); render();
@@ -269,6 +289,9 @@ export function createMech3dView(canvas, { onPick, gizmo = null }) {
     const r = canvas.getBoundingClientRect();
     ray.setFromCamera(new THREE.Vector2(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1), camera);
     // 단면 중이면 잘려 안 보이는 쪽(평면 거리 < 0)의 교차는 건너뛰고 다음 교차를 쓴다(Raycaster 는 clipping 을 모름)
+    // 빛 원뿔(위에 그려짐)이 먼저 — 선택 모드가 아닐 때만. 선택 원뿔을 앞에 둔다
+    const ch = pickable ? null : ray.intersectObjects([...coneMeshes].reverse(), false)[0];
+    if (ch) { onPick({ part: null, face: null, led: ch.object.userData.nums[Math.floor(ch.faceIndex / CONE_SEG)] }); return; }
     const hits = ray.intersectObjects(meshes.filter((m) => m.visible && (!pickable || pickable(m.userData.part))), false);
     const h = clip.length ? hits.find((x) => clip[0].distanceToPoint(x.point) >= 0) : hits[0];
     // 선택 모드(pickable 지정)에서는 클릭 광선도 넘긴다 — 빈 곳 클릭이어도 { part: null, face: null, ray } (가까운 LED 맞춤용)

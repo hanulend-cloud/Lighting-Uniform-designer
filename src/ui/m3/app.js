@@ -37,6 +37,8 @@ import { heightsFor, deformPart, refinedFor, minThickness, shapeVarRanges, pathF
 import { interferenceKeys, travelDistance } from '../../engine/mech3d/clearance.js';
 import { scaleMoveMesh, isIdentityXform } from '../../engine/mech3d/xform.js';
 import { defaultChecks } from '../../engine/mech3d/defs.js';
+import { validAdjust } from '../../engine/mech3d/led-adjust.js';
+import { beamSpec, ledOfHit, ledClashItems, dropStaleAdjust, setLedAdjust } from './led-select.js';
 
 const $ = (s) => document.querySelector(s);
 const VIEWS = [['top', '평면 (XY)'], ['front', '정면 (XZ)'], ['side', '측면 (YZ)'], ['iso', '등각']];
@@ -125,6 +127,7 @@ function onChange(tag) {
     if (ad.running && ad.runner && !ad.runner.stopped) { ad.runner.cancel(); A.store.session.status = '편집으로 자동설계를 중지함'; }
     else if (ad.result) { ad.result = null; A.meshShown = null; A.store.session.status = '값이 바뀌어 자동설계 결과를 지움'; }
   }
+  if (tag === 'light') { const t = dropStaleAdjust(M.light); if (t) A.store.session.status = t; }   // 배치가 바뀌어 무효가 된 LED 개별 조정(spec §4a)
   if (tag === 'observe' || tag === 'material') refreshLine();   // material: 부품 크기·위치가 바뀌면 라인도 다시(키가 같으면 건너뜀)
   if (PHYSICS.has(tag)) restartCalc();
   if (tag === 'target') A.prog.setJudge({ obs: M.observe, targetNoise: M.observe.targetNoise ?? 0.02, fluxLm: M.light.spec.fluxLm ?? 0 });
@@ -133,7 +136,7 @@ function onChange(tag) {
 }
 function onKey(e) {
   if (!A || e.target.closest?.('input, select, textarea')) return;
-  if (e.key === 'Escape') A.store.update('session', (_, s) => { s.sel = null; s.pick = null; s.focusCheck = null; });
+  if (e.key === 'Escape') A.store.update('session', (_, s) => { s.sel = null; s.ledSel = null; s.pick = null; s.focusCheck = null; });
   else if (e.key === 'f' || e.key === 'F') A.view?.fit();
 }
 
@@ -610,6 +613,10 @@ function adStep() {
 function onPick(s) {
   const st = A.store, M = st.mspec, S = st.session, nMech = getMech3d().parts.length, pick = S.pick;
   const say = (t) => st.update('session', (_, x) => { x.status = t; });
+  if (!pick && s) {   // LED 몸체·빛 원뿔 클릭 = LED 선택(spec §4a)
+    const n = ledOfHit(s, nMech, M.light.kind === 'step' ? L.stepLayout(M, S.line) : null);
+    if (n != null) { st.update('session', (_, x) => { x.ledSel = n; x.node = 'leds'; x.sel = null; }); return; }
+  }
   if (s && s.part == null && pick !== 'led' && pick !== 'ledx') s = null;   // 선택 모드 빈 곳 클릭(광선만) — LED 모드에서만 씀
   if ((pick === 'led' || pick === 'ledx') && s && M.light.step?.virtual) { say('가상 배치 중에는 원래 STEP 위치로 돌아가서 지정하세요'); return; }   // 클릭 번호 = 가상 부품
   if ((pick === 'led' || pick === 'ledx') && s && s.part != null && s.part < nMech) { say('LED STEP 부품(PCB·LED)을 클릭하세요 — 기구 부품은 이 모드에서 선택되지 않음'); return; }
@@ -642,7 +649,7 @@ function onPick(s) {
     return;
   }
   if (pick === 'pcb' && s && s.part < nMech) { st.update('light', (m, x) => { m.light.manual.pcb = { kind: 'face', part: s.part, face: s.face }; x.pick = null; }); return; }
-  st.update('session', (_, x) => { x.sel = s && s.part < nMech ? s : null; if (x.sel) x.node = `part:${x.sel.part}`; });   // LED STEP 부품은 소재 편집 대상이 아님
+  st.update('session', (_, x) => { x.sel = s && s.part < nMech ? s : null; x.ledSel = null; if (x.sel) x.node = `part:${x.sel.part}`; });   // LED STEP 부품은 소재 편집 대상이 아님
 }
 
 // ---- 속성 편집 처리기 (main.js:348-361, 426-451) — 태그가 계산·점검 범위를 정한다 ----
@@ -743,6 +750,16 @@ function propHandlers() {
     }),
     onSolder: (v) => st.update('light', (m) => { m.light.solder = v; }),
     onLedSpec: (key, v) => st.update(key === 'fluxLm' ? 'target' : 'light', (m) => { m.light.spec[key] = v; }),   // 광속은 휘도 환산만 — 재계산 없음
+    // LED 선택·속성(spec §4a)
+    onLedSel: (n) => st.update('session', (_, x) => { x.ledSel = n; if (n != null) { x.node = 'leds'; x.sel = null; } }),
+    onLedBeam: (a) => { const b = beamSpec(a); if (b) st.update('light', (m) => { Object.assign(m.light.spec, b); }); },   // 120 = 램버시안, 그 밖 = 가우시안
+    onLedDist: (g) => ledDist(g),
+    onLedAdjust: (n, adj) => st.update('light', (m) => { setLedAdjust(m.light, n, adj); }),
+    onLedExclude: (n) => st.update('light', (m) => {   // LED STEP 원래 배치만(가상 배치는 제외 없음) — 번호 n = step.leds 위치
+      const stp = m.light.step, p = stp?.leds?.[n];
+      if (p == null || stp.virtual) return;
+      stp.excluded ??= []; const k = stp.excluded.indexOf(p); if (k >= 0) stp.excluded.splice(k, 1); else stp.excluded.push(p);
+    }),
     onObs: (key, v) => st.update('observe', (m) => { m.observe[key] = v; }),
     onClearObs: () => st.update('observe', (m) => { m.observe.faces = []; }),
     onObsDir: (v) => st.update('observe', (m) => { m.observe.dir = v ? (() => { const l = Math.hypot(...v); return v.map((x) => x / l); })() : null; }),
@@ -861,6 +878,53 @@ function cmdHandlers() {
   };
 }
 
+// ---- LED 선택·속성(spec §4a) ----
+// 현재 배치의 LED 목록 — 번호 n: LED STEP(원래·가상) = lay.leds 위치(제외 LED 포함), 직접 배치 = 발광점 순서
+// → { lay, em(계산 발광점), list:[{ n, part(배치 부품 번호|null), e(발광점|null), excluded }] }
+function ledsNow(M = A.store.mspec, line = A.store.session.line) {
+  let em = []; try { em = L.currentEmitters(M, line); } catch { em = []; }
+  const lay = M.light.kind === 'step' ? L.stepLayout(M, line) : null;
+  if (!lay) return { lay: null, em, list: em.map((e, n) => ({ n, part: null, e, excluded: false })) };
+  const ex = new Set(lay.excluded ?? []), byN = new Map(em.map((e) => [e.led, e]));
+  return { lay, em, list: lay.leds.map((p, n) => ({ n, part: p, e: byN.get(n) ?? null, excluded: ex.has(p) })) };
+}
+// 발광점별 커버(관측면 부품)까지 관측 방향 d 거리(못 찾음 = NaN) — (발광점 배열, 기구, 라인, 관측 부품) 별 캐시
+function ledGaps(em, M = A.store.mspec) {
+  const S = A.store.session, rt = getMech3d();
+  if (!S.line || !rt || !em.length) return em.map(() => NaN);
+  const op = [...new Set(M.observe.faces.map((f) => f.part))], k = op.join();
+  const c = A.gapC;
+  if (c && c.em === em && c.rt === rt && c.line === S.line && c.k === k) return c.gaps;
+  const d = S.line.frame.d, gaps = em.map((e) => { let g = Infinity; for (const i of op) g = Math.min(g, rayT(rt.parts[i], e.pos, d)); return Number.isFinite(g) ? g : NaN; });
+  A.gapC = { em, rt, line: S.line, k, gaps };
+  return gaps;
+}
+const minFinite = (a) => a.reduce((m, v) => (Number.isFinite(v) && !(v >= m) ? v : m), NaN);
+// LED 속성 창 정보 — { n, total, s(라인 위치), gap(최소 커버 거리), adj, excluded, clash:[문구] }
+function ledUi(LS, n) {
+  const M = A.store.mspec, S = A.store.session, it = LS.list[n];
+  if (!it) return null;
+  let pos = it.e?.pos ?? null;
+  if (!pos && it.part != null && LS.lay?.parts[it.part]) { const b = bounds(LS.lay.parts[it.part].positions); pos = [0, 1, 2].map((k) => (b[k] + b[k + 3]) / 2); }
+  const s = Number.isFinite(it.e?.s) ? it.e.s : pos && S.line ? S.line.toSW(...S.line.to2D(pos))[0] : NaN;
+  const nm = (p) => M.parts[p]?.name ?? `부품 ${p + 1}`;
+  const say = { inside: (p) => `발광점이 ${nm(p)} 안에 있음 — 간섭`, overlap: (p) => `LED 몸체가 ${nm(p)}과(와) 겹침 — 간섭`, 'body-inside': (p) => `LED 몸체가 ${nm(p)} 안에 있음 — 간섭` };
+  const clash = [...new Set(ledClashItems(A.checks.interference?.items, n, LS.em, LS.lay).filter((x) => say[x.kind]).map((x) => say[x.kind](x.part)))];
+  return { n, total: LS.list.length, s, gap: minFinite(ledGaps(LS.em)), adj: validAdjust(M.light)?.[n] ?? { ds: 0, dz: 0 }, excluded: it.excluded, clash };
+}
+// 커버까지 거리(공통) → 모든 LED 를 관측 방향으로 같은 양 이동(자동설계 ⑤ 와 같은 applyDz: STEP offset·발광점 / 직접 배치 깊이)
+function ledDist(g) {
+  const st = A.store, M = st.mspec, S = st.session;
+  if (!S.line) return;
+  if (M.light.kind === 'manual' && M.light.manual.pcb?.kind !== 'depth') return;
+  const gap = minFinite(ledGaps(ledsNow().em));
+  if (!Number.isFinite(gap)) { setStatus('LED 앞쪽에서 커버(관측면 부품)를 찾지 못함'); return; }
+  let dz = gap - g, note = '';
+  if (M.light.kind === 'manual') { const dp = M.light.manual.pcb.depth; if (dp - dz < 0.1) { dz = dp - 0.1; note = ' — 관측면 아래 깊이 0.1 mm 까지만'; } }
+  if (Math.abs(dz) < 1e-6) return;
+  st.update('light', (m, x) => { applyDz(m, dz, S.line.frame.d); x.status = `모든 LED 를 커버 쪽으로 ${dz > 0 ? '+' : ''}${dz.toFixed(2)} mm 옮김${note}`; });
+}
+
 // ---- 그리기 ----
 function lineInfo() {
   const S = A.store.session, M = A.store.mspec, l = S.line;
@@ -871,15 +935,17 @@ function lineInfo() {
 function autoGrid() { const l = A.store.session.line; return l ? { cellS: Math.max(1, l.length / 100), cellW: Math.max(0.5, l.width / 8), winS: Math.max(5, l.length / 10) } : null; }
 function renderAll(tag = 'all') {
   const st = A.store, M = st.mspec, S = st.session;
+  const LS = ledsNow(); A.ledTotal = LS.list.length;
+  if (S.ledSel != null && !(S.ledSel < LS.list.length)) S.ledSel = null;   // 배치가 바뀌어 번호가 없어짐
   renderView();
   const lay = M.light.kind === 'step' ? L.stepLayout(M, S.line) : undefined;   // LED STEP 실제 배치(가상 실패 표시용)
   renderFeatureTree($('#m3-tree'), M, S, {
-    onNode: (id) => st.update('session', (_, x) => { x.node = id; x.sel = id.startsWith('part:') ? { part: +id.slice(5), face: null } : null; }),
+    onNode: (id) => st.update('session', (_, x) => { x.node = id; x.sel = id.startsWith('part:') ? { part: +id.slice(5), face: null } : null; if (id !== 'leds') x.ledSel = null; }),
     onEye: (id, only) => st.update('view', (m, x) => Object.assign(x, toggleVisibility(id, only, m.parts.length, x.hidden, x.hideLeds))),
   }, lay);
   const pi = S.node?.startsWith('part:') ? +S.node.slice(5) : -1, clr = pi >= 0 ? clearanceOf(pi) : null;
   if (clr !== A.clrShown) { A.clrShown = clr; renderMarkers(); }
-  if (tag !== 'view') renderPropertyPanel($('#m3-props'), M, S, { dbList: A.ctx.materialDb()?.list() ?? [], catalog: reflCat(), auto: autoGrid(), dir: M.observe.dir ?? S.line?.frame.d, lineInfo: lineInfo(), clearance: clr, xfInfo: pi >= 0 ? xformInfoOf(pi) : null, meshInfo: pi >= 0 ? partMeshInfo(pi) : null, xfMsg: S.xfMsg?.part === pi ? S.xfMsg.text : '', lay: lay ?? null }, propHandlers());
+  if (tag !== 'view') renderPropertyPanel($('#m3-props'), M, S, { dbList: A.ctx.materialDb()?.list() ?? [], catalog: reflCat(), auto: autoGrid(), dir: M.observe.dir ?? S.line?.frame.d, lineInfo: lineInfo(), clearance: clr, xfInfo: pi >= 0 ? xformInfoOf(pi) : null, meshInfo: pi >= 0 ? partMeshInfo(pi) : null, xfMsg: S.xfMsg?.part === pi ? S.xfMsg.text : '', lay: lay ?? null, led: S.node === 'leds' && S.ledSel != null ? ledUi(LS, S.ledSel) : null, ledTotal: LS.list.length }, propHandlers());
   if (tag === 'session' || tag === 'all') renderMarkers();
   A.cmd.update(S, S.calc);
   renderStatus();
@@ -887,7 +953,8 @@ function renderAll(tag = 'all') {
 }
 function renderStatus() {
   const S = A.store.session, M = A.store.mspec;
-  renderStatusBar($('#m3-status'), { calc: S.calc, targetNoise: M.observe.targetNoise ?? 0.02, checks: A.checks, focus: S.focusCheck, text: S.status }, {
+  const lt = S.ledSel != null && A.ledTotal ? `LED ${S.ledSel + 1}/${A.ledTotal}` : '';
+  renderStatusBar($('#m3-status'), { calc: S.calc, targetNoise: M.observe.targetNoise ?? 0.02, checks: A.checks, focus: S.focusCheck, text: lt && S.status ? `${lt} · ${S.status}` : lt || S.status }, {
     onCheck: (id) => A.store.update('session', (_, s) => { s.focusCheck = s.focusCheck === id ? null : id; }),
   });
 }
@@ -908,16 +975,17 @@ function renderView() {
   } else v.setKinds(kinds);
   const hid = new Set(S.hidden), nMech = M.parts.length;
   v.setHidden((i) => (i < nMech ? hid.has(i) : S.hideLeds));
-  v.setSelection(S.sel);
-  let arrows = [];
-  try { arrows = L.currentEmitters(pv?.M ?? M, S.line).map((e) => ({ pos: e.pos, axis: e.axis })); } catch { arrows = []; }
+  const LS = ledsNow(pv?.M ?? M, S.line), body = !pv && S.ledSel != null ? LS.list[S.ledSel]?.part ?? null : null;
+  v.setSelection(S.sel ?? (body != null && lp?.[body] ? { part: cur.parts.length + body, face: null } : null));   // 선택 LED 몸체 = 부품 선택처럼 강조
+  const sp = (pv?.M ?? M).light.spec, half = sp.model === 'gaussian' ? sp.beam / 2 : 60, gaps = ledGaps(LS.em, pv?.M ?? M);
+  const cones = LS.em.map((e, i) => ({ pos: e.pos, axis: e.axis, half, len: Number.isFinite(gaps[i]) ? Math.min(4, 0.4 * gaps[i]) : 4, n: e.led ?? i }));
   let line3d = null;
   if (S.line && S.node === 'obs') {   // 인식한 라인 중심선 — 관측면 노드를 골랐을 때만(평소엔 결과 색을 가림)
     const out = [], K = 200;
     for (let k = 0; k <= K; k++) { const s = (k / K) * S.line.length, [x, y] = S.line.fromSW(S.line.closed && k === K ? 0 : s, 0); out.push(...S.line.to3D(x, y, 0.3)); }
     line3d = Float32Array.from(out);
   }
-  v.setOverlay({ obsFaces: M.observe.faces, line3d, arrows });
+  v.setOverlay({ obsFaces: M.observe.faces, line3d, cones, coneSel: pv ? null : S.ledSel });
   // 선택 모드: LED 발광면/제외 → LED STEP 부품만 클릭되고 기구물은 투시, 관측면·PCB 면 → 기구 부품만 클릭
   const nM = cur.parts.length, led = S.pick === 'led' || S.pick === 'ledx', mech = S.pick === 'obs' || S.pick === 'pcb';
   v.setPickMode(led ? (i) => i >= nM : mech ? (i) => i < nM : null, led ? (i) => i < nM : null);

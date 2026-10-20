@@ -13,7 +13,9 @@ const SEC_OPEN = new Map();
 let SEC_FACE = null;   // 마지막으로 본 선택 면('부품:면') — 새 면이 선택되면 '면 처리' 구역을 자동으로 연다
 export const sectionOpen = (id) => SEC_OPEN.get(id) === true;
 export function resetSections() { SEC_OPEN.clear(); SEC_FACE = null; }
-const secHtml = (id, title, summary, body) => `<details class="m3-sec" data-m3-sec="${id}"${sectionOpen(id) ? ' open' : ''}><summary><span class="m3-sec-t">${title}</span>${summary ? ` <span class="m3-sec-s">${summary}</span>` : ''}</summary><div class="m3-sec-b">${body}</div></details>`;
+// 접는 구역 열림 기억 연결(다른 패널에서도 같은 모양·기억 — LED 속성 창)
+export const wireSections = (el) => el.querySelectorAll('details[data-m3-sec]').forEach((d) => d.addEventListener('toggle', () => SEC_OPEN.set(d.dataset.m3Sec, d.open)));
+export const secHtml = (id, title, summary, body) => `<details class="m3-sec" data-m3-sec="${id}"${sectionOpen(id) ? ' open' : ''}><summary><span class="m3-sec-t">${title}</span>${summary ? ` <span class="m3-sec-s">${summary}</span>` : ''}</summary><div class="m3-sec-b">${body}</div></details>`;
 const n1 = (v) => String(+(+v).toFixed(1));
 const pct = (x) => Math.round(x * 1000) / 10;
 const opts = (obj, cur) => Object.entries(obj).map(([k, v]) => `<option value="${k}" ${k === cur ? 'selected' : ''}>${esc(v.label ?? k)}</option>`).join('');

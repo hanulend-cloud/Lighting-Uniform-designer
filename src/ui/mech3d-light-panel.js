@@ -4,6 +4,8 @@ import { stepRefEmitter } from '../engine/mech3d/virtual-leds.js';
 import { clampRowGap, rowGapOptions } from '../engine/mech3d/placement.js';
 import { catalogOf } from '../engine/mech3d/housing-led.js';
 import { MEAS_CONDS, reflStatusText } from '../model/reflect-db.js';
+import { secHtml, wireSections } from './mech3d-panel.js';
+import { BEAM_PRESETS, beamPreset, ledStepSel } from './m3/led-select.js';
 const esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
 const num = (v, d = 1) => (Number.isFinite(v) ? v.toFixed(d) : '-');
 const numIn = (v, d) => (Number.isFinite(v) ? v.toFixed(d) : '');   // number input 값(빈칸 허용)
@@ -58,7 +60,7 @@ export function renderLightProps(el, m, ui, h) {
   on(el, '[data-lp-file]', 'change', (x) => { const f = x.files?.[0]; if (f) h.onLedFile(f); x.value = ''; });
   wirePick(el, ui, h);
   on(el, '[data-lp-step]', 'change', (x) => { const v = readNum(x); if (v != null) h.onStep(x.dataset.lpStep, v); });
-  on(el, '[data-lp-man]', 'change', (x) => { const k = x.dataset.lpMan; if (k === 'pcbKind' || k === 'side') h.onManual(k, x.value); else if (k === 'rows') h.onManual(k, +x.value); else { const v = readNum(x); if (v != null) h.onManual(k, v); } });
+  wireManual(el, h);
 }
 
 // 가상 배치 개수 상한 = 자동설계 ② 와 같은 차수: max(1, min(200, ⌊L/2⌋)). 라인 없으면 200
@@ -85,41 +87,96 @@ export function stepLayoutRowHtml(st, line = null) {
     ${ledRowsHtml(v, line, 'virt')}
     <div class="m3-row mut">${ref ? `기준 = LED STEP 부품 ${ref.part + 1} — ` : ''}기준 LED 의 몸체·발광점을 관측 라인을 따라 복사 — 원래 STEP 은 그대로</div>` : ''}`;
 }
-// LED 노드: 인식 상태 · (LED STEP) 배치 · 배광 · 지향각 · 발광면 크기 · 광속(lm/개, 0 = 상대값) · PCB 색
-// ui = { pick, ledInfo, line?, lay?(stepLayout 결과 — 실제 배치·err) }, h = { onLedSpec(key,val), onSolder(v), onPick(mode|null), onStepVirtual(v|null) }
-export function renderLedProps(el, m, ui, h) {
-  const L = m.light;
-  if (L.kind === 'none') { el.innerHTML = '<div class="m3-h">속성 · LED</div><div class="mut">광원 노드에서 방식을 먼저 고르세요</div>'; return; }
-  const st = L.step, v = L.kind === 'step' ? st?.virtual : null, lay = ui.lay ?? null;
+// LED 노드 본문(순수 HTML): 인식 상태 · (LED STEP) 배치 · 배광 · 지향각 · 발광면 크기 · 광속(lm/개, 0 = 상대값) · PCB 색
+// adv = LED 속성 창의 '배치·인식 (고급)' 구역 — 배치·배광·광속은 창 위쪽에 있으므로 뺀다
+function ledNodeBodyHtml(m, ui, adv = false) {
+  const L = m.light, st = L.step, v = L.kind === 'step' ? st?.virtual : null, lay = ui.lay ?? null;
   const nLed = (st?.leds ?? []).filter((i) => !(st.excluded ?? []).includes(i)).length;
   const failed = !!v && !lay?.virtual && (!!lay?.err || !!ui.line);   // 라인이 있는데 원래 배치로 돌아감(오류·메쉬 없음)
   const virtTxt = !v ? '' : lay?.virtual ? ` · 가상 배치 ${lay.leds.length}개` : failed ? ` · <span class="warn">가상 배치 실패 — 원래 ${nLed}개로 계산</span>` : ` · 가상 배치 ${rowsTxt(v)} <span class="mut">(관측 라인 대기)</span>`;
   const status = L.kind === 'step'
     ? (st?.emitters?.length ? `LED ${st.leds.length}개 인식${st.excluded?.length ? ` · 제외 ${st.excluded.length}개` : ''}${virtTxt}` : `<span class="mut">LED 발광면을 아직 지정하지 않음</span>${virtTxt}`)
     : `직접 배치 ${rowsTxt(L.manual)}`;
-  el.innerHTML = `<div class="m3-h">속성 · LED</div>
-    <div class="m3-row">${status}</div>
+  return `<div class="m3-row">${status}</div>
     ${failed ? `<div class="m3-row"><span class="warn">${esc(lay?.err ?? 'LED STEP 메쉬가 없음 — 다시 불러오세요')}</span></div>` : ''}
-    ${L.kind === 'step' && st ? stepLayoutRowHtml(st, ui.line ?? null) : ''}
+    ${!adv && L.kind === 'step' && st ? stepLayoutRowHtml(st, ui.line ?? null) : ''}
     ${L.kind === 'step' && st ? (v ? '<div class="m3-row mut">가상 배치 중에는 발광면·제외 지정을 쓰지 않음(원래 STEP 위치에서 지정)</div>' : `<div class="m3-row">${pickBtn(ui, 'led', 'LED 발광면 클릭')} ${pickBtn(ui, 'ledx', 'LED 제외/포함 클릭')}</div>`) : ''}
     ${ui.ledInfo ? `<div class="m3-row mut">${esc(ui.ledInfo)}</div>` : ''}
-    <div class="m3-row"><label>배광</label><select data-lp-spec="model"><option value="lambertian" ${sel(L.spec.model, 'lambertian')}>램버시안</option><option value="gaussian" ${sel(L.spec.model, 'gaussian')}>가우시안</option></select>
-      지향각<input type="number" min="10" max="170" step="5" value="${L.spec.beam}" data-lp-spec="beam">°</div>
+    ${adv ? '' : `<div class="m3-row"><label>배광</label><select data-lp-spec="model"><option value="lambertian" ${sel(L.spec.model, 'lambertian')}>램버시안</option><option value="gaussian" ${sel(L.spec.model, 'gaussian')}>가우시안</option></select>
+      지향각<input type="number" min="10" max="170" step="5" value="${L.spec.beam}" data-lp-spec="beam">°</div>`}
     <div class="m3-row"><label>발광면</label><input type="number" min="0" step="0.1" value="${L.spec.sizeX}" data-lp-spec="sizeX">×<input type="number" min="0" step="0.1" value="${L.spec.sizeY}" data-lp-spec="sizeY">mm</div>
-    <div class="m3-row"><label>광속</label><input type="number" min="0" step="1" value="${L.spec.fluxLm ?? 0}" data-lp-spec="fluxLm"> lm/개 <span class="mut">0 = 상대값(최대 대비 %)</span></div>
+    ${adv ? '' : `<div class="m3-row"><label>광속</label><input type="number" min="0" step="1" value="${L.spec.fluxLm ?? 0}" data-lp-spec="fluxLm"> lm/개 <span class="mut">0 = 상대값(최대 대비 %)</span></div>`}
     <div class="m3-row"><label>PCB 색</label><select data-lp-solder>${['백색', '녹색', '흑색'].map((c) => `<option ${c === L.solder ? 'selected' : ''}>${c}</option>`).join('')}</select></div>`;
+}
+// LED 고르기 ◀ ▶ (순수 HTML) — n = 선택 번호(0부터) | null, total = LED 수. 선택 없음: ◀ = 마지막, ▶ = 첫 LED
+export function ledNavHtml(n, total) {
+  const p = ledStepSel(n, total, -1), q = ledStepSel(n, total, 1);
+  if (p == null) return '';
+  return `<button type="button" data-lp-ledsel="${p}" title="이전 LED" aria-label="이전 LED">◀</button><button type="button" data-lp-ledsel="${q}" title="다음 LED" aria-label="다음 LED">▶</button>`;
+}
+const n2s = (v) => String(+(+v).toFixed(2));
+// LED 속성 창(순수 HTML, spec m3-cad-ui §4a) — ui.led = { n, total, s, gap(현재 LED→커버 최소 간격, 모르면 NaN), adj:{ds,dz}, excluded, clash:[문구] }, ui.line
+export function ledPanelHtml(m, ui) {
+  const L = m.light, d = ui.led, st = L.kind === 'step' ? L.step : null, man = L.manual, pre = beamPreset(L.spec);
+  const seg = BEAM_PRESETS.map(([a, t]) => `<button type="button" data-lp-beam="${a}" aria-pressed="${pre === a ? 'true' : 'false'}">${t} ${a}°</button>`).join('');
+  const faceP = L.kind === 'manual' && man?.pcb?.kind === 'face', noGap = !Number.isFinite(d.gap);
+  const dis = faceP ? 'PCB 를 기구 면으로 지정해서 높이는 그 면이 정함 — 광원 노드에서 "관측면 아래 깊이" 로 바꾸면 조절 가능' : noGap ? 'LED 앞쪽에서 커버(관측면 부품)를 찾지 못함' : '';
+  const arrange = st ? stepLayoutRowHtml(st, ui.line ?? null)
+    : `<div class="m3-row">개수<input type="number" min="1" step="1" value="${man.count}" data-lp-man="count" aria-label="LED 개수"> 피치<input type="number" min="0" step="0.5" value="${man.pitch}" data-lp-man="pitch" aria-label="LED 피치 mm">mm <span class="mut">(0 = 균등)</span></div>${ledRowsHtml(man, ui.line ?? null, 'man')}`;
+  const adjOn = !!(d.adj?.ds || d.adj?.dz), canEx = !!st && !st.virtual;
+  return `<div class="m3-h m3-title m3-ledh"><span>LED ${d.n + 1} · ${d.total}개 중 · 라인 위치 ${num(d.s, 1)} mm</span><span class="m3-ledsel">${ledNavHtml(d.n, d.total)}<button type="button" data-lp-ledsel="" title="LED 선택 해제(Esc)" aria-label="LED 선택 해제">✕</button></span></div>
+    <div class="m3-card"><div class="m3-sub">배광 <span class="mut">(모든 LED 공통)</span></div>
+      <div class="m3-seg m3-seg3" role="group" aria-label="배광">${seg}</div>
+      <div class="m3-row">직접 입력 <input type="number" min="10" max="170" step="5" data-lp-beamc value="${pre === 'custom' ? L.spec.beam : ''}" aria-label="빛이 퍼지는 각도 °">° <span class="mut">빛이 퍼지는 각도(밝기 절반 기준)</span></div></div>
+    <div class="m3-card"><div class="m3-sub">밝기 <span class="mut">(모든 LED 공통)</span></div>
+      <div class="m3-row">광속 <input type="number" min="0" step="1" value="${L.spec.fluxLm ?? 0}" data-lp-spec="fluxLm" aria-label="LED 1개 광속 lm"> lm/개 <span class="mut">0 = 상대값(최대 대비 %)</span></div></div>
+    <div class="m3-card"><div class="m3-sub">위치 — 전체 LED</div>
+      <div class="m3-row">커버까지 거리 <input type="number" min="0" step="0.1" value="${numIn(d.gap, 1)}" data-lp-dist${dis ? ' disabled' : ''} aria-label="LED 에서 커버까지 거리 mm"> mm <span class="mut">${dis || '가장 가까운 LED 기준 · 바꾸면 모든 LED 높이를 함께 옮김'}</span></div>
+      ${arrange}</div>
+    <div class="m3-card"><div class="m3-sub">위치 — 이 LED만</div>
+      <div class="m3-row">라인 방향 <input type="number" step="0.5" value="${n2s(d.adj?.ds ?? 0)}" data-lp-adj="ds" aria-label="이 LED 라인 방향 이동 mm"> mm 높이 <input type="number" step="0.1" value="${n2s(d.adj?.dz ?? 0)}" data-lp-adj="dz" aria-label="이 LED 높이 이동 mm"> mm ${adjOn ? '<button type="button" data-lp-adjreset>원래대로</button>' : ''}</div>
+      <div class="m3-row mut">라인 방향 + = 라인 진행 쪽, 높이 + = 커버 쪽 · 배치(개수·피치·열)를 바꾸면 지워짐</div>
+      ${canEx ? `<div class="m3-row"><button type="button" data-lp-ledx>${d.excluded ? '이 LED 포함' : '이 LED 제외'}</button> <span class="mut">${d.excluded ? '지금 빛을 내지 않음(제외됨)' : '제외하면 빛을 내지 않음'}</span></div>` : ''}
+      ${(d.clash ?? []).map((t) => `<div class="m3-clash" role="alert">${esc(t)}</div>`).join('')}</div>
+    ${secHtml('ledadv', '배치·인식 (고급)', '', ledNodeBodyHtml(m, ui, true))}`;
+}
+// 직접 배치 입력 연결(광원 노드·LED 속성 창 공용)
+const wireManual = (el, h) => on(el, '[data-lp-man]', 'change', (x) => { const k = x.dataset.lpMan; if (k === 'pcbKind' || k === 'side') h.onManual(k, x.value); else if (k === 'rows') h.onManual(k, +x.value); else { const v = readNum(x); if (v != null) h.onManual(k, v); } });
+// LED 노드: ui.led 가 있으면 LED 속성 창(선택한 LED), 없으면 노드 내용 + LED 고르기 ◀ ▶
+// ui = { pick, ledInfo, line?, lay?(stepLayout 결과 — 실제 배치·err), led?, ledTotal? }
+// h = { onLedSpec(key,val), onSolder(v), onPick(mode|null), onStepVirtual(v|null), onManual(key,val), onLedSel(n|null), onLedBeam(°), onLedDist(mm), onLedAdjust(n, {ds,dz}|null), onLedExclude(n) }
+export function renderLedProps(el, m, ui, h) {
+  const L = m.light;
+  if (L.kind === 'none') { el.innerHTML = '<div class="m3-h">속성 · LED</div><div class="mut">광원 노드에서 방식을 먼저 고르세요</div>'; return; }
+  const st = L.step, v = L.kind === 'step' ? st?.virtual : null, d = ui.led ?? null;
+  const nLed = (st?.leds ?? []).filter((i) => !(st.excluded ?? []).includes(i)).length;
+  const nav = ledNavHtml(null, ui.ledTotal ?? 0);
+  el.innerHTML = d ? ledPanelHtml(m, ui) : `<div class="m3-h">속성 · LED</div>
+    ${nav ? `<div class="m3-row">LED 고르기 <span class="m3-ledsel">${nav}</span> <span class="mut">3D 에서 LED·빛 원뿔을 클릭해도 됩니다</span></div>` : ''}
+    ${ledNodeBodyHtml(m, ui)}`;
+  wireSections(el);
   wirePick(el, ui, h);
   on(el, '[data-lp-spec]', 'change', (x) => {
     const k = x.dataset.lpSpec;
     if (k === 'model') { h.onLedSpec(k, x.value); return; }
-    const v = readNum(x);
-    if (v != null) h.onLedSpec(k, v); else if (k === 'fluxLm') h.onLedSpec(k, 0);   // 광속 빈칸 = 0(상대값)
+    const val = readNum(x);
+    if (val != null) h.onLedSpec(k, val); else if (k === 'fluxLm') h.onLedSpec(k, 0);   // 광속 빈칸 = 0(상대값)
   });
   on(el, '[data-lp-solder]', 'change', (x) => h.onSolder(x.value));
   // 배치 전환: 처음 가상으로 = 현재 LED 수·피치 0(균등)
   on(el, '[data-lp-vmode]', 'change', (x) => { if (!x.checked) return; if (x.value === 'virt') { if (!v) h.onStepVirtual(clampVirtual({ count: Math.max(1, nLed), pitch: 0 }, ui.line ?? null)); } else if (v) h.onStepVirtual(null); });
   on(el, '[data-lp-virt]', 'change', (x) => { const n = x.dataset.lpVirt === 'rows' ? +x.value : readNum(x); if (n != null && v) h.onStepVirtual(clampVirtual({ ...v, [x.dataset.lpVirt]: n }, ui.line ?? null)); });
   on(el, '[data-lp-vorig]', 'click', () => h.onStepVirtual(null));
+  wireManual(el, h);
+  on(el, '[data-lp-ledsel]', 'click', (x) => h.onLedSel?.(x.dataset.lpLedsel === '' ? null : +x.dataset.lpLedsel));
+  on(el, '[data-lp-beam]', 'click', (x) => h.onLedBeam?.(+x.dataset.lpBeam));
+  on(el, '[data-lp-beamc]', 'change', (x) => { const a = readNum(x); if (a != null) h.onLedBeam?.(a); });
+  on(el, '[data-lp-dist]', 'change', (x) => { const g = readNum(x); if (g != null) h.onLedDist?.(g); });
+  if (d) {
+    on(el, '[data-lp-adj]', 'change', () => { const g = (k) => readNum(el.querySelector(`[data-lp-adj="${k}"]`)) ?? 0; h.onLedAdjust?.(d.n, { ds: g('ds'), dz: g('dz') }); });
+    on(el, '[data-lp-adjreset]', 'click', () => h.onLedAdjust?.(d.n, null));
+    on(el, '[data-lp-ledx]', 'click', () => h.onLedExclude?.(d.n));
+  }
 }
 
 // 관측면 노드: 면 클릭(추가/제거) · 라인 인식 결과 · 관측 방향 · 원뿔 · 집계 격자 · 가장자리 제외

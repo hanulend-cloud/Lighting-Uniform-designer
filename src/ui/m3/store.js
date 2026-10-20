@@ -10,6 +10,7 @@ export function initialSession() {
   return {
     node: null,          // 피처 트리 선택 노드 id ('parts' | 'part:i' | 'light' | 'leds' | 'obs' | 'target' | 'contacts')
     sel: null,           // 3D 선택 { part, face } (기구 부품만)
+    ledSel: null,        // 선택한 LED 번호(현재 배치 기준, spec §4a) | null
     pick: null,          // 클릭 모드 'obs' | 'led' | 'ledx' | 'pcb' | null
     line: null, lineErr: '', ledInfo: '', status: '',
     calc: null,          // 점진 계산 snapshot(progressive.js)
