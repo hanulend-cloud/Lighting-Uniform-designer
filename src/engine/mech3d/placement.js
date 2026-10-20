@@ -51,10 +51,12 @@ export function ledAtS(line, s, { side = 'direct', pcb }, rt = null, w = 0) {
 export const wrapS = (line, s) => (line.closed ? ((s % line.length) + line.length) % line.length : Math.max(0, Math.min(line.length, s)));
 // rows 2 → 같은 s 에 w = −δ, +δ 두 개(순서: s 오름차순, 각 s 에서 −δ → +δ). 번호 = 이 순서.
 // adjust = ledAdjust.items(validAdjust) | null — 그 번호의 LED 를 s+ds 에 다시 놓고 관측 방향 d 로 +dz(spec m3-cad-ui §4a)
-export function manualLeds(line, { count, pitch = 0, side = 'direct', pcb, rows = 1, rowGap = 0 }, rt = null, adjust = null) {
+// positions = [{s, w}] 이 있으면(자동설계 ② 배치 Solver 결과) 개수·피치·열 대신 그 위치 그대로
+export function manualLeds(line, { count, pitch = 0, side = 'direct', pcb, rows = 1, rowGap = 0, positions = null }, rt = null, adjust = null) {
   if (pcb.kind === 'depth' && !(pcb.depth > 0)) throw new Error('PCB 깊이는 0 보다 커야 함');
   const ws = rowOffsets(rows, rows === 2 ? clampRowGap(line, rowGap) : 0), d = line.frame.d;
-  return ledSPositions(line, count, pitch).flatMap((s) => ws.map((w) => [s, w])).map(([s, w], i) => {
+  const SW = Array.isArray(positions) && positions.length ? positions.map((q) => [q.s, q.w ?? 0]) : ledSPositions(line, count, pitch).flatMap((s) => ws.map((w) => [s, w]));
+  return SW.map(([s, w], i) => {
     const it = adjust?.[i];
     if (!it || (!it.ds && !it.dz)) return ledAtS(line, s, { side, pcb }, rt, w);
     const e = ledAtS(line, wrapS(line, s + it.ds), { side, pcb }, rt, w);

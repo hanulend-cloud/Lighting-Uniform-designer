@@ -389,13 +389,16 @@ function adBaseMesh(i, ctx) {
 // 형상 후보 메쉬 — 세분은 메모(refinedFor: 후보 27개도 R 3개 → 세분 3번). hDiv = R/hMax(STEP 은 거칠게 3)
 // hBottom = lineVarH(mod) — runtime.applyPartMods 와 같게(평가 형상 = 적용 형상)
 const adShapeMesh = (base, mod, hDiv = 8) => deformPart(refinedFor(base, mod.frame, mod.centers, mod.R, Math.max(0.1, mod.R / hDiv), lineVarH(mod)), mod.frame, heightsFor(base, mod.frame, mod.cell), mod);
+// ② 설계 → LED STEP 배치(step.virtual): Solver 위치 목록이면 { positions }(STEP 편집 배치), 아니면 균등 { count, pitch, rows, rowGap }
+const stepVirtOf = (d, rw) => (d.positions ? { positions: d.positions.map((q) => ({ s: q.s, w: q.w ?? 0, dz: 0 })) } : { count: d.count, pitch: d.pitch, ...rw });
+const samePos = (a, b) => JSON.stringify((a ?? null) && a.map((q) => [q.s, q.w ?? 0])) === JSON.stringify((b ?? null) && b.map((q) => [q.s, q.w ?? 0]));
 // 설계 → (mspec 복사본, 기구 메쉬) — 형상은 후보 메쉬로 바꾼 부품 포함
 function designScene(d, ctx) {
   const M = adClone(ctx.M0), rt = ctx.rt, mp = ctx.mp;
   if (mp != null && d.milky != null) M.parts[mp] = setPartMaterialParam(M.parts[mp], 'milky', d.milky);
   const rw = { rows: d.rows === 2 ? 2 : 1, rowGap: d.rows === 2 ? d.rowGap ?? 0 : 0 };   // 열 배치(spec P4 §2.2b) — d.rows 없음 = 1열
-  if (M.light.kind === 'manual' && d.count != null) Object.assign(M.light.manual, { count: d.count, pitch: d.pitch }, d.rows != null ? rw : {});
-  if (M.light.kind === 'step' && M.light.step && d.count != null && d.stepVirt) M.light.step.virtual = { count: d.count, pitch: d.pitch, ...rw };
+  if (M.light.kind === 'manual' && d.count != null) { Object.assign(M.light.manual, { count: d.count, pitch: d.pitch }, d.rows != null ? rw : {}); if (d.positions) M.light.manual.positions = d.positions; else delete M.light.manual.positions; }
+  if (M.light.kind === 'step' && M.light.step && d.count != null && d.stepVirt) M.light.step.virtual = stepVirtOf(d, rw);   // Solver 위치 목록 = STEP 편집 배치
   if (d.finish) applyFinish(M, d.finish);   // ④ 그 부품 기본 면 처리
   if (d.dz) applyDz(M, d.dz, ctx.line.frame.d);   // ⑤ STEP offset(+발광점) / 직접 배치 깊이 — 가상 배치는 stepLayout 이 offset 을 따름
   let parts = rt.parts;
@@ -573,9 +576,9 @@ function adApply() {
   const M = A.store.mspec, mp = r.ctx.mp, Lm = M.light.manual;
   const milkyCh = mp != null && d.milky != null && d.milky !== M.parts[mp].material.milky;
   const rw = { rows: d.rows === 2 ? 2 : 1, rowGap: d.rows === 2 ? d.rowGap ?? 0 : 0 }, rowsCh = (o) => (o?.rows === 2 ? 2 : 1) !== rw.rows || (rw.rows === 2 && o.rowGap !== rw.rowGap);   // 열 배치도 비교
-  const lightCh = !!r.stages?.leds && M.light.kind === 'manual' && d.count != null && (d.count !== Lm.count || d.pitch !== Lm.pitch || rowsCh(Lm));
+  const lightCh = !!r.stages?.leds && M.light.kind === 'manual' && d.count != null && (d.count !== Lm.count || d.pitch !== Lm.pitch || rowsCh(Lm) || !samePos(d.positions, Lm.positions));
   const sv = M.light.kind === 'step' ? M.light.step?.virtual ?? null : null;   // LED STEP: 가상 배치로 바뀌었고 이전과 다르면
-  const stepCh = !!r.stages?.leds && M.light.kind === 'step' && !!M.light.step && d.count != null && !!d.stepVirt && (!sv || sv.count !== d.count || sv.pitch !== d.pitch || rowsCh(sv));
+  const stepCh = !!r.stages?.leds && M.light.kind === 'step' && !!M.light.step && d.count != null && !!d.stepVirt && (!sv || (d.positions ? !samePos(d.positions, sv.positions) : sv.count !== d.count || sv.pitch !== d.pitch || rowsCh(sv)));
   const mod = d.shape ? adPreview().M.parts[d.shape.part].shapeMod : null;
   const fp = d.finish?.part, pf = fp != null ? M.parts[fp]?.finish : null, pc = fp != null ? M.parts[fp]?.coating ?? null : null;
   const finCh = fp != null && !(pf?.kind === d.finish.kind && (pf?.R ?? null) === (d.finish.R ?? null) && pc === (d.finish.coating ?? null));   // ④ 면 처리(특수 처리 표시 포함)가 다르면
@@ -585,8 +588,8 @@ function adApply() {
   st.result = null; A.meshShown = null;
   if (undo.milky || undo.manual || undo.stepVirt || undo.shape || undo.finish || undo.dz) st.undo = undo;
   if (milkyCh) A.store.update('material', (m) => { m.parts[mp] = setPartMaterialParam(m.parts[mp], 'milky', d.milky); });
-  if (lightCh) A.store.update('light', (m) => { Object.assign(m.light.manual, { count: d.count, pitch: d.pitch }, rw); });
-  if (stepCh) A.store.update('light', (m, x) => { m.light.step.virtual = { count: d.count, pitch: d.pitch, ...rw }; if (x.pick === 'led' || x.pick === 'ledx') x.pick = null; });   // 가상 중엔 발광면·제외 클릭 끔
+  if (lightCh) A.store.update('light', (m) => { Object.assign(m.light.manual, { count: d.count, pitch: d.pitch }, rw); if (d.positions) m.light.manual.positions = adClone(d.positions); else delete m.light.manual.positions; });
+  if (stepCh) A.store.update('light', (m, x) => { m.light.step.virtual = stepVirtOf(d, rw); if (x.pick === 'led' || x.pick === 'ledx') x.pick = null; });   // 가상 중엔 발광면·제외 클릭 끔
   if (mod) A.store.update('material', (m) => { m.parts[d.shape.part].shapeMod = mod; applyPartMods(m.parts); m.contacts = redetectContacts(m.contacts); });
   if (finCh) A.store.update('material', (m) => { applyFinish(m, d.finish); });
   if (dzCh) A.store.update('light', (m) => { applyDz(m, d.dz, r.ctx.line.frame.d); });   // STEP: 발광점도 같은 이동(재인식과 같음)
@@ -754,6 +757,7 @@ function propHandlers() {
       else if (key === 'rows') { Lm.rows = v === 2 ? 2 : 1; if (Lm.rows === 2 && !(Lm.rowGap > 0)) Lm.rowGap = defaultRowGap(x.line); }   // 처음 2열 = 0.27·W
       else if (key === 'rowGap') { const g = x.line ? Math.floor(clampRowGap(x.line, v) * 10 + 1e-9) / 10 : Math.max(0, v); Lm.rowGap = g; if (g !== v) x.status = `열 간격 보정: ±${g}mm(관측 폭 안으로)`; }
       else Lm[key] = key === 'count' ? Math.max(1, Math.round(v)) : v;
+      if (['count', 'pitch', 'rows', 'rowGap'].includes(key)) delete Lm.positions;   // 손으로 고치면 Solver 위치 목록은 버림
     }),
     onSolder: (v) => st.update('light', (m) => { m.light.solder = v; }),
     onLedSpec: (key, v) => st.update(key === 'fluxLm' ? 'target' : 'light', (m) => { m.light.spec[key] = v; }),   // 광속은 휘도 환산만 — 재계산 없음

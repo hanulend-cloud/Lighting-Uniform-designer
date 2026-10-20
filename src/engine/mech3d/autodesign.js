@@ -3,7 +3,8 @@
 // io.milkyRows(d, ms, { precise }) — precise = 경계가 든 창의 재추적(광자 많이). 결과 { feasible, best(design), steps:[{stage, …}], reason, verified, current(현재안 io.verify), cancelled }
 import { milkyAxis } from './reweight.js';
 import { pickMilky, margin } from './milky-search.js';
-import { searchLeds, searchLeds2 } from './basis.js';
+import { searchLeds } from './basis.js';
+import { solveLayout, layoutText } from './layout-solver.js';
 import { gridCandidates } from './shape-opt.js';
 import { gradeOf, heightCandidates } from './housing-led.js';
 
@@ -31,7 +32,7 @@ const rowsOf = (x) => (x?.rows === 2 ? 2 : 1), gapOf = (x) => (rowsOf(x) === 2 ?
 export const totalLeds = (x) => (x?.count ?? 0) * rowsOf(x);
 const sameFinish = (f, g) => (!f && !g) || (!!f && !!g && f.part === g.part && f.kind === g.kind && (f.R ?? null) === (g.R ?? null));
 export const sameDesign = (a, b) => ['count', 'pitch', 'milky'].every((k) => (a?.[k] ?? null) === (b?.[k] ?? null)) && !!a?.stepVirt === !!b?.stepVirt && JSON.stringify(a?.shape ?? null) === JSON.stringify(b?.shape ?? null)
-  && rowsOf(a) === rowsOf(b) && Math.abs(gapOf(a) - gapOf(b)) < 1e-6
+  && rowsOf(a) === rowsOf(b) && Math.abs(gapOf(a) - gapOf(b)) < 1e-6 && JSON.stringify(a?.positions ?? null) === JSON.stringify(b?.positions ?? null)
   && Math.abs((a?.dz ?? 0) - (b?.dz ?? 0)) < 1e-6 && sameFinish(a?.finish ?? null, b?.finish ?? null);
 
 // 단계적 압축: schedule = [[남길 수(첫 단계는 전체), 광자 수, 후보당 시간 제한 ms?]…]. 각 단계 결과 점수로 다음 단계 후보를 줄임
@@ -241,11 +242,14 @@ export async function runAutoDesign(cfg, io) {
     if (stop()) return { cancelled: true };
     // 후보가 {s, w} 면 (s, w) 격자 — 열 수·열 간격까지(searchLeds2, nMax = 총수 상한), 숫자면 1열(기존)
     const two = typeof B.cand[0] === 'object', a = { G: cfg.G, obs, line: cfg.line, cand: B.cand, maps: B.maps, pitchRange: cfg.pitchRange ?? null, nMax: cfg.nMax, emitted: B.emitted };
-    const r = two ? searchLeds2({ ...a, gaps: B.gaps ?? [], spare: 1 }) : searchLeds({ ...a, spare: 1 });   // spare: 다음 총수까지 tried 에(검증 실패 시 대안)
+    // (s, w) 격자 = 배치 Solver(같은 피치+끝 여백 → 끝 압축 → 자유 위치, spec 2026-10-20 led-layout-solver) · 숫자 격자 = 1열 기존 탐색
+    const r = two ? solveLayout({ ...a, gaps: B.gaps ?? [], timeBudget: cfg.layoutBudget ?? 20000 }) : searchLeds({ ...a, spare: 1 });
     steps.push({ stage: 'leds', ...r });
-    const lay = (e) => ({ count: e.n, pitch: e.pitch, rows: two ? e.rows : 1, rowGap: two ? e.rowGap : 0 });
+    const lay = (e) => two
+      ? { count: e.n, pitch: e.pitch, rows: e.rows, rowGap: e.rowGap, positions: e.positions?.length ? e.positions : null, layoutKind: e.kind, layoutText: e.positions?.length ? layoutText(e) : null }
+      : { count: e.n, pitch: e.pitch, rows: 1, rowGap: 0, positions: null, layoutKind: null, layoutText: null };
     d = { ...d, ...lay(r), stepVirt: !!cfg.stepMode };
-    ledAlts = ledAlternatives(r, two).map(lay);   // cfg.stepMode = LED STEP(② 는 가상 배치를 점수 매김)
+    ledAlts = (two ? r.alts ?? [] : ledAlternatives(r, false)).map(lay);   // cfg.stepMode = LED STEP(② 는 기준 LED 복사 배치를 점수 매김)
     if (!r.feasible) { feasible = false; reason = r.reason; }
   }
   const evalV = (cands, N, ms) => io.evalVariants(d, cands, N, ms), uText = (s) => `길이 U ${s.Ulen.toFixed(2)}${s.Uwid == null ? '' : ` · 폭 U ${s.Uwid.toFixed(2)}`}`;

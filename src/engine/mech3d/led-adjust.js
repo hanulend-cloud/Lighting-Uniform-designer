@@ -9,7 +9,7 @@ export function layoutKeyOf(light) {
   const k = light?.kind ?? 'none', rg = (o) => (o?.rows === 2 ? { rows: 2, rowGap: Number(o.rowGap) || 0 } : { rows: 1, rowGap: 0 });
   if (k === 'manual') {
     const m = light.manual ?? {}, p = m.pcb ?? {};
-    return JSON.stringify({ kind: k, count: m.count ?? null, pitch: Number(m.pitch) || 0, ...rg(m), pcb: p.kind === 'face' ? { kind: 'face', part: p.part, face: p.face } : { kind: p.kind ?? null } });
+    return JSON.stringify({ kind: k, count: m.count ?? null, pitch: Number(m.pitch) || 0, ...rg(m), ...(Array.isArray(m.positions) ? { positions: m.positions.map((q) => [q.s, q.w ?? 0].map((x) => +(+x).toFixed(3))) } : {}), pcb: p.kind === 'face' ? { kind: 'face', part: p.part, face: p.face } : { kind: p.kind ?? null } });
   }
   if (k === 'step') {
     const s = light.step ?? {}, v = s.virtual;
