@@ -7,7 +7,7 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
 const KIND_COLOR = { milky: 0xdfe9f2, clear: 0x8cc8ff, whiteTrans: 0xf2efe6, opaque: 0x8a909c, pcb: 0x2f6b3a, led: 0xffcf3f };
 const KIND_OPACITY = { milky: 0.85, clear: 0.35, whiteTrans: 0.95, opaque: 1, pcb: 1, led: 1 };
-const LED_SEL = new THREE.Color(0xff7a1a), CONE_COLOR = 0xffcf3f, CONE_SEL = 0xff7a1a, CONE_SEG = 16;   // 선택 LED 몸체·빛 원뿔 = 주황
+const LED_SEL = new THREE.Color(0xff7a1a), CONE_COLOR = 0x3fd0ff, CONE_SEL = 0xff7a1a, CONE_SEG = 16;   // 선택 LED 몸체·빛 원뿔 = 주황, 나머지 원뿔 = 하늘색(광량 색지도의 노랑~빨강과 겹치지 않게)
 const SEL_TINT = new THREE.Color(0xffb020), FACE_COLOR = new THREE.Color(0xff5a36), OBS_COLOR = new THREE.Color(0x29d3e0);
 // 보기 방향(카메라 쪽). 평면은 z 축과 아주 조금 어긋나게 — up(z) 을 바꾸지 않으려고(OrbitControls 회전축은 생성 때 up 으로 고정)
 const VIEW_DIR = { top: [0, -1e-3, 1], front: [0, -1, 0], side: [1, 0, 0], iso: [0.7, -1.1, 0.9] };
@@ -179,7 +179,7 @@ export function createMech3dView(canvas, { onPick, gizmo = null }) {
       ln.renderOrder = 2; overlay.add(ln);
     }
     const cs = over.cones ?? [], on = cs.filter((c) => c.n === over.coneSel), off = cs.filter((c) => c.n !== over.coneSel);
-    if (off.length) coneMeshes.push(coneMesh(off, CONE_COLOR, 0.25));
+    if (off.length) coneMeshes.push(coneMesh(off, CONE_COLOR, 0.35));
     if (on.length) coneMeshes.push(coneMesh(on, CONE_SEL, 0.5));
     coneMeshes.forEach((m) => overlay.add(m));
     scene.add(overlay);
