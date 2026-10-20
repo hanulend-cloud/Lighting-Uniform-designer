@@ -821,7 +821,7 @@ function importLedStep(file) {
       w.terminate();
       if (m.data.error) { say(`불러오기 실패: ${m.data.error}`); return; }
       if (A?.store !== st) return;
-      setLedMesh(file.name, m.data.parts); saveLedIDB().catch(() => {}); L.resetLedCaches();
+      setLedMesh(file.name, m.data.parts); if (A?.ctx.canSave?.() !== false) saveLedIDB().catch(() => {}); L.resetLedCaches();
       st.update('light', (M, x) => {
         // 같은 이름의 LED STEP 을 다시 불러옴(저장소 비워짐 등) — 저장된 기준 LED·위치 보정·제외·가상 배치로 재인식
         const old = M.light.step;

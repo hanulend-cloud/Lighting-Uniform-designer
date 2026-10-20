@@ -19,6 +19,18 @@
       <button id="btn-mech3d-show" hidden>3D 기구 보기</button>
     </div>
   </header>
+  <!-- 다른 탭에서도 열려 있음(src/ui/tab-lock.js) — 이 탭은 저장하지 않음 -->
+  <div id="tab-lock" class="tab-note" role="alert" hidden>
+    <span>⚠ 이 프로젝트가 다른 탭에서도 열려 있습니다 — 이 탭의 변경은 저장되지 않습니다.</span>
+    <button type="button" data-take>이 탭에서 편집하기</button>
+    <button type="button" data-reload>새로고침</button>
+  </div>
+  <!-- 편집 탭인데 다른 탭이 설정을 바꿈(비정상 — 예: 잠금 이전 버전 탭) -->
+  <div id="tab-changed" class="tab-note" role="status" hidden>
+    <span>다른 탭이 설정을 바꿨습니다 —</span>
+    <button type="button" data-reload>다시 불러오기</button>
+    <button type="button" data-close>닫기</button>
+  </div>
   <!-- 3D 설정은 남았는데 기구 메쉬(IndexedDB)가 사라진 경우 안내 -->
   <div id="m3-pending" role="alert" hidden>
     <span>⚠ 3D 기구 형상 데이터를 찾을 수 없음(브라우저 저장소가 비워짐)<span data-name></span> — [기구 STEP 다시 불러오기] 하면 저장된 3D 설정을 복원합니다</span>

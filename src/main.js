@@ -24,6 +24,7 @@ import { matchesPending, restorePending } from './engine/mech3d/restore.js';
 import { bounds } from './engine/mech3d/mesh.js';
 import { migrateMech3d } from './engine/mech3d/defs.js';
 import * as m3app from './ui/m3/app.js';
+import { createTabLock, openChannel } from './ui/tab-lock.js';
 
 const LS_KEY = 'uds.spec.v11';
 
@@ -192,7 +193,7 @@ function importStep(file) {
       const r = m.data.result;
       spec.body.shape = { source: 'step', name: file.name, flipZ: false, rot: 0 };
       setBodyMesh(file.name, { positions: r.positions, triangles: r.triangles }, spec.body.shape);
-      saveBodyIDB().catch(() => {});
+      tabLock.write('bodyIDB', () => saveBodyIDB().catch(() => {}));   // 읽기 전용 탭은 메쉬도 저장하지 않음
       const note = r.solidCount > 1 ? ` (솔리드 ${r.solidCount}개 중 가장 큰 1개 사용)` : '';
       if (!spec.levels[3].on) { spec.levels[3].on = true; buildLevels($('#levels'), spec, onToggleLevel, onLevelParam); }
       setShapeStatus(el, `불러옴: ${file.name}${note}`);
@@ -216,7 +217,7 @@ function clearShape() {
 let reflectDb = null;   // 반사 소재 DB — 시작 시 불러옴
 function m3ctx() {
   return {
-    mspec: spec.mech3d, persist, dbLists, materialDb, reflectDb: () => reflectDb, l2Table: () => l2State().table, l2Raw, milkyFromMusR,
+    mspec: spec.mech3d, persist, canSave: () => tabLock.canWrite(), dbLists, materialDb, reflectDb: () => reflectDb, l2Table: () => l2State().table, l2Raw, milkyFromMusR,
     onImportMech3d: importMech3d,
     onMaterialDbChanged: () => { solver?.postMessage({ type: 'db', db: dbLists() }); markSoloReset(); },   // 3D 실측 맞춤 대화상자에서 실측소재 DB 가 바뀜 → 평판 solver 도
     onExit: () => { spec.mode = 'flat'; persist(); applyMode(); schedule(); },
@@ -276,7 +277,7 @@ function importMech3d(file) {
           if (ms.light?.step && !getLedMesh()) await loadLedIDB();   // LED STEP 메쉬 — 없으면 mount 의 validateLedStep 이 안내(지정은 유지)
         }
         spec.mech3d = ms; spec.mode = 'mech3d'; spec.mech3dPending = null;
-        saveMech3dIDB().catch(() => {});
+        tabLock.write('mech3dIDB', () => saveMech3dIDB().catch(() => {}));
         persist(); applyMode();
         m3app.setStatus(restored
           ? `복원함: 저장된 3D 설정 — ${file.name} · 부품 ${ms.parts.length}개 · 접촉면 ${ms.contacts.length}개${pend.name && pend.name !== file.name ? ` (저장 이름 ${pend.name})` : ''}`
@@ -643,7 +644,8 @@ function setupZoom() {
 }
 
 // ---- 저장/불러오기 ----
-function persist() { try { localStorage.setItem(LS_KEY, JSON.stringify(spec)); } catch {} }
+// 다른 탭에서 편집 중이면(tabLock 읽기 전용) 쓰지 않는다 — 3D 저장소의 디바운스 저장·flush 도 이 함수를 거친다
+function persist() { tabLock.write('spec', () => { try { localStorage.setItem(LS_KEY, JSON.stringify(spec)); } catch {} }); }
 function load() { try { return JSON.parse(localStorage.getItem(LS_KEY)); } catch { return null; } }
 function exportJson() {
   const a = document.createElement('a');
@@ -723,6 +725,28 @@ function migrate(s) {
 }
 
 // ---- 시작 ----
+// 탭 동시 편집 잠금(src/ui/tab-lock.js): 이미 다른 탭이 열려 있으면 이 탭은 읽기 전용(저장 안 함, 화면 조작·계산은 됨).
+// [이 탭에서 편집하기] → take 알림(다른 탭은 읽기 전용, 예약된 디바운스 저장도 무시됨) → 세션 플래그를 남기고
+// 새로고침해 최신 저장값을 다시 읽은 뒤 편집 탭으로 시작한다(그 사이 연 탭도 시작 시 take 로 읽기 전용).
+const TAKE_FLAG = 'uds.tab.take';
+let takeOnStart = false;
+try { takeOnStart = sessionStorage.getItem(TAKE_FLAG) === '1'; sessionStorage.removeItem(TAKE_FLAG); } catch {}
+const tabLock = createTabLock({
+  channel: openChannel(window), takeOnStart,
+  id: Date.now().toString(36).padStart(10, '0') + '-' + Math.random().toString(36).slice(2, 8),
+  onChange: (role) => { $('#tab-lock').hidden = role !== 'readonly'; if (role !== 'editor') $('#tab-changed').hidden = true; },
+});
+// take 는 새로고침 뒤(takeOnStart)에 알린다 — 여기서 먼저 편집 탭이 되면 pagehide flush 가 이 탭의
+// 오래된 메모리 설정을 써 버리므로, 이 탭은 읽기 전용인 채로 떠난다.
+$('#tab-lock [data-take]').onclick = () => {
+  try { sessionStorage.setItem(TAKE_FLAG, '1'); } catch {}
+  location.reload();
+};
+$('#tab-lock [data-reload]').onclick = () => location.reload();
+$('#tab-changed [data-reload]').onclick = () => location.reload();
+$('#tab-changed [data-close]').onclick = () => { $('#tab-changed').hidden = true; };
+// 편집 탭인데 다른 탭이 설정 키를 바꿈(잠금 이전 버전 탭·비정상 종료 뒤 등) — 막지 않고 안내만
+window.addEventListener('storage', (e) => { if (e.key === LS_KEY && tabLock.canWrite()) $('#tab-changed').hidden = false; });
 // L2 산란 응답표(≈4MB) 로드·자체검증 — 실패해도 앱은 뜨고 L2 결과만 "신뢰 불가"로 표시된다.
 $('#timing').textContent = 'L2 산란 응답표 로드 중…';
 await initL2(browserLoader());
@@ -732,7 +756,7 @@ await initL2(browserLoader());
   let base = [], user = [];
   try { base = (await (await fetch('./data/materials-db.json')).json()).entries ?? []; } catch { base = []; }
   try { user = JSON.parse(localStorage.getItem(MAT_KEY) || '[]'); } catch { user = []; }
-  setMaterialDb(createDb(base, user, (list) => { try { localStorage.setItem(MAT_KEY, JSON.stringify(list)); } catch {} }));
+  setMaterialDb(createDb(base, user, (list) => tabLock.write(MAT_KEY, () => { try { localStorage.setItem(MAT_KEY, JSON.stringify(list)); } catch {} })));
 }
 // 반사 소재 DB(spec P4 §2.3e): 공용(data/reflect-db.json) + 사용자(브라우저 저장) — 3D 모드 ctx.reflectDb()
 {
@@ -740,7 +764,7 @@ await initL2(browserLoader());
   let base = [], user = [];
   try { base = (await (await fetch('./data/reflect-db.json')).json()).entries ?? []; } catch { base = []; }
   try { user = JSON.parse(localStorage.getItem(REFL_KEY) || '[]'); } catch { user = []; }
-  reflectDb = createReflectDb(base, user, (list) => { try { localStorage.setItem(REFL_KEY, JSON.stringify(list)); } catch {} });
+  reflectDb = createReflectDb(base, user, (list) => tabLock.write(REFL_KEY, () => { try { localStorage.setItem(REFL_KEY, JSON.stringify(list)); } catch {} }));
 }
 spec = load() || structuredClone(DEFAULT_SPEC);
 migrate(spec);

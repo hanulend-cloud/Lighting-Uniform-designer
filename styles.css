@@ -436,5 +436,11 @@ canvas.m3-g { width: 100%; display: block; border-radius: 4px; background: #fafb
 #m3-pending { flex: 0 0 auto; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 8px 16px;
   background: #fff4d6; color: #5c4300; border-bottom: 1px solid #f0c75e; font-size: 13px; }
 #m3-pending[hidden] { display: none; }
+.tab-note { flex: 0 0 auto; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 8px 16px;
+  background: #fde8e8; color: #6b1d1d; border-bottom: 1px solid #f0a0a0; font-size: 13px; }
+#tab-changed { background: #e8f0fd; color: #1d3a6b; border-bottom-color: #a0b8f0; }
+.tab-note[hidden] { display: none; }
+.tab-note button { background: #fff; color: #20262f; border: 1px solid #d3d8e0; border-radius: 6px; padding: 4px 10px; cursor: pointer; font-size: 13px; }
+.tab-note button[data-take] { border-color: #d05050; font-weight: 700; }
 #m3-pending button { background: #fff; color: #20262f; border: 1px solid #d3d8e0; border-radius: 6px; padding: 4px 10px; cursor: pointer; font-size: 13px; }
 #m3-pending button[data-reload] { border-color: #e0a800; font-weight: 700; }
