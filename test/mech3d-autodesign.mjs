@@ -198,6 +198,12 @@ ok(halvingTotal(27) === 35 && halvingTotal(4) === 10 && halvingTotal(1) === 3, '
     verify: async (d) => { calls.push(d); return { stats: st(0.9, 0.9), eff: 0.5 }; }, progress() {}, cancelled: () => false };
   const r = await runAutoDesign({ stages: { height: true, housing: true }, obs, current: { milky: 3, count: 5, pitch: 0, finish: null, dz: 0 }, heightRange: [-1, 1], finishCands: fins, housingPart: 1 }, io);
   ok(r.unchanged && r.best.finish === null && r.best.dz === 0 && calls.length === 1, `현재 후보 선택 → 현재안 그대로 (verify ${calls.length}회)`); }
+{ // ④ 특수 처리 후보(spec P4 §2.3d): 통과하는 유일한 후보가 특수 → best.finish.coating = id
+  const fins = [{ kind: 'whiteDiffuse', R: 0.85, current: true }, { kind: 'whiteDiffuse', R: 0.9 }, { kind: 'whiteDiffuse', R: 0.97, special: true, coating: 'coat-white' }];
+  const io = { evalVariants: async (d, cs) => cs.map((c) => ({ cand: c, ok: true, stats: st(c.finish.R > 0.95 ? 0.9 : 0.6, 0.9), eff: 0.5 })),
+    verify: async (d) => ({ stats: st(d.finish?.R > 0.95 ? 0.9 : 0.6, 0.9), eff: 0.5 }), progress() {}, cancelled: () => false };
+  const r = await runAutoDesign({ stages: { housing: true }, obs, current: { milky: 3, count: 5, pitch: 0, finish: null }, finishCands: fins, housingPart: 1 }, io);
+  ok(r.best.finish?.coating === 'coat-white' && r.best.finish.R === 0.97 && !('special' in r.best.finish), `특수 후보 선택 → coating 전달: ${JSON.stringify(r.best.finish)}`); }
 { // 가드: ⑤ 가 dz 를 골랐지만 검증에서 이득 없음 → 현재안 유지
   const io = { evalVariants: async (d, cs) => cs.map((c) => ({ cand: c, ok: true, stats: st(0.7 + c.dz / 100, 0.9), eff: 0.5 })),
     verify: async (d) => ({ stats: st(0.7, 0.9), eff: 0.5 }), progress() {}, cancelled: () => false };

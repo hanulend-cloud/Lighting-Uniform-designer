@@ -1,7 +1,7 @@
 // 자동설계 카드 — spec P4 §3. 체크 5개(①~⑤) · ③·④ 대상 부품 · [실행]/[중지] · 진행 · 현재|최적 비교 · [적용][취소][되돌리기][STEP]
 import { stepRefEmitter } from '../../engine/mech3d/virtual-leds.js';   // 가상 배치 기준 LED(엔진과 같은 규칙)
 import { setPartFinish } from '../../engine/mech3d/materials.js';
-import { FINISH_GRADES, gradeOf } from '../../engine/mech3d/housing-led.js';
+import { FINISH_GRADES, gradeOf, DEFAULT_FINISH_CATALOG } from '../../engine/mech3d/housing-led.js';
 const esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 const f2 = (v) => (Number.isFinite(v) ? v.toFixed(2) : '–');
 
@@ -12,9 +12,10 @@ export const capDefault = (sel, avail, curMilky = 0) => (sel.leds && avail.leds?
 // ④ 보완 계산 후보 — 현재보다 높은 등급 중 가장 낮은 것(없으면 null)
 // ④ 보완 안내용 면 처리: 같은 종류(없으면 백색)에서 반사율 +0.10 이상 중 가장 낮은 것, 없으면 그 종류 최고(현재보다 높을 때만).
 //   실측: 백색 85 → 95 % 가 길이·폭 모두 개선, 경면 88 % 는 폭 U 를 낮춤 — 종류를 바꾸지 않는다
-export const nextFinish = (cur) => {
+//   pool = 고를 수 있는 등급(소재 상한 안 · 특수 허용 시 특수 포함 — finishCandidatesFor), 기본 = 전체 등급
+export const nextFinish = (cur, pool = FINISH_GRADES) => {
   const kind = cur?.kind === 'metal' ? 'metal' : 'whiteDiffuse', R = cur?.R ?? 0;
-  const same = FINISH_GRADES.filter((x) => x.kind === kind && x.R > R + 1e-9).sort((a, b) => a.R - b.R);
+  const same = pool.filter((x) => x.kind === kind && x.R > R + 1e-9).sort((a, b) => a.R - b.R);
   return same.find((x) => x.R >= R + 0.1 - 1e-9) ?? same.at(-1) ?? null;
 };
 // 전체 진행률 — 단계 무게(현재안 5 · ② 35 · ⑤ 20 · ④ 20 · ① 35 · ③ 50 · 최종 10)를 켠 단계로 정규화. 순서 = 실행 순서
@@ -79,7 +80,9 @@ export function defaultHousingPart(M, boxes) {
 }
 // 면 처리 문구 — 백색 85% · 경면 88% · 광택 · 흑색 5%
 const FIN_NAME = { whiteDiffuse: '백색', metal: '경면', black: '흑색', gloss: '광택' };
-export const finishText = (f) => (!f ? '–' : `${FIN_NAME[f.kind] ?? f.kind}${f.R != null ? ` ${Math.round(f.R * 100)}%` : ''}`);
+// coating = 특수 처리 id → ' (특수: 고반사 도장)'
+const coatName = (id) => DEFAULT_FINISH_CATALOG.find((e) => e.id === id && e.special)?.short;
+export const finishText = (f) => (!f ? '–' : `${FIN_NAME[f.kind] ?? f.kind}${f.R != null ? ` ${Math.round(f.R * 100)}%` : ''}${coatName(f.coating) ? ` (특수: ${coatName(f.coating)})` : ''}`);
 // ⑤ dz 적용(M = spec.mech3d, 바꿔서 돌려줌) — LED STEP: offset += dz·d, 저장된 발광점(월드 좌표)도 같이 이동 · 직접 배치(깊이): depth −= dz · 기구 면 PCB: 그대로
 export function applyDz(M, dz, d) {
   if (!dz) return M;
@@ -91,9 +94,12 @@ export function applyDz(M, dz, d) {
   } else if (Lt.kind === 'manual' && Lt.manual?.pcb?.kind === 'depth') Lt.manual.pcb.depth -= dz;
   return M;
 }
-// ④ 면 처리 적용 — 그 부품의 기본 면 처리만 교체(면별 덮어쓰기 유지)
+// ④ 면 처리 적용 — 그 부품의 기본 면 처리만 교체(면별 덮어쓰기 유지) · 특수 처리면 부품 coating = id, 아니면 해제
 export function applyFinish(M, f) {
-  if (f) M.parts[f.part] = setPartFinish(M.parts[f.part], null, { kind: f.kind, ...(f.R != null ? { R: f.R } : {}) });
+  if (!f) return M;
+  const q = setPartFinish(M.parts[f.part], null, { kind: f.kind, ...(f.R != null ? { R: f.R } : {}) });
+  if (f.coating) q.coating = f.coating; else delete q.coating;
+  M.parts[f.part] = q;
   return M;
 }
 const ITEMS = [['milky', '① Milky 레벨'], ['leds', '② LED 개수·피치'], ['shape', '③ LGP 형상'], ['housing', '④ 케이스 면 처리'], ['height', '⑤ LED 높이(LED–커버 거리)']];
@@ -102,7 +108,8 @@ const progHtml = (running) => {
   return `<div class="m3-ad-prog"><div class="bar" role="progressbar" aria-label="자동설계 진행" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${pct}"><i style="width:${pct}%"></i></div><span>${esc(running.text)}</span> <button type="button" data-ad="stop">중지</button></div>`;
 };
 // noLine = 관측 라인 없음(실행 불가) · milkyPart = ① 대상 부품 번호. 실행 중에는 입력을 모두 비활성
-export function autoCardHtml({ avail, sel, running, names = [], canRevert = false, noLine = false, milkyPart = null }) {
+// housingMat = ④ 대상 부품의 반사 소재 { name, max } | null(미지정)
+export function autoCardHtml({ avail, sel, running, names = [], canRevert = false, noLine = false, milkyPart = null, housingMat = null }) {
   const dis = running ? ' disabled' : '', pname = (i) => esc(names[i] ?? `부품 ${i + 1}`);
   const row = ([k, label]) => {
     const a = avail[k];
@@ -112,7 +119,8 @@ export function autoCardHtml({ avail, sel, running, names = [], canRevert = fals
   const mTarget = sel.milky && avail.milky.ok && milkyPart != null ? `<div class="m3-row mut">① 대상: ${pname(milkyPart)}</div>` : '';
   const cap = (sel.milky && avail.milky.ok) || (sel.leds && avail.leds.ok) ? `<div class="m3-row">Milky 상한 <input type="number" min="0.5" max="9.9" step="0.5" value="${sel.milkyMax ?? capDefault(sel, avail)}" data-ad="milkyMax" aria-label="Milky 상한"${dis}> <span class="mut">${sel.leds && avail.leds.ok ? '② 는 이 값(확산 최대)에서 개수를 정하고 ① 이 고름' : '① 은 이 값까지 균일도 최고점을 찾음(투과율은 희생)'}</span></div>` : '';
   const part = avail.shape.ok ? `<div class="m3-row">③ 대상 <select data-ad="shapePart" aria-label="③ 대상 부품"${dis}>${avail.shape.parts.map((i) => `<option value="${i}"${i === sel.shapePart ? ' selected' : ''}>${pname(i)}</option>`).join('')}</select></div>` : '';
-  const hPart = avail.housing?.ok && sel.housing ? `<div class="m3-row">④ 대상 <select data-ad="housingPart" aria-label="④ 대상 부품"${dis}>${avail.housing.parts.map((i) => `<option value="${i}"${i === sel.housingPart ? ' selected' : ''}>${pname(i)}</option>`).join('')}</select></div>` : '';
+  const hPart = avail.housing?.ok && sel.housing ? `<div class="m3-row">④ 대상 <select data-ad="housingPart" aria-label="④ 대상 부품"${dis}>${avail.housing.parts.map((i) => `<option value="${i}"${i === sel.housingPart ? ' selected' : ''}>${pname(i)}</option>`).join('')}</select> <span class="mut">${housingMat ? `${esc(housingMat.name)} · 상한 ${Math.round(housingMat.max * 100)}%` : '반사 소재 미지정 — 등급 전체'}</span></div>
+    <label class="m3-ad-item"><input type="checkbox" data-ad="housingSpecial"${sel.housingSpecial ? ' checked' : ''}${dis}> 특수 표면처리 허용 (고반사 도장·시트·증착)</label>` : '';
   const any = ITEMS.some(([k]) => sel[k] && avail[k]?.ok);
   const run = `<button type="button" data-ad="run"${!any || noLine ? ' disabled' : ''}${noLine ? ' title="관측 라인이 없음"' : ''}>▶ 실행</button>`;
   return `<div class="m3-h">자동설계 <span class="mut">체크한 항목만 바꿈 · 순서 ②→⑤→④→①→③</span></div>${ITEMS.map(row).join('')}${mTarget}${cap}${part}${hPart}

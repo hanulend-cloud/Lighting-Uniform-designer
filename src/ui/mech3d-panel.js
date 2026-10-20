@@ -2,17 +2,19 @@
 // 상태는 갖지 않는다: m = spec.mech3d, sel = { part, face|null }, dbList = 실측소재 DB 목록, h = 이벤트 처리기.
 import { PART_KINDS, FINISH_KINDS, RESIN_N, resolveFinish } from '../engine/mech3d/materials.js';
 import { bounds, meshVolume } from '../engine/mech3d/mesh.js';
+import { DEFAULT_FINISH_CATALOG, finishLimit } from '../engine/mech3d/housing-led.js';
 
 const esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
 const XF_LOCK = new WeakMap();   // 패널 요소 → 비율 고정 체크(세션 동안)
 const pct = (x) => Math.round(x * 1000) / 10;
 const opts = (obj, cur) => Object.entries(obj).map(([k, v]) => `<option value="${k}" ${k === cur ? 'selected' : ''}>${esc(v.label ?? k)}</option>`).join('');
 
-function finishRow(f, scope, allowInherit) {
-  const k = f ? FINISH_KINDS[f.kind] : null;
+// lim = 반사율 상한 { kind, max, entry } | null — 같은 종류일 때 R 칸 옆에 표시
+function finishRow(f, scope, allowInherit, lim = null) {
+  const k = f ? FINISH_KINDS[f.kind] : null, limTxt = lim && k?.hasR && f.kind === lim.kind ? ` <span class="mut">${lim.entry.special ? '특수 처리' : '소재'} 상한 ${pct(lim.max)}%</span>` : '';
   return `<div class="m3-row"><select data-m3-finish="${scope}">
       ${allowInherit ? `<option value="" ${f ? '' : 'selected'}>부품 기본 따름</option>` : ''}${opts(FINISH_KINDS, f?.kind)}</select>
-    ${k?.hasR ? `반사율 <input type="number" min="0" max="100" step="1" value="${esc(pct(f.R))}" data-m3-finishr="${scope}">%` : ''}</div>`;
+    ${k?.hasR ? `반사율 <input type="number" min="0" max="100" step="1" value="${esc(pct(f.R))}" data-m3-finishr="${scope}">%${limTxt}` : ''}</div>`;
 }
 
 function materialParams(mat, dbList) {
@@ -30,17 +32,25 @@ function materialParams(mat, dbList) {
   }
 }
 
+// 반사 소재(spec P4 §2.3d) — 불투명 부품만. 특수 처리는 자동설계 ④ 에서만(여기선 표시)
+export function reflRowHtml(p, catalog = DEFAULT_FINISH_CATALOG) {
+  if (p.material?.kind !== 'opaque') return '';
+  const coat = catalog.find((e) => e.id === p.coating && e.special);
+  return `<div class="m3-row">반사 소재 <select data-m3-refl aria-label="반사 소재"><option value=""${p.reflMaterial ? '' : ' selected'}>— 미지정 —</option>${catalog.filter((e) => !e.special).map((e) => `<option value="${esc(e.id)}"${e.id === p.reflMaterial ? ' selected' : ''}>${esc(e.name)}</option>`).join('')}</select>${coat ? ` <span class="mut">특수: ${esc(coat.name)}</span>` : ''}</div>`;
+}
+
 function partEditor(p, sel, dbList) {
-  const face = sel.face;
+  const face = sel.face, cat = sel.catalog ?? DEFAULT_FINISH_CATALOG, lim = finishLimit(p, cat);
   return `<div class="m3-edit">
     <div class="m3-sub">${esc(p.name)} — 부품 소재</div>
     <div class="m3-row"><select data-m3-kind>${opts(PART_KINDS, p.material.kind)}</select></div>
     ${materialParams(p.material, dbList)}
     <div class="m3-sub">면 처리 (부품 기본)</div>
-    ${finishRow(p.finish, 'part', false)}
+    ${reflRowHtml(p, cat)}
+    ${finishRow(p.finish, 'part', false, lim)}
     ${xformEditor(p, sel.xfInfo, sel.lock)}${sel.xfMsg ? `<div class="m3-warn" role="status">${esc(sel.xfMsg)}</div>` : ''}
     ${clearanceHtml(sel.clearance)}
-    ${face != null ? `<div class="m3-sub">선택한 면 #${face}${p.faceFinish[face] ? ' · 덮어씀' : ''}</div>${finishRow(p.faceFinish[face] ?? null, 'face', true)}` : '<div class="mut">3D 뷰에서 면을 클릭하면 그 면만 다르게 지정할 수 있습니다</div>'}
+    ${face != null ? `<div class="m3-sub">선택한 면 #${face}${p.faceFinish[face] ? ' · 덮어씀' : ''}</div>${finishRow(p.faceFinish[face] ?? null, 'face', true, lim)}` : '<div class="mut">3D 뷰에서 면을 클릭하면 그 면만 다르게 지정할 수 있습니다</div>'}
   </div>`;
 }
 
@@ -112,7 +122,8 @@ export function partHeaderText(p, info) {
   return `${size.map((v) => v.toFixed(1)).join('×')}mm · ${vol.toFixed(0)} mm³${p.shapeMod ? ' · 형상 변경됨' : ''}`;
 }
 
-// 부품 노드 — sel = { part, face|null }, h = { onKind(part, kind), onMat(part, key, value), onFinish(part, face|null, finish|null) }
+// 부품 노드 — sel = { part, face|null, catalog? }, h = { onKind(part, kind), onMat(part, key, value), onFinish(part, face|null, finish|null), onReflMaterial(part, id|null) }
+// 반사율 상한 자르기는 onFinish 쪽(partFinishEdit)
 export function renderPartProps(el, m, sel0, dbList, h) {
   const sel = { ...sel0, lock: XF_LOCK.get(el.ownerDocument ?? XF_LOCK) ?? false };   // 비율 고정: 기본 꺼짐(한 치수만 바꾸는 경우가 대부분), 켜면 다시 그려도 유지
   const p = m.parts[sel.part];
@@ -142,6 +153,8 @@ export function renderPartProps(el, m, sel0, dbList, h) {
   });
   const rs = el.querySelector('[data-m3-xfreset]');
   if (rs) rs.onclick = () => h.onXform?.(i, null);
+  const refl = el.querySelector('[data-m3-refl]');
+  if (refl) refl.onchange = () => h.onReflMaterial?.(i, refl.value || null);
   el.querySelectorAll('[data-m3-finish]').forEach((x) => {
     x.onchange = () => {
       const face = x.dataset.m3Finish === 'face' ? sel.face : null;

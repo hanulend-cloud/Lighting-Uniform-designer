@@ -1,4 +1,5 @@
 // 3D 기구 광원·관측 지정 기본값 — spec 2026-10-14 §4·§5 (P3 계획 "데이터 모델"), 2026-10-15 m3-cad-ui(광속·목표·점검 기준).
+import { catalogOf } from './housing-led.js';
 export const SOLDER_R = { '백색': 0.8, '녹색': 0.3, '흑색': 0.05 };
 export const LED_BODY_FINISH = { kind: 'whiteDiffuse', R: 0.8 };   // 백색 실리콘 패키지
 
@@ -34,6 +35,14 @@ export function migrateMech3d(m) {
   if (st) {
     const v = st.virtual, c = Math.round(Number(v?.count)), p = Number(v?.pitch);
     st.virtual = v && typeof v === 'object' ? { count: Number.isFinite(c) && c >= 1 ? c : 1, pitch: Number.isFinite(p) && p > 0 ? p : 0, ...rowsOf(v) } : null;
+  }
+  // ④ 반사 소재(spec P4 §2.3d): finishCatalog = 배열만 · 부품 reflMaterial = 불투명 + 소재 id · coating = 특수 처리 id — 그 밖은 지움
+  if (m.finishCatalog != null && !Array.isArray(m.finishCatalog)) delete m.finishCatalog;
+  const cat = catalogOf(m);
+  for (const p of Array.isArray(m.parts) ? m.parts : []) {
+    if (!p) continue;
+    if (p.reflMaterial != null && !(p.material?.kind === 'opaque' && cat.some((e) => e.id === p.reflMaterial && !e.special))) delete p.reflMaterial;
+    if (p.coating != null && !cat.some((e) => e.id === p.coating && e.special)) delete p.coating;
   }
   return m;
 }

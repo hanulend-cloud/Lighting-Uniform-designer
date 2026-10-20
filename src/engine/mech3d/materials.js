@@ -43,9 +43,10 @@ export function defaultPart(id, name, volume) {
   return { id, name, volume, material, finish: finishForMaterial(material), faceFinish: {} };
 }
 
+// 반사 소재·특수 처리 표시(spec P4 §2.3d)는 면 처리가 기본값으로 돌아가므로 해제
 export function setPartMaterial(part, kind) {
-  const material = defaultMaterial(kind);
-  return { ...part, material, finish: finishForMaterial(material), faceFinish: {} };
+  const material = defaultMaterial(kind), { reflMaterial, coating, ...rest } = part;
+  return { ...rest, material, finish: finishForMaterial(material), faceFinish: {} };
 }
 
 export function setPartMaterialParam(part, key, value) {

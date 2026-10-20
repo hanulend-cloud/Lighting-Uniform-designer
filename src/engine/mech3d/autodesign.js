@@ -227,7 +227,7 @@ export async function runAutoDesign(cfg, io) {
     const ref = stages.milky || (stages.housing && cfg.finishCands?.length);
     if (stages.housing && cfg.finishCands?.length) {
       const top = cfg.finishCands.reduce((a, f) => (gradeOf(f) > gradeOf(a) ? f : a));
-      d = { ...d, finish: top.current ? (cfg.current?.finish ?? null) : { part: cfg.housingPart ?? top.part, kind: top.kind, ...(top.R != null ? { R: top.R } : {}) } };
+      d = { ...d, finish: top.current ? (cfg.current?.finish ?? null) : { part: cfg.housingPart ?? top.part, kind: top.kind, ...(top.R != null ? { R: top.R } : {}), ...(top.coating ? { coating: top.coating } : {}) } };
     }
     let mRef = null;
     if (stages.milky) {
@@ -261,7 +261,7 @@ export async function runAutoDesign(cfg, io) {
     }
   }
   if (stages.housing && cfg.finishCands?.length) {   // ④ 케이스 면 — 후보 { finish }(current = 현재 면 처리), 통과 중 최저 등급
-    const cands = cfg.finishCands.map(({ current, ...f }) => ({ finish: { part: cfg.housingPart ?? f.part, kind: f.kind, ...(f.R != null ? { R: f.R } : {}) }, current: !!current }));
+    const cands = cfg.finishCands.map(({ current, ...f }) => ({ finish: { part: cfg.housingPart ?? f.part, kind: f.kind, ...(f.R != null ? { R: f.R } : {}), ...(f.coating ? { coating: f.coating } : {}) }, current: !!current }));   // coating = 특수 처리 id(spec P4 §2.3d)
     io.progress?.('housing', 0, `케이스 면 후보 ${cands.length}개 평가`);
     if (hasFin) d = { ...d, finish: fin0 }; else delete (d = { ...d }).finish;   // ② 기준용 최고 등급 → 현재 면으로 되돌린 뒤 평가
     const r = await pickVariant(cands, evalV, obs, { prefer: 'lowestPassing', grade: (c) => gradeOf(c.finish), cancelled: stop, progress: (f, t) => io.progress?.('housing', f, `케이스 면 ${t}`) });

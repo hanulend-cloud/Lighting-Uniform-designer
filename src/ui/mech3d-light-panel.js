@@ -2,6 +2,7 @@
 // P3 의 renderLightPanel 을 피처 트리 노드별로 나눴다. 계산 버튼·결과 표시는 자동 점진 계산(결과 패널·상태 띠)으로 옮김.
 import { stepRefEmitter } from '../engine/mech3d/virtual-leds.js';
 import { clampRowGap, rowGapOptions } from '../engine/mech3d/placement.js';
+import { catalogOf } from '../engine/mech3d/housing-led.js';
 const esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
 const num = (v, d = 1) => (Number.isFinite(v) ? v.toFixed(d) : '-');
 const numIn = (v, d) => (Number.isFinite(v) ? v.toFixed(d) : '');   // number input 값(빈칸 허용)
@@ -145,8 +146,17 @@ export function renderObserveProps(el, m, ui, h) {
   on(el, '[data-lp-dirauto]', 'click', () => h.onObsDir(null));
 }
 
+// 반사 소재표(spec P4 §2.3d) — 기본 R·상한 R(%) 편집. 특수 처리 = 상한만. edited = 저장된 값 있음 → [기본값으로]
+const KIND_SHORT = { whiteDiffuse: '확산', metal: '경면' };
+export function catalogTableHtml(cat, edited) {
+  const cell = (e, k) => (e[k] == null ? '—' : `<input type="number" min="0" max="100" step="1" value="${num(e[k] * 100, 0)}" data-lp-cat="${esc(e.id)}" data-lp-catk="${k}" aria-label="${esc(e.name)} ${k === 'R' ? '기본' : '상한'} 반사율">`);
+  return `<div class="m3-sub">반사 소재표 <span class="mut">반사율 % · 불투명 부품 상한 · 자동설계 ④ 후보</span></div>
+    <table class="m3-cmp m3-cat"><tr><th>소재</th><th>종류</th><th>기본 R</th><th>상한 R</th></tr>${cat.map((e) => `<tr><th>${e.special ? '특수 · ' : ''}${esc(e.name)}</th><td>${KIND_SHORT[e.kind] ?? e.kind}</td><td>${cell(e, 'R')}</td><td>${cell(e, 'max')}</td></tr>`).join('')}</table>
+    ${edited ? '<div class="m3-row"><button data-lp-catreset>기본값으로</button></div>' : ''}`;
+}
+
 // 목표 노드: 균일도(길이·폭) · 평균 휘도 · 잡음 목표 · 설계 점검 기준
-// h = { onTarget(key, v|null), onCheckParam(key, v) } — % 칸(data-lp-pct)은 0~1 로 바꿔 넘김
+// h = { onTarget(key, v|null), onCheckParam(key, v), onCatalog(id|null, key, v) } — % 칸(data-lp-pct)은 0~1 로 바꿔 넘김 · onCatalog(null) = 소재표 기본값으로
 export function renderTargetProps(el, m, h) {
   const O = m.observe, C = m.checks;
   el.innerHTML = `<div class="m3-h">속성 · 목표</div>
@@ -157,8 +167,11 @@ export function renderTargetProps(el, m, h) {
     <div class="m3-sub">설계 점검 기준</div>
     <div class="m3-row"><label>최소 살두께</label><input type="number" min="0.1" step="0.1" value="${C.minWall}" data-lp-chk="minWall"> mm</div>
     <div class="m3-row"><label>최소 도달률</label><input type="number" min="0" max="100" step="5" value="${num(C.minReach * 100, 0)}" data-lp-chk="minReach" data-lp-pct>%</div>
-    <div class="m3-row"><label>새는 빛 한도</label><input type="number" min="0" max="100" step="5" value="${num(C.maxLeak * 100, 0)}" data-lp-chk="maxLeak" data-lp-pct>%</div>`;
+    <div class="m3-row"><label>새는 빛 한도</label><input type="number" min="0" max="100" step="5" value="${num(C.maxLeak * 100, 0)}" data-lp-chk="maxLeak" data-lp-pct>%</div>
+    ${catalogTableHtml(catalogOf(m), Array.isArray(m.finishCatalog))}`;
   const val = (x) => { const v = readNum(x); return v == null ? null : 'lpPct' in x.dataset ? v / 100 : v; };
   on(el, '[data-lp-tgt]', 'change', (x) => { const v = val(x); if (v != null || 'lpAuto' in x.dataset) h.onTarget(x.dataset.lpTgt, v); });
   on(el, '[data-lp-chk]', 'change', (x) => { const v = val(x); if (v != null) h.onCheckParam(x.dataset.lpChk, v); });
+  on(el, '[data-lp-cat]', 'change', (x) => { const v = readNum(x); if (v != null) h.onCatalog?.(x.dataset.lpCat, x.dataset.lpCatk, v / 100); });
+  on(el, '[data-lp-catreset]', 'click', () => h.onCatalog?.(null));
 }

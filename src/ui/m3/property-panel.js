@@ -1,13 +1,14 @@
 // 속성 패널 — spec 2026-10-15 m3-cad-ui §2: 피처 트리에서 고른 노드의 편집기만 보인다(기존 편집기를 노드별로 재사용).
 // ui = { dbList, auto, dir, lineInfo, meshInfo(고른 부품 실제 메쉬 외곽·부피) }, h = app.js propHandlers()
 import { renderPartProps, renderContactsProps } from '../mech3d-panel.js';
+import { catalogOf } from '../../engine/mech3d/housing-led.js';
 import { renderLightProps, renderLedProps, renderObserveProps, renderTargetProps } from '../mech3d-light-panel.js';
 
 export function renderPropertyPanel(el, M, S, ui, h) {
   const id = S.node ?? 'parts';
   if (id.startsWith('part:')) {
     const i = +id.slice(5);
-    renderPartProps(el, M, { part: i, face: S.sel?.part === i ? S.sel.face : null, clearance: ui.clearance, xfMsg: ui.xfMsg, xfInfo: ui.xfInfo, meshInfo: ui.meshInfo ?? null }, ui.dbList, h);
+    renderPartProps(el, M, { part: i, face: S.sel?.part === i ? S.sel.face : null, clearance: ui.clearance, xfMsg: ui.xfMsg, xfInfo: ui.xfInfo, meshInfo: ui.meshInfo ?? null, catalog: catalogOf(M) }, ui.dbList, h);
     return;
   }
   switch (id) {

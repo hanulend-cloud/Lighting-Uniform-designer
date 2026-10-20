@@ -6,7 +6,9 @@ import { checkLabels, statusWord, statusIcon, checkAria, isActivateKey, esc as e
 import { ramp, NO_DATA } from '../src/ui/m3/colormap.js';
 import { defaultLight, defaultObserve, defaultChecks } from '../src/engine/mech3d/defs.js';
 import { defaultPart, setPartMaterial, setPartMaterialParam } from '../src/engine/mech3d/materials.js';
-import { clearanceHtml, meshInfo, partHeaderText } from '../src/ui/mech3d-panel.js';
+import { clearanceHtml, meshInfo, partHeaderText, reflRowHtml } from '../src/ui/mech3d-panel.js';
+import { DEFAULT_FINISH_CATALOG, finishCandidatesFor } from '../src/engine/mech3d/housing-led.js';
+import { catalogTableHtml } from '../src/ui/mech3d-light-panel.js';
 import { stepLayoutRowHtml, clampVirtual, virtCountMax, ledRowsHtml, defaultRowGap } from '../src/ui/mech3d-light-panel.js';
 import { rowGapOptions } from '../src/engine/mech3d/placement.js';
 import { ok, done } from './mech3d-util.mjs';
@@ -216,4 +218,29 @@ ok(clampCap(12) === 9.9 && clampCap(0.1) === 0.5 && clampCap(3) === 3 && clampCa
   const cm = compareHtml({ cur: { ...e, count: 10, pitch: 0, rows: 1 }, best: { ...e, count: 10, pitch: 0, rows: 2, rowGap: 5 }, feasible: true, reason: '', shape: null });
   const cs = compareHtml({ cur: { ...e, count: 10, pitch: 0, stepOrig: true }, best: { ...e, count: 10, pitch: 0, stepOrig: false, rows: 2, rowGap: 5 }, feasible: true, reason: '', shape: null, stepLeds: 10 });
   ok(cm.includes('<td>10개 균등</td>') && cm.includes('2열 × 10개 균등 (열 간격 ±5.0 mm)') && cs.includes('LED STEP 원래 10개') && cs.includes('가상 2열 × 10개 균등 (열 간격 ±5.0 mm)'), '비교표: 2열 × n개 (열 간격 ±δ) · STEP 원래 → 가상 2열'); }
+{ // ④ 소재별 반사율 상한(spec P4 §2.3d) — 문구·안내 후보·적용·카드·부품 편집기·소재표
+  const C = DEFAULT_FINISH_CATALOG, W = (R) => ({ kind: 'whiteDiffuse', R });
+  ok(finishText({ ...W(0.97), coating: 'coat-white' }) === '백색 97% (특수: 고반사 도장)' && finishText({ kind: 'metal', R: 0.95, coating: 'coat-metal' }) === '경면 95% (특수: 금속 증착)' && finishText({ ...W(0.9), coating: 'zz' }) === '백색 90%', '면 처리 문구: 특수 처리 표시');
+  const e = { count: 5, pitch: 0, milky: 3, Ulen: 0.6, Uwid: 0.7, eff: 0.5 };
+  const cc = compareHtml({ cur: e, best: e, feasible: true, reason: '', shape: null, finish: { cur: W(0.85), best: { ...W(0.97), coating: 'coat-white' } } });
+  ok(cc.includes('<tr><th>케이스 면</th><td>백색 85%</td><td class="chg">백색 97% (특수: 고반사 도장)</td></tr>'), '비교표: 백색 85% → 백색 97% (특수: 고반사 도장)');
+  const pool = (allowSpecial) => finishCandidatesFor({ catalog: C, materialId: 'pc-white', current: W(0.85), allowSpecial }).filter((f) => !f.current);
+  const n1 = nextFinish(W(0.85), pool(false)), n2 = nextFinish(W(0.9), pool(false)), n3 = nextFinish(W(0.85), pool(true));
+  ok(n1?.R === 0.9 && n2 === null && n3?.R === 0.97 && n3.coating === 'coat-white', `① 보완 안내: 소재 상한 안(85→90, 90→없음) · 특수 허용 → 97 특수: ${JSON.stringify([n1, n2, n3])}`);
+  const P = { parts: [{ finish: W(0.85), faceFinish: {}, reflMaterial: 'pc-white' }] };
+  applyFinish(P, { part: 0, ...W(0.97), coating: 'coat-white' });
+  const c1 = P.parts[0].coating; applyFinish(P, { part: 0, ...W(0.9) });
+  ok(c1 === 'coat-white' && !('coating' in P.parts[0]) && P.parts[0].finish.R === 0.9 && !('coating' in P.parts[0].finish) && P.parts[0].reflMaterial === 'pc-white', '적용: 특수 처리 → coating 저장 · 일반 등급 → 해제');
+  const a = { milky: { ok: false, why: 'x' }, leds: { ok: false, why: 'x' }, shape: { ok: false, why: 'x' }, height: { ok: false, why: 'x' }, housing: { ok: true, parts: [1] } };
+  const h1 = autoCardHtml({ avail: a, sel: { housing: true, housingPart: 1, housingSpecial: true }, running: null, names: ['LGP', '케이스'], housingMat: { name: '백색 PC(일반 착색)', max: 0.9 } });
+  const h0 = autoCardHtml({ avail: a, sel: { housing: true, housingPart: 1 }, running: null, names: ['LGP', '케이스'], housingMat: null });
+  ok(h1.includes('백색 PC(일반 착색) · 상한 90%') && /data-ad="housingSpecial" checked/.test(h1) && h1.includes('특수 표면처리 허용 (고반사 도장·시트·증착)'), '카드 ④: 소재·상한 · 특수 허용 체크');
+  ok(h0.includes('반사 소재 미지정') && /data-ad="housingSpecial"(?! checked)/.test(h0) && !autoCardHtml({ avail: a, sel: { housing: false }, running: null }).includes('housingSpecial'), '카드 ④: 소재 미지정 안내 · ④ 끄면 없음');
+  const r = reflRowHtml({ material: { kind: 'opaque' }, reflMaterial: 'pc-white' }, C), r0 = reflRowHtml({ material: { kind: 'opaque' } }, C);
+  ok(/<option value="pc-white" selected>/.test(r) && (r.match(/<option/g) ?? []).length === 6 && !r.includes('coat-') && r0.includes('<option value="" selected>— 미지정 —'), '부품 편집기: 반사 소재(미지정 + 일반 5개)');
+  ok(reflRowHtml({ material: { kind: 'milky' } }, C) === '', '불투명 아님 → 반사 소재 없음');
+  const q = setPartMaterial({ ...defaultPart(0, 'c', 1), reflMaterial: 'pc-white', coating: 'coat-white' }, 'opaque');
+  ok(!('reflMaterial' in q) && !('coating' in q), '소재 종류 바꾸면 반사 소재·특수 표시 해제');
+  const t = catalogTableHtml(C, false), t1 = catalogTableHtml(C, true);
+  ok(t.includes('반사 소재표') && /data-lp-cat="pc-white" data-lp-catk="R"[^>]*value="85"|value="85"[^>]*data-lp-cat="pc-white" data-lp-catk="R"/.test(t) && /data-lp-cat="coat-white" data-lp-catk="max"/.test(t) && !/data-lp-cat="coat-white" data-lp-catk="R"/.test(t) && !t.includes('data-lp-catreset') && t1.includes('data-lp-catreset'), '소재표: 기본 R·상한 R 칸(특수 = 상한만) · 고친 뒤 기본값으로'); }
 done();
