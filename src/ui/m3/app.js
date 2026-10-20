@@ -336,7 +336,7 @@ function clearanceOf(i) {
 }
 
 // ---- 자동설계(P4) ----
-function adState() { return (A.ad ??= { open: false, sel: { milky: true, leds: false, shape: false, shapePart: -1, milkyMax: null, height: false, housing: false, housingPart: -1, housingSpecial: false }, running: null, result: null, undo: null, milkyPart: null, runner: null, info: null, stepBusy: false, stepWorker: null }); }
+function adState() { return (A.ad ??= { open: (() => { try { return localStorage.getItem('uds.m3.autoOpen') === '1'; } catch { return false; } })(), sel: { milky: true, leds: false, shape: false, shapePart: -1, milkyMax: null, height: false, housing: false, housingPart: -1, housingSpecial: false }, running: null, result: null, undo: null, milkyPart: null, runner: null, info: null, stepBusy: false, stepWorker: null }); }
 function adInfo() {   // 부품별 비 2.5D 비율(관측 방향) — 라인이 있을 때만. (기구·라인) 별 캐시(높이맵 계산이 무거움)
   const st = adState(), S = A.store.session, rt = getMech3d();
   if (!st.info || st.info.rt !== rt || st.info.line !== S.line) st.info = { rt, line: S.line, non25: S.line && rt ? rt.parts.map((p) => heightsFor(p, S.line.frame, 0.5).non25) : [], boxes: rt ? rt.parts.map((p) => bounds(p.positions)) : [] };   // boxes = ④ 기본 대상용 외곽
@@ -344,10 +344,17 @@ function adInfo() {   // 부품별 비 2.5D 비율(관측 방향) — 라인이 
 }
 const adMilkyPart = (M, avail) => (avail.milky.ok ? (avail.milky.parts.find((i) => M.observe.faces.some((f) => f.part === i)) ?? avail.milky.parts[0]) : null);
 const adClone = (x) => (x == null ? null : JSON.parse(JSON.stringify(x)));
+// 자동설계 카드 펼침 상태 — 새로고침해도 기억(브라우저별 편의 설정)
+const AD_OPEN_KEY = 'uds.m3.autoOpen';
+function adSetOpen(v) { adState().open = v; try { localStorage.setItem(AD_OPEN_KEY, v ? '1' : '0'); } catch {} renderAuto(); }
 function renderAuto() {
   const el = $('#m3-auto'), st = adState();
-  el.hidden = !st.open;
-  if (!st.open) return;
+  el.hidden = false;   // 닫혀 있어도 한 줄 머리는 늘 보인다(메뉴가 사라진 것처럼 보이지 않게)
+  if (!st.open) {
+    el.innerHTML = '<button type="button" class="m3-ad-collapsed" data-ad="open" aria-expanded="false">✨ 자동설계 <span class="mut">— 펼치기 ▸</span></button>';
+    el.querySelector('[data-ad="open"]').onclick = () => { adSetOpen(true); };
+    return;
+  }
   const M = A.store.mspec, avail = stageAvailability(M, adInfo());
   if (!st.running && !avail.shape.parts?.includes(st.sel.shapePart)) st.sel.shapePart = avail.shape.ok ? avail.shape.parts[0] : -1;   // 부품 소재·형상이 바뀌어 대상이 빠지면 첫 후보로
   if (!st.running && !avail.housing.parts?.includes(st.sel.housingPart)) { const k = defaultHousingPart(M, adInfo().boxes); st.sel.housingPart = avail.housing.ok ? (avail.housing.parts.includes(k) ? k : avail.housing.parts[0]) : -1; }   // ④ 기본 = 관측 부품을 감싸는 가장 큰 불투명 부품
@@ -355,7 +362,7 @@ function renderAuto() {
   const hm = st.sel.housingPart >= 0 ? reflCat().find((e) => !e.special && e.id === M.parts[st.sel.housingPart]?.reflMaterial) : null;   // ④ 대상 반사 소재
   renderAutoPanel(el, { avail, sel, running: st.running, result: st.result, names: M.parts.map((p) => p.name), canRevert: !!st.undo, noLine: !A.store.session.line, milkyPart: mp, housingMat: hm ? { name: hm.name, max: hm.max } : null, catalog: reflCat() }, {
     onSel: (k, v) => { if (st.running) return; st.sel[k] = k === 'milkyMax' ? clampCap(v) : v; renderAuto(); },
-    onAction: (k) => ({ run: adRun, stop: adStop, close: () => { st.open = false; renderAuto(); }, apply: adApply, cancel: adCancel, revert: adRevert, step: adStep })[k]?.(),
+    onAction: (k) => ({ run: adRun, stop: adStop, close: () => adSetOpen(false), apply: adApply, cancel: adCancel, revert: adRevert, step: adStep })[k]?.(),
   });
 }
 function adStop() { const st = adState(); if (!st.running || !st.runner) return; st.runner.cancel(); setStatus('자동설계 중지됨'); }
@@ -873,7 +880,7 @@ function cmdHandlers() {
       const s = A.prog.snapshot().state;
       if (s === 'running' || s === 'pending' || s === 'starting') A.prog.pause(); else if (s === 'paused') A.prog.resume(); else restartCalc();
     },
-    onAuto: () => { const st = adState(); st.open = !st.open; renderAuto(); },
+    onAuto: () => adSetOpen(!adState().open),
     onExit: () => A.ctx.onExit(),
   };
 }

@@ -451,3 +451,6 @@ canvas.m3-g { width: 100%; display: block; border-radius: 4px; background: #fafb
 .tab-note button[data-take] { border-color: #d05050; font-weight: 700; }
 #m3-pending button { background: #fff; color: #20262f; border: 1px solid #d3d8e0; border-radius: 6px; padding: 4px 10px; cursor: pointer; font-size: 13px; }
 #m3-pending button[data-reload] { border-color: #e0a800; font-weight: 700; }
+
+.m3-ad-collapsed { display: block; width: 100%; text-align: left; padding: 6px 4px; background: none; border: none; font-weight: 600; cursor: pointer; color: var(--m3-acc); }
+.m3-ad-collapsed:hover, .m3-ad-collapsed:focus-visible { background: var(--m3-accbg); border-radius: 6px; }
