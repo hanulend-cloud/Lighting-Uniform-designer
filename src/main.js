@@ -218,6 +218,7 @@ function m3ctx() {
   return {
     mspec: spec.mech3d, persist, dbLists, materialDb, reflectDb: () => reflectDb, l2Table: () => l2State().table, l2Raw, milkyFromMusR,
     onImportMech3d: importMech3d,
+    onMaterialDbChanged: () => { solver?.postMessage({ type: 'db', db: dbLists() }); markSoloReset(); },   // 3D 실측 맞춤 대화상자에서 실측소재 DB 가 바뀜 → 평판 solver 도
     onExit: () => { spec.mode = 'flat'; persist(); applyMode(); schedule(); },
   };
 }

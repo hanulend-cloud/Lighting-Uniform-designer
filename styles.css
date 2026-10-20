@@ -400,6 +400,12 @@ canvas.m3-g { width: 100%; display: block; border-radius: 4px; background: #fafb
 .m3-ad-prog { display: flex; gap: 6px; align-items: center; margin: 6px 0; } .m3-ad-prog .bar { flex: 1; height: 6px; background: #e6e9ef; border-radius: 3px; overflow: hidden; } .m3-ad-prog .bar i { display: block; height: 100%; background: var(--m3-acc); }
 .m3-cmp { width: 100%; border-collapse: collapse; margin: 4px 0; } .m3-cmp th, .m3-cmp td { padding: 2px 4px; text-align: left; border-bottom: 1px solid var(--m3-line); } .m3-cmp td.chg { color: var(--m3-acc); font-weight: 600; }
 .m3-cat th { font-weight: 400; } .m3-cat td { white-space: nowrap; } .m3-props .m3-cat input[type=number] { width: 42px; padding: 1px 2px; }
+.m3-props .m3-cat input:not([type]) { width: 90px; padding: 1px 2px; } .m3-cat button { font-size: 11px; padding: 1px 4px; }
+.m3-cat-wrap { overflow-x: auto; max-width: 100%; }
+.m3-file { display: inline-block; font-size: 11.5px; padding: 3px 8px; border: 1px solid #c9cfdb; border-radius: 5px; background: #fff; cursor: pointer; }
+.m3-refladd .m3-row label { min-width: 64px; }
+.m3-fitdlg .zoom-modal-inner { width: min(94vw, 900px); height: auto; max-height: 90vh; }
+.m3-fitdlg .m3-fitdlg-body { overflow: auto; padding: 10px 14px; font-size: 12px; }
 
 /* 메쉬 잃은 3D 설정 보관 안내 띠 */
 #m3-pending { flex: 0 0 auto; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 8px 16px;

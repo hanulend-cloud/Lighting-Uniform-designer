@@ -3,6 +3,7 @@
 import { stepRefEmitter } from '../engine/mech3d/virtual-leds.js';
 import { clampRowGap, rowGapOptions } from '../engine/mech3d/placement.js';
 import { catalogOf } from '../engine/mech3d/housing-led.js';
+import { MEAS_CONDS, reflStatusText } from '../model/reflect-db.js';
 const esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
 const num = (v, d = 1) => (Number.isFinite(v) ? v.toFixed(d) : '-');
 const numIn = (v, d) => (Number.isFinite(v) ? v.toFixed(d) : '');   // number input 값(빈칸 허용)
@@ -146,18 +147,29 @@ export function renderObserveProps(el, m, ui, h) {
   on(el, '[data-lp-dirauto]', 'click', () => h.onObsDir(null));
 }
 
-// 반사 소재표(spec P4 §2.3d) — 기본 R·상한 R(%) 편집. 특수 처리 = 상한만. edited = 저장된 값 있음 → [기본값으로]
+// 반사 소재 DB 관리(spec P4 §2.3e, 목표 노드) — 이름·종류·R·상한·상태·측정 수. 사용자 항목 = 이름·R·상한 편집·측정값 추가·삭제,
+// 공용 항목 = 읽기 전용 + [복사]. 특수 처리 = 상한만. ui = { addFor: 측정값 추가 중인 id }
 const KIND_SHORT = { whiteDiffuse: '확산', metal: '경면' };
-// 반사 소재표(= 반사 소재 DB 행, spec P4 §2.3e) — 공용 항목을 고치면 사용자 사본이 생김(app.js onCatalog)
-const STATUS_SHORT = { measured: '실측', datasheet: '데이터시트', example: '예시' };
-export function catalogTableHtml(cat) {
-  const cell = (e, k) => (e[k] == null ? '—' : `<input type="number" min="0" max="100" step="1" value="${num(e[k] * 100, 0)}" data-lp-cat="${esc(e.id)}" data-lp-catk="${k}" aria-label="${esc(e.name)} ${k === 'R' ? '기본' : '상한'} 반사율">`);
-  return `<div class="m3-sub">반사 소재표 <span class="mut">반사율 % · 불투명 부품 상한 · 자동설계 ④ 후보 · 공용 항목을 고치면 사용자 사본</span></div>
-    <table class="m3-cmp m3-cat"><tr><th>소재</th><th>종류</th><th>기본 R</th><th>상한 R</th><th>상태</th></tr>${cat.map((e) => `<tr><th>${e.special ? '특수 · ' : ''}${esc(e.name)}</th><td>${KIND_SHORT[e.kind] ?? e.kind}</td><td>${cell(e, 'R')}</td><td>${cell(e, 'max')}</td><td>${e.origin === 'user' ? '사용자 · ' : ''}${STATUS_SHORT[e.status] ?? ''}${e.nSamples ? ` ${e.nSamples}회` : ''}</td></tr>`).join('')}</table>`;
+const pc0 = (v) => (v == null ? '—' : num(v * 100, 1).replace(/\.0$/, ''));
+export function reflDbHtml(cat, ui = {}) {
+  const cell = (e, k) => (e[k] == null ? '—' : e.origin !== 'user' ? pc0(e[k]) : `<input type="number" min="0" max="100" step="0.1" value="${pc0(e[k])}" data-lp-cat="${esc(e.id)}" data-lp-catk="${k}" aria-label="${esc(e.name)} ${k === 'R' ? '기본' : '상한'} 반사율">`);
+  const row = (e) => {
+    const u = e.origin === 'user', id = esc(e.id);
+    const name = u ? `<input value="${esc(e.name)}" data-lp-catname="${id}" aria-label="소재 이름" size="12">` : esc(e.name);
+    const act = u ? `<button data-lp-dbadd="${id}" title="측정값 추가">＋측정</button><button data-lp-dbdel="${id}" title="삭제">삭제</button>` : `<button data-lp-dbcopy="${id}" title="사용자 사본 만들기">복사</button>`;
+    const add = u && ui.addFor === e.id ? `<tr><td colspan="7"><div class="m3-row">값 <input data-lp-addv placeholder="85.5, 86.1" size="10" aria-label="측정 반사율 %(쉼표로 여러 값)">% <select data-lp-addc aria-label="측정 조건">${MEAS_CONDS.map((c) => `<option>${c}</option>`).join('')}</select>
+      메모 <input data-lp-addn size="8" aria-label="메모"> <button data-lp-addok="${id}">추가</button><button data-lp-addno>취소</button></div></td></tr>` : '';
+    return `<tr><th>${e.special ? '특수 · ' : ''}${name}</th><td>${KIND_SHORT[e.kind] ?? e.kind}</td><td>${cell(e, 'R')}</td><td>${cell(e, 'max')}</td><td>${u ? '사용자 · ' : ''}${reflStatusText(e)}</td><td>${e.nSamples ?? 0}</td><td>${act}</td></tr>${add}`;
+  };
+  return `<div class="m3-sub">반사 소재 DB <span class="mut">반사율 % · 불투명 부품 상한 · 자동설계 ④ 후보 · 공용은 [복사] 후 수정</span></div>
+    <div class="m3-cat-wrap"><table class="m3-cmp m3-cat"><tr><th>소재</th><th>종류</th><th>R</th><th>상한</th><th>상태</th><th>측정</th><th></th></tr>${cat.map(row).join('')}</table></div>
+    <div class="m3-row"><button data-lp-dbexp>내보내기</button><label class="m3-file"><span>불러오기</span><input type="file" accept=".json,application/json" data-lp-dbimp hidden></label></div>`;
 }
+const DB_ADD = new WeakMap();   // 패널 요소 → 측정값 추가 중인 id
 
 // 목표 노드: 균일도(길이·폭) · 평균 휘도 · 잡음 목표 · 설계 점검 기준
-// h = { onTarget(key, v|null), onCheckParam(key, v), onCatalog(id, key, v) } — % 칸(data-lp-pct)은 0~1 로 바꿔 넘김 · cat = 반사 소재표 행(catalogOf(DB))
+// h = { onTarget(key, v|null), onCheckParam(key, v), onCatalog(id, key, v), onReflDb(op, id?, arg?) } — % 칸(data-lp-pct)은 0~1 로 바꿔 넘김 · cat = 반사 소재표 행(catalogOf(DB))
+// onReflDb op: 'rename'(id, 이름) · 'samples'(id, { values, cond, note } → 오류 문구|없음) · 'remove'(id) · 'copy'(id) · 'export' · 'import'(_, 텍스트)
 export function renderTargetProps(el, m, h, cat = catalogOf(null)) {
   const O = m.observe, C = m.checks;
   el.innerHTML = `<div class="m3-h">속성 · 목표</div>
@@ -169,9 +181,23 @@ export function renderTargetProps(el, m, h, cat = catalogOf(null)) {
     <div class="m3-row"><label>최소 살두께</label><input type="number" min="0.1" step="0.1" value="${C.minWall}" data-lp-chk="minWall"> mm</div>
     <div class="m3-row"><label>최소 도달률</label><input type="number" min="0" max="100" step="5" value="${num(C.minReach * 100, 0)}" data-lp-chk="minReach" data-lp-pct>%</div>
     <div class="m3-row"><label>새는 빛 한도</label><input type="number" min="0" max="100" step="5" value="${num(C.maxLeak * 100, 0)}" data-lp-chk="maxLeak" data-lp-pct>%</div>
-    ${catalogTableHtml(cat)}`;
+    ${reflDbHtml(cat, { addFor: DB_ADD.get(el) ?? null })}`;
   const val = (x) => { const v = readNum(x); return v == null ? null : 'lpPct' in x.dataset ? v / 100 : v; };
   on(el, '[data-lp-tgt]', 'change', (x) => { const v = val(x); if (v != null || 'lpAuto' in x.dataset) h.onTarget(x.dataset.lpTgt, v); });
   on(el, '[data-lp-chk]', 'change', (x) => { const v = val(x); if (v != null) h.onCheckParam(x.dataset.lpChk, v); });
   on(el, '[data-lp-cat]', 'change', (x) => { const v = readNum(x); if (v != null) h.onCatalog?.(x.dataset.lpCat, x.dataset.lpCatk, v / 100); });
+  const again = (id) => { DB_ADD.set(el, id); renderTargetProps(el, m, h, cat); };
+  on(el, '[data-lp-catname]', 'change', (x) => { if (x.value.trim()) h.onReflDb?.('rename', x.dataset.lpCatname, x.value.trim()); });
+  on(el, '[data-lp-dbadd]', 'click', (x) => again(DB_ADD.get(el) === x.dataset.lpDbadd ? null : x.dataset.lpDbadd));
+  on(el, '[data-lp-addno]', 'click', () => again(null));
+  on(el, '[data-lp-addok]', 'click', (x) => {
+    const g = (k) => el.querySelector(`[data-lp-${k}]`)?.value ?? '', f = { values: g('addv'), cond: g('addc'), note: g('addn') };
+    DB_ADD.set(el, null);
+    const err = h.onReflDb?.('samples', x.dataset.lpAddok, f);
+    if (err) { again(x.dataset.lpAddok); el.querySelector('[data-lp-addv]').value = f.values; el.querySelector('[data-lp-addn]').value = f.note; }
+  });
+  on(el, '[data-lp-dbdel]', 'click', (x) => { const e = cat.find((c) => c.id === x.dataset.lpDbdel); if (globalThis.confirm?.(`"${e?.name ?? x.dataset.lpDbdel}" 을 반사 소재 DB 에서 삭제할까요? 이 소재를 쓰는 부품은 "없는 소재" 로 표시됩니다.`)) h.onReflDb?.('remove', x.dataset.lpDbdel); });
+  on(el, '[data-lp-dbcopy]', 'click', (x) => h.onReflDb?.('copy', x.dataset.lpDbcopy));
+  on(el, '[data-lp-dbexp]', 'click', () => h.onReflDb?.('export'));
+  on(el, '[data-lp-dbimp]', 'change', async (x) => { const f = x.files?.[0]; if (!f) return; const t = await f.text(); x.value = ''; h.onReflDb?.('import', null, t); });
 }

@@ -131,3 +131,45 @@ export function migrateFinishCatalog(m, db, defaults = DEFAULT_FINISH_CATALOG) {
   delete m.finishCatalog;
   return { moved };
 }
+
+// ---- 화면 도우미(spec P4 §2.3e) ----
+export const MEAS_CONDS = ['SCI 8°/d', 'SCE 8°/d', '0°/45°', '기타'];
+// 상태 문구 — e = 소재표 행(nSamples) 또는 DB 항목(samples)
+export function reflStatusText(e) {
+  if (e?.status === 'measured') return `실측 ${e.nSamples ?? e.samples?.length ?? 0}회`;
+  return { datasheet: '데이터시트', example: '예시' }[e?.status] ?? '';
+}
+// '85.5, 86.1 85.8' (%) → { values: 0~1, bad: 숫자 아님·0~100 밖 }
+export function parsePercents(text) {
+  const values = [], bad = [];
+  for (const t of String(text ?? '').split(/[\s,;]+/).filter(Boolean)) {
+    const v = Number(t);
+    if (Number.isFinite(v) && v >= 0 && v <= 100) values.push(rd(v / 100)); else bad.push(t);
+  }
+  return { values, bad };
+}
+// 측정값 추가 → update 용 patch: 기존 + 새 측정값으로 R = 평균, Rmax = 입력(0~1) 또는 최대, status = measured
+export function addSamples(e, samples, Rmax) {
+  const s = entryFromSamples({ name: e.name, kind: e.kind, samples: [...(e.samples ?? []), ...samples], Rmax });
+  return { status: 'measured', samples: s.samples, R: s.R, Rmax: s.Rmax };
+}
+// 인라인 양식(문자열, % 단위) → { entry } | { error }. max = 상한 %(빈칸 = 측정 최대)
+export function entryFromForm({ name = '', kind = 'whiteDiffuse', values = '', cond = '', note = '', max = '' } = {}) {
+  name = String(name).trim();
+  if (!name) return { error: '이름을 입력하세요' };
+  const { values: vs, bad } = parsePercents(values);
+  if (bad.length) return { error: `측정 반사율은 0~100 % 숫자: ${bad.join(', ')}` };
+  if (!vs.length) return { error: '측정 반사율 %를 하나 이상 입력하세요' };
+  let Rmax;
+  if (String(max).trim() !== '') {
+    const m = parsePercents(max);
+    if (m.bad.length || m.values.length !== 1) return { error: '상한은 0~100 % 숫자 하나' };
+    Rmax = m.values[0];
+  }
+  const entry = entryFromSamples({ name, kind: REFLECT_KINDS[kind] ? kind : 'whiteDiffuse', samples: vs.map((R) => ({ R, cond, note })), Rmax });
+  if (entry.R > entry.Rmax + 1e-9) return { error: `상한 ${Math.round(entry.Rmax * 1000) / 10}% 이 측정 평균보다 작음` };
+  const errs = validateReflect(entry);
+  return errs.length ? { error: errs.join(', ') } : { entry };
+}
+// DB 에 이미 있는 id 면 '_' 를 붙여 겹치지 않게
+export function uniqueReflId(db, id) { while (db?.get(id)) id += '_'; return id; }

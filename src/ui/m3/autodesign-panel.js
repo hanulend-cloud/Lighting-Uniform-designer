@@ -80,9 +80,9 @@ export function defaultHousingPart(M, boxes) {
 }
 // 면 처리 문구 — 백색 85% · 경면 88% · 광택 · 흑색 5%
 const FIN_NAME = { whiteDiffuse: '백색', metal: '경면', black: '흑색', gloss: '광택' };
-// coating = 특수 처리 id → ' (특수: 고반사 도장)'
-const coatName = (id) => DEFAULT_FINISH_CATALOG.find((e) => e.id === id && e.special)?.short;
-export const finishText = (f) => (!f ? '–' : `${FIN_NAME[f.kind] ?? f.kind}${f.R != null ? ` ${Math.round(f.R * 100)}%` : ''}${coatName(f.coating) ? ` (특수: ${coatName(f.coating)})` : ''}`);
+// coating = 특수 처리 id → ' (특수: 고반사 도장)' — catalog = 반사 소재표 행(DB, 사용자 특수 항목 포함)
+const coatName = (id, catalog) => { const e = catalog.find((x) => x.id === id && x.special); return e ? e.short ?? e.name : null; };
+export const finishText = (f, catalog = DEFAULT_FINISH_CATALOG) => (!f ? '–' : `${FIN_NAME[f.kind] ?? f.kind}${f.R != null ? ` ${Math.round(f.R * 100)}%` : ''}${coatName(f.coating, catalog) ? ` (특수: ${coatName(f.coating, catalog)})` : ''}`);
 // ⑤ dz 적용(M = spec.mech3d, 바꿔서 돌려줌) — LED STEP: offset += dz·d, 저장된 발광점(월드 좌표)도 같이 이동 · 직접 배치(깊이): depth −= dz · 기구 면 PCB: 그대로
 export function applyDz(M, dz, d) {
   if (!dz) return M;
@@ -147,7 +147,7 @@ export function screenSummary(gains) {
 // 비교표 — cur/best = { count, pitch, milky, Ulen, Uwid, eff, profile? }, shape = { dt, h, R, e?, c? } | null, cur.shape = 이미 적용된 형상(없으면 원본), screen = ③ 선별 이득 { dt, e, c, h? } | null
 // stepLeds = LED STEP 발광점 수(직접 배치면 null) · STEP 이면 열마다 stepOrig(true = 원래 위치, false = 가상 배치) · unchanged = 최종안이 현재안 그대로(나은 설계 없음) → 사유 표시 · [적용] 비활성
 // finish = ④ { cur, best }(면 처리) | null · height = ⑤ { dz, gap(현재 LED–커버 축 거리, NaN = 모름) } | null
-export function compareHtml({ cur, best, feasible, reason, shape, stepLeds = null, canRevert = false, unchanged = false, screen = null, finish = null, height = null }) {
+export function compareHtml({ cur, best, feasible, reason, shape, stepLeds = null, canRevert = false, unchanged = false, screen = null, finish = null, height = null, catalog = DEFAULT_FINISH_CATALOG }) {
   const tr = (label, a, b) => `<tr><th>${label}</th><td>${a}</td><td class="${a !== b ? 'chg' : ''}">${b}</td></tr>`;
   const lay = (x) => `${x.rows === 2 ? '2열 × ' : ''}${x.count}개 ${x.pitch > 0 ? `피치 ${x.pitch}` : '균등'}${x.rows === 2 ? ` (열 간격 ±${(x.rowGap ?? 0).toFixed(1)} mm)` : ''}`;   // 2열 = 열당 개수(spec P4 §2.2b)
   const led = (x) => (stepLeds == null ? lay(x) : x.stepOrig === false ? `가상 ${lay(x)}` : `LED STEP 원래 ${x.count ?? stepLeds}개`);   // STEP: stepOrig = 원래 STEP 위치
@@ -159,7 +159,7 @@ export function compareHtml({ cur, best, feasible, reason, shape, stepLeds = nul
       ${tr('길이 U', f2(cur.Ulen), f2(best.Ulen))}${tr('폭 U', f2(cur.Uwid), f2(best.Uwid))}
       ${tr('광 효율', `${f2(cur.eff * 100)}%`, `${f2(best.eff * 100)}%`)}
       ${shape || cur.shape ? tr('형상', curShape, shape ? shapeText(shape) : curShape) : ''}
-      ${finish ? tr('케이스 면', finishText(finish.cur), finishText(finish.best ?? finish.cur)) : ''}
+      ${finish ? tr('케이스 면', finishText(finish.cur, catalog), finishText(finish.best ?? finish.cur, catalog)) : ''}
       ${height ? (() => { const now = Number.isFinite(height.gap) ? `현재 (커버까지 ${height.gap.toFixed(1)} mm)` : '현재'; return tr('LED 높이', now, nz(height.dz) ? `${sg(height.dz)} mm${Number.isFinite(height.gap) ? ` (커버까지 ${(height.gap - height.dz).toFixed(1)} mm)` : ''}` : now); })() : ''}
     </table>${profileSvg(cur.profile, best.profile)}${screen ? `<div class="m3-row mut">${esc(screenSummary(screen))}</div>` : ''}
     <div class="m3-row"><button type="button" data-ad="apply"${unchanged ? ' disabled title="현재안과 같음"' : ''}>적용</button><button type="button" data-ad="cancel">취소</button>${shape ? '<button type="button" data-ad="step">STEP 내보내기</button>' : ''}${canRevert ? '<button type="button" data-ad="revert">되돌리기</button>' : ''}</div>`;
@@ -168,7 +168,7 @@ export function compareHtml({ cur, best, feasible, reason, shape, stepLeds = nul
 // el 에 카드를 그리고 이벤트를 h 로 넘긴다. state = { avail, sel, running, result, names, canRevert, noLine, milkyPart }
 // 실행 중 카드 구조가 같으면 진행 막대·문구만 바꿈(갱신마다 innerHTML 을 다시 만들지 않게)
 export function renderAutoPanel(el, state, h) {
-  const html = state.result ? compareHtml({ ...state.result, canRevert: state.canRevert }) : autoCardHtml(state);
+  const html = state.result ? compareHtml({ ...state.result, canRevert: state.canRevert, ...(state.catalog ? { catalog: state.catalog } : {}) }) : autoCardHtml(state);
   const key = state.result ? html : autoCardHtml({ ...state, running: state.running ? { frac: 0, text: '' } : null });
   const bar = state.running && !state.result && el._adKey === key ? el.querySelector('.m3-ad-prog .bar') : null;
   if (bar) {

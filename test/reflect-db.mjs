@@ -1,6 +1,6 @@
 // 반사 소재 DB(spec P4 §2.3e): node test/reflect-db.mjs
 import { readFileSync } from 'node:fs';
-import { validateReflect, createReflectDb, entryFromSamples, reflectPatch, copyAsUser, migrateFinishCatalog } from '../src/model/reflect-db.js';
+import { validateReflect, createReflectDb, entryFromSamples, reflectPatch, copyAsUser, migrateFinishCatalog, addSamples, parsePercents, entryFromForm, reflStatusText, MEAS_CONDS, uniqueReflId } from '../src/model/reflect-db.js';
 import { DEFAULT_FINISH_CATALOG, catalogOf } from '../src/engine/mech3d/housing-led.js';
 import { ok, done } from './mech3d-util.mjs';
 
@@ -75,4 +75,23 @@ const near = (a, b) => Math.abs(a - b) < 1e-9;
   const e = entryFromSamples({ name: '사내', samples: [{ R: 0.85 }, { R: 0.87 }] }); db.add(e);
   const row = catalogOf(db).find((r) => r.id === e.id);
   ok(row && row.status === 'measured' && row.nSamples === 2 && near(row.R, 0.86) && near(row.max, 0.87) && row.origin === 'user' && catalogOf(db).length === 8, `DB 행: ${JSON.stringify(row)}`); }
+// Task 2: 측정값 추가·양식 해석·상태 문구(spec P4 §2.3e)
+{ const e = entryFromSamples({ name: '사내 백색 PC', samples: [{ R: 0.855 }, { R: 0.861 }] });
+  const p = addSamples(e, [{ R: 0.858, cond: 'SCI 8°/d', note: 'n' }]);
+  ok(p.samples.length === 3 && near(p.R, (0.855 + 0.861 + 0.858) / 3) && near(p.Rmax, 0.861) && p.status === 'measured' && p.samples[2].cond === 'SCI 8°/d' && /^\d{4}-\d\d-\d\d$/.test(p.samples[2].date), `addSamples: 합쳐 평균·최대 다시: ${JSON.stringify(p)}`);
+  const p2 = addSamples(e, [{ R: 0.85 }], 0.9);
+  ok(near(p2.Rmax, 0.9) && !validateReflect({ ...e, ...p2 }).length, 'addSamples: 상한 직접 입력');
+  const ds = { ...e, status: 'datasheet', samples: [], R: 0.8, Rmax: 0.95 }, p3 = addSamples(ds, [{ R: 0.82 }]);
+  ok(p3.status === 'measured' && near(p3.R, 0.82) && near(p3.Rmax, 0.82), 'addSamples: 데이터시트 항목 → 실측'); }
+{ const a = parsePercents('85.5, 86.1;85.8 x 120 -1'), b = parsePercents('');
+  ok(a.values.length === 3 && near(a.values[0], 0.855) && near(a.values[2], 0.858) && a.bad.join() === 'x,120,-1' && !b.values.length && !b.bad.length, `parsePercents: % → 0~1, 범위 밖 거부: ${JSON.stringify(a)}`); }
+{ const f = entryFromForm({ name: '사내 백색 PC', kind: 'whiteDiffuse', values: '85.5, 86.1, 85.8', cond: 'SCI 8°/d', note: '시료 A', max: '' });
+  ok(f.entry && !validateReflect(f.entry).length && near(f.entry.R, 0.858) && near(f.entry.Rmax, 0.861) && f.entry.samples.length === 3 && f.entry.samples.every((s) => s.cond === 'SCI 8°/d' && s.note === '시료 A'), `entryFromForm: R 85.8 % · 상한 86.1 %: ${JSON.stringify(f)}`);
+  const g = entryFromForm({ name: 'm', kind: 'metal', values: '80', max: '90' });
+  ok(g.entry.kind === 'metal' && near(g.entry.Rmax, 0.9), 'entryFromForm: 경면 · 상한 % 입력');
+  ok(entryFromForm({ name: '', values: '80' }).error === '이름을 입력하세요' && /측정 반사율/.test(entryFromForm({ name: 'a', values: '' }).error) && /0~100/.test(entryFromForm({ name: 'a', values: '80, 101' }).error) && /상한/.test(entryFromForm({ name: 'a', values: '80, 85', max: '82' }).error), '양식 오류: 이름·값 없음·범위·상한 < 평균');
+  ok(MEAS_CONDS.join() === 'SCI 8°/d,SCE 8°/d,0°/45°,기타', '측정 조건 목록'); }
+{ ok(reflStatusText({ status: 'measured', nSamples: 3 }) === '실측 3회' && reflStatusText({ status: 'measured', samples: [1, 2] }) === '실측 2회' && reflStatusText({ status: 'datasheet' }) === '데이터시트' && reflStatusText({ status: 'example' }) === '예시', '상태 문구');
+  const db = createReflectDb(BASE, [], () => {});
+  ok(uniqueReflId(db, 'pc-white') === 'pc-white_' && uniqueReflId(db, 'zz') === 'zz', 'id 겹치면 _ 붙임'); }
 done();

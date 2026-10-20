@@ -6,9 +6,9 @@ import { checkLabels, statusWord, statusIcon, checkAria, isActivateKey, esc as e
 import { ramp, NO_DATA } from '../src/ui/m3/colormap.js';
 import { defaultLight, defaultObserve, defaultChecks } from '../src/engine/mech3d/defs.js';
 import { defaultPart, setPartMaterial, setPartMaterialParam } from '../src/engine/mech3d/materials.js';
-import { clearanceHtml, meshInfo, partHeaderText, reflRowHtml } from '../src/ui/mech3d-panel.js';
+import { clearanceHtml, meshInfo, partHeaderText, reflRowHtml, reflAddFormHtml, partToDbMaterial } from '../src/ui/mech3d-panel.js';
 import { DEFAULT_FINISH_CATALOG, finishCandidatesFor, catalogOf } from '../src/engine/mech3d/housing-led.js';
-import { catalogTableHtml } from '../src/ui/mech3d-light-panel.js';
+import { reflDbHtml } from '../src/ui/mech3d-light-panel.js';
 import { stepLayoutRowHtml, clampVirtual, virtCountMax, ledRowsHtml, defaultRowGap } from '../src/ui/mech3d-light-panel.js';
 import { rowGapOptions } from '../src/engine/mech3d/placement.js';
 import { ok, done } from './mech3d-util.mjs';
@@ -241,6 +241,24 @@ ok(clampCap(12) === 9.9 && clampCap(0.1) === 0.5 && clampCap(3) === 3 && clampCa
   ok(reflRowHtml({ material: { kind: 'milky' } }, C) === '', '불투명 아님 → 반사 소재 없음');
   const q = setPartMaterial({ ...defaultPart(0, 'c', 1), reflMaterial: 'pc-white', coating: 'coat-white' }, 'opaque');
   ok(!('reflMaterial' in q) && !('coating' in q), '소재 종류 바꾸면 반사 소재·특수 표시 해제');
-  const t = catalogTableHtml(catalogOf(null)), t1 = catalogTableHtml([{ ...catalogOf(null)[1], id: 'u1', origin: 'user', status: 'measured', nSamples: 3 }]);
-  ok(t.includes('반사 소재표') && /data-lp-cat="pc-white" data-lp-catk="R"[^>]*value="85"|value="85"[^>]*data-lp-cat="pc-white" data-lp-catk="R"/.test(t) && /data-lp-cat="coat-white" data-lp-catk="max"/.test(t) && !/data-lp-cat="coat-white" data-lp-catk="R"/.test(t) && !t.includes('data-lp-catreset') && t.includes('예시') && t1.includes('사용자 · 실측 3회'), '소재표: 기본 R·상한 R 칸(특수 = 상한만) · 상태(사용자·실측 횟수)'); }
+  const t = reflDbHtml(catalogOf(null)), U = { ...catalogOf(null)[1], id: 'u1', name: '사내 PC', origin: 'user', status: 'measured', nSamples: 3 }, t1 = reflDbHtml([U]);
+  ok(t.includes('반사 소재 DB') && !t.includes('data-lp-cat=') && t.includes('data-lp-dbcopy="pc-white"') && !t.includes('data-lp-dbdel') && t.includes('예시') && t.includes('85') && t.includes('data-lp-dbexp') && /type="file"[^>]*data-lp-dbimp|data-lp-dbimp[^>]*type="file"/.test(t), '소재 DB: 공용 = 읽기 전용 + [복사] · 내보내기·불러오기');
+  ok(/data-lp-catname="u1"[^>]*value="사내 PC"|value="사내 PC"[^>]*data-lp-catname="u1"/.test(t1) && /data-lp-cat="u1" data-lp-catk="R"[^>]*value="85"|value="85"[^>]*data-lp-cat="u1" data-lp-catk="R"/.test(t1) && t1.includes('data-lp-catk="max"') && t1.includes('data-lp-dbadd="u1"') && t1.includes('data-lp-dbdel="u1"') && t1.includes('실측 3회') && !t1.includes('data-lp-addv'), '소재 DB: 사용자 = 이름·R·상한 편집 · 측정값 추가 · 삭제');
+  const t2 = reflDbHtml([U], { addFor: 'u1' });
+  ok(t2.includes('data-lp-addv') && t2.includes('data-lp-addok="u1"') && t2.includes('<option>SCI 8°/d</option>') && t2.includes('data-lp-addn'), '소재 DB: 측정값 추가 인라인(값 %·조건·메모)');
+  const sp = reflDbHtml([{ ...catalogOf(null)[5], id: 'u2', origin: 'user' }]);
+  ok(!/data-lp-cat="u2" data-lp-catk="R"/.test(sp) && /data-lp-cat="u2" data-lp-catk="max"/.test(sp) && sp.includes('특수'), '소재 DB: 특수 처리 = 상한만');
+  // 부품 속성: 그룹·상태·없는 소재·복사·추가 양식
+  const CU = [...catalogOf(null), U];
+  const g = reflRowHtml({ material: { kind: 'opaque' }, reflMaterial: 'u1' }, CU);
+  ok(g.includes('<optgroup label="기본">') && g.includes('<optgroup label="사용자">') && /<option value="u1" selected>사내 PC · 실측 3회/.test(g) && g.includes('백색 ABS · 예시') && !g.includes('data-m3-reflcopy') && g.includes('data-m3-refladd'), '반사 소재: 기본/사용자 그룹 · 상태 · [＋ 측정값으로 소재 추가]');
+  ok(r.includes('data-m3-reflcopy') && !r0.includes('data-m3-reflcopy'), '반사 소재: 기본 항목 선택 → [복사해서 수정]');
+  const gm = reflRowHtml({ material: { kind: 'opaque' }, reflMaterial: 'gone-1' }, C);
+  ok(/<option value="gone-1" selected>없는 소재\(gone-1\) — 다시 고르세요/.test(gm) && gm.includes('— 미지정 —</option>') && !/value="" selected/.test(gm), '반사 소재: DB 에 없는 id → 없는 소재 표시');
+  const fm = reflRowHtml({ material: { kind: 'opaque' } }, C, { addOpen: true, msg: '이름을 입력하세요' }), f0 = reflAddFormHtml();
+  ok(fm.includes('data-m3-raok') && fm.includes('이름을 입력하세요') && ['name', 'kind', 'values', 'cond', 'note', 'max'].every((k) => f0.includes(`data-m3-ra="${k}"`)) && f0.includes('<option value="metal">경면</option>') && f0.includes('<option>0°/45°</option>') && !r.includes('data-m3-raok'), '추가 양식: 이름·종류·값 %·조건·메모·상한');
+  ok(finishText({ ...W(0.96), coating: 'u-coat' }, [...C, { id: 'u-coat', name: '사내 반사시트', kind: 'whiteDiffuse', R: null, max: 0.96, special: true }]) === '백색 96% (특수: 사내 반사시트)' && finishText({ ...W(0.97), coating: 'coat-white' }, C) === '백색 97% (특수: 고반사 도장)', '면 처리 문구: 사용자 특수 항목');
+  // 투과 부품에 실측 소재 적용 — 투명·백색 투과 → Milky 로
+  const mk = partToDbMaterial({ ...defaultPart(0, 'a', 1), material: { kind: 'milky', dbId: '', milky: 2, resin: 'PC' } }, 'm1'), cl = partToDbMaterial(setPartMaterial(defaultPart(0, 'b', 1), 'clear'), 'm1');
+  ok(mk.material.dbId === 'm1' && mk.material.milky === 2 && cl.material.kind === 'milky' && cl.material.dbId === 'm1', '실측 소재 적용: Milky 유지 · 투명 → Milky'); }
 done();

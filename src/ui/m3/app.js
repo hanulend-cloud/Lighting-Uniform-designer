@@ -18,14 +18,15 @@ import { mountCommandBar } from './command-bar.js';
 import { renderFeatureTree, toggleVisibility } from './feature-tree.js';
 import { partClearance, limitXform, axisLimits, TOL } from '../../engine/mech3d/clearance.js';
 import { renderPropertyPanel } from './property-panel.js';
-import { meshInfo } from '../mech3d-panel.js';
+import { meshInfo, partToDbMaterial } from '../mech3d-panel.js';
+import { renderAdvanced } from '../l2-advanced.js';
 import { clampVirtual, defaultRowGap } from '../mech3d-light-panel.js';
 import { createResultsPanel } from './results-panel.js';
 import { renderStatusBar } from './status-bar.js';
 import { createAdRunner } from './autodesign-run.js';
 import { renderAutoPanel, stageAvailability, clampCap, overallFrac, etaText, reusableCurrent, defaultHousingPart, applyDz, applyFinish, capDefault, nextFinish, finishText } from './autodesign-panel.js';
 import { ledHeightRange, heightCandidates, catalogOf, finishCandidatesFor, setReflMaterial, partFinishEdit } from '../../engine/mech3d/housing-led.js';
-import { migrateFinishCatalog, reflectPatch, copyAsUser } from '../../model/reflect-db.js';
+import { migrateFinishCatalog, reflectPatch, copyAsUser, entryFromForm, addSamples, parsePercents, uniqueReflId } from '../../model/reflect-db.js';
 import { intersectRay } from '../../engine/mech3d/bvh.js';
 import { runAutoDesign, shapeTotal } from '../../engine/mech3d/autodesign.js';
 import { milkyRows } from '../../engine/mech3d/milky-search.js';
@@ -349,7 +350,7 @@ function renderAuto() {
   if (!st.running && !avail.housing.parts?.includes(st.sel.housingPart)) { const k = defaultHousingPart(M, adInfo().boxes); st.sel.housingPart = avail.housing.ok ? (avail.housing.parts.includes(k) ? k : avail.housing.parts[0]) : -1; }   // ④ 기본 = 관측 부품을 감싸는 가장 큰 불투명 부품
   const mp = st.running ? st.milkyPart : adMilkyPart(M, avail), sel = { ...st.sel, milkyMax: st.sel.milkyMax ?? capDefault(st.sel, avail, mp != null ? M.parts[mp].material.milky : 0) };
   const hm = st.sel.housingPart >= 0 ? reflCat().find((e) => !e.special && e.id === M.parts[st.sel.housingPart]?.reflMaterial) : null;   // ④ 대상 반사 소재
-  renderAutoPanel(el, { avail, sel, running: st.running, result: st.result, names: M.parts.map((p) => p.name), canRevert: !!st.undo, noLine: !A.store.session.line, milkyPart: mp, housingMat: hm ? { name: hm.name, max: hm.max } : null }, {
+  renderAutoPanel(el, { avail, sel, running: st.running, result: st.result, names: M.parts.map((p) => p.name), canRevert: !!st.undo, noLine: !A.store.session.line, milkyPart: mp, housingMat: hm ? { name: hm.name, max: hm.max } : null, catalog: reflCat() }, {
     onSel: (k, v) => { if (st.running) return; st.sel[k] = k === 'milkyMax' ? clampCap(v) : v; renderAuto(); },
     onAction: (k) => ({ run: adRun, stop: adStop, close: () => { st.open = false; renderAuto(); }, apply: adApply, cancel: adCancel, revert: adRevert, step: adStep })[k]?.(),
   });
@@ -519,7 +520,7 @@ async function adRun() {
   let res = null;
   try {
     res = await runAutoDesign({
-      stages, obs, G, line, current: cur, milkyMax: st.sel.milkyMax ?? null, housingProbe, finishText, nMax: Math.max(1, Math.min(60, Math.floor(line.length / 2))), pitchRange: null, stepMode: stp,
+      stages, obs, G, line, current: cur, milkyMax: st.sel.milkyMax ?? null, housingProbe, finishText: (f) => finishText(f, reflCat()), nMax: Math.max(1, Math.min(60, Math.floor(line.length / 2))), pitchRange: null, stepMode: stp,
       shapePart: sp, shapeRanges, currentVerified, heightRange: hInfo?.range ?? null, housingPart: hp, finishCands,
     }, io);
   } catch (e) { if (A === a && !R.stopped) setStatus(`자동설계 실패: ${e.message}`); }
@@ -664,6 +665,42 @@ function propHandlers() {
       if (r.clamped) x.status = `소재 상한(${Math.round(r.max * 100)}%) 초과 — 특수 표면처리는 자동설계 ④ 에서 허용`;
     }),
     onReflMaterial: (i, id) => st.update('material', (m) => { m.parts[i] = setReflMaterial(m.parts[i], id, reflCat()); }),
+    // 측정값으로 반사 소재 추가(spec P4 §2.3e) — 사용자 항목 등록 후 이 부품에 적용. f = 양식 문자열(% 단위) → 오류 문구 | 없음
+    onReflAdd: (i, f) => {
+      const db = ctx.reflectDb?.(); if (!db) return '반사 소재 DB 없음';
+      const r = entryFromForm(f); if (r.error) return r.error;
+      const e = { ...r.entry, id: uniqueReflId(db, r.entry.id) };
+      try { db.add(e); } catch (err) { return err.message; }
+      st.update('material', (m, x) => { m.parts[i] = setReflMaterial(m.parts[i], e.id, reflCat()); x.status = `반사 소재 "${e.name}" 등록 · 적용(R ${pct1(e.R)}%, 상한 ${pct1(e.Rmax)}%)`; });
+      return null;
+    },
+    // 공용 항목 → 사용자 사본 만들고 이 부품을 사본으로
+    onReflCopy: (i, id) => {
+      const db = ctx.reflectDb?.(), e = db?.get(id); if (!e) return;
+      const c = copyAsUser(e); c.id = uniqueReflId(db, c.id);
+      try { db.add(c); } catch (err) { setStatus(`복사 실패: ${err.message}`); return; }
+      st.update('material', (m, x) => { m.parts[i] = setReflMaterial(m.parts[i], c.id, reflCat()); x.status = `사용자 사본 "${c.name}" 을 만들어 적용 — 목표 노드의 반사 소재 DB 에서 고칠 수 있습니다`; });
+    },
+    onFitDialog: (i) => openFitDialog(i),
+    // 반사 소재 DB 관리(목표 노드) — 바뀐 뒤 다시 그림(부품 속성·자동설계 ④ 후보·카드). 오류 문구 | null
+    onReflDb: (op, id, arg) => {
+      const db = ctx.reflectDb?.(); if (!db) { setStatus('반사 소재 DB 없음'); return '반사 소재 DB 없음'; }
+      if (op === 'export') { downloadText('uds-reflect.json', db.exportJson('all'), 'application/json'); setStatus('반사 소재 DB 를 uds-reflect.json 으로 내보냄'); return null; }
+      let msg = '', err = null;
+      try {
+        if (op === 'rename') { db.update(id, { name: arg }); msg = `이름 바꿈: ${arg}`; }
+        else if (op === 'samples') {
+          const e = db.get(id), { values, bad } = parsePercents(arg?.values);
+          if (bad.length || !values.length) err = bad.length ? `측정 반사율은 0~100 % 숫자: ${bad.join(', ')}` : '측정 반사율 %를 입력하세요';
+          else { const q = db.update(id, addSamples(e, values.map((R) => ({ R, cond: arg.cond ?? '', note: arg.note ?? '' })))); msg = `"${q.name}" 측정 ${q.samples.length}회 · R ${pct1(q.R)}% · 상한 ${pct1(q.Rmax)}%`; }
+        } else if (op === 'remove') { const e = db.get(id); if (db.remove(id)) msg = `"${e?.name ?? id}" 삭제 — 이 소재를 쓰던 부품은 "없는 소재" 로 표시`; }
+        else if (op === 'copy') { const c = copyAsUser(db.get(id)); c.id = uniqueReflId(db, c.id); db.add(c); msg = `사용자 사본 "${c.name}" 을 만들었습니다`; }
+        else if (op === 'import') { const r = db.importJson(arg); msg = `반사 소재 불러옴 ${r.added.length}건${r.rejected.length ? ` · 거부 ${r.rejected.length}건: ${r.rejected.join('; ')}` : ''}`; }
+      } catch (e) { err = `반사 소재 DB ${op === 'import' ? '불러오기' : '고침'} 실패: ${e.message}`; }
+      if (err) { setStatus(err); return err; }
+      st.update('session', (_, x) => { x.status = msg || x.status; });
+      return null;
+    },
     // 크기·위치 조절: 장면을 바꾸고 접촉면을 다시 찾는다(같은 면 쌍은 모드 유지). xf = null → 원래대로
     // 새 간섭이 생기면 간섭 직전까지만 적용(limitXform). 직접 배치 LED 는 라인을 따라 다시 놓이므로 고정 LED(STEP)만 장애물
     onXform: (i, want, note = '') => st.update('material', (m, x) => {
@@ -723,6 +760,55 @@ function propHandlers() {
       } catch (err) { x.status = `반사 소재 고침 실패: ${err.message}`; }
     }),
   };
+}
+const pct1 = (v) => Math.round(v * 1000) / 10;
+// 사용자 파일 저장(Blob 링크) — l2-advanced.js download 와 같은 방식
+function downloadText(name, text, type) {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([text], { type })); a.download = name; a.click(); URL.revokeObjectURL(a.href);
+}
+// 투과 부품 실측 맞춤 대화상자(spec P4 §2.3e) — 평판 모드 l2-advanced 화면을 그대로 띄움(같은 실측소재 DB).
+// 저장되면 실측소재 목록 갱신(Worker 포함) · 이 부품에 그 소재 적용(투명·백색 투과 → Milky) · 닫음
+function openFitDialog(i) {
+  const ctx = A.ctx, db = ctx.materialDb?.(), table = ctx.l2Table?.();
+  if (!db || !table) { setStatus('실측소재 DB·L2 응답표가 아직 준비되지 않았습니다'); return; }
+  document.querySelector('.m3-fitdlg')?.remove();
+  const name = String(A.store.mspec.parts[i]?.name ?? '').replace(/[<>&"]/g, ''), dlg = document.createElement('div');
+  dlg.className = 'zoom-modal m3-fitdlg';
+  dlg.innerHTML = `<div class="zoom-modal-inner" role="dialog" aria-modal="true" aria-label="실측 데이터로 소재 추가">
+    <div class="zoom-modal-hd"><span>실측 데이터로 소재 추가 · ${name}</span><button data-fit-close>닫기</button></div>
+    <div class="m3-fitdlg-body"><div class="mut">측정값을 넣고 [피팅] → [DB 저장] 하면 이 부품에 그 실측 소재가 적용됩니다.</div><div data-fit-adv></div></div></div>`;
+  document.body.appendChild(dlg);
+  const onKey = (ev) => { if (ev.key === 'Escape') close(); };
+  const close = () => { dlg.remove(); document.removeEventListener('keydown', onKey); };
+  document.addEventListener('keydown', onKey);
+  dlg.querySelector('[data-fit-close]').onclick = close;
+  let saved = null;
+  const wdb = Object.create(db);   // add 만 가로채 저장된 id 를 앎
+  wdb.add = (e) => { db.add(e); saved = e.id; };
+  const host = dlg.querySelector('[data-fit-adv]');
+  const actx = {
+    table, db: wdb, viewNote: '현재 소재 보기는 평판 모드에서 — 여기서는 측정 → 피팅 → 저장',
+    onDbChanged: () => {
+      pool?.setDb(ctx.dbLists()); ctx.onMaterialDbChanged?.();
+      if (saved) {
+        const id = saved; saved = null; close();
+        A.store.update('material', (m, x) => {
+          const ent = db.get(id);
+          let q = partToDbMaterial(m.parts[i], id);
+          if (ent) q = setPartMaterialParam(q, 'milky', Math.round(ctx.milkyFromMusR(table, ent.fitted.musR) * 100) / 100);
+          m.parts[i] = q; x.status = `실측 소재 "${ent?.name ?? id}" 저장 · ${q.name} 에 적용`;
+        });
+        return;
+      }
+      // 삭제·불러오기 — 지워진 소재를 쓰던 부품은 추상 Milky 로
+      const gone = A.store.mspec.parts.some((p) => p.material?.dbId && !db.get(p.material.dbId));
+      A.store.update(gone ? 'material' : 'session', (m) => { for (const p of m.parts) if (p.material?.dbId && !db.get(p.material.dbId)) p.material = { ...p.material, dbId: '' }; });
+      renderAdvanced(host, actx, null);
+    },
+  };
+  renderAdvanced(host, actx, null);
+  const add = host.querySelector('details.adv-add'); if (add) add.open = true;
 }
 // LED STEP 불러오기 (main.js:452-469)
 function importLedStep(file) {
