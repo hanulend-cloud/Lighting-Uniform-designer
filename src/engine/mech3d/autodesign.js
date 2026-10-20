@@ -293,7 +293,11 @@ export async function runAutoDesign(cfg, io) {
   }
   if (stop()) return { cancelled: true };
   io.progress?.('verify', 0, '최종안 정밀 재계산');
-  if (sameDesign(d, cfg.current)) return { feasible: feasible && margin(currentVerified.stats, obs) >= 0, best: { ...cfg.current }, steps, reason, verified: currentVerified, current: currentVerified, unchanged: true, cancelled: false, hint };
+  if (sameDesign(d, cfg.current)) {   // 현재안이 최선 — 현재안이 목표 미달이면 이유를 비워 두지 않음
+    const okCur = margin(currentVerified.stats, obs) >= 0, cs = currentVerified.stats;
+    const why = reason || (okCur ? '' : `현재 설계가 최선 — 목표 미달(길이 U ${cs.Ulen.toFixed(2)}${cs.Uwid == null ? '' : ` · 폭 U ${cs.Uwid.toFixed(2)}`})`);
+    return { feasible: feasible && okCur, best: { ...cfg.current }, steps, reason: why, verified: currentVerified, current: currentVerified, unchanged: true, cancelled: false, hint };
+  }
   let verified = await io.verify(d);
   if (ledAlts?.length && margin(verified.stats, obs) < 0) {   // ② 재확인: 정밀 검증 미달이면 기저 순위의 다음 후보(같은 총수 → 다음 총수) 최대 2개 — 다른 필드(①③⑤④ 결과)는 그대로
     const tried = [{ design: d, verified }], scV = (v) => shapeScore({ ok: !v.stats.empty, stats: v.stats, eff: v.eff }, obs);
