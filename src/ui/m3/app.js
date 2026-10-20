@@ -174,10 +174,10 @@ export function jobFor(M, mechParts, { emitters = null, line = null, G = null, o
   const o = obs ?? tallyObs(M.observe, M.observe.dir ?? ln.frame.d), g = G ?? geometry(o);
   const isStep = M.light.kind === 'step' && getLedMesh(), lay = isStep ? L.stepLayout(M, ln) : null, ms = JSON.parse(JSON.stringify(M));
   let ledParts = isStep ? L.rawParts(getLedMesh().parts) : null;
-  // 가상 배치: 부품은 이미 월드 좌표 → composeScene 이 다시 변환하지 않게 offset·rot = 0, 번호는 가상 배치 기준
-  if (lay?.virtual) {
+  // 가상 배치·개별 조정(spec §4a): 부품은 이미 월드 좌표 → composeScene 이 다시 변환하지 않게 offset·rot = 0, 번호는 그 배치 기준
+  if (lay?.virtual || lay?.adjusted) {
     ledParts = L.rawParts(lay.parts);
-    ms.light.step = { ...ms.light.step, offset: [0, 0, 0], rot: [0, 0, 0], leds: lay.leds, pcb: lay.pcb, excluded: [], emitters: JSON.parse(JSON.stringify(lay.emitters)), virtual: null };
+    ms.light.step = { ...ms.light.step, offset: [0, 0, 0], rot: [0, 0, 0], leds: lay.leds, pcb: lay.pcb, excluded: lay.excluded, emitters: JSON.parse(JSON.stringify(lay.emitters)), virtual: null };
   }
   return {
     sceneKey: `s${++sceneSeq}`, G: g, obs: o, nLeds: em.length, fluxLm: M.light.spec.fluxLm ?? 0,

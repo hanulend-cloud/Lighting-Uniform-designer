@@ -5,6 +5,7 @@ import { meshStats, findLeds, findEmitters, pcbIndex, pickLedNearRay, refineEmit
 import { transformMesh } from '../../engine/mech3d/xform.js';
 import { manualLeds } from '../../engine/mech3d/placement.js';
 import { stepLayoutOf } from '../../engine/mech3d/virtual-leds.js';
+import { validAdjust } from '../../engine/mech3d/led-adjust.js';
 import { bounds } from '../../engine/mech3d/mesh.js';
 
 let ledCache = [], manCache = null, layCache = [];
@@ -21,14 +22,15 @@ function stepPartsNow(M) {
   return c.parts;
 }
 // 원래/가상 배치 하나로(spec P4 §2.2a) → { parts, leds, pcb, excluded, emitters, virtual, err? } | null.
-// 입력이 같으면 같은 객체(화면 meshKey 비교용). 캐시 4칸(LRU — 자동설계 복사본이 화면 항목을 밀어내지 않게). line 이 없으면 원래 배치
+// 입력이 같으면 같은 객체(화면 meshKey 비교용). 캐시 4칸(LRU — 자동설계 복사본이 화면 항목을 밀어내지 않게). line 이 없으면 원래 배치(개별 조정 없음)
+// LED 개별 조정(light.ledAdjust, 배치가 맞을 때만)은 line 이 있을 때 반영 — 결과 adjusted 면 parts 는 조정된 월드 좌표
 export function stepLayout(M, line = null) {
   const st = M?.light?.step, parts = stepPartsNow(M);
   if (!st || !parts) return null;
-  const v = st.virtual && line ? st.virtual : null, ln = v ? line : null;
-  const key = JSON.stringify([st.leds, st.pcb, st.excluded, (st.emitters ?? []).map((e) => [e.part, e.pos, e.axis, e.xAxis, !!e.needsCheck]), v]);
+  const adj = line ? validAdjust(M.light) : null, v = st.virtual && line ? st.virtual : null, ln = v || adj ? line : null;
+  const key = JSON.stringify([st.leds, st.pcb, st.excluded, (st.emitters ?? []).map((e) => [e.part, e.pos, e.axis, e.xAxis, !!e.needsCheck]), v, adj]);
   let c = layCache.find((x) => x.parts === parts && x.line === ln && x.key === key);
-  if (!c) c = { parts, line: ln, key, res: stepLayoutOf({ parts, step: { ...st, virtual: v }, line: ln }) };
+  if (!c) c = { parts, line: ln, key, res: stepLayoutOf({ parts, step: { ...st, virtual: v }, line: ln, adjust: adj }) };
   layCache = [c, ...layCache.filter((x) => x !== c)].slice(0, 4);   // 최근 사용을 앞으로
   return c.res;
 }
@@ -97,10 +99,10 @@ export function currentEmitters(M, line) {
     const ex = new Set(L.step?.excluded ?? []); return (L.step?.emitters ?? []).filter((e) => !e.needsCheck && !ex.has(e.part));   // 메쉬 없음
   }
   if (L.kind === 'manual' && line) {
-    const key = JSON.stringify(L.manual);
+    const adj = validAdjust(L), key = JSON.stringify([L.manual, adj]);   // 개별 조정(배치가 맞을 때만) 포함
     if (!manCache || manCache.line !== line || manCache.key !== key || manCache.rt !== getMech3d()) {
       let em = null, err = null;
-      try { em = manualLeds(line, L.manual, getMech3d()); } catch (e) { err = e; }
+      try { em = manualLeds(line, L.manual, getMech3d(), adj); } catch (e) { err = e; }
       manCache = { line, key, rt: getMech3d(), em, err };
     }
     if (manCache.err) throw manCache.err;

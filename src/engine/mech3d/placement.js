@@ -47,11 +47,19 @@ export function ledAtS(line, s, { side = 'direct', pcb }, rt = null, w = 0) {
   return { s, pos, axis, xAxis: T3 };
 }
 
-// rows 2 → 같은 s 에 w = −δ, +δ 두 개(순서: s 오름차순, 각 s 에서 −δ → +δ)
-export function manualLeds(line, { count, pitch = 0, side = 'direct', pcb, rows = 1, rowGap = 0 }, rt = null) {
+// 개별 조정 s 정리: 닫힌 라인은 감고, 열린 라인은 [0, L] 로 자름
+export const wrapS = (line, s) => (line.closed ? ((s % line.length) + line.length) % line.length : Math.max(0, Math.min(line.length, s)));
+// rows 2 → 같은 s 에 w = −δ, +δ 두 개(순서: s 오름차순, 각 s 에서 −δ → +δ). 번호 = 이 순서.
+// adjust = ledAdjust.items(validAdjust) | null — 그 번호의 LED 를 s+ds 에 다시 놓고 관측 방향 d 로 +dz(spec m3-cad-ui §4a)
+export function manualLeds(line, { count, pitch = 0, side = 'direct', pcb, rows = 1, rowGap = 0 }, rt = null, adjust = null) {
   if (pcb.kind === 'depth' && !(pcb.depth > 0)) throw new Error('PCB 깊이는 0 보다 커야 함');
-  const ws = rowOffsets(rows, rows === 2 ? clampRowGap(line, rowGap) : 0);
-  return ledSPositions(line, count, pitch).flatMap((s) => ws.map((w) => ledAtS(line, s, { side, pcb }, rt, w)));
+  const ws = rowOffsets(rows, rows === 2 ? clampRowGap(line, rowGap) : 0), d = line.frame.d;
+  return ledSPositions(line, count, pitch).flatMap((s) => ws.map((w) => [s, w])).map(([s, w], i) => {
+    const it = adjust?.[i];
+    if (!it || (!it.ds && !it.dz)) return ledAtS(line, s, { side, pcb }, rt, w);
+    const e = ledAtS(line, wrapS(line, s + it.ds), { side, pcb }, rt, w);
+    return { ...e, pos: e.pos.map((c, k) => c + it.dz * d[k]) };
+  });
 }
 
 // 가상 PCB(깊이 지정): 관측 라인 외곽 + margin, 두께 1mm, 윗면 = LED 높이(관측면 최저점 − depth)
