@@ -124,7 +124,7 @@ function buildForm() {
   }
   $('#btn-reset').onclick = () => { spec = structuredClone(DEFAULT_SPEC); markSoloReset(); mount(); m3app.unmount(); m3app.resetWorkers(); applyMode(); schedule(); };
   $('#btn-mech3d-show').onclick = () => { spec.mode = 'mech3d'; persist(); applyMode(); };
-  $('#btn-flat-mode').onclick = () => { spec.mode = 'flat'; spec.flatChosen = true; persist(); applyMode(); schedule(); };   // 평판(초기 검토) — 사용자가 고른 경우만 평판으로 시작
+  $('#btn-flat-mode').onclick = () => { spec.mode = 'flat'; persist(); applyMode(); schedule(); };   // 평판(초기 검토) — 이번 실행에서만(다음 실행은 3D)
   $('#btn-sample-project').onclick = () => loadSampleProject();
   $('#file-mech3d-start').onchange = (e) => { const f = e.target.files?.[0]; if (f) importMech3d(f); e.target.value = ''; };
   $('#file-mech3d').onchange = (e) => { const f = e.target.files?.[0]; if (f) importMech3d(f); e.target.value = ''; };
@@ -223,7 +223,7 @@ function m3ctx() {
     mspec: spec.mech3d, persist, canSave: () => tabLock.canWrite(), dbLists, materialDb, reflectDb: () => reflectDb, l2Table: () => l2State().table, l2Raw, milkyFromMusR,
     onImportMech3d: importMech3d,
     onMaterialDbChanged: () => { solver?.postMessage({ type: 'db', db: dbLists() }); markSoloReset(); },   // 3D 실측 맞춤 대화상자에서 실측소재 DB 가 바뀜 → 평판 solver 도
-    onExit: () => { spec.mode = 'flat'; spec.flatChosen = true; persist(); applyMode(); schedule(); },
+    onExit: () => { spec.mode = 'flat'; persist(); applyMode(); schedule(); },
   };
 }
 function applyMode() {
@@ -711,7 +711,7 @@ function mount() {
 
 // 구버전 저장값 보정
 function migrate(s) {
-  if (s.mode !== 'mech3d' && !s.flatChosen) s.mode = 'mech3d';   // 3D 가 메인 화면(2026-10-21) — 평판은 사용자가 고른 경우만
+  s.mode = 'mech3d'; delete s.flatChosen;   // 3D 가 메인 화면(v3) — 실행·불러오기는 늘 3D 로 시작, 평판(초기 검토)은 그 자리에서 고를 때만
   s.levels ??= {};
   for (const l of [1, 2, 3, 4, 5]) {
     const cur = s.levels[l] || {};
