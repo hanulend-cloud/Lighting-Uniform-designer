@@ -1,6 +1,6 @@
 // 삼각형 메쉬 → STEP 솔리드: node test/mesh-step.mjs
 import initOpenCascade from 'opencascade.js/dist/node.js';
-import { meshToStepText } from '../src/export/mesh-step.js';
+import { meshToStepText, meshesToStepText } from '../src/export/mesh-step.js';
 import { readStepParts } from '../src/engine/shape/step-import.js';
 import { meshVolume } from '../src/engine/mech3d/mesh.js';
 import { boxMesh, mergeMeshes, ok, done } from './mech3d-util.mjs';
@@ -11,6 +11,9 @@ const oc = await initOpenCascade(), m = boxMesh(0, 0, 0, 40, 10, 2);
 const text = meshToStepText(oc, m);
 const back = readStepParts(oc, text);
 ok(/ISO-10303-21/.test(text) && back.length === 1 && back[0].faceCount === 6 && Math.abs(meshVolume(back[0].positions, back[0].triangles) - 800) < 0.5, `STEP 왕복: 부품 1개, 같은 평면 합침(면 6개), 부피 ${back.length ? meshVolume(back[0].positions, back[0].triangles).toFixed(2) : '–'}`);
+{ // 여러 부품 → 한 STEP(부품마다 솔리드) — 파일 메뉴 '3D 기구 STEP 내보내기'
+  const t2 = meshesToStepText(oc, [boxMesh(0, 0, 0, 40, 10, 2), boxMesh(0, 0, 5, 20, 10, 3)]), b2 = readStepParts(oc, t2);
+  ok(b2.length === 2 && Math.abs(meshVolume(b2[1].positions, b2[1].triangles) - 600) < 0.5, `여러 부품 STEP: ${b2.length}개, 두 번째 부피 ${b2[1] ? meshVolume(b2[1].positions, b2[1].triangles).toFixed(1) : '–'}`); }
 { // 세분·변형 판 + 일직선(퇴화) 삼각형 1개 → STEP 왕복 부피 ±1%
   const frame = { u: [1, 0, 0], v: [0, 1, 0], d: [0, 0, 1] }, pl = boxMesh(0, 0, 0, 60, 40, 3), C = [[15, 20], [45, 20]], R = 9;
   const H = frameHeights(pl, frame, 0.5), d = deformPart(refineForBumps(pl, frame, C, R, R / 3, { H }), frame, H, { dt: 0.3, h: 0.8, R, centers: C });

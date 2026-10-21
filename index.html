@@ -9,15 +9,14 @@
 </head>
 <body>
   <header>
-    <h1>Uniform Design Simulator <small>Phase 1 · 직하형 · 확산판 없음</small></h1>
-    <div class="actions">
-      <button id="btn-reset">기본값</button>
-      <button id="btn-export">JSON 내보내기</button>
-      <button id="btn-step">STEP 내보내기</button>
-      <label class="import">불러오기<input type="file" id="file-import" accept="application/json" hidden /></label>
-      <label class="import" title="기구설계 STEP(.stp/.step) — 모든 부품을 불러와 3D 기구 모드로 전환">3D 기구 불러오기<input type="file" id="file-mech3d" accept=".stp,.step" hidden /></label>
-      <button id="btn-mech3d-show" hidden>3D 기구 설계</button>
+    <div class="hd-left">
+      <h1>Uniform Design Simulator <small id="app-ver"></small></h1>
+      <nav id="menubar" class="menubar" aria-label="메뉴"></nav>
     </div>
+    <!-- 메뉴가 쓰는 파일 선택(숨김) -->
+    <input type="file" id="file-import" accept="application/json,.json" hidden />
+    <input type="file" id="file-mech3d" accept=".stp,.step" hidden />
+    <input type="file" id="file-led" accept=".stp,.step" hidden />
   </header>
   <!-- 다른 탭에서도 열려 있음(src/ui/tab-lock.js) — 이 탭은 저장하지 않음 -->
   <div id="tab-lock" class="tab-note" role="alert" hidden>

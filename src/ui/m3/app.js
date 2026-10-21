@@ -59,7 +59,47 @@ export function warmWorkers(ctx) { getPool(ctx).warm(); }
 export const isMounted = () => !!A;
 export function setStatus(t) { A?.store.update('session', (_, s) => { s.status = t; }); }
 export function flush() { A?.store.flush(); }
-export function importLed(file) { if (A) importLedStep(file); }   // 예제 프로젝트 — LED STEP 을 코드에서 불러옴(같은 이름이면 저장된 기준 LED 로 재인식)
+export function importLed(file) { if (!A) return; if (A.store.mspec.light.kind !== 'step') A.store.update('light', (m) => { m.light.kind = 'step'; }); importLedStep(file); }   // 예제 프로젝트 — LED STEP 을 코드에서 불러옴(같은 이름이면 저장된 기준 LED 로 재인식)
+// 상단 메뉴(main.js) → 3D 명령. 3D 화면이 아니면 false
+export function command(id) {
+  if (!A) return false;
+  const h = cmdHandlers(), st = A.store, click = (sel) => document.querySelector(sel)?.click();
+  switch (id) {
+    case 'view:top': case 'view:front': case 'view:side': case 'view:iso': click(`#m3-views [data-view="${id.slice(5)}"]`); break;
+    case 'theme': click('#m3-views [data-theme-toggle]'); break;
+    case 'fit': h.onFit(); break;
+    case 'section': h.onSection(); break;
+    case 'show-all': st.update('view', (_, x) => { x.hidden = []; x.hideLeds = false; }); break;
+    case 'deselect': st.update('session', (_, x) => { x.sel = null; x.ledSel = null; x.pick = null; x.focusCheck = null; }); break;
+    case 'led-pick': h.onLed(); break;
+    case 'obs-pick': h.onObs(); break;
+    case 'target': st.update('session', (_, x) => { x.node = 'target'; x.sel = null; x.ledSel = null; }); break;
+    case 'calc': h.onToggleCalc(); break;
+    case 'auto': adSetOpen(true); break;
+    case 'export-mech': exportMechStep(); break;
+    default: return false;
+  }
+  return true;
+}
+export const theme = () => { try { return localStorage.getItem('uds.m3.theme') === 'dark' ? 'dark' : 'light'; } catch { return 'light'; } };
+// 3D 기구 STEP 내보내기 — 지금 부품 메쉬(크기·위치·형상 수정 반영)를 부품마다 솔리드로(삼각형 근사 — 수정 안 한 부품은 원본 STEP 이 더 정확)
+let mechStepBusy = false;
+function exportMechStep() {
+  const rt = getMech3d();
+  if (!rt || mechStepBusy) return;
+  const nTri = rt.parts.reduce((t, p) => t + p.triangles.length / 3, 0), name = String(A.store.mspec.name ?? 'mech').replace(/\.(stp|step)$/i, '').replace(/[/\\:*?"<>|]/g, '_');
+  const w = new Worker(new URL('../../export/assembly-step-worker.js', import.meta.url), { type: 'module' });
+  mechStepBusy = true;
+  const end = () => { w.terminate(); mechStepBusy = false; };
+  setStatus(`3D 기구 STEP 생성 중… 부품 ${rt.parts.length}개 · 삼각형 ${nTri}개${nTri > 60000 ? ' — 많아서 오래 걸릴 수 있음' : ''}`);
+  w.onmessage = (ev) => {
+    if (ev.data.type === 'done') { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([ev.data.stepText], { type: 'application/step' })); a.download = `${name}-uds.stp`; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000); setStatus('3D 기구 STEP 내보내기 완료 (수정 반영 · 삼각형 근사)'); }
+    else setStatus(`STEP 실패: ${ev.data.message}`);
+    end();
+  };
+  w.onerror = (e) => { setStatus(`STEP 실패: ${e.message ?? e}`); end(); };
+  w.postMessage({ meshes: rt.parts.map((p) => ({ positions: p.positions, triangles: p.triangles })) });
+}
 globalThis.__m3 = () => A;   // 브라우저 점검용: __m3().prog.snapshot(), __m3().timing, __m3().checks
 
 function getView() {

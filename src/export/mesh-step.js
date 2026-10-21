@@ -2,7 +2,8 @@
 import { pnt, triFace, sewMeshFaces, shapesToStepText } from './oc-build.js';
 import { weld } from '../engine/mech3d/shape-opt.js';
 
-export function meshToStepText(oc, mesh) {
+// 메쉬 → 꿰맨 솔리드(OCC shape, 호출한 쪽이 delete)
+export function meshToShape(oc, mesh) {
   const P = mesh.positions, T = mesh.triangles, { id, rep } = weld(P), pts = new Map();
   const at = (c) => { let p = pts.get(c); if (!p) pts.set(c, (p = pnt(oc, rep[3 * c], rep[3 * c + 1], rep[3 * c + 2]))); return p; };
   const faces = [];
@@ -18,8 +19,18 @@ export function meshToStepText(oc, mesh) {
     try { faces.push(triFace(oc, at(a), at(b), at(c))); } catch { skipped++; }
   }
   for (const p of pts.values()) p.delete();   // 면이 좌표를 복사해 가짐
-  const shape = sewMeshFaces(oc, faces);
+  return sewMeshFaces(oc, faces);
+}
+export function meshToStepText(oc, mesh) {
+  const shape = meshToShape(oc, mesh);
   const text = shapesToStepText(oc, [shape]);   // 이름 인자 없음(oc-build.js:135) — name 은 파일 이름에만 씀
   shape.delete();
+  return text;
+}
+// 여러 부품 메쉬 → 한 STEP(부품마다 솔리드) — 3D 기구 내보내기(크기·위치·형상 수정 반영, 삼각형 근사)
+export function meshesToStepText(oc, meshes) {
+  const shapes = meshes.map((m) => meshToShape(oc, m));
+  const text = shapesToStepText(oc, shapes);
+  for (const s of shapes) s.delete();
   return text;
 }

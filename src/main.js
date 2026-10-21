@@ -24,6 +24,8 @@ import { matchesPending, restorePending } from './engine/mech3d/restore.js';
 import { bounds } from './engine/mech3d/mesh.js';
 import { migrateMech3d } from './engine/mech3d/defs.js';
 import * as m3app from './ui/m3/app.js';
+import { mountMenubar } from './ui/menubar.js';
+import { APP_VERSION, APP_DATE } from './version.js';
 import { createTabLock, openChannel } from './ui/tab-lock.js';
 
 const LS_KEY = 'uds.spec.v11';
@@ -122,17 +124,11 @@ function buildForm() {
     }
     form.appendChild(grp);
   }
-  $('#btn-reset').onclick = () => { spec = structuredClone(DEFAULT_SPEC); markSoloReset(); mount(); m3app.unmount(); m3app.resetWorkers(); applyMode(); schedule(); };
-  $('#btn-mech3d-show').onclick = () => { spec.mode = 'mech3d'; persist(); applyMode(); };
   $('#btn-flat-mode').onclick = () => { spec.mode = 'flat'; persist(); applyMode(); schedule(); };   // 평판(초기 검토) — 이번 실행에서만(다음 실행은 3D)
   $('#btn-sample-project').onclick = () => loadSampleProject();
   $('#file-mech3d-start').onchange = (e) => { const f = e.target.files?.[0]; if (f) importMech3d(f); e.target.value = ''; };
   $('#file-mech3d').onchange = (e) => { const f = e.target.files?.[0]; if (f) importMech3d(f); e.target.value = ''; };
-  $('#btn-step').onclick = () => {
-    if (!last) return;
-    exportStep(spec, last.combo, last.geom, last.active);
-  };
-  $('#btn-export').onclick = exportJson;
+  $('#file-led').onchange = (e) => { const f = e.target.files?.[0]; if (f) m3app.importLed(f); e.target.value = ''; };
   $('#file-import').onchange = importJson;
 }
 
@@ -216,6 +212,83 @@ function clearShape() {
   clearBody(); syncBody(); markSoloReset(); schedule();
 }
 
+// ---- 상단 메뉴(파일·편집·보기·계산·설정·도움말) ----
+function resetAll() { spec = structuredClone(DEFAULT_SPEC); markSoloReset(); mount(); m3app.unmount(); m3app.resetWorkers(); applyMode(); schedule(); }
+function newProject() {
+  if (!confirm('지금 프로젝트를 닫고 v3 기준 프로젝트로 새로 시작할까요?\n(저장하지 않은 변경은 사라집니다 — 먼저 [파일 › 프로젝트 저장] 권장)')) return;
+  m3app.unmount(); spec.mech3d = null; spec.mech3dPending = null; spec.mode = 'mech3d'; persist(); applyMode(); loadSampleProject(false);
+}
+const GUIDE = `사용 순서 (3D 기구 설계)
+1. 파일 › 3D 기구 STEP 불러오기 — 케이스·도광판·커버 등 모든 부품
+2. 왼쪽 트리에서 부품을 골라 소재(Milky·투명·불투명)와 반사 소재를 정함
+3. 파일 › LED STEP 불러오기 → LED 하나의 발광면 클릭(편집 › LED 발광면 지정)
+4. 편집 › 관측면 지정 → 빛을 보는 면 클릭 — 계산이 시작됨
+5. 계산 › 자동설계 — 바꿀 항목을 체크하고 실행 → 결과 비교 후 [적용]
+6. 파일 › 프로젝트 저장(JSON)으로 작업을 보관`;
+function setupMenubar() {
+  const m3 = () => m3app.isMounted(), flatMode = () => spec.mode === 'flat';
+  const menus = [
+    { label: '파일', items: [
+      { id: 'new', label: '새 프로젝트 (v3 기준)' },
+      { id: 'open-json', label: '프로젝트 열기 (JSON)…' },
+      { id: 'save-json', label: '프로젝트 저장 (JSON 내보내기)' },
+      '-',
+      { id: 'import-mech', label: '3D 기구 STEP 불러오기…' },
+      { id: 'import-led', label: 'LED STEP 불러오기…', enabled: m3 },
+      { id: 'export-mech', label: '3D 기구 STEP 내보내기 (수정 반영)', enabled: m3 },
+      { id: 'export-flat', label: '평판 형상 STEP 내보내기', enabled: () => flatMode() && !!last },
+      '-',
+      { id: 'reset', label: '기본값으로 초기화…' },
+    ] },
+    { label: '편집', items: [
+      { id: 'deselect', label: '선택 해제', key: 'Esc', enabled: m3 },
+      { id: 'led-pick', label: 'LED 발광면 지정', enabled: m3 },
+      { id: 'obs-pick', label: '관측면 지정', enabled: m3 },
+      '-',
+      { id: 'refl-db', label: '반사 소재 DB…', enabled: m3 },
+    ] },
+    { label: '보기', items: [
+      { id: 'view:top', label: '평면 (XY)', enabled: m3 }, { id: 'view:front', label: '정면 (XZ)', enabled: m3 },
+      { id: 'view:side', label: '측면 (YZ)', enabled: m3 }, { id: 'view:iso', label: '등각', enabled: m3 },
+      { id: 'fit', label: '화면 맞춤', key: 'F', enabled: m3 }, { id: 'section', label: '단면 켜기/끄기', enabled: m3 },
+      { id: 'show-all', label: '모든 부품 보기', enabled: m3 },
+      '-',
+      { id: 'theme', label: '3D 배경 어둡게', checked: () => m3app.theme() === 'dark', enabled: m3 },
+      '-',
+      { id: 'mode-3d', label: '3D 기구 설계 화면', checked: () => !flatMode() },
+      { id: 'mode-flat', label: '평판 확산판 화면 (초기 검토)', checked: flatMode },
+    ] },
+    { label: '계산', items: [
+      { id: 'calc', label: '다시 계산 / 일시정지', enabled: m3 },
+      { id: 'auto', label: '자동설계 열기', enabled: m3 },
+    ] },
+    { label: '설정', items: [
+      { id: 'target', label: '목표 균일도 · 계산 정밀도 · 설계 점검 기준…', enabled: m3 },
+      { id: 'auto', label: '자동설계 기본값 (Milky 상한 · 보완 자동 추가)…', enabled: m3 },
+    ] },
+    { label: '도움말', items: [{ id: 'guide', label: '사용 순서' }, { id: 'about', label: '버전 정보' }] },
+  ];
+  const run = (id) => {
+    if (id === 'new') return newProject();
+    if (id === 'open-json') return $('#file-import').click();
+    if (id === 'save-json') return exportJson();
+    if (id === 'import-mech') return $('#file-mech3d').click();
+    if (id === 'import-led') return $('#file-led').click();
+    if (id === 'export-flat') { if (last) exportStep(spec, last.combo, last.geom, last.active); return; }
+    if (id === 'reset') { if (confirm('모든 설정을 기본값으로 되돌릴까요? (불러온 기구·LED 설정도 지워짐)')) resetAll(); return; }
+    if (id === 'mode-3d') { spec.mode = 'mech3d'; persist(); applyMode(); return; }
+    if (id === 'mode-flat') { spec.mode = 'flat'; persist(); applyMode(); schedule(); return; }
+    if (id === 'refl-db') return m3app.command('target');
+    if (id === 'guide') return alert(GUIDE);
+    if (id === 'about') return alert(`Uniform Design Simulator ${APP_VERSION} (${APP_DATE})
+3D 기구 설계 — 도광·확산 부품의 균일도 해석과 자동설계
+기준 프로젝트: v3 (평판 구조 + LED STEP 10개 1열)`);
+    m3app.command(id);
+  };
+  $('#app-ver').textContent = APP_VERSION;
+  mountMenubar($('#menubar'), menus, run);
+}
+
 // ---- 3D 기구 모드 (spec 2026-10-14 §3, 2026-10-15 m3-cad-ui) — 화면·계산은 src/ui/m3/app.js ----
 let reflectDb = null;   // 반사 소재 DB — 시작 시 불러옴
 function m3ctx() {
@@ -234,7 +307,6 @@ function applyMode() {
   $('#design-wrap').hidden = !flat;
   $('#results-wrap').hidden = !flat;
   $('#inputbar').hidden = !flat;
-  $('#btn-mech3d-show').hidden = !flat;
   if (m3) stopFlatSolve();
   if (m3) m3app.mount(m3ctx()).catch((e) => m3app.setStatus(`3D 화면 오류: ${e.message ?? e}`));
   else m3app.unmount();
@@ -806,6 +878,7 @@ if (spec.mode !== 'mech3d') startSolver();
 mount();
 setupZoom();
 setupHeatPick();
+setupMenubar();
 window.addEventListener('resize', schedule);
 // 3D 모드 디바운스 저장 마저 쓰기(탭 닫기·새로고침·모바일 백그라운드)
 window.addEventListener('pagehide', () => m3app.flush());
