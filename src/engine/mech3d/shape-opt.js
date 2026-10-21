@@ -351,10 +351,12 @@ export function shapeVarRanges({ t0, pitch, hasCenters }) {
   return r;
 }
 // 고른 변수의 3^k 격자 — {lo, 0, hi}(R 은 {lo, mid, hi}). 고르지 않은 변수는 0, R 은 mid(범위 없으면 1). 현재 형상(전부 0) 포함
-export function gridCandidates(vars, ranges) {
+// levels 5 = {lo, lo/2, 0, hi/2, hi} — 중간값까지(변수가 적을 때 autodesign 이 고름)
+export function gridCandidates(vars, ranges, levels = 3) {
   const rd = (v) => Math.round(v * 1e4) / 1e4;
   const Rm = ranges.R ? rd((ranges.R[0] + ranges.R[1]) / 2) : 1;
-  const vals = (k) => (k === 'R' ? [ranges.R[0], (ranges.R[0] + ranges.R[1]) / 2, ranges.R[1]].map(rd) : [...new Set([ranges[k][0], 0, ranges[k][1]].map(rd))].sort((a, b) => a - b));
+  const lv = (lo, hi) => (levels === 5 ? [lo, lo / 2, 0, hi / 2, hi] : [lo, 0, hi]);
+  const vals = (k) => (k === 'R' ? [ranges.R[0], (ranges.R[0] + ranges.R[1]) / 2, ranges.R[1]].map(rd) : [...new Set(lv(ranges[k][0], ranges[k][1]).map(rd))].sort((a, b) => a - b));
   let out = [{ dt: 0, h: 0, R: Rm, e: 0, c: 0 }];
   for (const k of vars) { if (!ranges[k]) continue; const V = vals(k); out = out.flatMap((g) => V.map((v) => ({ ...g, [k]: v }))); }
   return out;

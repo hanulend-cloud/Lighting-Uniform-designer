@@ -59,7 +59,7 @@ export const shapeTotal = (nScreen, nGrid, schedule = SHAPE_SCHEDULE) => nScreen
 export async function screenShapeVars(evalFn, ranges, obs, { N = 6e4, maxMs = 2500, eps = 0.02, keep = 3, budget = 3 } = {}) {
   const rd = (v) => Math.round(v * 1e4) / 1e4, Rm = ranges.R ? rd((ranges.R[0] + ranges.R[1]) / 2) : 1, zero = { dt: 0, h: 0, R: Rm, e: 0, c: 0 };
   const names = Object.keys(ranges).filter((k) => k !== 'R'), cands = [zero], tag = [-1];
-  names.forEach((v, i) => ranges[v].forEach((x) => { cands.push({ ...zero, [v]: rd(x) }); tag.push(i); }));
+  names.forEach((v, i) => [ranges[v][0], ranges[v][0] / 2, ranges[v][1] / 2, ranges[v][1]].forEach((x) => { cands.push({ ...zero, [v]: rd(x) }); tag.push(i); }));   // 끝값 + 중간값(±½) — 끝값이 간섭으로 막혀도 중간값으로 효과를 봄
   const results = await evalFn(cands, N, maxMs), byCand = new Map(results.map((r) => [r.cand, r]));
   const sc = (c) => { const r = byCand.get(c); return r ? shapeScore(r, obs) : -Infinity; }, base = sc(zero), gains = {};
   names.forEach((v, i) => {
@@ -300,7 +300,7 @@ export async function runAutoDesign(cfg, io) {
   }
   let shapeCands = cfg.shapeCands, shapeNone = false;
   if (stages.shape && cfg.shapeRanges) {   // ③ 1단계 선별 → 2단계 격자 (cfg.shapeCands 만 있으면 아래 기존 경로)
-    const rg = cfg.shapeRanges, nScreen = 1 + 2 * Object.keys(rg).filter((k) => k !== 'R').length;
+    const rg = cfg.shapeRanges, nScreen = 1 + 4 * Object.keys(rg).filter((k) => k !== 'R').length;
     io.shapePlan?.({ screen: nScreen, grid: null, total: null });
     io.progress?.('shape', 0, `형상 변수 선별 (후보 ${nScreen}개)`);
     const sc = await screenShapeVars((cands, N, ms) => io.evalShapes(d, cands, N, ms), rg, obs, cfg.screen);
@@ -308,7 +308,8 @@ export async function runAutoDesign(cfg, io) {
     steps.push({ stage: 'shapeScreen', gains: sc.gains, vars: sc.vars, results: (sc.results ?? []).map((r) => ({ cand: r.cand, ok: r.ok, why: r.why ?? null, Ulen: r.stats?.Ulen ?? null, Uwid: r.stats?.Uwid ?? null })) });   // results = 후보별 판정(진단·설명용)
     if (!sc.vars.length) { shapeNone = true; feasible = margin(currentVerified.stats, obs) >= 0; reason = '형상 변수의 효과가 잡음 수준 — 현재 형상 유지'; }
     else {
-      shapeCands = gridCandidates(sc.vars.includes('h') && rg.R ? [...sc.vars, 'R'] : sc.vars, rg);
+      const gv = sc.vars.includes('h') && rg.R ? [...sc.vars, 'R'] : sc.vars, nR = gv.includes('R') ? 3 : 1;
+      shapeCands = gridCandidates(gv, rg, 5 ** sc.vars.length * nR <= 45 ? 5 : 3);   // 변수가 적으면 중간값(±½)까지 5단계, 많으면 3단계(후보 ≤ 27)
       io.shapePlan?.({ screen: nScreen, grid: shapeCands.length, total: shapeTotal(nScreen, shapeCands.length, cfg.schedule) });
     }
   }
