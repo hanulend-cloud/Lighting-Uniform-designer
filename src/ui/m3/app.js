@@ -596,13 +596,16 @@ async function adRun(opt = {}) {
     async evalShapes(d, cands, N, maxMs = 2500) {   // 단계별 광자·시간 제한은 halving 일정(6만/20만/60만 · 2.5/4/6초)
       const out = [], base = adBaseMesh(sp, ctx), H = heightsFor(base, line.frame, 0.5);
       const others = rt.parts.map((p, j) => (j === sp ? null : p)), lp = (M0.light.kind === 'step' && L.ledPartsNow(designScene(d, ctx).M, ctx.line)) || [];   // ② 가 바꾼 가상 배치 몸체 포함
-      const before = interferenceKeys(base, others, lp, []);
+      // 기준 겹침 = '변화 없음' 형상(같은 세분·변형 경로)의 겹침 — 원본 메쉬로 재면 케이스 벽에 닿아 있는 부품(접촉)은
+      // 세분 메쉬가 늘 '새 간섭' 으로 잡혀 모든 후보가 탈락했음(2026-10-21)
+      const zc = { dt: 0, h: 0, R: cands[0]?.R ?? 1, e: 0, c: 0 }, zp = designScene({ ...d, shape: { part: sp, ...zc } }, ctx).parts[sp];
+      const before = new Map(); for (const M of [interferenceKeys(base, others, lp, []), interferenceKeys(zp, others, lp, [])]) for (const [k, v] of M) before.set(k, Math.max(before.get(k) ?? 0, v ?? 0));   // 부품별 기존 겹침 깊이
       for (const c of cands) {
         if (R.stopped) break;
         progress('shape', Math.min(1, shapeI / shapeTot), shapeI < shapeScr ? `형상 변수 선별 ${shapeI + 1}/${shapeScr}` : `형상 후보 ${Math.min(shapeI + 1, shapeTot) - shapeScr}/${shapeTot - shapeScr}`); shapeI++;
         const { M: Md, parts } = designScene({ ...d, shape: { part: sp, ...c } }, ctx), mod = Md.parts[sp].shapeMod;
         const thin = minThickness(H, mod) < minWall;   // 칸 중심 + LED 중심
-        const clash = !thin && [...interferenceKeys(parts[sp], others, lp, []).keys()].some((k) => !before.has(k));
+        const clash = !thin && [...interferenceKeys(parts[sp], others, lp, [])].some(([k, v]) => !before.has(k) || (v ?? 0) > before.get(k) + 0.05);   // 새 겹침 또는 기존보다 0.05 mm 넘게 깊어짐
         if (thin || clash) { out.push({ cand: c, ok: false, why: thin ? '살두께' : '간섭' }); continue; }
         const r = await R.trace(adJob(Md, parts, ctx), { N, maxMs, minN: Math.min(N, 3e4), batches: 4 }), stt = tallyStats(G, r.batches, obs);
         out.push({ cand: c, ok: !stt.empty, stats: stt, eff: adEff(r) });

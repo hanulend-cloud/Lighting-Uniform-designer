@@ -305,7 +305,7 @@ export async function runAutoDesign(cfg, io) {
     io.progress?.('shape', 0, `형상 변수 선별 (후보 ${nScreen}개)`);
     const sc = await screenShapeVars((cands, N, ms) => io.evalShapes(d, cands, N, ms), rg, obs, cfg.screen);
     if (stop()) return { cancelled: true };
-    steps.push({ stage: 'shapeScreen', gains: sc.gains, vars: sc.vars });
+    steps.push({ stage: 'shapeScreen', gains: sc.gains, vars: sc.vars, results: (sc.results ?? []).map((r) => ({ cand: r.cand, ok: r.ok, why: r.why ?? null, Ulen: r.stats?.Ulen ?? null, Uwid: r.stats?.Uwid ?? null })) });   // results = 후보별 판정(진단·설명용)
     if (!sc.vars.length) { shapeNone = true; feasible = margin(currentVerified.stats, obs) >= 0; reason = '형상 변수의 효과가 잡음 수준 — 현재 형상 유지'; }
     else {
       shapeCands = gridCandidates(sc.vars.includes('h') && rg.R ? [...sc.vars, 'R'] : sc.vars, rg);
