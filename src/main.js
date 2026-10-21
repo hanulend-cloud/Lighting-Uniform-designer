@@ -256,15 +256,17 @@ function renderPendingBanner() {
 const partInfo = (parts) => parts.map((p) => { const b = bounds(p.positions); return { volume: p.volume, size: [b[3] - b[0], b[4] - b[1], b[5] - b[2]] }; });
 // 지금 spec.mech3d 를 메쉬 없는 보관 상태로(버리지 않음) — 평판 모드로 시작
 function shelveMech3d() { spec.mech3dPending = spec.mech3d; spec.mech3d = null; }   // 모드는 그대로 — 3D 면 시작 화면 + 안내 띠
-// 예제 프로젝트(data/sample-project.json — tools/make-sample-project.mjs): 평판 구조 + LED STEP 10개 1열.
-// 저장 설정을 보관분(mech3dPending)으로 두고 기구 STEP 을 불러오면 복원 경로를 그대로 탐 → 이어서 같은 이름 LED STEP = 저장된 기준 LED 로 재인식
-async function loadSampleProject() {
+// 기본 프로젝트 v3(data/projects/v3.json — 사용자가 정한 기준 화면): 평판 구조 + LED STEP 10개 1열.
+// 저장 설정을 보관분(mech3dPending)으로 두고 기구 STEP 을 불러오면 복원 경로를 그대로 탐 → 이어서 같은 이름 LED STEP = 저장된 기준 LED 로 재인식.
+// 3D 배경 테마는 사용자가 따로 고른 적이 없을 때만 v3 값으로. 프로젝트가 없는 첫 실행이면 자동으로 연다.
+async function loadSampleProject(ask = true) {
   const say = (t) => { $('#m3-start-msg').textContent = t; };
-  if (spec.mech3dPending && !confirm('보관 중인 3D 설정이 있습니다. 예제 프로젝트로 바꿀까요?')) return;
+  if (ask && spec.mech3dPending && !confirm('보관 중인 3D 설정이 있습니다. v3 기준 프로젝트로 바꿀까요?')) return;
   try {
-    say('예제 프로젝트 불러오는 중…');
+    say('v3 기준 프로젝트 불러오는 중…');
     const get = async (url) => { const r = await fetch(url, { cache: 'no-store' }); if (!r.ok) throw new Error(`${url} ${r.status}`); return r; };
-    const P = await (await get('data/sample-project.json')).json();
+    const P = await (await get('data/projects/v3.json')).json();
+    try { if (P.theme && !localStorage.getItem('uds.m3.theme')) localStorage.setItem('uds.m3.theme', P.theme); } catch {}
     const file = async (url) => new File([await (await get(url)).text()], url.split('/').pop());
     const mech = await file(P.mech), led = await file(P.led);
     spec.mech3dPending = P.mech3d; spec.mech3d = null; spec.mode = 'mech3d';
@@ -272,7 +274,7 @@ async function loadSampleProject() {
       for (let i = 0; i < 200 && !m3app.isMounted(); i++) await new Promise((r) => setTimeout(r, 100));
       m3app.importLed(led);
     });
-  } catch (e) { say(`예제 불러오기 실패: ${e.message ?? e}`); }
+  } catch (e) { say(`v3 기준 프로젝트 불러오기 실패: ${e.message ?? e}`); }
 }
 // 기구 STEP 불러오기(평판·3D 모드 공통) — spec.mech3d 를 새로 만들고 3D 모드로
 function importMech3d(file, onDone = null) {
@@ -810,4 +812,5 @@ window.addEventListener('pagehide', () => m3app.flush());
 window.addEventListener('beforeunload', () => m3app.flush());
 forceHeatOnNextRun = true;   // 첫 계산에 히트맵 포함
 applyMode();
+if (spec.mode === 'mech3d' && !spec.mech3d && !spec.mech3dPending) loadSampleProject(false);   // 프로젝트 없는 첫 실행 = v3 기준 프로젝트
 schedule();

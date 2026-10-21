@@ -1,7 +1,9 @@
 {
- "about": "평판 구조 + LED STEP 10개 1열 — 케이스 PC 고반사 95%, 도광판 Milky 2, 목표 0.80/0.80",
+ "version": "v3",
+ "about": "v3 기준 화면 — 평판 구조(케이스 PC 고반사 95% · 도광판 Milky 2 · 투명 커버) + LED STEP 10개 1열 · 목표 0.80/0.80 · 3D 다크 배경",
  "mech": "test/fixtures/mech3d-sample.stp",
  "led": "test/fixtures/mech3d-led-sample.stp",
+ "theme": "dark",
  "mech3d": {
   "name": "mech3d-sample.stp",
   "parts": [
@@ -153,10 +155,182 @@
      "part": 7,
      "face": 10
     },
-    "leds": [],
+    "leds": [
+     1,
+     2,
+     3,
+     4,
+     5,
+     6,
+     7,
+     8,
+     9,
+     10
+    ],
     "excluded": [],
-    "pcb": -1,
-    "emitters": [],
+    "pcb": 0,
+    "emitters": [
+     {
+      "part": 1,
+      "face": 10,
+      "pos": [
+       7.800000190734863,
+       10,
+       3.5
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ],
+      "xAxis": null,
+      "needsCheck": false
+     },
+     {
+      "part": 2,
+      "face": 10,
+      "pos": [
+       19.399999618530273,
+       10,
+       3.5
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ],
+      "xAxis": null,
+      "needsCheck": false
+     },
+     {
+      "part": 3,
+      "face": 10,
+      "pos": [
+       77.4000015258789,
+       10,
+       3.5
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ],
+      "xAxis": null,
+      "needsCheck": false
+     },
+     {
+      "part": 4,
+      "face": 10,
+      "pos": [
+       112.19999694824219,
+       10,
+       3.5
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ],
+      "xAxis": null,
+      "needsCheck": false
+     },
+     {
+      "part": 5,
+      "face": 10,
+      "pos": [
+       31,
+       10,
+       3.5
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ],
+      "xAxis": null,
+      "needsCheck": false
+     },
+     {
+      "part": 6,
+      "face": 10,
+      "pos": [
+       42.599998474121094,
+       10,
+       3.5
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ],
+      "xAxis": null,
+      "needsCheck": false
+     },
+     {
+      "part": 7,
+      "face": 10,
+      "pos": [
+       54.20000076293945,
+       10,
+       3.5
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ],
+      "xAxis": null,
+      "needsCheck": false
+     },
+     {
+      "part": 8,
+      "face": 10,
+      "pos": [
+       65.80000305175781,
+       10,
+       3.5
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ],
+      "xAxis": null,
+      "needsCheck": false
+     },
+     {
+      "part": 9,
+      "face": 10,
+      "pos": [
+       89,
+       10,
+       3.5
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ],
+      "xAxis": null,
+      "needsCheck": false
+     },
+     {
+      "part": 10,
+      "face": 10,
+      "pos": [
+       100.5999984741211,
+       10,
+       3.5
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ],
+      "xAxis": null,
+      "needsCheck": false
+     }
+    ],
     "virtual": null
    },
    "manual": {
