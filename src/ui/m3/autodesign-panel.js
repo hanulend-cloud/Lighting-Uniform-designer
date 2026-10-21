@@ -117,8 +117,8 @@ export function autoCardHtml({ avail, sel, running, names = [], canRevert = fals
     return `<label class="m3-ad-item${a.ok ? '' : ' off'}"><input type="checkbox" data-ad="${k}"${sel[k] && a.ok ? ' checked' : ''}${a.ok ? dis : ' disabled'}> ${label}${a.ok ? (a.note ? ` <span class="mut">— ${esc(a.note)}</span>` : '') : ` <span class="mut">— ${esc(a.why)}</span>`}</label>`;
   };
   const mTarget = sel.milky && avail.milky.ok && milkyPart != null ? `<div class="m3-row mut">① 대상: ${pname(milkyPart)}</div>` : '';
-  const cap = (sel.milky && avail.milky.ok) || (sel.leds && avail.leds.ok) ? `<div class="m3-row">Milky 상한 <input type="number" min="0.5" max="9.9" step="0.5" value="${sel.milkyMax ?? capDefault(sel, avail)}" data-ad="milkyMax" aria-label="Milky 상한"${dis}> <span class="mut">${sel.leds && avail.leds.ok ? '② 는 이 값(확산 최대)에서 개수를 정하고 ① 이 고름' : '① 은 이 값까지 균일도 최고점을 찾음(투과율은 희생)'}</span></div>` : '';
-  const part = avail.shape.ok ? `<div class="m3-row">③ 대상 <select data-ad="shapePart" aria-label="③ 대상 부품"${dis}>${avail.shape.parts.map((i) => `<option value="${i}"${i === sel.shapePart ? ' selected' : ''}>${pname(i)}</option>`).join('')}</select></div>` : '';
+  const cap = sel.milky && avail.milky.ok ? `<div class="m3-row">Milky 상한 <input type="number" min="0.5" max="9.9" step="0.5" value="${sel.milkyMax ?? capDefault(sel, avail)}" data-ad="milkyMax" aria-label="Milky 상한"${dis}> <span class="mut">${sel.leds && avail.leds.ok ? '② 는 이 값(확산 최대)에서 개수를 정하고 ① 이 고름' : '① 은 이 값까지 균일도 최고점을 찾음(투과율은 희생)'}</span></div>` : '';
+  const part = avail.shape.ok && sel.shape ? `<div class="m3-row">③ 대상 <select data-ad="shapePart" aria-label="③ 대상 부품"${dis}>${avail.shape.parts.map((i) => `<option value="${i}"${i === sel.shapePart ? ' selected' : ''}>${pname(i)}</option>`).join('')}</select></div>` : '';
   const hPart = avail.housing?.ok && sel.housing ? `<div class="m3-row">④ 대상 <select data-ad="housingPart" aria-label="④ 대상 부품"${dis}>${avail.housing.parts.map((i) => `<option value="${i}"${i === sel.housingPart ? ' selected' : ''}>${pname(i)}</option>`).join('')}</select> <span class="mut">${housingMat ? `${esc(housingMat.name)} · 상한 ${Math.round(housingMat.max * 100)}%` : '반사 소재 미지정 — 등급 전체'}</span></div>
     <label class="m3-ad-item"><input type="checkbox" data-ad="housingSpecial"${sel.housingSpecial ? ' checked' : ''}${dis}> 특수 표면처리 허용 (고반사 도장·시트·증착)</label>` : '';
   const boost = `<label class="m3-ad-item"><input type="checkbox" data-ad="boost"${sel.boost !== false ? ' checked' : ''}${dis}> 목표 미달이면 보완 항목 자동 추가 <span class="mut">— ④ 케이스 면 · ② LED 배치 · ⑤ LED 높이 중 적게 바꾸는 것부터</span></label>`;
@@ -149,14 +149,19 @@ export function screenSummary(gains) {
 // stepLeds = LED STEP 발광점 수(직접 배치면 null) · STEP 이면 열마다 stepOrig(true = 원래 위치, false = 기준 LED 복사 배치) · unchanged = 최종안이 현재안 그대로(나은 설계 없음) → 사유 표시 · [적용] 비활성
 // finish = ④ { cur, best }(면 처리) | null · height = ⑤ { dz, gap(현재 LED–커버 축 거리, NaN = 모름) } | null
 // 바뀐 양(소수 2자리, 0.005 미만 = 없음) — Milky·U 는 값 차, 광 효율은 %p
-const dl = (a, b, k = 1, u = '') => (Number.isFinite(a) && Number.isFinite(b) && Math.abs((b - a) * k) >= 0.005 ? ` <span class="m3-dl">(${b > a ? '+' : ''}${((b - a) * k).toFixed(2)}${u})</span>` : '');
+// 화면에 보이는 값(소수 2자리)끼리의 차 — 표의 두 값과 어긋나지 않게
+const dl = (a, b, k = 1, u = '') => { if (!Number.isFinite(a) || !Number.isFinite(b)) return ''; const d = +(b * k).toFixed(2) - +(a * k).toFixed(2); return Math.abs(d) >= 0.005 ? ` <span class="m3-dl">(${d > 0 ? '+' : ''}${d.toFixed(2)}${u})</span>` : ''; };
+// 총 LED 수(2열 = 열 수 × 열당, 위치 목록 = 그 수)
+const ledTotal = (x) => (x?.positions?.length ? x.positions.length : Number.isFinite(x?.count) ? x.count * (x.rows === 2 ? 2 : 1) : NaN);
 // 비교표 줄(현재 → 최적/적용 후) — compareHtml 과 적용 뒤 요약(appliedHtml)이 같이 씀
 function cmpRows({ cur, best, shape, stepLeds = null, finish = null, height = null, catalog = DEFAULT_FINISH_CATALOG }) {
   const tr = (label, a, b, d = '') => `<tr><th>${label}</th><td>${a}</td><td class="${a !== b ? 'chg' : ''}">${b}${d}</td></tr>`;
   const lay = (x) => `${x.rows === 2 ? '2열 × ' : ''}${x.count}개 ${x.pitch > 0 ? `피치 ${x.pitch}` : '균등'}${x.rows === 2 ? ` (열 간격 ±${(x.rowGap ?? 0).toFixed(1)} mm)` : ''}`;   // 2열 = 열당 개수(spec P4 §2.2b)
   const led = (x) => (x.layoutText ? x.layoutText : stepLeds == null ? lay(x) : x.stepOrig === false ? `${lay(x)}` : `LED STEP 현재 ${x.count ?? stepLeds}개`);   // layoutText = ② 배치 Solver 문구(같은 피치/끝 압축/자유 배치) · STEP: stepOrig = 원래 STEP 위치
   const curShape = cur.shape ? `적용된 형상 · ${shapeText(cur.shape)}` : '원본';
-  return `${tr('LED', led(cur), led(best))}
+  const tc = stepLeds != null && cur.stepOrig !== false ? stepLeds : ledTotal(cur), tb = best.stepOrig === true ? tc : ledTotal(best);
+  const tot = Number.isFinite(tc) && Number.isFinite(tb) && tb !== tc ? ` <b class="m3-tot">· 총 ${tb}개 (${tb > tc ? '+' : ''}${tb - tc})</b>` : '';
+  return `${tr('LED', led(cur), led(best), tot)}
       ${tr('Milky', f2(cur.milky), f2(best.milky), dl(cur.milky, best.milky))}
       ${tr('길이 U', f2(cur.Ulen), f2(best.Ulen), dl(cur.Ulen, best.Ulen))}${tr('폭 U', f2(cur.Uwid), f2(best.Uwid), dl(cur.Uwid, best.Uwid))}
       ${tr('광 효율', `${f2(cur.eff * 100)}%`, `${f2(best.eff * 100)}%`, dl(cur.eff, best.eff, 100, '%p'))}
@@ -166,12 +171,16 @@ function cmpRows({ cur, best, shape, stepLeds = null, finish = null, height = nu
 }
 export function compareHtml(r) {
   const { cur, best, feasible, reason, shape, canRevert = false, unchanged = false, screen = null } = r;
-  const boost = r.added?.length ? `<div class="m3-boost">체크한 항목만으로는 목표 미달 → 보완 자동 추가: <b>${r.added.map(esc).join(' · ')}</b></div>` : '';
-  return `<div class="m3-h">${unchanged ? '현재안 유지' : feasible ? '최적안' : '가장 가까운 안'} <span class="mut">${esc(reason)}</span></div>${boost}
+  const bs = r.base, boost = r.added?.length ? `<div class="m3-boost">체크한 항목만으로는 목표 미달${bs ? ` (길이 U ${f2(bs.Ulen)} · 폭 U ${f2(bs.Uwid)}${bs.reason ? ` — ${esc(bs.reason)}` : ''})` : ''} → 보완 자동 추가: <b>${r.added.map(esc).join(' · ')}</b></div>` : '';
+  const twoRow = best.rows === 2 && cur.rows !== 2 ? '<div class="m3-warn">2열 배치 = LED PCB 를 새로 설계해야 함</div>' : '';
+  const effDrop = Number.isFinite(cur.eff) && Number.isFinite(best.eff) && best.eff - cur.eff <= -0.02 ? `<div class="m3-warn">광 효율 ${((cur.eff - best.eff) * 100).toFixed(1)}%p 감소 — 같은 LED 광속이면 그만큼 어두워짐</div>` : '';
+  const clash = r.clash > 0 ? `<div class="m3-clash" role="alert">이 안은 LED 몸체가 부품과 겹침(${r.clash}개) — 조립 불가라 적용하지 않음</div>` : '';
+  const note = r.note ? `<div class="m3-warn">${esc(r.note)}</div>` : '';
+  return `<div class="m3-h">${unchanged ? '현재안 유지' : feasible ? '최적안' : '가장 가까운 안'} <span class="mut">${esc(reason)}</span></div>${note}${boost}${clash}
     <table class="m3-cmp"><tr><th></th><th>현재</th><th>최적</th></tr>
       ${cmpRows(r)}
-    </table>${profileSvg(cur.profile, best.profile)}${screen ? `<div class="m3-row mut">${esc(screenSummary(screen))}</div>` : ''}
-    <div class="m3-row"><button type="button" data-ad="apply"${unchanged ? ' disabled title="현재안과 같음"' : ''}>적용</button><button type="button" data-ad="cancel">취소</button>${shape ? '<button type="button" data-ad="step">STEP 내보내기</button>' : ''}${canRevert ? '<button type="button" data-ad="revert">되돌리기</button>' : ''}</div>`;
+    </table>${twoRow}${effDrop}${profileSvg(cur.profile, best.profile)}${screen ? `<div class="m3-row mut">${esc(screenSummary(screen))}</div>` : ''}
+    <div class="m3-row"><button type="button" data-ad="apply"${unchanged ? ' disabled title="현재안과 같음"' : r.clash > 0 ? ' disabled title="LED 몸체가 부품과 겹침"' : ''}>적용</button><button type="button" data-ad="cancel">취소</button>${shape ? '<button type="button" data-ad="step">STEP 내보내기</button>' : ''}${canRevert ? '<button type="button" data-ad="revert">되돌리기</button>' : ''}</div>`;
 }
 // 적용 뒤에도 남는 요약(이전 → 적용 후) — applied = 적용한 결과(compareHtml 인자와 같은 꼴) + at(시각 문구)
 export function appliedHtml(applied) {

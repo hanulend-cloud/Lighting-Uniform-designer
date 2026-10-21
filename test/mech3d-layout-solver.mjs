@@ -41,4 +41,7 @@ const gapsOk = (r, g) => ss(r).every((x, i, a) => i === 0 || x - a[i - 1] >= g -
   const maps = cc.map(({ s }) => Float32Array.from({ length: 100 }, (_, i) => { const d = Math.min(Math.abs(i + 0.5 - s), 100 - Math.abs(i + 0.5 - s)); return Math.exp(-(d * d) / 72); }));
   const r = solveLayout({ G: Gc, obs: { targetLen: 0.8, targetWid: 0 }, line: ring, cand: cc, maps, rowsOptions: [1], nMax: 30 }), s = ss(r);
   ok(r.feasible && r.kind === 'uniform' && s.every((x, i) => i === 0 || Math.abs(x - s[i - 1] - 100 / s.length) < 0.3), `닫힌 라인 균등: ${s.length}개`); }
+{ // 끝 여유(sMargin): LED 몸체가 끝벽에 닿지 않게 첫·끝 LED 중심 ≥ 여유
+  const r = solveLayout({ G, obs: { targetLen: 0.7, targetWid: 0 }, line, cand, maps: mk(0.4), rowsOptions: [1], nMax: 30, sMargin: 4 }), s = r.positions.map((q) => q.s);
+  ok(r.positions.length > 0 && Math.min(...s) >= 4 - 1e-9 && Math.max(...s) <= 96 + 1e-9, `끝 여유 4 mm: ${Math.min(...s)}~${Math.max(...s)} (${r.feasible ? '통과' : '미달'})`); }
 done();

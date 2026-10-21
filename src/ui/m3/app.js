@@ -34,7 +34,7 @@ import { runAutoDesign, shapeTotal } from '../../engine/mech3d/autodesign.js';
 import { milkyRows } from '../../engine/mech3d/milky-search.js';
 import { candidateGrid } from '../../engine/mech3d/basis.js';
 import { ledAtS, clampRowGap, rowGapOptions } from '../../engine/mech3d/placement.js';
-import { virtualEmittersAt } from '../../engine/mech3d/virtual-leds.js';
+import { virtualEmittersAt, stepRefEmitter } from '../../engine/mech3d/virtual-leds.js';
 import { heightsFor, deformPart, refinedFor, minThickness, shapeVarRanges, pathFromLine, swOnPath, ledEll, lineVarH, splineInput } from '../../engine/mech3d/shape-opt.js';
 import { interferenceKeys, travelDistance } from '../../engine/mech3d/clearance.js';
 import { scaleMoveMesh, isIdentityXform } from '../../engine/mech3d/xform.js';
@@ -464,6 +464,28 @@ function shapeModFor({ dt, h, R, e = 0, c = 0 }, M, line) {
   const ell = ledEll({ pitch: lay?.pitch ?? 0, count: lay?.count ?? 0, ss: centers.map(([x, y]) => swOnPath(P, x, y)[0]), L: P.L });
   return { frame: { u: F.u, v: F.v, d: F.d }, dt, h, R, e, c, centers, cell: 0.5, path: P.path, halfW: P.halfW, closed: P.closed, L: P.L, ell };
 }
+// 최종안의 LED 몸체가 기구 부품과 새로 겹치는 수(LED STEP) — 현재안에 이미 있던 겹침은 뺌. 0 = 없음
+function designClash(d, ctx, M0, rt, line) {
+  if (M0.light.kind !== 'step') return 0;
+  try {
+    const cnt = (M, mech) => { const lay = L.stepLayout(M, line); return (lay?.leds ?? []).filter((k) => lay.parts[k] && interferenceKeys(lay.parts[k], mech, [], []).size > 0).length; };
+    const { M, parts } = designScene(d, ctx);
+    return Math.max(0, cnt(M, parts) - cnt(M0, rt.parts));
+  } catch { return 0; }
+}
+// LED 몸체 반폭(관측 평면 u·v 투영 중 큰 쪽의 반) — LED STEP = 기준 LED 몸체, 직접 배치 = 발광면 크기의 반. ② 끝벽·측벽 여유
+function ledHalfWidth(M, line) {
+  const F = line.frame, sp = M.light.spec ?? {};
+  if (M.light.kind === 'step') {
+    const ref = stepRefEmitter(M.light.step), P = ref ? L.ledPartsNow(M, null)?.[ref.part]?.positions : null;
+    if (P) {
+      let u0 = Infinity, u1 = -Infinity, v0 = Infinity, v1 = -Infinity;
+      for (let i = 0; i < P.length; i += 3) { const u = P[i] * F.u[0] + P[i + 1] * F.u[1] + P[i + 2] * F.u[2], v = P[i] * F.v[0] + P[i + 1] * F.v[1] + P[i + 2] * F.v[2]; u0 = Math.min(u0, u); u1 = Math.max(u1, u); v0 = Math.min(v0, v); v1 = Math.max(v1, v); }
+      return Math.max(u1 - u0, v1 - v0) / 2;
+    }
+  }
+  return Math.max(sp.sizeX ?? 2, sp.sizeY ?? 2) / 2;
+}
 const adJob = (M, parts, ctx, o = {}) => { const j = jobFor(M, parts, { line: ctx.line, G: ctx.G, obs: ctx.obs, ...o }); if (!j) throw new Error('LED 가 없음'); return j; };
 const adEff = (r) => { let t = 0; for (const b of r.batches) for (const v of b) t += v; return t / r.ledger.emitted; };
 // ⑤ 높이 범위 [아래, 위](관측 방향 d 이동량 mm) + gap(현재 발광점 → 관측 부품 +d 축 거리 최소, 모르면 NaN)
@@ -484,26 +506,34 @@ function adHeightInfo(M0, line, rt) {
   let gap = Infinity; for (const e of em) for (const i of op) gap = Math.min(gap, rayT(mech[i], e.pos, d));
   return { range, gap: Number.isFinite(gap) ? gap : NaN };
 }
-// 보완 자동 추가(목표 미달 시): 체크한 항목만으로 목표 미달이면 다른 항목을 더해 다시 실행 — 적게 바꾸는 순서:
-// 하나씩(④ 케이스 면 → ② LED 배치 → ⑤ LED 높이) 먼저, 그래도 안 되면 둘·셋 함께. 처음 통과한 안에서 멈춤(모두 미달이면 마지막 안).
-// 추가한 항목은 결과에 added 로 표시 — 적용은 사용자가 정함
-const BOOST_ITEMS = [['housing', '④ 케이스 면'], ['leds', '② LED 배치'], ['height', '⑤ LED 높이']];
+// 보완 자동 추가(목표 미달 시): 체크한 항목만으로 목표 미달이면 다른 항목을 더해 다시 실행 — 바꾸는 비용이 적은 순서:
+// ④ 케이스 면(표면 처리) → ⑤ LED 높이(기구 치수) → ④+⑤ → ② LED 배치(PCB·LED 수) → ②+④ → ②+④+⑤. 처음 통과한 안에서 멈춤.
+// 체크한 항목만의 결과는 base 로 결과 위에 남기고, 보완 실행이 실패·중지되면 직전 결과를 다시 보여 줌. 적용은 사용자가 정함
+const BOOST_SETS = [['housing'], ['height'], ['housing', 'height'], ['leds'], ['leds', 'housing'], ['leds', 'housing', 'height']];
+const BOOST_LABEL = { housing: '④ 케이스 면', height: '⑤ LED 높이', leds: '② LED 배치' };
 async function adRunBoost() {
   const st = adState();
   let r = await adRun();
-  if (!r || r.feasible || st.sel.boost === false) return;
-  const avail = stageAvailability(A.store.mspec, adInfo()), base = r.stages;
-  const extra = BOOST_ITEMS.filter(([k]) => !base[k] && avail[k]?.ok);
-  const sets = [...extra.map((e) => [e]), ...(extra.length > 1 ? [extra.slice(0, 2)] : []), ...(extra.length > 2 ? [extra] : [])];
-  for (const set of sets) {
-    const stages = { ...base, ...Object.fromEntries(set.map(([k]) => [k, true])) };
-    r = await adRun({ stages, added: set.map(([, label]) => label) });
-    if (!r || r.feasible) return;
+  if (!r || r.feasible || st.sel.boost === false || !st.result) return;
+  const b0 = st.result, base = { Ulen: b0.best.Ulen, Uwid: b0.best.Uwid, milky: b0.best.milky, reason: b0.reason, unchanged: b0.unchanged };
+  const avail = stageAvailability(A.store.mspec, adInfo()), checked = r.stages;
+  const sets = BOOST_SETS.filter((set) => set.every((k) => !checked[k] && avail[k]?.ok));
+  let good = b0;
+  for (const [i, set] of sets.entries()) {
+    const added = set.map((k) => BOOST_LABEL[k]);
+    r = await adRun({ stages: { ...checked, ...Object.fromEntries(set.map((k) => [k, true])) }, added, base, step: `${i + 1}/${sets.length}` });
+    if (!r) {   // 실패·중지 — 직전 결과를 다시 보여 줌
+      if (A && !st.running) { st.result = { ...good, note: `보완(${added.join(' + ')}) 계산이 끝나지 못함 — 직전 결과를 표시` }; A.meshShown = null; renderView(); renderAuto(); }
+      return;
+    }
+    good = st.result;
+    if (r.feasible) return;
   }
 }
 async function adRun(opt = {}) {
   const a = A, st = adState(), S = A.store.session;
   if (!S.line || st.running) return null;
+  if (/^자동설계 실패/.test(S.status ?? '')) setStatus('');   // 지난 실패 문구는 지움
   const M0 = adClone(A.store.mspec), line = S.line, rt = getMech3d();   // 실행 격리 — 편집은 실행을 중지시킴(onChange)
   const avail = stageAvailability(M0, adInfo()), stages = opt.stages ?? { milky: st.sel.milky && avail.milky.ok, leds: st.sel.leds && avail.leds.ok, shape: st.sel.shape && avail.shape.ok && avail.shape.parts.includes(st.sel.shapePart),
     height: st.sel.height && avail.height.ok, housing: st.sel.housing && avail.housing.ok && avail.housing.parts.includes(st.sel.housingPart) };
@@ -512,7 +542,7 @@ async function adRun(opt = {}) {
   const obs = tallyObs(M0.observe, M0.observe.dir ?? line.frame.d), G = geometry(obs), sp = st.sel.shapePart, hp = stages.housing ? hpSel : -1;
   let hInfo = null; if (stages.height) { try { hInfo = adHeightInfo(M0, line, rt); } catch { stages.height = false; } }   // 범위 계산 실패 = ⑤ 생략
   const ctx = { M0, line, G, obs, rt, mp: st.milkyPart };
-  const R = (st.runner = createAdRunner({ ports: A.pool.ports() }));
+  const R = (st.runner = createAdRunner({ ports: A.pool.ports(), chunkTimeoutMs: 90000 }));   // 높은 Milky 청크는 30 초를 넘기기도 함
   // 같은 Worker 를 쓰므로 점진 계산은 멈춤 — 대기(디바운스) 중이면 장면을 곧 보내므로 취소. 사용자 일시정지 여부는 기억(끝나고 그대로)
   const snap0 = A.prog.snapshot(), ps = snap0.state, currentVerified = reusableCurrent(snap0, G);   // 수렴한 점진 결과 = 현재안(verify 생략)
   st.userPaused = ps === 'paused'; st.deferred = ['paused', 'running', 'pending', 'starting'].includes(ps);
@@ -535,7 +565,7 @@ async function adRun(opt = {}) {
   const progress = (stage, frac, text) => {   // 전체 진행률(단계 무게) + 남은 시간
     if (A !== a || R.stopped) return;
     const f = overallFrac(stages, stage, frac), eta = etaText(performance.now() - t0, f);
-    const tx = opt.added?.length ? `보완(${opt.added.join(' + ')}) · ${text}` : text;
+    const tx = opt.added?.length ? `보완 ${opt.step ?? ''} (${opt.added.join(' + ')}) · ${text}` : text;
     st.running = { frac: f, text: eta ? `${tx} · ${eta}` : tx }; renderAuto();
   };
   const io = {
@@ -551,15 +581,17 @@ async function adRun(opt = {}) {
     // ② 후보 = (s, w) 격자(spec P4 §2.2b): s 2 mm × w ∈ {0, ±δk}, δk = 0.2/0.27/0.33·W(반폭 − 0.5 로 자름) — 후보 수 ≈ (L/2+1)·7, 후보당 ≤ 1.2만 광자(60 s 예산)
     async basis(d) {   // ①·④ 를 함께 켜면 실행기가 d.milky = 거친 최고점 · d.finish = 최고 등급으로 넘김(§2.2c)
       const gaps = rowGapOptions(line), cand = candidateGrid(line, { sStep: 2, wOffsets: [0, ...gaps.flatMap((g) => [-g, g])] });
-      const { M: Md, parts } = designScene({ ...d, rows: 1, rowGap: 0 }, ctx);
+      const { M: Md, parts } = designScene({ ...d, rows: 1, rowGap: 0 }, ctx), ledHalf = ledHalfWidth(Md, line);
       let sets;
       if (Md.light.kind === 'step') {   // 기준 LED 발광점을 후보 위치로 · 장면은 LED 몸체 없이(PCB·기타만 = 가상 0개)
         sets = virtualEmittersAt({ parts: L.ledPartsNow(Md), step: Md.light.step, line, positions: cand }).map((e) => [e]);
         Md.light.step.virtual = { count: 0, pitch: 0 };
       } else sets = cand.map(({ s, w }) => [ledAtS(line, s, Md.light.manual, rt, w)]);
       // 시간 예산 60 s(spec §2.2c): 후보당 1.2만 광자, 넘치면 줄임(≥ 3000) — 지도는 후보마다 방출 1 기준(emitted = 1)
-      const r = await R.traceEach(adJob(Md, parts, ctx, { emitters: sets[0] }), sets, { N: 12000, maxMs: 60000, minN: 3000, onProgress: (i, n) => progress('leds', i / n, `LED 후보 위치 추적 ${i}/${n}`) });
-      return { cand, maps: r.maps, emitted: r.emitted, gaps };
+      const r = await R.traceEach(adJob(Md, parts, ctx, { emitters: sets[0] }), sets, { N: 12000, maxMs: 60000, minN: 3000, onProgress: (i, n) => progress('leds', i / n, `LED 위치 후보 시험 ${i}/${n}`) });
+      // 간섭 방지: LED 몸체 반폭 + 0.3 mm 만큼 라인 끝에서 떨어지게(끝벽), 2열 간격도 반폭만큼 안쪽(측벽)
+      const m = ledHalf + 0.3, gapsOk = gaps.filter((g) => !(line.width > 0) || g + m <= line.width / 2 + 1e-9);
+      return { cand, maps: r.maps, emitted: r.emitted, gaps: gapsOk, sMargin: m };
     },
     async evalShapes(d, cands, N, maxMs = 2500) {   // 단계별 광자·시간 제한은 halving 일정(6만/20만/60만 · 2.5/4/6초)
       const out = [], base = adBaseMesh(sp, ctx), H = heightsFor(base, line.frame, 0.5);
@@ -615,7 +647,7 @@ async function adRun(opt = {}) {
     let nStep = null; if (M0.light.kind === 'step') { try { nStep = L.currentEmitters(M0, line).length; } catch { nStep = 0; } }
     const smI = sp >= 0 && M0.parts[sp]?.shapeMod ? sp : M0.parts.findIndex((p) => p.shapeMod), sm = smI >= 0 ? M0.parts[smI].shapeMod : null;   // 비교표 '현재' 열 — 이미 적용된 형상(표시만)
     st.result = { design: res.best, feasible: res.feasible, reason: res.reason, hint: res.hint ?? null, shape: res.best.shape ?? null, screen: res.steps?.find((x) => x.stage === 'shapeScreen')?.gains ?? null, stepLeds: nStep, unchanged: !!res.unchanged, ctx, stages,
-      added: opt.added ?? [],
+      added: opt.added ?? [], base: opt.base ?? null, clash: designClash(res.best, ctx, M0, rt, line),
       finish: stages.housing ? (() => { const c = { ...M0.parts[hp].finish, ...(M0.parts[hp].coating ? { coating: M0.parts[hp].coating } : {}) }; return { cur: c, best: res.best.finish ?? c }; })() : null, height: stages.height && hInfo ? { dz: res.best.dz ?? 0, gap: hInfo.gap } : null,
       cur: { ...cur, shape: sm ? { dt: sm.dt, h: sm.h, R: sm.R, e: sm.e ?? 0, c: sm.c ?? 0 } : null, Ulen: C?.stats?.Ulen, Uwid: C?.stats?.Uwid, eff: C?.eff ?? NaN, profile: C?.stats?.profile ?? null },
       best: { ...res.best, ...(stp ? { stepOrig: !res.best.stepVirt } : {}), Ulen: res.verified.stats.Ulen, Uwid: res.verified.stats.Uwid, eff: res.verified.eff, profile: res.verified.stats.profile ?? null } };

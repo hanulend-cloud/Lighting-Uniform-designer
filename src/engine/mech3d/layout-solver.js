@@ -11,7 +11,8 @@ const RATIOS = [0.15, 0.3, 0.45, 0.6], HOPELESS = -0.12, FREE_STEPS = [2, 1, 0.5
 
 const snapS = (s, L) => L / 2 + Math.round((s - L / 2) / SNAP) * SNAP;
 const better = (a, b) => !b || a.margin > b.margin + 1e-9 || (Math.abs(a.margin - b.margin) <= 1e-9 && a.eff > b.eff);
-const okGaps = (ss, minGap, L) => ss.every((s, i) => s >= -1e-9 && s <= L + 1e-9 && (i === 0 || s - ss[i - 1] >= minGap - 1e-9));
+// m = 라인 양 끝 여유(LED 몸체 반폭 + 틈 — 끝벽 간섭 방지)
+const okGaps = (ss, minGap, L, m = 0) => ss.every((s, i) => s >= m - 1e-9 && s <= L - m + 1e-9 && (i === 0 || s - ss[i - 1] >= minGap - 1e-9));
 
 // 열린 라인 같은 피치: 끝 여백 e(첫 LED s), 가운데 대칭
 export function uniformPositions(L, n, e) {
@@ -37,7 +38,8 @@ export function layoutText(r) {
 
 // 반환 { feasible, n, rows, rowGap, total, positions:[{s,w}], kind, pitch, endMargin, ratio, stats, eff, margin, reason, alts:[…], evals }
 // safety = 통과 판정 여유(기저 추정은 광자 잡음이 있어 검증에서 0 근처 통과가 뒤집힘 — 이만큼 넘는 배치만 통과로 봄)
-export function solveLayout({ G, obs, line, cand, maps, rowsOptions = [1, 2], gaps = [], nMax, emitted = 1, minGap = 2, pitchRange = null, timeBudget = 20000, now = () => Date.now(), safety = 0 }) {
+export function solveLayout({ G, obs, line, cand, maps, rowsOptions = [1, 2], gaps = [], nMax, emitted = 1, minGap = 2, pitchRange = null, timeBudget = 20000, now = () => Date.now(), safety = 0, sMargin = 0 }) {
+  const sm = line.closed ? 0 : Math.max(0, sMargin);   // 끝 여유: 첫·끝 LED 중심 ≥ sm(몸체가 끝벽에 닿지 않게)
   const L = line.length, closed = !!line.closed, nCell = G.ns * G.nw, t0 = now(), RO = [...new Set(rowsOptions)].sort((a, b) => a - b);
   const gMin = Math.max(minGap, pitchRange?.min ?? 0);
   let evals = 0;
@@ -58,10 +60,10 @@ export function solveLayout({ G, obs, line, cand, maps, rowsOptions = [1, 2], ga
       return best;
     }
     if (n === 1) return ev([snapS(L / 2, L)], rows, g, 'uniform', { pitch: 0, endMargin: L / 2 });
-    let eLo = 0, eHi = (L - (n - 1) * gMin) / 2;
+    let eLo = sm, eHi = (L - (n - 1) * gMin) / 2;
     if (pitchRange) { eLo = Math.max(eLo, (L - (n - 1) * pitchRange.max) / 2); eHi = Math.min(eHi, (L - (n - 1) * pitchRange.min) / 2); }
     if (eHi < eLo - 1e-9) return null;
-    const tryE = (e) => { const ss = uniformPositions(L, n, e).map((s) => snapS(s, L)); if (!okGaps(ss, gMin, L)) return; const r = ev(ss, rows, g, 'uniform', { pitch: +(ss[1] - ss[0]).toFixed(2), endMargin: ss[0] }); if (r && better(r, best)) best = r; };
+    const tryE = (e) => { const ss = uniformPositions(L, n, e).map((s) => snapS(s, L)); if (!okGaps(ss, gMin, L, sm)) return; const r = ev(ss, rows, g, 'uniform', { pitch: +(ss[1] - ss[0]).toFixed(2), endMargin: ss[0] }); if (r && better(r, best)) best = r; };
     for (let e = eLo; e <= eHi + 1e-9; e += 1) tryE(e);
     tryE(eHi);
     if (best) { const c = best.endMargin; for (let e = Math.max(eLo, c - 1); e <= Math.min(eHi, c + 1) + 1e-9; e += SNAP) tryE(e); }
@@ -71,9 +73,9 @@ export function solveLayout({ G, obs, line, cand, maps, rowsOptions = [1, 2], ga
   function stage2(n, rows, g) {
     if (closed || n < 4) return null;
     let best = null;
-    for (const a of RATIOS) for (let e = 0; e <= L / 2; e += 1) {
+    for (const a of RATIOS) for (let e = sm; e <= L / 2; e += 1) {
       const ss = compressedPositions(L, n, e, a).map((s) => snapS(s, L));
-      if (!okGaps(ss, gMin, L)) continue;
+      if (!okGaps(ss, gMin, L, sm)) continue;
       const r = ev(ss, rows, g, 'endCompress', { endMargin: ss[0], ratio: a });
       if (r && better(r, best)) best = r;
     }
@@ -88,7 +90,7 @@ export function solveLayout({ G, obs, line, cand, maps, rowsOptions = [1, 2], ga
       let moved = false;
       for (const dl of FREE_STEPS) for (let i = 0; i < Math.floor(n / 2); i++) for (const sg of [-1, 1]) {
         const tr = ss.slice(); tr[i] = snapS(tr[i] + sg * dl, L); tr[n - 1 - i] = snapS(L - tr[i], L);
-        if (!okGaps(tr, gMin, L)) continue;
+        if (!okGaps(tr, gMin, L, sm)) continue;
         const r = ev(tr, rows, g, 'free', { endMargin: tr[0] });
         if (r && better(r, cur)) { cur = r; ss = tr; moved = true; }
       }

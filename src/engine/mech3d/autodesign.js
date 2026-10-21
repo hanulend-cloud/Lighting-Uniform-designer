@@ -55,7 +55,8 @@ export async function halving(cands, evalFn, obs, schedule = SHAPE_SCHEDULE, can
 export const shapeTotal = (nScreen, nGrid, schedule = SHAPE_SCHEDULE) => nScreen + halvingTotal(nGrid, schedule);
 // ③ 1단계 변수 선별 — 현재 형상 + 변수별 하한/상한 하나씩(R 은 h 와 묶음: h 후보는 R=mid). 이득 = max(점수(lo), 점수(hi)) − 점수(현재) ≥ eps 인 상위 keep 개
 // 격자 차원 예산 budget(기본 3 → 3^3 = 27 이하): h 는 R 과 함께라 2, 나머지 1 — 이득 순으로 예산 안에 드는 것만
-export async function screenShapeVars(evalFn, ranges, obs, { N = 6e4, maxMs = 2500, eps = 0.01, keep = 3, budget = 3 } = {}) {
+// eps 0.02: 6만 광자 선별의 잡음(±0.01 안팎)보다 큰 이득만 형상 변수로 — 잡음 수준 이득으로 금형 변경을 권하지 않게
+export async function screenShapeVars(evalFn, ranges, obs, { N = 6e4, maxMs = 2500, eps = 0.02, keep = 3, budget = 3 } = {}) {
   const rd = (v) => Math.round(v * 1e4) / 1e4, Rm = ranges.R ? rd((ranges.R[0] + ranges.R[1]) / 2) : 1, zero = { dt: 0, h: 0, R: Rm, e: 0, c: 0 };
   const names = Object.keys(ranges).filter((k) => k !== 'R'), cands = [zero], tag = [-1];
   names.forEach((v, i) => ranges[v].forEach((x) => { cands.push({ ...zero, [v]: rd(x) }); tag.push(i); }));
@@ -243,7 +244,7 @@ export async function runAutoDesign(cfg, io) {
     // 후보가 {s, w} 면 (s, w) 격자 — 열 수·열 간격까지(searchLeds2, nMax = 총수 상한), 숫자면 1열(기존)
     const two = typeof B.cand[0] === 'object', a = { G: cfg.G, obs, line: cfg.line, cand: B.cand, maps: B.maps, pitchRange: cfg.pitchRange ?? null, nMax: cfg.nMax, emitted: B.emitted };
     // (s, w) 격자 = 배치 Solver(같은 피치+끝 여백 → 끝 압축 → 자유 위치, spec 2026-10-20 led-layout-solver) · 숫자 격자 = 1열 기존 탐색
-    const r = two ? solveLayout({ ...a, gaps: B.gaps ?? [], timeBudget: cfg.layoutBudget ?? 20000, safety: cfg.layoutSafety ?? 0.02 }) : searchLeds({ ...a, spare: 1 });
+    const r = two ? solveLayout({ ...a, gaps: B.gaps ?? [], sMargin: B.sMargin ?? 0, timeBudget: cfg.layoutBudget ?? 20000, safety: cfg.layoutSafety ?? 0.02 }) : searchLeds({ ...a, spare: 1 });
     steps.push({ stage: 'leds', ...r });
     const lay = (e) => two
       ? { count: e.n, pitch: e.pitch, rows: e.rows, rowGap: e.rowGap, positions: e.positions?.length ? e.positions : null, layoutKind: e.kind, layoutText: e.positions?.length ? layoutText(e) : null }

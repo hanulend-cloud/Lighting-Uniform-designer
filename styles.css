@@ -529,3 +529,4 @@ main:has(#m3-start:not([hidden])) { grid-template-rows: minmax(0, 1fr); }
   .m3-splitting { cursor: col-resize; user-select: none; }
 }
 @media (max-width: 1024px) { .m3-split { display: none; } }
+.m3-tot { color: var(--m3-acc); }
