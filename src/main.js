@@ -812,5 +812,7 @@ window.addEventListener('pagehide', () => m3app.flush());
 window.addEventListener('beforeunload', () => m3app.flush());
 forceHeatOnNextRun = true;   // 첫 계산에 히트맵 포함
 applyMode();
-if (spec.mode === 'mech3d' && !spec.mech3d && !spec.mech3dPending) loadSampleProject(false);   // 프로젝트 없는 첫 실행 = v3 기준 프로젝트
+// 프로젝트 없는 첫 실행, 또는 기구만 불러오고 아무것도 정하지 않은(광원·관측면 없음) 빈 프로젝트 = v3 기준 프로젝트
+const blankM3 = (m) => !!m && (m.light?.kind ?? 'none') === 'none' && !(m.observe?.faces?.length);
+if (spec.mode === 'mech3d' && ((!spec.mech3d && !spec.mech3dPending) || (blankM3(spec.mech3d) && !spec.mech3dPending))) { if (spec.mech3d) { m3app.unmount(); spec.mech3d = null; } loadSampleProject(false); }
 schedule();
