@@ -1,0 +1,199 @@
+{
+ "about": "평판 구조 + LED STEP 10개 1열 — 케이스 PC 고반사 95%, 도광판 Milky 2, 목표 0.80/0.80",
+ "mech": "test/fixtures/mech3d-sample.stp",
+ "led": "test/fixtures/mech3d-led-sample.stp",
+ "mech3d": {
+  "name": "mech3d-sample.stp",
+  "parts": [
+   {
+    "id": 0,
+    "name": "부품 1",
+    "volume": 10240.000000000004,
+    "material": {
+     "kind": "opaque"
+    },
+    "finish": {
+     "kind": "whiteDiffuse",
+     "R": 0.95
+    },
+    "faceFinish": {},
+    "size": [
+     120,
+     20,
+     12
+    ],
+    "reflMaterial": "pc-hr"
+   },
+   {
+    "id": 1,
+    "name": "부품 2",
+    "volume": 3711.999999999999,
+    "material": {
+     "kind": "milky",
+     "dbId": "",
+     "milky": 2,
+     "resin": "PC"
+    },
+    "finish": {
+     "kind": "gloss"
+    },
+    "faceFinish": {},
+    "size": [
+     116,
+     16,
+     2
+    ]
+   },
+   {
+    "id": 2,
+    "name": "부품 3",
+    "volume": 2784,
+    "material": {
+     "kind": "clear",
+     "resin": "PC",
+     "T": 1,
+     "tRef": 2
+    },
+    "finish": {
+     "kind": "gloss"
+    },
+    "faceFinish": {},
+    "size": [
+     116,
+     4,
+     6
+    ],
+    "xform": {
+     "offset": [
+      0,
+      0,
+      2.33
+     ],
+     "scale": [
+      0.9875,
+      3.9875,
+      0.191667
+     ]
+    }
+   }
+  ],
+  "contacts": [
+   {
+    "a": 0,
+    "faceA": 6,
+    "b": 1,
+    "faceB": 2,
+    "area": 231.99999999999994,
+    "mode": "contact"
+   },
+   {
+    "a": 0,
+    "faceA": 7,
+    "b": 1,
+    "faceB": 1,
+    "area": 32,
+    "mode": "contact"
+   },
+   {
+    "a": 0,
+    "faceA": 8,
+    "b": 1,
+    "faceB": 3,
+    "area": 232.00000000000006,
+    "mode": "contact"
+   },
+   {
+    "a": 0,
+    "faceA": 9,
+    "b": 1,
+    "faceB": 0,
+    "area": 32,
+    "mode": "contact"
+   },
+   {
+    "a": 0,
+    "faceA": 6,
+    "b": 2,
+    "faceB": 2,
+    "area": 131.73267665386447,
+    "mode": "contact"
+   },
+   {
+    "a": 0,
+    "faceA": 8,
+    "b": 2,
+    "faceB": 3,
+    "area": 131.73267665386453,
+    "mode": "contact"
+   }
+  ],
+  "light": {
+   "kind": "step",
+   "solder": "백색",
+   "spec": {
+    "model": "lambertian",
+    "beam": 120,
+    "sizeX": 2,
+    "sizeY": 2,
+    "fluxLm": 0
+   },
+   "step": {
+    "name": "mech3d-led-sample.stp",
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "rot": [
+     0,
+     0,
+     0
+    ],
+    "ref": {
+     "part": 7,
+     "face": 10
+    },
+    "leds": [],
+    "excluded": [],
+    "pcb": -1,
+    "emitters": [],
+    "virtual": null
+   },
+   "manual": {
+    "pcb": {
+     "kind": "depth",
+     "depth": 10
+    },
+    "count": 10,
+    "pitch": 0,
+    "side": "direct",
+    "rows": 1,
+    "rowGap": 0
+   }
+  },
+  "observe": {
+   "faces": [
+    {
+     "part": 1,
+     "face": 5
+    }
+   ],
+   "dir": null,
+   "cone": 90,
+   "cell": null,
+   "cellS": null,
+   "cellW": null,
+   "winS": null,
+   "edgeExcl": 0.5,
+   "targetLen": 0.8,
+   "targetWid": 0.8,
+   "targetLum": null,
+   "targetNoise": 0.02
+  },
+  "checks": {
+   "minWall": 0.8,
+   "minReach": 0.5,
+   "maxLeak": 0.2
+  }
+ }
+}

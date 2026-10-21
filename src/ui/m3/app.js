@@ -59,6 +59,7 @@ export function warmWorkers(ctx) { getPool(ctx).warm(); }
 export const isMounted = () => !!A;
 export function setStatus(t) { A?.store.update('session', (_, s) => { s.status = t; }); }
 export function flush() { A?.store.flush(); }
+export function importLed(file) { if (A) importLedStep(file); }   // 예제 프로젝트 — LED STEP 을 코드에서 불러옴(같은 이름이면 저장된 기준 LED 로 재인식)
 globalThis.__m3 = () => A;   // 브라우저 점검용: __m3().prog.snapshot(), __m3().timing, __m3().checks
 
 function getView() {

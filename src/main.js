@@ -125,6 +125,7 @@ function buildForm() {
   $('#btn-reset').onclick = () => { spec = structuredClone(DEFAULT_SPEC); markSoloReset(); mount(); m3app.unmount(); m3app.resetWorkers(); applyMode(); schedule(); };
   $('#btn-mech3d-show').onclick = () => { spec.mode = 'mech3d'; persist(); applyMode(); };
   $('#btn-flat-mode').onclick = () => { spec.mode = 'flat'; spec.flatChosen = true; persist(); applyMode(); schedule(); };   // 평판(초기 검토) — 사용자가 고른 경우만 평판으로 시작
+  $('#btn-sample-project').onclick = () => loadSampleProject();
   $('#file-mech3d-start').onchange = (e) => { const f = e.target.files?.[0]; if (f) importMech3d(f); e.target.value = ''; };
   $('#file-mech3d').onchange = (e) => { const f = e.target.files?.[0]; if (f) importMech3d(f); e.target.value = ''; };
   $('#btn-step').onclick = () => {
@@ -255,8 +256,26 @@ function renderPendingBanner() {
 const partInfo = (parts) => parts.map((p) => { const b = bounds(p.positions); return { volume: p.volume, size: [b[3] - b[0], b[4] - b[1], b[5] - b[2]] }; });
 // 지금 spec.mech3d 를 메쉬 없는 보관 상태로(버리지 않음) — 평판 모드로 시작
 function shelveMech3d() { spec.mech3dPending = spec.mech3d; spec.mech3d = null; }   // 모드는 그대로 — 3D 면 시작 화면 + 안내 띠
+// 예제 프로젝트(data/sample-project.json — tools/make-sample-project.mjs): 평판 구조 + LED STEP 10개 1열.
+// 저장 설정을 보관분(mech3dPending)으로 두고 기구 STEP 을 불러오면 복원 경로를 그대로 탐 → 이어서 같은 이름 LED STEP = 저장된 기준 LED 로 재인식
+async function loadSampleProject() {
+  const say = (t) => { $('#m3-start-msg').textContent = t; };
+  if (spec.mech3dPending && !confirm('보관 중인 3D 설정이 있습니다. 예제 프로젝트로 바꿀까요?')) return;
+  try {
+    say('예제 프로젝트 불러오는 중…');
+    const get = async (url) => { const r = await fetch(url, { cache: 'no-store' }); if (!r.ok) throw new Error(`${url} ${r.status}`); return r; };
+    const P = await (await get('data/sample-project.json')).json();
+    const file = async (url) => new File([await (await get(url)).text()], url.split('/').pop());
+    const mech = await file(P.mech), led = await file(P.led);
+    spec.mech3dPending = P.mech3d; spec.mech3d = null; spec.mode = 'mech3d';
+    importMech3d(mech, async () => {
+      for (let i = 0; i < 200 && !m3app.isMounted(); i++) await new Promise((r) => setTimeout(r, 100));
+      m3app.importLed(led);
+    });
+  } catch (e) { say(`예제 불러오기 실패: ${e.message ?? e}`); }
+}
 // 기구 STEP 불러오기(평판·3D 모드 공통) — spec.mech3d 를 새로 만들고 3D 모드로
-function importMech3d(file) {
+function importMech3d(file, onDone = null) {
   const say = (t) => { if (m3app.isMounted()) m3app.setStatus(t); else $('#timing').textContent = t; };
   say(`${file.name} 읽는 중…`);
   file.text().then((text) => {
@@ -282,7 +301,7 @@ function importMech3d(file) {
         }
         spec.mech3d = ms; spec.mode = 'mech3d'; spec.mech3dPending = null;
         tabLock.write('mech3dIDB', () => saveMech3dIDB().catch(() => {}));
-        persist(); applyMode();
+        persist(); applyMode(); onDone?.();
         m3app.setStatus(restored
           ? `복원함: 저장된 3D 설정 — ${file.name} · 부품 ${ms.parts.length}개 · 접촉면 ${ms.contacts.length}개${pend.name && pend.name !== file.name ? ` (저장 이름 ${pend.name})` : ''}`
           : `불러옴: ${file.name} · 부품 ${m.data.parts.length}개 · 접촉면 ${ms.contacts.length}개 — Milky 부품부터 지정하세요`);

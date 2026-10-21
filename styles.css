@@ -495,3 +495,5 @@ main:has(#m3-start:not([hidden])) { grid-template-rows: minmax(0, 1fr); }
 .m3-start-btn:hover { background: #185bb0; }
 .m3-start-sub { font-size: 12.5px; color: #6b7385; margin: 12px 0 8px; }
 .m3-start-link { border: 0; background: none; padding: 0; color: #6b7385; font-size: 12.5px; text-decoration: underline; cursor: pointer; }
+.m3-start-btn2 { margin-left: 8px; border: 1px solid #1f6fd1; background: #fff; color: #1f6fd1; border-radius: 6px; padding: 9px 14px; cursor: pointer; font: inherit; font-weight: 600; }
+.m3-start-btn2:hover { background: #e4effc; }
