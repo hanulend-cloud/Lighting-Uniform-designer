@@ -345,7 +345,7 @@ function clearanceOf(i) {
 }
 
 // ---- 자동설계(P4) ----
-function adState() { return (A.ad ??= { open: (() => { try { return localStorage.getItem('uds.m3.autoOpen') === '1'; } catch { return false; } })(), sel: { milky: true, leds: false, shape: false, shapePart: -1, milkyMax: null, height: false, housing: false, housingPart: -1, housingSpecial: false }, running: null, result: null, undo: null, milkyPart: null, runner: null, info: null, stepBusy: false, stepWorker: null }); }
+function adState() { return (A.ad ??= { open: (() => { try { return localStorage.getItem('uds.m3.autoOpen') === '1'; } catch { return false; } })(), sel: { milky: true, leds: false, shape: false, shapePart: -1, milkyMax: null, height: false, housing: false, housingPart: -1, housingSpecial: false, boost: true }, running: null, result: null, undo: null, milkyPart: null, runner: null, info: null, stepBusy: false, stepWorker: null }); }
 function adInfo() {   // 부품별 비 2.5D 비율(관측 방향) — 라인이 있을 때만. (기구·라인) 별 캐시(높이맵 계산이 무거움)
   const st = adState(), S = A.store.session, rt = getMech3d();
   if (!st.info || st.info.rt !== rt || st.info.line !== S.line) st.info = { rt, line: S.line, non25: S.line && rt ? rt.parts.map((p) => heightsFor(p, S.line.frame, 0.5).non25) : [], boxes: rt ? rt.parts.map((p) => bounds(p.positions)) : [] };   // boxes = ④ 기본 대상용 외곽
@@ -369,9 +369,9 @@ function renderAuto() {
   if (!st.running && !avail.housing.parts?.includes(st.sel.housingPart)) { const k = defaultHousingPart(M, adInfo().boxes); st.sel.housingPart = avail.housing.ok ? (avail.housing.parts.includes(k) ? k : avail.housing.parts[0]) : -1; }   // ④ 기본 = 관측 부품을 감싸는 가장 큰 불투명 부품
   const mp = st.running ? st.milkyPart : adMilkyPart(M, avail), sel = { ...st.sel, milkyMax: st.sel.milkyMax ?? capDefault(st.sel, avail, mp != null ? M.parts[mp].material.milky : 0) };
   const hm = st.sel.housingPart >= 0 ? reflCat().find((e) => !e.special && e.id === M.parts[st.sel.housingPart]?.reflMaterial) : null;   // ④ 대상 반사 소재
-  renderAutoPanel(el, { avail, sel, running: st.running, result: st.result, names: M.parts.map((p) => p.name), canRevert: !!st.undo, noLine: !A.store.session.line, milkyPart: mp, housingMat: hm ? { name: hm.name, max: hm.max } : null, catalog: reflCat() }, {
+  renderAutoPanel(el, { avail, sel, running: st.running, result: st.result, names: M.parts.map((p) => p.name), canRevert: !!st.undo, applied: st.undo ? st.applied ?? null : null, noLine: !A.store.session.line, milkyPart: mp, housingMat: hm ? { name: hm.name, max: hm.max } : null, catalog: reflCat() }, {
     onSel: (k, v) => { if (st.running) return; st.sel[k] = k === 'milkyMax' ? clampCap(v) : v; renderAuto(); },
-    onAction: (k) => ({ run: adRun, stop: adStop, close: () => adSetOpen(false), apply: adApply, cancel: adCancel, revert: adRevert, step: adStep })[k]?.(),
+    onAction: (k) => ({ run: adRunBoost, stop: adStop, close: () => adSetOpen(false), apply: adApply, cancel: adCancel, revert: adRevert, step: adStep })[k]?.(),
   });
 }
 function adStop() { const st = adState(); if (!st.running || !st.runner) return; st.runner.cancel(); setStatus('자동설계 중지됨'); }
@@ -442,14 +442,32 @@ function adHeightInfo(M0, line, rt) {
   let gap = Infinity; for (const e of em) for (const i of op) gap = Math.min(gap, rayT(mech[i], e.pos, d));
   return { range, gap: Number.isFinite(gap) ? gap : NaN };
 }
-async function adRun() {
+// 보완 자동 추가(목표 미달 시): 체크한 항목만으로 목표 미달이면 다른 항목을 더해 다시 실행 — 적게 바꾸는 순서:
+// 하나씩(④ 케이스 면 → ② LED 배치 → ⑤ LED 높이) 먼저, 그래도 안 되면 둘·셋 함께. 처음 통과한 안에서 멈춤(모두 미달이면 마지막 안).
+// 추가한 항목은 결과에 added 로 표시 — 적용은 사용자가 정함
+const BOOST_ITEMS = [['housing', '④ 케이스 면'], ['leds', '② LED 배치'], ['height', '⑤ LED 높이']];
+async function adRunBoost() {
+  const st = adState();
+  let r = await adRun();
+  if (!r || r.feasible || st.sel.boost === false) return;
+  const avail = stageAvailability(A.store.mspec, adInfo()), base = r.stages;
+  const extra = BOOST_ITEMS.filter(([k]) => !base[k] && avail[k]?.ok);
+  const sets = [...extra.map((e) => [e]), ...(extra.length > 1 ? [extra.slice(0, 2)] : []), ...(extra.length > 2 ? [extra] : [])];
+  for (const set of sets) {
+    const stages = { ...base, ...Object.fromEntries(set.map(([k]) => [k, true])) };
+    r = await adRun({ stages, added: set.map(([, label]) => label) });
+    if (!r || r.feasible) return;
+  }
+}
+async function adRun(opt = {}) {
   const a = A, st = adState(), S = A.store.session;
-  if (!S.line || st.running) return;
+  if (!S.line || st.running) return null;
   const M0 = adClone(A.store.mspec), line = S.line, rt = getMech3d();   // 실행 격리 — 편집은 실행을 중지시킴(onChange)
-  const avail = stageAvailability(M0, adInfo()), stages = { milky: st.sel.milky && avail.milky.ok, leds: st.sel.leds && avail.leds.ok, shape: st.sel.shape && avail.shape.ok && avail.shape.parts.includes(st.sel.shapePart),
+  const avail = stageAvailability(M0, adInfo()), stages = opt.stages ?? { milky: st.sel.milky && avail.milky.ok, leds: st.sel.leds && avail.leds.ok, shape: st.sel.shape && avail.shape.ok && avail.shape.parts.includes(st.sel.shapePart),
     height: st.sel.height && avail.height.ok, housing: st.sel.housing && avail.housing.ok && avail.housing.parts.includes(st.sel.housingPart) };
   st.milkyPart = adMilkyPart(M0, avail);
-  const obs = tallyObs(M0.observe, M0.observe.dir ?? line.frame.d), G = geometry(obs), sp = st.sel.shapePart, hp = stages.housing ? st.sel.housingPart : -1;
+  const hpSel = avail.housing?.parts?.includes(st.sel.housingPart) ? st.sel.housingPart : defaultHousingPart(M0, adInfo().boxes);   // 보완으로 ④ 를 더했으면 기본 케이스 부품
+  const obs = tallyObs(M0.observe, M0.observe.dir ?? line.frame.d), G = geometry(obs), sp = st.sel.shapePart, hp = stages.housing ? hpSel : -1;
   let hInfo = null; if (stages.height) { try { hInfo = adHeightInfo(M0, line, rt); } catch { stages.height = false; } }   // 범위 계산 실패 = ⑤ 생략
   const ctx = { M0, line, G, obs, rt, mp: st.milkyPart };
   const R = (st.runner = createAdRunner({ ports: A.pool.ports() }));
@@ -475,7 +493,8 @@ async function adRun() {
   const progress = (stage, frac, text) => {   // 전체 진행률(단계 무게) + 남은 시간
     if (A !== a || R.stopped) return;
     const f = overallFrac(stages, stage, frac), eta = etaText(performance.now() - t0, f);
-    st.running = { frac: f, text: eta ? `${text} · ${eta}` : text }; renderAuto();
+    const tx = opt.added?.length ? `보완(${opt.added.join(' + ')}) · ${text}` : text;
+    st.running = { frac: f, text: eta ? `${tx} · ${eta}` : tx }; renderAuto();
   };
   const io = {
     progress,
@@ -553,6 +572,7 @@ async function adRun() {
     let nStep = null; if (M0.light.kind === 'step') { try { nStep = L.currentEmitters(M0, line).length; } catch { nStep = 0; } }
     const smI = sp >= 0 && M0.parts[sp]?.shapeMod ? sp : M0.parts.findIndex((p) => p.shapeMod), sm = smI >= 0 ? M0.parts[smI].shapeMod : null;   // 비교표 '현재' 열 — 이미 적용된 형상(표시만)
     st.result = { design: res.best, feasible: res.feasible, reason: res.reason, hint: res.hint ?? null, shape: res.best.shape ?? null, screen: res.steps?.find((x) => x.stage === 'shapeScreen')?.gains ?? null, stepLeds: nStep, unchanged: !!res.unchanged, ctx, stages,
+      added: opt.added ?? [],
       finish: stages.housing ? (() => { const c = { ...M0.parts[hp].finish, ...(M0.parts[hp].coating ? { coating: M0.parts[hp].coating } : {}) }; return { cur: c, best: res.best.finish ?? c }; })() : null, height: stages.height && hInfo ? { dz: res.best.dz ?? 0, gap: hInfo.gap } : null,
       cur: { ...cur, shape: sm ? { dt: sm.dt, h: sm.h, R: sm.R, e: sm.e ?? 0, c: sm.c ?? 0 } : null, Ulen: C?.stats?.Ulen, Uwid: C?.stats?.Uwid, eff: C?.eff ?? NaN, profile: C?.stats?.profile ?? null },
       best: { ...res.best, ...(stp ? { stepOrig: !res.best.stepVirt } : {}), Ulen: res.verified.stats.Ulen, Uwid: res.verified.stats.Uwid, eff: res.verified.eff, profile: res.verified.stats.profile ?? null } };
@@ -561,6 +581,7 @@ async function adRun() {
   // restart 는 일시정지 상태를 이어가므로(wantPaused) 사용자가 멈춘 게 아니면 resume(대기 중 resume = 일시정지 요청 해제)
   if (st.deferred) { st.deferred = false; restartCalc(); if (st.userPaused) A.prog.pause(); else A.prog.resume(); }
   A.meshShown = null; renderView(); renderAuto();
+  return res && !res.cancelled && !R.stopped && st.result ? { feasible: !!res.feasible, stages } : null;
 }
 // 비교 중 3D 미리보기 — 결과마다 한 번 만들어 둠(meshKey 비교용 객체)
 function adPreview() {
@@ -586,6 +607,8 @@ function adApply() {
   const dzCh = Math.abs(d.dz ?? 0) > 1e-9 && (M.light.kind === 'step' ? !!M.light.step : M.light.manual?.pcb?.kind === 'depth');   // ⑤ 이동 있음
   const undo = { milky: milkyCh ? [mp, adClone(M.parts[mp].material)] : null, manual: lightCh ? adClone(Lm) : null, stepVirt: stepCh ? { v: adClone(sv) } : null, shape: mod ? [d.shape.part, adClone(M.parts[d.shape.part].shapeMod ?? null)] : null,
     finish: finCh ? [fp, adClone(pf), pc] : null, dz: dzCh ? (M.light.kind === 'step' ? { step: adClone({ offset: M.light.step.offset, emitters: M.light.step.emitters }) } : { depth: M.light.manual.pcb.depth }) : null };
+  const tm = new Date();
+  st.applied = { ...r, catalog: reflCat(), at: `${tm.getHours()}:${String(tm.getMinutes()).padStart(2, '0')} 적용` };   // 적용 뒤 요약(이전 → 적용 후) — renderAutoPanel 이 compareHtml 과 같은 인자로 그림
   st.result = null; A.meshShown = null;
   if (undo.milky || undo.manual || undo.stepVirt || undo.shape || undo.finish || undo.dz) st.undo = undo;
   if (milkyCh) A.store.update('material', (m) => { m.parts[mp] = setPartMaterialParam(m.parts[mp], 'milky', d.milky); });

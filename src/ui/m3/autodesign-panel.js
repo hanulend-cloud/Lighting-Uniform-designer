@@ -109,7 +109,7 @@ const progHtml = (running) => {
 };
 // noLine = 관측 라인 없음(실행 불가) · milkyPart = ① 대상 부품 번호. 실행 중에는 입력을 모두 비활성
 // housingMat = ④ 대상 부품의 반사 소재 { name, max } | null(미지정)
-export function autoCardHtml({ avail, sel, running, names = [], canRevert = false, noLine = false, milkyPart = null, housingMat = null }) {
+export function autoCardHtml({ avail, sel, running, names = [], canRevert = false, noLine = false, milkyPart = null, housingMat = null, applied = null }) {
   const dis = running ? ' disabled' : '', pname = (i) => esc(names[i] ?? `부품 ${i + 1}`);
   const row = ([k, label]) => {
     const a = avail[k];
@@ -121,10 +121,11 @@ export function autoCardHtml({ avail, sel, running, names = [], canRevert = fals
   const part = avail.shape.ok ? `<div class="m3-row">③ 대상 <select data-ad="shapePart" aria-label="③ 대상 부품"${dis}>${avail.shape.parts.map((i) => `<option value="${i}"${i === sel.shapePart ? ' selected' : ''}>${pname(i)}</option>`).join('')}</select></div>` : '';
   const hPart = avail.housing?.ok && sel.housing ? `<div class="m3-row">④ 대상 <select data-ad="housingPart" aria-label="④ 대상 부품"${dis}>${avail.housing.parts.map((i) => `<option value="${i}"${i === sel.housingPart ? ' selected' : ''}>${pname(i)}</option>`).join('')}</select> <span class="mut">${housingMat ? `${esc(housingMat.name)} · 상한 ${Math.round(housingMat.max * 100)}%` : '반사 소재 미지정 — 등급 전체'}</span></div>
     <label class="m3-ad-item"><input type="checkbox" data-ad="housingSpecial"${sel.housingSpecial ? ' checked' : ''}${dis}> 특수 표면처리 허용 (고반사 도장·시트·증착)</label>` : '';
+  const boost = `<label class="m3-ad-item"><input type="checkbox" data-ad="boost"${sel.boost !== false ? ' checked' : ''}${dis}> 목표 미달이면 보완 항목 자동 추가 <span class="mut">— ④ 케이스 면 · ② LED 배치 · ⑤ LED 높이 중 적게 바꾸는 것부터</span></label>`;
   const any = ITEMS.some(([k]) => sel[k] && avail[k]?.ok);
   const run = `<button type="button" data-ad="run"${!any || noLine ? ' disabled' : ''}${noLine ? ' title="관측 라인이 없음"' : ''}>▶ 실행</button>`;
-  return `<div class="m3-h">자동설계 <span class="mut">체크한 항목만 바꿈 · 순서 ②→⑤→④→①→③</span></div>${ITEMS.map(row).join('')}${mTarget}${cap}${part}${hPart}
-    ${running ? progHtml(running) : `<div class="m3-row">${run}${canRevert ? '<button type="button" data-ad="revert" title="마지막 적용 전 값으로">↶ 되돌리기</button>' : ''}<button type="button" data-ad="close">닫기</button></div>`}`;
+  return `<div class="m3-h">자동설계 <span class="mut">체크한 항목만 바꿈 · 순서 ②→⑤→④→①→③</span></div>${ITEMS.map(row).join('')}${boost}${mTarget}${cap}${part}${hPart}
+    ${running ? progHtml(running) : `${appliedHtml(applied)}<div class="m3-row">${run}${canRevert ? '<button type="button" data-ad="revert" title="마지막 적용 전 값으로">↶ 되돌리기</button>' : ''}<button type="button" data-ad="close">닫기</button></div>`}`;
 }
 // 형상 문구 — 0 인 항 생략. e = 끝단 두께, c = 폭 가장자리 두께(+ 가장자리 두껍게 · − 얇게), h < 0 = 돌출
 const sg = (v) => `${v >= 0 ? '+' : '−'}${f2(Math.abs(v))}`, nz = (v) => Number.isFinite(v) && Math.abs(v) >= 5e-5;
@@ -147,22 +148,36 @@ export function screenSummary(gains) {
 // 비교표 — cur/best = { count, pitch, milky, Ulen, Uwid, eff, profile? }, shape = { dt, h, R, e?, c? } | null, cur.shape = 이미 적용된 형상(없으면 원본), screen = ③ 선별 이득 { dt, e, c, h? } | null
 // stepLeds = LED STEP 발광점 수(직접 배치면 null) · STEP 이면 열마다 stepOrig(true = 원래 위치, false = 기준 LED 복사 배치) · unchanged = 최종안이 현재안 그대로(나은 설계 없음) → 사유 표시 · [적용] 비활성
 // finish = ④ { cur, best }(면 처리) | null · height = ⑤ { dz, gap(현재 LED–커버 축 거리, NaN = 모름) } | null
-export function compareHtml({ cur, best, feasible, reason, shape, stepLeds = null, canRevert = false, unchanged = false, screen = null, finish = null, height = null, catalog = DEFAULT_FINISH_CATALOG }) {
-  const tr = (label, a, b) => `<tr><th>${label}</th><td>${a}</td><td class="${a !== b ? 'chg' : ''}">${b}</td></tr>`;
+// 바뀐 양(소수 2자리, 0.005 미만 = 없음) — Milky·U 는 값 차, 광 효율은 %p
+const dl = (a, b, k = 1, u = '') => (Number.isFinite(a) && Number.isFinite(b) && Math.abs((b - a) * k) >= 0.005 ? ` <span class="m3-dl">(${b > a ? '+' : ''}${((b - a) * k).toFixed(2)}${u})</span>` : '');
+// 비교표 줄(현재 → 최적/적용 후) — compareHtml 과 적용 뒤 요약(appliedHtml)이 같이 씀
+function cmpRows({ cur, best, shape, stepLeds = null, finish = null, height = null, catalog = DEFAULT_FINISH_CATALOG }) {
+  const tr = (label, a, b, d = '') => `<tr><th>${label}</th><td>${a}</td><td class="${a !== b ? 'chg' : ''}">${b}${d}</td></tr>`;
   const lay = (x) => `${x.rows === 2 ? '2열 × ' : ''}${x.count}개 ${x.pitch > 0 ? `피치 ${x.pitch}` : '균등'}${x.rows === 2 ? ` (열 간격 ±${(x.rowGap ?? 0).toFixed(1)} mm)` : ''}`;   // 2열 = 열당 개수(spec P4 §2.2b)
-  const led = (x) => (x.layoutText ? x.layoutText : stepLeds == null ? lay(x) : x.stepOrig === false ? `${lay(x)}` : `LED STEP 현재 ${x.count ?? stepLeds}개`);   // layoutText = ② 배치 Solver 문구(같은 피치/끝 압축/자유 배치)   // STEP: stepOrig = 원래 STEP 위치
+  const led = (x) => (x.layoutText ? x.layoutText : stepLeds == null ? lay(x) : x.stepOrig === false ? `${lay(x)}` : `LED STEP 현재 ${x.count ?? stepLeds}개`);   // layoutText = ② 배치 Solver 문구(같은 피치/끝 압축/자유 배치) · STEP: stepOrig = 원래 STEP 위치
   const curShape = cur.shape ? `적용된 형상 · ${shapeText(cur.shape)}` : '원본';
-  return `<div class="m3-h">${unchanged ? '현재안 유지' : feasible ? '최적안' : '가장 가까운 안'} <span class="mut">${esc(reason)}</span></div>
-    <table class="m3-cmp"><tr><th></th><th>현재</th><th>최적</th></tr>
-      ${tr('LED', led(cur), led(best))}
-      ${tr('Milky', f2(cur.milky), f2(best.milky))}
-      ${tr('길이 U', f2(cur.Ulen), f2(best.Ulen))}${tr('폭 U', f2(cur.Uwid), f2(best.Uwid))}
-      ${tr('광 효율', `${f2(cur.eff * 100)}%`, `${f2(best.eff * 100)}%`)}
+  return `${tr('LED', led(cur), led(best))}
+      ${tr('Milky', f2(cur.milky), f2(best.milky), dl(cur.milky, best.milky))}
+      ${tr('길이 U', f2(cur.Ulen), f2(best.Ulen), dl(cur.Ulen, best.Ulen))}${tr('폭 U', f2(cur.Uwid), f2(best.Uwid), dl(cur.Uwid, best.Uwid))}
+      ${tr('광 효율', `${f2(cur.eff * 100)}%`, `${f2(best.eff * 100)}%`, dl(cur.eff, best.eff, 100, '%p'))}
       ${shape || cur.shape ? tr('형상', curShape, shape ? shapeText(shape) : curShape) : ''}
       ${finish ? tr('케이스 면', finishText(finish.cur, catalog), finishText(finish.best ?? finish.cur, catalog)) : ''}
-      ${height ? (() => { const now = Number.isFinite(height.gap) ? `현재 (커버까지 ${height.gap.toFixed(1)} mm)` : '현재'; return tr('LED 높이', now, nz(height.dz) ? `${sg(height.dz)} mm${Number.isFinite(height.gap) ? ` (커버까지 ${(height.gap - height.dz).toFixed(1)} mm)` : ''}` : now); })() : ''}
+      ${height ? (() => { const now = Number.isFinite(height.gap) ? `현재 (커버까지 ${height.gap.toFixed(1)} mm)` : '현재'; return tr('LED 높이', now, nz(height.dz) ? `${sg(height.dz)} mm${Number.isFinite(height.gap) ? ` (커버까지 ${(height.gap - height.dz).toFixed(1)} mm)` : ''}` : now); })() : ''}`;
+}
+export function compareHtml(r) {
+  const { cur, best, feasible, reason, shape, canRevert = false, unchanged = false, screen = null } = r;
+  const boost = r.added?.length ? `<div class="m3-boost">체크한 항목만으로는 목표 미달 → 보완 자동 추가: <b>${r.added.map(esc).join(' · ')}</b></div>` : '';
+  return `<div class="m3-h">${unchanged ? '현재안 유지' : feasible ? '최적안' : '가장 가까운 안'} <span class="mut">${esc(reason)}</span></div>${boost}
+    <table class="m3-cmp"><tr><th></th><th>현재</th><th>최적</th></tr>
+      ${cmpRows(r)}
     </table>${profileSvg(cur.profile, best.profile)}${screen ? `<div class="m3-row mut">${esc(screenSummary(screen))}</div>` : ''}
     <div class="m3-row"><button type="button" data-ad="apply"${unchanged ? ' disabled title="현재안과 같음"' : ''}>적용</button><button type="button" data-ad="cancel">취소</button>${shape ? '<button type="button" data-ad="step">STEP 내보내기</button>' : ''}${canRevert ? '<button type="button" data-ad="revert">되돌리기</button>' : ''}</div>`;
+}
+// 적용 뒤에도 남는 요약(이전 → 적용 후) — applied = 적용한 결과(compareHtml 인자와 같은 꼴) + at(시각 문구)
+export function appliedHtml(applied) {
+  if (!applied) return '';
+  return `<div class="m3-applied"><div class="m3-h">적용한 변경 <span class="mut">${esc(applied.at ?? '')} · 되돌리기 전까지 유지</span></div>
+    <table class="m3-cmp"><tr><th></th><th>이전</th><th>적용 후</th></tr>${cmpRows(applied)}</table></div>`;
 }
 
 // el 에 카드를 그리고 이벤트를 h 로 넘긴다. state = { avail, sel, running, result, names, canRevert, noLine, milkyPart }
