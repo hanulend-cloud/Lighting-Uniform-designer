@@ -517,3 +517,15 @@ main:has(#m3-start:not([hidden])) { grid-template-rows: minmax(0, 1fr); }
 .mb-lbl { flex: 1; }
 .mb-key { color: #8390a6; font-size: 11.5px; margin-left: 16px; }
 .mb-sep { height: 1px; background: #e3e7ee; margin: 4px 2px; }
+
+/* 3D 화면 좌·우 창 폭 조절(src/ui/m3/splitter.js) — 넓은 화면에서만 */
+@media (min-width: 1025px) {
+  .m3-main[data-split] { position: relative; grid-template-columns: var(--m3-l, 260px) minmax(0, 1fr) var(--m3-r, 430px); }
+  .m3-split { position: absolute; top: 0; bottom: 0; width: 8px; cursor: col-resize; z-index: 5; touch-action: none; }
+  .m3-split::after { content: ""; position: absolute; top: 0; bottom: 0; left: 3px; width: 2px; background: transparent; transition: background .15s; }
+  .m3-split:hover::after, .m3-splitting .m3-split::after { background: var(--m3-acc); opacity: .6; }
+  .m3-split-l { left: calc(var(--m3-l, 260px) - 4px); }
+  .m3-split-r { right: calc(var(--m3-r, 430px) - 4px); }
+  .m3-splitting { cursor: col-resize; user-select: none; }
+}
+@media (max-width: 1024px) { .m3-split { display: none; } }

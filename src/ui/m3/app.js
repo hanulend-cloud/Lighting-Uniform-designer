@@ -16,6 +16,7 @@ import * as L from './leds.js';
 import { buildObsOverlay, cellColors, extractFaces } from './colormap.js';
 import { mountCommandBar } from './command-bar.js';
 import { renderFeatureTree, toggleVisibility } from './feature-tree.js';
+import { mountSplitter } from './splitter.js';
 import { partClearance, limitXform, axisLimits, TOL } from '../../engine/mech3d/clearance.js';
 import { renderPropertyPanel } from './property-panel.js';
 import { meshInfo, partToDbMaterial } from '../mech3d-panel.js';
@@ -123,6 +124,7 @@ function getView() {
 // 반사 소재표 행 = 반사 소재 DB(없으면 기본 소재표)
 const reflCat = () => catalogOf(A?.ctx.reflectDb?.() ?? null);
 export async function mount(ctx) {
+  mountSplitter(document.querySelector('.m3-main'));   // 좌·우 창 폭 끌어서 조절(한 번만 붙음)
   if (A && A.ctx.mspec === ctx.mspec) { A.ctx = ctx; return; }   // 같은 기구 — 그대로
   unmount();
   const pool = getPool(ctx);

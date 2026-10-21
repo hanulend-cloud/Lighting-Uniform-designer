@@ -294,4 +294,9 @@ ok(clampCap(12) === 9.9 && clampCap(0.1) === 0.5 && clampCap(3) === 3 && clampCa
   renderPartProps(el, P, { ...sel, part: 0 }, [], {});
   ok(html.includes('data-m3-mat="milky"') && html.includes('data-m3-fitdlg') && html.includes('＋ 실측 데이터') && html.includes('data-m3-kind="milky" aria-pressed="true"'), 'Milky: 소재 · Milky 값 · 실측 링크');
   resetSections(); }
+{ // 좌·우 창 폭 조절(splitter): 기본 260/430 · 비율 → px · 최소 폭 · 3D 최소 280px
+  const { splitPx } = await import('../src/ui/m3/splitter.js');
+  const d = splitPx(1400, null), a = splitPx(1000, { l: 0.3, r: 0.4 }), b = splitPx(1000, { l: 0.05, r: 0.05 }), c = splitPx(900, { l: 0.5, r: 0.5 });
+  ok(d.l === 260 && d.r === 430 && a.l === 300 && a.r === 400 && b.l === 180 && b.r === 260 && 900 - c.l - c.r >= 280 - 1, `splitPx: ${JSON.stringify([d, a, b, c])}`);
+}
 done();
