@@ -36,26 +36,6 @@ export function buildLut() {
 export const NO_DATA_RGB = NO_DATA.map((v) => Math.round(v * 255));
 const lutIndex = (t) => Math.max(0, Math.min(255, Math.round(t * 255)));
 
-const IMG = new WeakMap();   // canvas → ImageData (같은 크기면 다시 만들지 않는다)
-function drawMap(cv, G, map) {
-  LUT ??= buildLut();
-  const x = cv.getContext('2d'), W = cv.width, H = cv.height;
-  let img = IMG.get(cv);
-  if (!img || img.width !== W || img.height !== H) { img = x.createImageData(W, H); IMG.set(cv, img); }
-  let mx = 0; for (let k = 0; k < map.length; k++) if (G.valid[k] && map[k] > mx) mx = map[k];
-  const d = img.data, si = new Int32Array(W), [nr, ng, nb] = NO_DATA_RGB;
-  for (let i = 0; i < W; i++) si[i] = Math.min(G.ns - 1, Math.floor((i / W) * G.ns)) * G.nw;
-  for (let j = 0; j < H; j++) {
-    const wj = Math.min(G.nw - 1, Math.floor(((H - 1 - j) / H) * G.nw));   // 위 = +w
-    for (let i = 0; i < W; i++) {
-      const k = si[i] + wj, q = (j * W + i) * 4;
-      if (G.valid[k] && mx > 0) { const l = lutIndex(map[k] / mx) * 3; d[q] = LUT[l]; d[q + 1] = LUT[l + 1]; d[q + 2] = LUT[l + 2]; }
-      else { d[q] = nr; d[q + 1] = ng; d[q + 2] = nb; }
-      d[q + 3] = 255;
-    }
-  }
-  x.putImageData(img, 0, 0);
-}
 // 1D 프로파일(v2 평판 화면 수준) — 세로 = 최대 대비 %(최저·목표 아래까지 자동 확대, 10% 격자), 가로 = mm 눈금 격자,
 // 목표 하한(빨간 점선 + 값), LED 위치(아래 노란 삼각형), 최저점 표시(값·위치), 마우스 위치 읽기(hover = 칸 번호).
 // curves = [{ ys(0~1, NaN = 끊김), color, dash?, name }] — 첫 곡선이 판정 대상(최저점 표시). 모든 치수는 dpr 배
@@ -156,6 +136,92 @@ function wireHover(cv) {
   cv.addEventListener('mousemove', (e) => { const P = cv._plot; if (P) drawPlot(cv, P.curves, P.tg, P.opt, P.dpr, idx(e)); });
   cv.addEventListener('mouseleave', () => { const P = cv._plot; if (P) drawPlot(cv, P.curves, P.tg, P.opt, P.dpr, null); });
 }
+// 2D 광량 분포(v2 평판 화면 수준) — 색 = 최대 대비 %(오른쪽 색 막대 눈금), s·w mm 눈금, LED 위치(노란 점),
+// 최저점 표시(값·위치), 마우스 위치 읽기. equal = 가로세로 같은 축척(실제 비율, 확대 창에서 선택). 모든 치수는 dpr 배
+// v = { G, map, leds:[{s,w}] } · cv._mapv 에 저장 → 마우스 읽기·확대 창이 다시 그림
+const MAP_PAD = { l: 40, r: 64, t: 8, b: 30 };
+function mapBox(cv, G, dpr, equal) {
+  const W = cv.width, H = cv.height, w0 = G.w0, w1 = G.w0 + G.nw * G.cell, L = G.L;
+  let ox = MAP_PAD.l * dpr, oy = MAP_PAD.t * dpr, PW = W - (MAP_PAD.l + MAP_PAD.r) * dpr, PH = H - (MAP_PAD.t + MAP_PAD.b) * dpr;
+  if (equal) { const sc = Math.min(PW / L, PH / (w1 - w0)), pw = L * sc, ph = (w1 - w0) * sc; ox += (PW - pw) / 2; oy += (PH - ph) / 2; PW = pw; PH = ph; }
+  return { ox, oy, PW, PH, w0, w1, L };
+}
+function drawMap(cv, v, dpr = 1, hover = null, equal = false) {
+  cv._mapv = { v, dpr, equal };
+  LUT ??= buildLut();
+  const { G, map, leds = [] } = v, x = cv.getContext('2d'), W = cv.width, H = cv.height, { ox, oy, PW, PH, w0, w1, L } = mapBox(cv, G, dpr, equal);
+  x.clearRect(0, 0, W, H);
+  let mx = 0; for (let k = 0; k < map.length; k++) if (G.valid[k] && map[k] > mx) mx = map[k];
+  // 칸 그림(가로 = s, 세로 위 = +w) → 확대해 붙임
+  const tmp = document.createElement('canvas'); tmp.width = G.ns; tmp.height = G.nw;
+  const tx = tmp.getContext('2d'), img = tx.createImageData(G.ns, G.nw), d = img.data, [nr, ng, nb] = NO_DATA_RGB;
+  let kMin = -1;
+  for (let i = 0; i < G.ns; i++) for (let j = 0; j < G.nw; j++) {
+    const k = i * G.nw + j, q = ((G.nw - 1 - j) * G.ns + i) * 4;
+    if (G.valid[k] && mx > 0) { const l = lutIndex(map[k] / mx) * 3; d[q] = LUT[l]; d[q + 1] = LUT[l + 1]; d[q + 2] = LUT[l + 2]; if (kMin < 0 || map[k] < map[kMin]) kMin = k; }
+    else { d[q] = nr; d[q + 1] = ng; d[q + 2] = nb; }
+    d[q + 3] = 255;
+  }
+  tx.putImageData(img, 0, 0);
+  x.imageSmoothingEnabled = PW / G.ns > 6;   // 칸이 크게 보이면 부드럽게, 작으면 칸 그대로
+  x.drawImage(tmp, ox, oy, PW, PH);
+  x.strokeStyle = 'rgba(128,140,160,.7)'; x.lineWidth = dpr; x.strokeRect(ox, oy, PW, PH);
+  const SX = (s) => ox + (s / L) * PW, WY = (w) => oy + ((w1 - w) / (w1 - w0)) * PH;
+  // 눈금
+  x.font = `${10.5 * dpr}px sans-serif`; x.fillStyle = '#8a93a6';
+  const ss = niceStep(L, Math.max(3, Math.round(PW / (70 * dpr))));
+  x.textAlign = 'center'; x.textBaseline = 'top';
+  for (let s = 0; s <= L + 1e-9; s += ss) { x.strokeStyle = 'rgba(128,140,160,.6)'; x.beginPath(); x.moveTo(SX(s), oy + PH); x.lineTo(SX(s), oy + PH + 3 * dpr); x.stroke(); x.fillText(`${+s.toFixed(1)}`, SX(s), oy + PH + 5 * dpr); }
+  x.textAlign = 'right'; x.fillText('s (mm)', ox + PW, oy + PH + 17 * dpr);
+  const ws = niceStep(w1 - w0, Math.max(2, Math.round(PH / (28 * dpr))));
+  x.textBaseline = 'middle';
+  for (let w = Math.ceil(w0 / ws - 1e-9) * ws; w <= w1 + 1e-9; w += ws) { x.beginPath(); x.moveTo(ox - 3 * dpr, WY(w)); x.lineTo(ox, WY(w)); x.stroke(); x.fillText(`${+w.toFixed(1)}`, ox - 5 * dpr, WY(w)); }
+  x.save(); x.translate(10 * dpr, oy + PH / 2); x.rotate(-Math.PI / 2); x.textAlign = 'center'; x.fillText('w (mm)', 0, 0); x.restore();
+  // LED 위치
+  for (const p of leds) {
+    if (p.s < -1e-9 || p.s > L + 1e-9 || p.w < w0 - 1e-9 || p.w > w1 + 1e-9) continue;
+    x.fillStyle = 'rgba(255,214,64,.95)'; x.strokeStyle = 'rgba(20,26,38,.8)'; x.lineWidth = dpr;
+    x.beginPath(); x.arc(SX(p.s), WY(p.w), 2.6 * dpr, 0, 2 * Math.PI); x.fill(); x.stroke();
+  }
+  // 색 막대(0~100%) + 최저 표시
+  const bx = W - (MAP_PAD.r - 12) * dpr, bw = 11 * dpr;
+  for (let i = 0; i < PH; i++) { const l = lutIndex(1 - i / PH) * 3; x.fillStyle = `rgb(${LUT[l]},${LUT[l + 1]},${LUT[l + 2]})`; x.fillRect(bx, oy + i, bw, 1.5); }
+  x.strokeStyle = 'rgba(128,140,160,.7)'; x.strokeRect(bx, oy, bw, PH);
+  x.fillStyle = '#8a93a6'; x.textAlign = 'left'; x.textBaseline = 'middle';
+  for (let p = 0; p <= 100; p += 20) x.fillText(`${p}%`, bx + bw + 4 * dpr, oy + (1 - p / 100) * PH);
+  if (kMin >= 0) {
+    const t = map[kMin] / mx, i = Math.floor(kMin / G.nw), j = kMin % G.nw, cs = (i + 0.5) * G.ds, cw = w0 + (j + 0.5) * G.cell;
+    x.strokeStyle = '#ffffff'; x.lineWidth = 1.5 * dpr; x.beginPath(); x.moveTo(bx - 4 * dpr, oy + (1 - t) * PH); x.lineTo(bx + bw, oy + (1 - t) * PH); x.stroke();
+    x.beginPath(); x.arc(SX(cs), WY(cw), 5 * dpr, 0, 2 * Math.PI); x.stroke();
+    const lbl = `최저 ${(t * 100).toFixed(1)}% (s ${cs.toFixed(1)}, w ${cw.toFixed(1)})`, right = SX(cs) > ox + PW * 0.6;
+    x.font = `600 ${10.5 * dpr}px sans-serif`; const tw = x.measureText(lbl).width, lx = right ? SX(cs) - 8 * dpr - tw : SX(cs) + 8 * dpr, ly = Math.max(oy + 2 * dpr, Math.min(oy + PH - 15 * dpr, WY(cw) - 7 * dpr));
+    x.fillStyle = 'rgba(20,26,38,.75)'; x.fillRect(lx - 3 * dpr, ly - 1 * dpr, tw + 6 * dpr, 14 * dpr);
+    x.fillStyle = '#ffffff'; x.textAlign = 'left'; x.textBaseline = 'top'; x.fillText(lbl, lx, ly);
+    x.font = `${10.5 * dpr}px sans-serif`;
+  }
+  // 마우스 위치 읽기(칸 [i, j])
+  if (hover && mx > 0) {
+    const [i, j] = hover, k = i * G.nw + j, cs = (i + 0.5) * G.ds, cw = w0 + (j + 0.5) * G.cell, val = G.valid[k] ? `${((map[k] / mx) * 100).toFixed(1)}%` : '관측면 밖';
+    x.strokeStyle = 'rgba(255,255,255,.75)'; x.lineWidth = dpr; x.setLineDash([3 * dpr, 3 * dpr]);
+    x.beginPath(); x.moveTo(SX(cs), oy); x.lineTo(SX(cs), oy + PH); x.moveTo(ox, WY(cw)); x.lineTo(ox + PW, WY(cw)); x.stroke(); x.setLineDash([]);
+    const lbl = `s ${cs.toFixed(1)} · w ${cw.toFixed(1)} mm · ${val}`, tw = x.measureText(lbl).width;
+    const lx = Math.max(ox + 3 * dpr, SX(cs) + tw + 14 * dpr > ox + PW ? SX(cs) - tw - 10 * dpr : SX(cs) + 6 * dpr);
+    x.fillStyle = 'rgba(20,26,38,.88)'; x.fillRect(lx - 3 * dpr, oy + 3 * dpr, tw + 6 * dpr, 15 * dpr);
+    x.fillStyle = '#e6ebf2'; x.textAlign = 'left'; x.textBaseline = 'top'; x.fillText(lbl, lx, oy + 5 * dpr);
+  }
+}
+function wireMapHover(cv) {
+  if (cv._mhover) return;
+  cv._mhover = true;
+  const cell = (e) => {
+    const M = cv._mapv; if (!M) return null;
+    const r = cv.getBoundingClientRect(), px = (e.clientX - r.left) * (cv.width / r.width), py = (e.clientY - r.top) * (cv.height / r.height), b = mapBox(cv, M.v.G, M.dpr, M.equal);
+    const i = Math.floor(((px - b.ox) / b.PW) * M.v.G.ns), j = M.v.G.nw - 1 - Math.floor(((py - b.oy) / b.PH) * M.v.G.nw);
+    return i >= 0 && i < M.v.G.ns && j >= 0 && j < M.v.G.nw ? [i, j] : null;
+  };
+  cv.addEventListener('mousemove', (e) => { const M = cv._mapv; if (M) drawMap(cv, M.v, M.dpr, cell(e), M.equal); });
+  cv.addEventListener('mouseleave', () => { const M = cv._mapv; if (M) drawMap(cv, M.v, M.dpr, null, M.equal); });
+}
 const clearCanvas = (c) => c.getContext('2d').clearRect(0, 0, c.width, c.height);
 const dprNow = () => Math.max(1, globalThis.devicePixelRatio || 1);
 // 캔버스를 화면 크기 × DPR 로 맞춘다(가로세로 비는 만들 때의 비 유지). 크기가 바뀌면 true
@@ -172,19 +238,45 @@ export function createResultsPanel(el) {
   const gaugeHtml = (k) => `<div class="m3-gauge" data-r="${k}"><div class="f"></div><div class="tg"></div></div>`;
   el.innerHTML = `
     <div class="m3-msg" data-r="msg" hidden></div>
-    <div class="m3-blk"><div class="m3-t">2D 광량 분포 (관측면 펼침) <span data-r="mapsub"></span></div>
-      <div class="m3-withm"><canvas class="m3-g" data-r="map" width="600" height="150"></canvas>
+    <div class="m3-blk"><div class="m3-t">2D 광량 분포 (관측면 펼침) <span><span data-r="mapsub"></span> <button type="button" class="m3-zoom" data-zoom="map" title="큰 창으로 보기" aria-label="2D 광량 분포 확대">⤢</button></span></div>
+      <div class="m3-withm"><canvas class="m3-g" data-r="map" width="600" height="200"></canvas>
         <div class="m3-m"><div class="l">평균 광량</div><div class="v" data-r="avg">–</div><div class="s" data-r="avgs"></div>${gaugeHtml('avgg')}
           <div class="l" style="margin-top:6px">광 효율</div><div class="v sm" data-r="eff">–</div><div class="s">관측면 원뿔 안 / LED 총 방출</div></div></div></div>
-    <div class="m3-blk"><div class="m3-t">길이 방향 1D 프로파일 <span>폭 평균 · 빨간 점선 = 목표 하한</span></div>
+    <div class="m3-blk"><div class="m3-t">길이 방향 1D 프로파일 <span>폭 평균 · 빨간 점선 = 목표 하한 <button type="button" class="m3-zoom" data-zoom="prof" title="큰 창으로 보기" aria-label="길이 프로파일 확대">⤢</button></span></div>
       <div class="m3-withm"><canvas class="m3-g" data-r="prof" width="600" height="150"></canvas>
         <div class="m3-m"><div class="l">길이 균일도 U</div><div class="v" data-r="ul">–</div>${gaugeHtml('ulg')}<div class="s" data-r="ulj"></div></div></div></div>
-    <div class="m3-blk"><div class="m3-t">폭 방향 1D 프로파일 <span data-r="wsub"></span></div>
+    <div class="m3-blk"><div class="m3-t">폭 방향 1D 프로파일 <span><span data-r="wsub"></span> <button type="button" class="m3-zoom" data-zoom="wprof" title="큰 창으로 보기" aria-label="폭 프로파일 확대">⤢</button></span></div>
       <div class="m3-withm"><canvas class="m3-g" data-r="wprof" width="600" height="120"></canvas>
         <div class="m3-m"><div class="l">폭 균일도 U</div><div class="v" data-r="uw">–</div>${gaugeHtml('uwg')}<div class="s" data-r="uwj"></div></div></div></div>`;
   const q = (k) => el.querySelector(`[data-r="${k}"]`);
-  const RATIO = { map: 4, prof: 2.6, wprof: 3.2 };   // 프로파일은 눈금·읽기가 들어가도록 높게
-  wireHover(q('prof')); wireHover(q('wprof'));
+  const RATIO = { map: 2.6, prof: 2.6, wprof: 3.2 };   // 눈금·색 막대·읽기가 들어가도록 높게
+  wireHover(q('prof')); wireHover(q('wprof')); wireMapHover(q('map'));
+  // 큰 창(⤢) — 같은 그림을 화면 크기로. 계산이 이어지면 같이 갱신 · 2D 는 [실제 비율] 전환 · Esc·바깥 클릭·닫기
+  const VIEW = { map: null, prof: null, wprof: null }, TITLE = { map: '2D 광량 분포 (관측면 펼침)', prof: '길이 방향 1D 프로파일', wprof: '폭 방향 1D 프로파일' };
+  let big = null;
+  const paint = (kind, cv, hover = null) => {
+    const v = VIEW[kind], dpr = dprNow();
+    if (!v) { clearCanvas(cv); return; }
+    if (kind === 'map') drawMap(cv, v, dpr, hover, cv === big?.cv ? big.equal : false);
+    else drawPlot(cv, v.curves, v.tg, v.opt, dpr, hover);
+  };
+  const sizeBig = () => { const r = big.cv.getBoundingClientRect(), d = dprNow(); big.cv.width = Math.round(r.width * d); big.cv.height = Math.round(r.height * d); };
+  const closeBig = () => { if (!big) return; big.el.remove(); document.removeEventListener('keydown', big.key); window.removeEventListener('resize', big.rs); big = null; };
+  function openBig(kind) {
+    closeBig();
+    const ov = document.createElement('div');
+    ov.className = 'm3-big'; ov.setAttribute('role', 'dialog'); ov.setAttribute('aria-modal', 'true'); ov.setAttribute('aria-label', TITLE[kind]);
+    ov.innerHTML = `<div class="m3-big-in"><div class="m3-big-hd"><b>${TITLE[kind]}</b><span class="m3-big-sp"></span>${kind === 'map' ? '<label class="m3-big-eq"><input type="checkbox" data-big-eq> 실제 비율(가로·세로 같은 축척)</label>' : ''}<button type="button" data-big-close>닫기 (Esc)</button></div><canvas class="m3-big-cv"></canvas></div>`;
+    document.body.appendChild(ov);
+    big = { el: ov, kind, cv: ov.querySelector('canvas'), equal: false, key: (e) => { if (e.key === 'Escape') closeBig(); }, rs: () => { if (big) { sizeBig(); paint(big.kind, big.cv); } } };
+    document.addEventListener('keydown', big.key); window.addEventListener('resize', big.rs);
+    ov.addEventListener('click', (e) => { if (e.target === ov) closeBig(); });
+    ov.querySelector('[data-big-close]').onclick = closeBig;
+    const eq = ov.querySelector('[data-big-eq]'); if (eq) eq.onchange = () => { big.equal = eq.checked; paint('map', big.cv); };
+    if (kind === 'map') wireMapHover(big.cv); else wireHover(big.cv);
+    sizeBig(); paint(kind, big.cv);
+  }
+  el.addEventListener('click', (e) => { const b = e.target.closest('[data-zoom]'); if (b) openBig(b.dataset.zoom); });
   let last = null;
   const fill = (g, pct, ok, tgPct) => {
     const f = g.querySelector('.f'), w = `${Math.max(0, Math.min(100, pct)).toFixed(0)}%`;
@@ -200,6 +292,7 @@ export function createResultsPanel(el) {
     fill(q(`${key}g`), Number.isFinite(v) ? v * 100 : 0, j.cls === 'ok', tg * 100);
   };
   function clear(message) {
+    VIEW.map = VIEW.prof = VIEW.wprof = null; if (big) clearCanvas(big.cv);
     for (const k of ['map', 'prof', 'wprof']) clearCanvas(q(k));
     for (const k of ['avg', 'eff', 'ul', 'uw']) { q(k).textContent = '–'; q(k).className = 'v'; }
     for (const k of ['avgs', 'ulj', 'uwj', 'mapsub', 'wsub']) q(k).textContent = '';
@@ -216,18 +309,20 @@ export function createResultsPanel(el) {
     for (const k of Object.keys(RATIO)) sizeCanvas(q(k), RATIO[k]);
     const dpr = dprNow();
     q('mapsub').textContent = `s 0–${G.L.toFixed(0)} mm × w ${G.w0.toFixed(1)}–${(G.w0 + G.nw * G.cell).toFixed(1)} mm`;
-    drawMap(q('map'), G, st.map);
     const pm = finiteMax(st.profile), leds = args.leds ?? [];
-    drawPlot(q('prof'), [{ ys: Array.from(st.profile, (v) => v / pm), color: '#1f6fd1', name: '폭 평균' }], observe.targetLen, { x0: 0, x1: G.L, xl: 's (mm)', leds: leds.map((p) => p.s) }, dpr);
+    VIEW.map = { G, map: st.map, leds };
+    VIEW.prof = { curves: [{ ys: Array.from(st.profile, (v) => v / pm), color: '#1f6fd1', name: '폭 평균' }], tg: observe.targetLen, opt: { x0: 0, x1: G.L, xl: 's (mm)', leds: leds.map((p) => p.s) } };
+    paint('map', q('map')); paint('prof', q('prof'));
     gauge('ul', st.Ulen, observe.targetLen);
     if (st.Uwid == null || !st.win) {
-      clearCanvas(q('wprof')); resetGauge(q('uwg'));
+      VIEW.wprof = null; clearCanvas(q('wprof')); resetGauge(q('uwg'));
       q('uw').textContent = '–'; q('uw').className = 'v'; q('uwj').textContent = '폭 판정 불가(폭이 격자 2칸 미만)'; q('wsub').textContent = '';
     } else {
       // 판정 = 최저 창(실선), 비교 = 길이 전체 평균(점선) — 각자 최대 = 100%
       const wp = windowProfile(G, snap.sum, st.win[0], st.win[1]), wm = finiteMax(wp), wa = windowProfile(G, snap.sum, 0, G.ns), wam = finiteMax(wa);
-      drawPlot(q('wprof'), [{ ys: Array.from(wp, (v) => v / wm), color: '#1f6fd1', name: `최저 창 s=${st.sWorst.toFixed(0)}` }, { ys: Array.from(wa, (v) => v / wam), color: '#3fae7a', dash: [4, 3], name: '길이 전체 평균' }],
-        observe.targetWid, { x0: G.w0, x1: G.w0 + G.nw * G.cell, xl: 'w (mm)', leds: [...new Set(leds.map((p) => +p.w.toFixed(2)))] }, dpr);
+      VIEW.wprof = { curves: [{ ys: Array.from(wp, (v) => v / wm), color: '#1f6fd1', name: `최저 창 s=${st.sWorst.toFixed(0)}` }, { ys: Array.from(wa, (v) => v / wam), color: '#3fae7a', dash: [4, 3], name: '길이 전체 평균' }],
+        tg: observe.targetWid, opt: { x0: G.w0, x1: G.w0 + G.nw * G.cell, xl: 'w (mm)', leds: [...new Set(leds.map((p) => +p.w.toFixed(2)))] } };
+      paint('wprof', q('wprof'));
       gauge('uw', st.Uwid, observe.targetWid);
       q('wsub').textContent = `최저 창 s = ${st.sWorst.toFixed(1)} mm`;
     }
@@ -237,6 +332,7 @@ export function createResultsPanel(el) {
     if (lc.ratio != null) fill(q('avgg'), lc.ratio * 50, lc.pass, 50);   // 목표 = 가운데, 목표의 2배 = 가득
     const eff = snap.photometry?.eff;
     q('eff').textContent = Number.isFinite(eff) ? `${(eff * 100).toFixed(1)}%` : '–';
+    if (big) paint(big.kind, big.cv);   // 큰 창도 계산을 따라감
   }
   if (typeof ResizeObserver !== 'undefined') {
     let w0 = 0;
