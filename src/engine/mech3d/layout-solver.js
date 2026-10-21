@@ -36,7 +36,8 @@ export function layoutText(r) {
 }
 
 // 반환 { feasible, n, rows, rowGap, total, positions:[{s,w}], kind, pitch, endMargin, ratio, stats, eff, margin, reason, alts:[…], evals }
-export function solveLayout({ G, obs, line, cand, maps, rowsOptions = [1, 2], gaps = [], nMax, emitted = 1, minGap = 2, pitchRange = null, timeBudget = 20000, now = () => Date.now() }) {
+// safety = 통과 판정 여유(기저 추정은 광자 잡음이 있어 검증에서 0 근처 통과가 뒤집힘 — 이만큼 넘는 배치만 통과로 봄)
+export function solveLayout({ G, obs, line, cand, maps, rowsOptions = [1, 2], gaps = [], nMax, emitted = 1, minGap = 2, pitchRange = null, timeBudget = 20000, now = () => Date.now(), safety = 0 }) {
   const L = line.length, closed = !!line.closed, nCell = G.ns * G.nw, t0 = now(), RO = [...new Set(rowsOptions)].sort((a, b) => a - b);
   const gMin = Math.max(minGap, pitchRange?.min ?? 0);
   let evals = 0;
@@ -97,9 +98,9 @@ export function solveLayout({ G, obs, line, cand, maps, rowsOptions = [1, 2], ga
   }
   function solveN(n, rows, g) {
     const s1 = stage1(n, rows, g);
-    if (!s1 || s1.margin >= 0 || s1.margin < HOPELESS || now() - t0 > timeBudget) return s1;
+    if (!s1 || s1.margin >= safety || s1.margin < HOPELESS + safety || now() - t0 > timeBudget) return s1;
     const s2 = stage2(n, rows, g);
-    if (s2 && s2.margin >= 0) return s2;
+    if (s2 && s2.margin >= safety) return s2;
     const s3 = stage3(better(s2 ?? s1, s1) && s2 ? s2 : s1, rows, g);
     return [s1, s2, s3].filter(Boolean).reduce((a, b) => (better(b, a) ? b : a));
   }
@@ -113,7 +114,7 @@ export function solveLayout({ G, obs, line, cand, maps, rowsOptions = [1, 2], ga
     for (const rows of RO) {
       if (T % rows) continue;
       if (!found && atT.some((r) => r.rows < rows)) break;   // 같은 총수: 1열 통과면 2열은 안 봄
-      for (const g of rows === 1 ? [0] : gaps) { const r = solveN(T / rows, rows, g); if (r) (r.margin >= 0 ? atT : miss).push(r); }
+      for (const g of rows === 1 ? [0] : gaps) { const r = solveN(T / rows, rows, g); if (r) (r.margin >= safety ? atT : miss).push(r); }
     }
     atT.sort(rank);
     if (!found && atT.length) { found = atT[0]; foundT = T; pass.push(...atT.slice(1)); }

@@ -562,10 +562,11 @@ async function adRun(opt = {}) {
   try {
     res = await runAutoDesign({
       stages, obs, G, line, current: cur, milkyMax: st.sel.milkyMax ?? null, housingProbe, finishText: (f) => finishText(f, reflCat()), nMax: Math.max(1, Math.min(60, Math.floor(line.length / 2))), pitchRange: null, stepMode: stp,
-      shapePart: sp, shapeRanges, currentVerified, heightRange: hInfo?.range ?? null, housingPart: hp, finishCands,
+      shapePart: sp, shapeRanges, currentVerified, heightRange: hInfo?.range ?? null, housingPart: hp, finishCands, ledsAtCurrentMilky: !!opt.added?.length,
     }, io);
   } catch (e) { if (A === a && !R.stopped) setStatus(`자동설계 실패: ${e.message}`); }
   if (A !== a) return;   // 그사이 이탈
+  globalThis.__adLast = res;   // 진단용(콘솔에서 단계별 결과 확인)
   st.running = null; st.runner = null;
   if (res && !res.cancelled && !R.stopped) {
     const C = res.current;   // 현재안 = 최종안과 같은 추정기

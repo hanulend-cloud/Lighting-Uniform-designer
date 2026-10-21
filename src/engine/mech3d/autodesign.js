@@ -231,7 +231,7 @@ export async function runAutoDesign(cfg, io) {
       d = { ...d, finish: top.current ? (cfg.current?.finish ?? null) : { part: cfg.housingPart ?? top.part, kind: top.kind, ...(top.R != null ? { R: top.R } : {}), ...(top.coating ? { coating: top.coating } : {}) } };
     }
     let mRef = null;
-    if (stages.milky) {
+    if (stages.milky && !cfg.ledsAtCurrentMilky) {   // ledsAtCurrentMilky(보완 자동 추가) = 지금 Milky 에서 개수를 정함 — 적게 바꾸기 · 높은 Milky 추적은 매우 느림
       mRef = await coarsePeakMilky(d, cfg, io, steps, mCap);
       if (mRef === undefined) return { cancelled: true };
       d = { ...d, milky: Math.min(mCap, mRef ?? mCap) };
@@ -243,7 +243,7 @@ export async function runAutoDesign(cfg, io) {
     // 후보가 {s, w} 면 (s, w) 격자 — 열 수·열 간격까지(searchLeds2, nMax = 총수 상한), 숫자면 1열(기존)
     const two = typeof B.cand[0] === 'object', a = { G: cfg.G, obs, line: cfg.line, cand: B.cand, maps: B.maps, pitchRange: cfg.pitchRange ?? null, nMax: cfg.nMax, emitted: B.emitted };
     // (s, w) 격자 = 배치 Solver(같은 피치+끝 여백 → 끝 압축 → 자유 위치, spec 2026-10-20 led-layout-solver) · 숫자 격자 = 1열 기존 탐색
-    const r = two ? solveLayout({ ...a, gaps: B.gaps ?? [], timeBudget: cfg.layoutBudget ?? 20000 }) : searchLeds({ ...a, spare: 1 });
+    const r = two ? solveLayout({ ...a, gaps: B.gaps ?? [], timeBudget: cfg.layoutBudget ?? 20000, safety: cfg.layoutSafety ?? 0.02 }) : searchLeds({ ...a, spare: 1 });
     steps.push({ stage: 'leds', ...r });
     const lay = (e) => two
       ? { count: e.n, pitch: e.pitch, rows: e.rows, rowGap: e.rowGap, positions: e.positions?.length ? e.positions : null, layoutKind: e.kind, layoutText: e.positions?.length ? layoutText(e) : null }
