@@ -483,3 +483,15 @@ canvas.m3-g { width: 100%; display: block; border-radius: 4px; background: #fafb
 #mech3d-wrap[data-theme="dark"] .m3-gap.bad b { color: #ff9b8f; }
 #mech3d-wrap[data-theme="dark"] .m3-dot { background: #4a5366; }
 #mech3d-wrap[data-theme="dark"] .m3-dot.ok { background: var(--m3-ok); } #mech3d-wrap[data-theme="dark"] .m3-dot.warn { background: var(--m3-warn); } #mech3d-wrap[data-theme="dark"] .m3-dot.bad { background: var(--m3-bad); }
+
+/* 3D 기구 설계 시작 화면(기구 STEP 없음) — 3D 가 메인 화면 */
+main:has(#m3-start:not([hidden])) { grid-template-rows: minmax(0, 1fr); }
+#m3-start { grid-column: 1 / -1; display: grid; place-items: center; min-height: 0; padding: 24px 16px; background: #e6e9ee; border-radius: 8px; }
+#m3-start[hidden] { display: none; }
+.m3-start-card { background: #fff; border: 1px solid #d9dde5; border-radius: 10px; padding: 24px 28px; max-width: 560px; width: 100%; box-shadow: 0 2px 10px rgba(15,20,32,.06); }
+.m3-start-card h2 { margin: 0 0 12px; font-size: 20px; }
+.m3-start-card ol { margin: 0 0 18px; padding-left: 20px; line-height: 1.8; color: #3b4658; }
+.m3-start-btn { display: inline-block; background: #1f6fd1; color: #fff; border-radius: 6px; padding: 10px 18px; cursor: pointer; font-weight: 600; }
+.m3-start-btn:hover { background: #185bb0; }
+.m3-start-sub { font-size: 12.5px; color: #6b7385; margin: 12px 0 8px; }
+.m3-start-link { border: 0; background: none; padding: 0; color: #6b7385; font-size: 12.5px; text-decoration: underline; cursor: pointer; }

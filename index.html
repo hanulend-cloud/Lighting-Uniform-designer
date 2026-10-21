@@ -16,7 +16,7 @@
       <button id="btn-step">STEP 내보내기</button>
       <label class="import">불러오기<input type="file" id="file-import" accept="application/json" hidden /></label>
       <label class="import" title="기구설계 STEP(.stp/.step) — 모든 부품을 불러와 3D 기구 모드로 전환">3D 기구 불러오기<input type="file" id="file-mech3d" accept=".stp,.step" hidden /></label>
-      <button id="btn-mech3d-show" hidden>3D 기구 보기</button>
+      <button id="btn-mech3d-show" hidden>3D 기구 설계</button>
     </div>
   </header>
   <!-- 다른 탭에서도 열려 있음(src/ui/tab-lock.js) — 이 탭은 저장하지 않음 -->
@@ -100,6 +100,20 @@
             <canvas id="section-mini"></canvas>
           </div>
         </div>
+      </div>
+    </section>
+    <!-- 3D 기구 설계 시작 화면 — 3D 가 기본(메인) 화면. 기구 STEP 이 아직 없을 때 -->
+    <section id="m3-start" hidden>
+      <div class="m3-start-card">
+        <h2>3D 기구 설계로 시작</h2>
+        <ol>
+          <li><b>기구 STEP</b>(.stp/.step)을 불러옵니다 — 케이스·도광판·커버 등 모든 부품</li>
+          <li>왼쪽 트리 <b>광원</b>에서 <b>LED STEP</b> 을 불러오고 발광면을 지정합니다</li>
+          <li><b>관측면</b>(빛을 보는 면)을 클릭하면 균일도 계산이 시작됩니다</li>
+        </ol>
+        <label class="m3-start-btn">3D 기구 STEP 불러오기<input type="file" id="file-mech3d-start" accept=".stp,.step" hidden /></label>
+        <p class="m3-start-sub">이전 작업이 있으면 같은 기구 STEP 을 불러올 때 설정이 복원됩니다 · 프로젝트 JSON 은 위 <b>불러오기</b>로.</p>
+        <button type="button" id="btn-flat-mode" class="m3-start-link">평판 확산판 화면(초기 검토 버전) 열기</button>
       </div>
     </section>
     <section id="mech3d-wrap" hidden>

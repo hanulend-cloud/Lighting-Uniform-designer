@@ -7,7 +7,7 @@ export { LEVEL_DEFAULTS };
 
 export const DEFAULT_SPEC = {
   ver: 13,                      // 저장 스펙 마이그레이션용(main.migrate) — L3/L4 콘텐츠 스왑(v12)
-  mode: 'flat',                 // 'flat'(평판 모드, 기본) | 'mech3d'(3D 기구 모드 — 기구 STEP 불러오면 전환, spec 2026-10-14)
+  mode: 'mech3d',               // 'mech3d'(3D 기구 설계 — 메인, 기구 없으면 시작 화면) | 'flat'(평판 초기 검토 — 사용자가 고를 때만, flatChosen)
   mech3d: null,                 // 3D 기구 사용자 지정 { name, parts[소재·면 처리], contacts[접촉면] } — 메쉬는 IndexedDB
   target:  { xLen: 100, yLen: 100, shape: 'flat' },
   // edgeMargin: 균일도 판정에서 제외할 가장자리 비율(축별). 0 = 타겟 전체에서 균일도를 확보한다

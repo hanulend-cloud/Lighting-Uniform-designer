@@ -124,6 +124,8 @@ function buildForm() {
   }
   $('#btn-reset').onclick = () => { spec = structuredClone(DEFAULT_SPEC); markSoloReset(); mount(); m3app.unmount(); m3app.resetWorkers(); applyMode(); schedule(); };
   $('#btn-mech3d-show').onclick = () => { spec.mode = 'mech3d'; persist(); applyMode(); };
+  $('#btn-flat-mode').onclick = () => { spec.mode = 'flat'; spec.flatChosen = true; persist(); applyMode(); schedule(); };   // 평판(초기 검토) — 사용자가 고른 경우만 평판으로 시작
+  $('#file-mech3d-start').onchange = (e) => { const f = e.target.files?.[0]; if (f) importMech3d(f); e.target.value = ''; };
   $('#file-mech3d').onchange = (e) => { const f = e.target.files?.[0]; if (f) importMech3d(f); e.target.value = ''; };
   $('#btn-step').onclick = () => {
     if (!last) return;
@@ -220,16 +222,18 @@ function m3ctx() {
     mspec: spec.mech3d, persist, canSave: () => tabLock.canWrite(), dbLists, materialDb, reflectDb: () => reflectDb, l2Table: () => l2State().table, l2Raw, milkyFromMusR,
     onImportMech3d: importMech3d,
     onMaterialDbChanged: () => { solver?.postMessage({ type: 'db', db: dbLists() }); markSoloReset(); },   // 3D 실측 맞춤 대화상자에서 실측소재 DB 가 바뀜 → 평판 solver 도
-    onExit: () => { spec.mode = 'flat'; persist(); applyMode(); schedule(); },
+    onExit: () => { spec.mode = 'flat'; spec.flatChosen = true; persist(); applyMode(); schedule(); },
   };
 }
 function applyMode() {
-  const m3 = spec.mode === 'mech3d' && !!spec.mech3d && !!getMech3d();
+  // 3D 가 메인 화면: mode 'mech3d' + 기구 메쉬 = 3D 화면, mode 'mech3d' + 기구 없음 = 시작 화면, 'flat' = 평판(초기 검토)
+  const m3 = spec.mode === 'mech3d' && !!spec.mech3d && !!getMech3d(), start = spec.mode === 'mech3d' && !m3, flat = !m3 && !start;
   $('#mech3d-wrap').hidden = !m3;
-  $('#design-wrap').hidden = m3;
-  $('#results-wrap').hidden = m3;
-  $('#inputbar').hidden = m3;
-  $('#btn-mech3d-show').hidden = m3 || !(spec.mech3d && getMech3d());
+  $('#m3-start').hidden = !start;
+  $('#design-wrap').hidden = !flat;
+  $('#results-wrap').hidden = !flat;
+  $('#inputbar').hidden = !flat;
+  $('#btn-mech3d-show').hidden = !flat;
   if (m3) stopFlatSolve();
   if (m3) m3app.mount(m3ctx()).catch((e) => m3app.setStatus(`3D 화면 오류: ${e.message ?? e}`));
   else m3app.unmount();
@@ -250,7 +254,7 @@ function renderPendingBanner() {
 // 원본 메쉬 부품 → 같은 기구 판정용 { volume, size }
 const partInfo = (parts) => parts.map((p) => { const b = bounds(p.positions); return { volume: p.volume, size: [b[3] - b[0], b[4] - b[1], b[5] - b[2]] }; });
 // 지금 spec.mech3d 를 메쉬 없는 보관 상태로(버리지 않음) — 평판 모드로 시작
-function shelveMech3d() { spec.mech3dPending = spec.mech3d; spec.mech3d = null; spec.mode = 'flat'; }
+function shelveMech3d() { spec.mech3dPending = spec.mech3d; spec.mech3d = null; }   // 모드는 그대로 — 3D 면 시작 화면 + 안내 띠
 // 기구 STEP 불러오기(평판·3D 모드 공통) — spec.mech3d 를 새로 만들고 3D 모드로
 function importMech3d(file) {
   const say = (t) => { if (m3app.isMounted()) m3app.setStatus(t); else $('#timing').textContent = t; };
@@ -658,7 +662,6 @@ function importJson(e) {
   r.onload = () => { try { spec = JSON.parse(r.result); migrate(spec);
     // 지금 메쉬와 다른 기구면 버리지 않고 보관(안내 띠) — 같은 기구 STEP 을 다시 불러오면 복원
     if (spec.mech3d && !(getMech3d() && matchesPending(spec.mech3d, partInfo(getMech3d().raw.parts)))) shelveMech3d();
-    if (spec.mode === 'mech3d' && !spec.mech3d) spec.mode = 'flat';
     persist(); mount(); m3app.unmount(); applyMode(); schedule(); } catch { alert('JSON 파싱 실패'); } };
   r.readAsText(f);
 }
@@ -687,6 +690,7 @@ function mount() {
 
 // 구버전 저장값 보정
 function migrate(s) {
+  if (s.mode !== 'mech3d' && !s.flatChosen) s.mode = 'mech3d';   // 3D 가 메인 화면(2026-10-21) — 평판은 사용자가 고른 경우만
   s.levels ??= {};
   for (const l of [1, 2, 3, 4, 5]) {
     const cur = s.levels[l] || {};
@@ -775,7 +779,6 @@ if (spec.body.shape.source === 'step' && !(await loadBodyIDB({ flipZ: spec.body.
 }
 // 3D 기구 복원(IndexedDB) — 메쉬가 없으면 설정은 보관(mech3dPending, 안내 띠)하고 평판 모드로
 if (spec.mode === 'mech3d' && spec.mech3d && !(await loadMech3dIDB())) { shelveMech3d(); persist(); }
-if (spec.mode === 'mech3d' && !spec.mech3d) spec.mode = 'flat';
 if (spec.mech3d?.light?.step) await loadLedIDB();   // 검증은 m3app.mount 에서
 // 평판 계산 Worker — 평판 모드로 시작할 때만 지금 만든다(3D 모드면 평판 계산이 처음 필요할 때 run() 이 만든다)
 if (spec.mode !== 'mech3d') startSolver();
