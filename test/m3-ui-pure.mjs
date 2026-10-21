@@ -299,4 +299,8 @@ ok(clampCap(12) === 9.9 && clampCap(0.1) === 0.5 && clampCap(3) === 3 && clampCa
   const d = splitPx(1400, null), a = splitPx(1000, { l: 0.3, r: 0.4 }), b = splitPx(1000, { l: 0.05, r: 0.05 }), c = splitPx(900, { l: 0.5, r: 0.5 });
   ok(d.l === 260 && d.r === 430 && a.l === 300 && a.r === 400 && b.l === 180 && b.r === 260 && 900 - c.l - c.r >= 280 - 1, `splitPx: ${JSON.stringify([d, a, b, c])}`);
 }
+{ // 1D 프로파일 세로 범위: 최저·목표보다 5% 아래를 10% 단위로 내림
+  const { plotRange } = await import('../src/ui/m3/results-panel.js');
+  const a = plotRange([{ ys: [1, 0.79, NaN, 0.9] }], 0.8), b = plotRange([{ ys: [1, 0.3] }], 0.8), c = plotRange([{ ys: [1, 0.95] }], null);
+  ok(a.y0 === 70 && a.y1 === 102 && b.y0 === 20 && c.y0 === 90, `plotRange: ${[a.y0, b.y0, c.y0]}`); }
 done();

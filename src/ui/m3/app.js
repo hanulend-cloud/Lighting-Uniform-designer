@@ -269,7 +269,7 @@ function onCalc(snap) {
   if (T.start && snap.stats && T.first == null) T.first = (now - T.start) / 1000;
   if (T.start && snap.stats?.relNoise != null && snap.stats.relNoise <= 0.05 && T.noise5 == null) T.noise5 = (now - T.start) / 1000;
   updateLeakCheck(snap);
-  A.results.update({ snap, observe: M.observe, message: guidance(snap) });
+  A.results.update({ snap, observe: M.observe, message: guidance(snap), leds: ledSW(M, S.line) });
   paintObs(snap);
   A.cmd.update(S, snap);
   renderStatus();
@@ -472,6 +472,17 @@ function designClash(d, ctx, M0, rt, line) {
     const { M, parts } = designScene(d, ctx);
     return Math.max(0, cnt(M, parts) - cnt(M0, rt.parts));
   } catch { return 0; }
+}
+// 결과 프로파일 아래에 찍을 LED 위치(라인 좌표 s, w) — 배치·라인이 같으면 캐시
+let ledSWCache = null;
+function ledSW(M, line) {
+  if (!line) return [];
+  const key = JSON.stringify([M.light, M.parts.map((p) => p.xform ?? null)]);   // 배치·높이가 바뀌면 다시
+  if (ledSWCache?.key === key && ledSWCache.line === line) return ledSWCache.v;
+  let v = [];
+  try { v = L.currentEmitters(M, line).map((e) => { const [s, w] = line.toSW(...line.to2D(e.pos)); return { s, w }; }); } catch { v = []; }
+  ledSWCache = { key, line, v };
+  return v;
 }
 // LED 몸체 반폭(관측 평면 u·v 투영 중 큰 쪽의 반) — LED STEP = 기준 LED 몸체, 직접 배치 = 발광면 크기의 반. ② 끝벽·측벽 여유
 function ledHalfWidth(M, line) {
