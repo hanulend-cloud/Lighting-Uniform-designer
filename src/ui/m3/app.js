@@ -17,6 +17,7 @@ import { buildObsOverlay, cellColors, extractFaces } from './colormap.js';
 import { mountCommandBar } from './command-bar.js';
 import { renderFeatureTree, toggleVisibility } from './feature-tree.js';
 import { mountSplitter } from './splitter.js';
+import { createOptDash, createSimDash } from './opt-dash.js';
 import { partClearance, limitXform, axisLimits, TOL } from '../../engine/mech3d/clearance.js';
 import { renderPropertyPanel } from './property-panel.js';
 import { meshInfo, partToDbMaterial } from '../mech3d-panel.js';
@@ -26,7 +27,7 @@ import { positionsFromLayout, addPosition, alignPositions } from '../../engine/m
 import { createResultsPanel } from './results-panel.js';
 import { renderStatusBar } from './status-bar.js';
 import { createAdRunner } from './autodesign-run.js';
-import { renderAutoPanel, stageAvailability, clampCap, overallFrac, etaText, reusableCurrent, defaultHousingPart, applyDz, applyFinish, capDefault, nextFinish, finishText } from './autodesign-panel.js';
+import { renderAutoPanel, stageAvailability, clampCap, overallFrac, etaText, reusableCurrent, defaultHousingPart, applyDz, applyFinish, capDefault, nextFinish, finishText, shapeText } from './autodesign-panel.js';
 import { ledHeightRange, heightCandidates, catalogOf, finishCandidatesFor, setReflMaterial, partFinishEdit } from '../../engine/mech3d/housing-led.js';
 import { migrateFinishCatalog, reflectPatch, copyAsUser, entryFromForm, addSamples, parsePercents, uniqueReflId } from '../../model/reflect-db.js';
 import { intersectRay } from '../../engine/mech3d/bvh.js';
@@ -144,6 +145,7 @@ export async function mount(ctx) {
   const a = A = { ctx, store, pool, view: null, meshShown: null, lineKey: '', Gc: null, obsShown: null, checks: {}, markKey: '', timing: { start: 0, first: null, noise5: null } };
   a.prog = createProgressive({ ports: pool.ports(), onUpdate: onCalc, opts: { targetNoise: ctx.mspec.observe.targetNoise ?? 0.02 } });
   a.results = createResultsPanel($('#m3-res'));
+  a.optDash = createOptDash($('#m3-optdash')); a.simDash = createSimDash($('#m3-simdash'));   // 아래 칸 대시보드
   a.cmd = mountCommandBar($('#m3-cmd'), cmdHandlers());
   a.unsub = store.subscribe(onChange);
   a.keydown = onKey; window.addEventListener('keydown', onKey);
@@ -270,6 +272,7 @@ function onCalc(snap) {
   if (T.start && snap.stats?.relNoise != null && snap.stats.relNoise <= 0.05 && T.noise5 == null) T.noise5 = (now - T.start) / 1000;
   updateLeakCheck(snap);
   A.results.update({ snap, observe: M.observe, message: guidance(snap), leds: ledSW(M, S.line) });
+  A.simDash?.sample(snap, M.observe.targetNoise ?? 0.02, M.observe);
   paintObs(snap);
   A.cmd.update(S, snap);
   renderStatus();
@@ -401,8 +404,9 @@ function adSetOpen(v) { adState().open = v; try { localStorage.setItem(AD_OPEN_K
 function renderAuto() {
   const el = $('#m3-auto'), st = adState();
   el.hidden = false;   // 닫혀 있어도 한 줄 머리는 늘 보인다(메뉴가 사라진 것처럼 보이지 않게)
+  $('#m3-dock')?.classList.toggle('collapsed', !st.open);   // 접으면 아래 칸 = 한 줄(대시보드 숨김)
   if (!st.open) {
-    el.innerHTML = '<button type="button" class="m3-ad-collapsed" data-ad="open" aria-expanded="false">✨ 자동설계 <span class="mut">— 펼치기 ▸</span></button>';
+    el.innerHTML = '<button type="button" class="m3-ad-collapsed" data-ad="open" aria-expanded="false">✨ 자동설계 · 최적화 대시보드 <span class="mut">— 펼치기 ▴</span></button>';
     el.querySelector('[data-ad="open"]').onclick = () => { adSetOpen(true); };
     return;
   }
@@ -522,8 +526,24 @@ function adHeightInfo(M0, line, rt) {
 // 체크한 항목만의 결과는 base 로 결과 위에 남기고, 보완 실행이 실패·중지되면 직전 결과를 다시 보여 줌. 적용은 사용자가 정함
 const BOOST_SETS = [['housing'], ['height'], ['housing', 'height'], ['leds'], ['leds', 'housing'], ['leds', 'housing', 'height']];
 const BOOST_LABEL = { housing: '④ 케이스 면', height: '⑤ LED 높이', leds: '② LED 배치' };
+// 최적화 대시보드 — 실행 시작 때 체크한 항목으로 초기화, 끝나면 결과 표시
+function dashReset() {
+  const st = adState(), avail = stageAvailability(A.store.mspec, adInfo()), O = A.store.mspec.observe;
+  A.optDash?.reset({ stages: Object.fromEntries(['milky', 'leds', 'shape', 'housing', 'height'].map((k) => [k, !!st.sel[k] && !!avail[k]?.ok])), tgLen: O.targetLen, tgWid: O.targetWid });
+}
+// 검증 후보 이름(⑥) — 바뀐 항목만 짧게
+function verifyLabel(d) {
+  const t = [];
+  if (d.milky != null) t.push(`Milky ${(+d.milky).toFixed(2)}`);
+  if (d.layoutText) t.push(d.layoutText); else if (d.count != null && d.stepVirt) t.push(`${d.rows === 2 ? '2열×' : ''}${d.count}개`);
+  if (d.finish) t.push(finishText(d.finish, reflCat()));
+  if (d.dz) t.push(`높이 ${d.dz >= 0 ? '+' : ''}${(+d.dz).toFixed(2)}`);
+  if (d.shape) t.push('형상');
+  return t.length ? t.join(' · ') : '현재안';
+}
 async function adRunBoost() {
   const st = adState();
+  dashReset();
   let r = await adRun();
   if (!r || r.feasible || st.sel.boost === false || !st.result) return;
   const b0 = st.result, base = { Ulen: b0.best.Ulen, Uwid: b0.best.Uwid, milky: b0.best.milky, reason: b0.reason, unchanged: b0.unchanged };
@@ -532,6 +552,7 @@ async function adRunBoost() {
   let good = b0;
   for (const [i, set] of sets.entries()) {
     const added = set.map((k) => BOOST_LABEL[k]);
+    A.optDash?.addStages(Object.fromEntries(set.map((k) => [k, true])), `보완 ${i + 1}/${sets.length}: ${added.join(' + ')}`);
     r = await adRun({ stages: { ...checked, ...Object.fromEntries(set.map((k) => [k, true])) }, added, base, step: `${i + 1}/${sets.length}` });
     if (!r) {   // 실패·중지 — 직전 결과를 다시 보여 줌
       if (A && !st.running) { st.result = { ...good, note: `보완(${added.join(' + ')}) 계산이 끝나지 못함 — 직전 결과를 표시` }; A.meshShown = null; renderView(); renderAuto(); }
@@ -577,6 +598,7 @@ async function adRun(opt = {}) {
     if (A !== a || R.stopped) return;
     const f = overallFrac(stages, stage, frac), eta = etaText(performance.now() - t0, f);
     const tx = opt.added?.length ? `보완 ${opt.step ?? ''} (${opt.added.join(' + ')}) · ${text}` : text;
+    A.optDash?.progress(stage, frac, tx);
     st.running = { frac: f, text: eta ? `${tx} · ${eta}` : tx }; renderAuto();
   };
   const io = {
@@ -587,7 +609,9 @@ async function adRun(opt = {}) {
       const { M: Md, parts } = designScene({ ...d, milky: ms[Math.floor(ms.length / 2)] }, ctx);
       const hi = ms[Math.floor(ms.length / 2)] >= 6;   // 높은 Milky 는 광자당 매우 느림 — 탐색 창은 최소 광자를 낮춤(정밀 창은 그대로)
       const r = await R.trace(adJob(Md, parts, ctx), { ...(precise ? { N: 3e6, maxMs: 6000 } : { N: 1.5e6, maxMs: 2000, minN: hi ? 5e4 : 1e5 }), rw: { part: ctx.mp, milkies: ms } });
-      return milkyRows(G, obs, { milkies: ms, batches: r.rwBatches, ess: r.ess, emitted: r.ledger.emitted });
+      const rows = milkyRows(G, obs, { milkies: ms, batches: r.rwBatches, ess: r.ess, emitted: r.ledger.emitted });
+      A.optDash?.evals('milky', rows.filter((q) => q.trusted).map((q) => ({ label: `Milky ${(+q.milky).toFixed(2)}`, Ulen: q.Ulen, Uwid: q.Uwid })));   // 믿을 수 있는(ESS 충분) 격자점만
+      return rows;
     },
     // ② 후보 = (s, w) 격자(spec P4 §2.2b): s 2 mm × w ∈ {0, ±δk}, δk = 0.2/0.27/0.33·W(반폭 − 0.5 로 자름) — 후보 수 ≈ (L/2+1)·7, 후보당 ≤ 1.2만 광자(60 s 예산)
     async basis(d) {   // ①·④ 를 함께 켜면 실행기가 d.milky = 거친 최고점 · d.finish = 최고 등급으로 넘김(§2.2c)
@@ -617,9 +641,10 @@ async function adRun(opt = {}) {
         const { M: Md, parts } = designScene({ ...d, shape: { part: sp, ...c } }, ctx), mod = Md.parts[sp].shapeMod;
         const thin = minThickness(H, mod) < minWall;   // 칸 중심 + LED 중심
         const clash = !thin && [...interferenceKeys(parts[sp], others, lp, [])].some(([k, v]) => !before.has(k) || (v ?? 0) > before.get(k) + 0.05);   // 새 겹침 또는 기존보다 0.05 mm 넘게 깊어짐
-        if (thin || clash) { out.push({ cand: c, ok: false, why: thin ? '살두께' : '간섭' }); continue; }
+        if (thin || clash) { out.push({ cand: c, ok: false, why: thin ? '살두께' : '간섭' }); A.optDash?.evals('shape', [{ label: shapeText(c), ok: false, why: thin ? '살두께' : '간섭' }]); continue; }
         const r = await R.trace(adJob(Md, parts, ctx), { N, maxMs, minN: Math.min(N, 3e4), batches: 4 }), stt = tallyStats(G, r.batches, obs);
         out.push({ cand: c, ok: !stt.empty, stats: stt, eff: adEff(r) });
+        A.optDash?.evals('shape', [{ label: shapeText(c), Ulen: stt.Ulen, Uwid: stt.Uwid, ok: !stt.empty }]);
       }
       return out;
     },
@@ -631,14 +656,18 @@ async function adRun(opt = {}) {
         const { M: Md, parts } = designScene({ ...d, ...('dz' in c ? { dz: c.dz } : { finish: c.finish }) }, ctx);
         const r = await R.trace(adJob(Md, parts, ctx), { N, maxMs, minN: Math.min(N, 3e4), batches: 4 }), stt = tallyStats(G, r.batches, obs);
         out.push({ cand: c, ok: !stt.empty, stats: stt, eff: adEff(r) });
+        A.optDash?.evals(stages[stg] ? stg : 'final', [{ label: 'dz' in c ? `높이 ${c.dz >= 0 ? '+' : ''}${(+c.dz).toFixed(2)} mm` : finishText(c.finish, reflCat()), Ulen: stt.Ulen, Uwid: stt.Uwid, ok: !stt.empty }]);
       }
       return out;
     },
     async verify(d) {   // 정밀 재판정(현재안·최종안): 200만 광자 또는 6초(≥ 30만) — 잡음 ≈ ±2%
       const { M: Md, parts } = designScene(d, ctx);
       const r = await R.trace(adJob(Md, parts, ctx), { N: 2e6, maxMs: 6000, minN: 3e5, batches: 10 });
-      return { stats: tallyStats(G, r.batches, obs), eff: adEff(r) };
+      const stt = tallyStats(G, r.batches, obs);
+      A.optDash?.evals('final', [{ label: verifyLabel(d), Ulen: stt.Ulen, Uwid: stt.Uwid, ok: !stt.empty }]);
+      return { stats: stt, eff: adEff(r) };
     },
+    trace: (stage, list) => A.optDash?.evals(stage, list),   // 엔진이 직접 알리는 결과(② 배치 Solver 최선안·대안)
   };
   // ① 보완 계산 — ④ 를 안 쓸 때만: 기본 케이스 부품의 면 처리 한 단계 위(최고 등급이면 생략)
   let housingProbe = null;
@@ -670,6 +699,7 @@ async function adRun(opt = {}) {
   // restart 는 일시정지 상태를 이어가므로(wantPaused) 사용자가 멈춘 게 아니면 resume(대기 중 resume = 일시정지 요청 해제)
   if (st.deferred) { st.deferred = false; restartCalc(); if (st.userPaused) A.prog.pause(); else A.prog.resume(); }
   A.meshShown = null; renderView(); renderAuto();
+  if (res && !res.cancelled && !R.stopped && st.result) A.optDash?.finish(!!res.feasible, res.feasible ? '' : (res.reason ?? '').slice(0, 80));
   return res && !res.cancelled && !R.stopped && st.result ? { feasible: !!res.feasible, stages } : null;
 }
 // 비교 중 3D 미리보기 — 결과마다 한 번 만들어 둠(meshKey 비교용 객체)

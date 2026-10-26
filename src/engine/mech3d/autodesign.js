@@ -246,6 +246,7 @@ export async function runAutoDesign(cfg, io) {
     // (s, w) 격자 = 배치 Solver(같은 피치+끝 여백 → 끝 압축 → 자유 위치, spec 2026-10-20 led-layout-solver) · 숫자 격자 = 1열 기존 탐색
     const r = two ? solveLayout({ ...a, gaps: B.gaps ?? [], sMargin: B.sMargin ?? 0, timeBudget: cfg.layoutBudget ?? 20000, safety: cfg.layoutSafety ?? 0.02 }) : searchLeds({ ...a, spare: 1 });
     steps.push({ stage: 'leds', ...r });
+    if (two) io.trace?.('leds', [r, ...(r.alts ?? [])].filter((e) => e.positions?.length).map((e, i) => ({ label: `${i ? '대안 ' : ''}${layoutText(e)}`, Ulen: e.stats?.Ulen, Uwid: e.stats?.Uwid, ok: true })));   // 대시보드: 배치 Solver 최선안·대안(기저 추정)
     const lay = (e) => two
       ? { count: e.n, pitch: e.pitch, rows: e.rows, rowGap: e.rowGap, positions: e.positions?.length ? e.positions : null, layoutKind: e.kind, layoutText: e.positions?.length ? layoutText(e) : null }
       : { count: e.n, pitch: e.pitch, rows: 1, rowGap: 0, positions: null, layoutKind: null, layoutText: null };

@@ -559,3 +559,44 @@ main:has(#m3-start:not([hidden])) { grid-template-rows: minmax(0, 1fr); }
 #mech3d-wrap .m3-tabs [role=tab][aria-selected=true] { color: var(--m3-acc); border-bottom-color: var(--m3-acc); }
 /* 좁은 화면(≤1024px): 왼쪽 창이 3D 칸 높이를 넘으면 아래 결과 칸을 덮지 않고 스크롤 */
 @media (max-width: 1024px) and (min-width: 721px) { .m3-left { overflow: auto; min-height: 0; } }
+
+/* 아래 칸(자동설계 설정 | 최적화 진행현황 | 시뮬레이션 진행현황) — 2안: 평가 결과는 오른쪽, 최적화는 아래 */
+#mech3d-wrap { grid-template-rows: auto minmax(0, 1fr) auto auto; }
+.m3-dock { display: grid; grid-template-columns: 340px minmax(0, 1fr) 320px; border-top: 1px solid var(--m3-line); height: 360px; min-height: 0; }
+.m3-dock > div { min-height: 0; overflow: auto; padding: 8px 10px; }
+.m3-dock > div + div { border-left: 1px solid var(--m3-line); }
+.m3-dock #m3-auto { border: 0; max-height: none; }
+.m3-dock.collapsed { height: auto; grid-template-columns: 1fr; }
+.m3-dock.collapsed .m3-dock-dash, .m3-dock.collapsed .m3-dock-sim { display: none; }
+@media (max-width: 1024px) { .m3-dock { grid-template-columns: 1fr; height: auto; } .m3-dock > div + div { border-left: 0; border-top: 1px solid var(--m3-line); } }
+.od-h { font-size: 12.5px; font-weight: 600; margin-bottom: 4px; }
+.od-h .mut { font-weight: 400; font-size: 11.5px; margin-left: 6px; }
+.od-note { font-size: 11.5px; color: var(--m3-acc); margin-left: 6px; }
+.od-empty { font-size: 12px; padding: 8px 0; }
+.od-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 6px; }
+.od-tile { border: 1px solid var(--m3-line); border-radius: 6px; padding: 5px 7px; font-size: 11.5px; min-width: 0; }
+.od-tile.od-run { border-color: var(--m3-acc); box-shadow: 0 0 0 1px var(--m3-acc) inset; }
+.od-tile.od-off { opacity: .5; }
+.od-th { display: flex; justify-content: space-between; gap: 6px; margin-bottom: 2px; }
+.od-chip { font-size: 10.5px; padding: 0 6px; border-radius: 9px; background: var(--m3-accbg); color: var(--m3-acc); white-space: nowrap; }
+.od-done .od-chip { background: rgba(46,139,87,.15); color: var(--m3-ok); }
+.od-off .od-chip, .od-wait .od-chip { background: transparent; color: var(--m3-mut); border: 1px solid var(--m3-line); }
+.od-row { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1.5; }
+.od-ok { color: var(--m3-ok); } .od-bad { color: var(--m3-bad); }
+.od-off { padding: 6px 0; }
+.od-spark { width: 100%; height: 50px; display: block; margin: 2px 0; }
+.od-sim { width: 100%; height: 130px; display: block; margin: 4px 0; }
+.od-spark polyline, .od-sim polyline { fill: none; stroke-width: 1.4; vector-effect: non-scaling-stroke; }
+.od-l1 { stroke: #2f80ed; } .od-l2 { stroke: #2fb57a; } .od-ln { stroke: #e0703a; }
+.od-d1 { fill: #2f80ed; } .od-d2 { fill: #2fb57a; }
+.od-tg { stroke: #d9473a; stroke-dasharray: 4 3; stroke-width: 1; vector-effect: non-scaling-stroke; } .od-tg2 { opacity: .5; }
+.od-best { fill: none; stroke: #f0b400; stroke-width: 2; vector-effect: non-scaling-stroke; }
+.od-ax { font-size: 8px; fill: var(--m3-mut); } .od-x { font-size: 10px; fill: var(--m3-bad); } .od-none { font-size: 10px; fill: var(--m3-mut); }
+.od-bar { height: 5px; background: var(--m3-line); border-radius: 3px; overflow: hidden; margin-top: 2px; }
+.od-bar i { display: block; height: 100%; background: var(--m3-acc); transition: width .3s; }
+.od-bar-big { height: 9px; flex: 1; }
+.od-tx { font-size: 10.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.od-pct { display: flex; align-items: center; gap: 8px; margin: 4px 0; } .od-pct b { font-size: 20px; min-width: 54px; }
+.od-legend { font-size: 10.5px; color: var(--m3-mut); display: flex; gap: 4px; align-items: center; flex-wrap: wrap; margin: 2px 0 4px; }
+.od-legend i { display: inline-block; width: 14px; height: 0; border-top: 2px solid; margin-left: 6px; }
+.od-k1 { border-color: #2f80ed !important; } .od-k2 { border-color: #2fb57a !important; } .od-kn { border-color: #e0703a !important; } .od-kt { border-top-style: dashed !important; border-color: #d9473a !important; } .od-kb { border-color: #f0b400 !important; width: 8px !important; height: 8px !important; border: 2px solid; border-radius: 50%; }

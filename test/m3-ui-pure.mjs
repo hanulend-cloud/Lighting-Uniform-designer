@@ -309,4 +309,11 @@ ok(clampCap(12) === 9.9 && clampCap(0.1) === 0.5 && clampCap(3) === 3 && clampCa
   const { plotRange } = await import('../src/ui/m3/results-panel.js');
   const a = plotRange([{ ys: [1, 0.79, NaN, 0.9] }], 0.8), b = plotRange([{ ys: [1, 0.3] }], 0.8), c = plotRange([{ ys: [1, 0.95] }], null);
   ok(a.y0 === 70 && a.y1 === 102 && b.y0 === 20 && c.y0 === 90, `plotRange: ${[a.y0, b.y0, c.y0]}`); }
+{ // 최적화·시뮬레이션 대시보드(순수)
+  const { tileOf, evalSparkSvg, simPct, STAGES } = await import('../src/ui/m3/opt-dash.js');
+  ok(STAGES.length === 6 && tileOf('milky') === 'milky' && tileOf('verify') === 'final' && tileOf('current') === 'final' && tileOf('ledsRef') === 'final', `6 타일 · 단계 → 타일`);
+  const sv = evalSparkSvg([{ label: 'a', Ulen: 0.7, Uwid: 0.6 }, { label: 'b', ok: false, why: '간섭' }, { label: 'c', Ulen: 0.82, Uwid: 0.81 }], 0.8, 0.8, 2);
+  ok(sv.includes('od-l1') && sv.includes('od-d1') && sv.includes('od-best') && sv.includes('od-tg') && sv.includes('×'), '후보 그래프: 점·최고·목표·탈락(×)');
+  ok(evalSparkSvg([], 0.8, 0.8).includes('후보 결과 없음'), '후보 없음');
+  ok(simPct(0.04, 0.02) === 25 && simPct(0.02, 0.02) === 100 && simPct(0.01, 0.02) === 100 && simPct(NaN, 0.02) === 0, `진행률 = (목표/오차)² (${simPct(0.04, 0.02)})`); }
 done();
