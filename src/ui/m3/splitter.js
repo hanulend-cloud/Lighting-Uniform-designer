@@ -50,3 +50,27 @@ export function mountSplitter(main) {
   new ResizeObserver(apply).observe(main);
   apply();
 }
+
+// 아래 칸(자동설계·대시보드) 높이 조절 — 위 경계 손잡이를 위아래로 끌기(uds.m3.dockH, px). 3D·결과 칸은 최소 MIN_MAIN 을 남김. 두 번 클릭 = 기본
+const DOCK_KEY = 'uds.m3.dockH', DOCK_DEF = 250, DOCK_MIN = 120, MIN_MAIN = 240;
+export const clampDock = (h, wrapH) => Math.round(Math.max(DOCK_MIN, Math.min(h, Math.max(DOCK_MIN, wrapH - MIN_MAIN - 90))));   // 90 = 명령줄·상태줄
+export function mountDockSplitter(dock, wrap) {
+  if (!dock || dock.dataset.split) return;
+  dock.dataset.split = '1';
+  let h = DOCK_DEF; try { const v = +localStorage.getItem(DOCK_KEY); if (v > 0) h = v; } catch {}
+  const apply = () => { if (window.innerWidth <= NARROW) { dock.style.removeProperty('--m3-dock-h'); return; } dock.style.setProperty('--m3-dock-h', `${clampDock(h, wrap.clientHeight)}px`); };
+  const hd = document.createElement('div');
+  hd.className = 'm3-dock-split'; hd.setAttribute('role', 'separator'); hd.setAttribute('aria-orientation', 'horizontal'); hd.title = '아래 칸 높이 — 위아래로 끌어 조절 · 두 번 클릭 = 기본';
+  hd.addEventListener('pointerdown', (e) => {
+    if (window.innerWidth <= NARROW) return;
+    e.preventDefault(); hd.setPointerCapture(e.pointerId); wrap.classList.add('m3-splitting-v');
+    const y0 = e.clientY, h0 = dock.getBoundingClientRect().height;
+    const move = (ev) => { h = clampDock(h0 - (ev.clientY - y0), wrap.clientHeight); apply(); };
+    const up = () => { hd.removeEventListener('pointermove', move); hd.removeEventListener('pointerup', up); hd.removeEventListener('pointercancel', up); wrap.classList.remove('m3-splitting-v'); try { localStorage.setItem(DOCK_KEY, String(h)); } catch {} window.dispatchEvent(new Event('resize')); };
+    hd.addEventListener('pointermove', move); hd.addEventListener('pointerup', up); hd.addEventListener('pointercancel', up);
+  });
+  hd.addEventListener('dblclick', () => { h = DOCK_DEF; try { localStorage.removeItem(DOCK_KEY); } catch {} apply(); window.dispatchEvent(new Event('resize')); });
+  dock.prepend(hd);
+  new ResizeObserver(apply).observe(wrap);
+  apply();
+}

@@ -318,4 +318,7 @@ ok(clampCap(12) === 9.9 && clampCap(0.1) === 0.5 && clampCap(3) === 3 && clampCa
   ok(sv.includes('od-l1') && sv.includes('od-d1') && sv.includes('od-best') && sv.includes('od-tg') && sv.includes('×'), '후보 그래프: 점·최고·목표·탈락(×)');
   ok(evalSparkSvg([], 0.8, 0.8).includes('후보 결과 없음'), '후보 없음');
   ok(simPct(0.04, 0.02) === 25 && simPct(0.02, 0.02) === 100 && simPct(0.01, 0.02) === 100 && simPct(NaN, 0.02) === 0, `진행률 = (목표/오차)² (${simPct(0.04, 0.02)})`); }
+{ // 아래 칸 높이: 최소 120 · 3D·결과 칸 최소 240(+명령·상태줄 90) 남김
+  const { clampDock } = await import('../src/ui/m3/splitter.js');
+  ok(clampDock(250, 900) === 250 && clampDock(50, 900) === 120 && clampDock(800, 900) === 570 && clampDock(300, 400) === 120, `clampDock: ${[clampDock(250, 900), clampDock(50, 900), clampDock(800, 900), clampDock(300, 400)]}`); }
 done();

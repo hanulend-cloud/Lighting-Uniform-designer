@@ -621,3 +621,28 @@ main:has(#m3-start:not([hidden])) { grid-template-rows: minmax(0, 1fr); }
 .m3-dock .od-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 @media (max-width: 900px) { .m3-dock .od-grid { grid-template-columns: 1fr; } }
 .m3-dock .od-spark { height: 70px; }
+
+/* 한 화면(스크롤 없음) — 넓은 화면: 결과 창 그래프가 칸 높이에 맞춰 줄고, 아래 칸은 끌어서 높이 조절 */
+@media (min-width: 1025px) {
+  .m3-dock { position: relative; height: var(--m3-dock-h, 250px); }
+  .m3-dock.collapsed { height: auto; }
+  .m3-dock-split { position: absolute; left: 0; right: 0; top: -4px; height: 8px; cursor: row-resize; z-index: 6; touch-action: none; }
+  .m3-dock-split::after { content: ""; position: absolute; left: 0; right: 0; top: 3px; height: 2px; background: transparent; transition: background .15s; }
+  .m3-dock-split:hover::after, .m3-splitting-v .m3-dock-split::after { background: var(--m3-acc); opacity: .6; }
+  .m3-dock.collapsed .m3-dock-split { display: none; }
+  .m3-splitting-v { cursor: row-resize; user-select: none; }
+  .m3-res { overflow: hidden; gap: 6px; padding: 6px 8px; }
+  .m3-res > .m3-blk { flex: 1 1 0; min-height: 0; display: flex; flex-direction: column; padding: 5px 7px; }
+  .m3-res > .m3-blk > .m3-withm { flex: 1 1 0; min-height: 0; }
+  .m3-res canvas.m3-g { height: 100%; min-height: 50px; }
+  .m3-res .m3-m { overflow: hidden; }
+  .m3-res .m3-m .v { font-size: 17px; }
+}
+@media (max-width: 1024px) { .m3-dock-split { display: none; } }
+@media (min-width: 1025px) {
+  .m3-res .m3-m { padding: 3px 6px; justify-content: flex-start; }
+  .m3-res .m3-m .s { display: none; }   /* 한 화면에 맞추려고 보조 설명은 숨김(마우스를 올리면 그래프에서 값 읽기) */
+  .m3-res .m3-m .l { font-size: 10.5px; }
+  .m3-res .m3-t { margin-bottom: 2px; }
+  .m3-res .m3-withm { grid-template-columns: minmax(0, 1fr) 96px; gap: 6px; }
+}

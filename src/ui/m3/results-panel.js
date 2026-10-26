@@ -225,10 +225,11 @@ function wireMapHover(cv) {
 const clearCanvas = (c) => c.getContext('2d').clearRect(0, 0, c.width, c.height);
 const dprNow = () => Math.max(1, globalThis.devicePixelRatio || 1);
 // 캔버스를 화면 크기 × DPR 로 맞춘다(가로세로 비는 만들 때의 비 유지). 크기가 바뀌면 true
+// 넓은 화면(> 1024px) = 칸 높이에 맞춤(CSS 가 높이를 정함 — 결과 창이 스크롤 없이 한 화면), 좁은 화면 = 가로세로 비
 function sizeCanvas(cv, ratio) {
-  const cw = cv.clientWidth;
+  const cw = cv.clientWidth, ch = cv.clientHeight, fit = (globalThis.innerWidth ?? 0) > 1024 && ch > 40;
   if (!cw) return false;
-  const W = Math.round(cw * dprNow()), H = Math.round(W / ratio);
+  const W = Math.round(cw * dprNow()), H = fit ? Math.round(ch * dprNow()) : Math.round(W / ratio);
   if (cv.width === W && cv.height === H) return false;
   cv.width = W; cv.height = H;
   return true;
@@ -336,7 +337,7 @@ export function createResultsPanel(el) {
   }
   if (typeof ResizeObserver !== 'undefined') {
     let w0 = 0;
-    new ResizeObserver(() => { const w = q('map').clientWidth; if (w && w !== w0) { w0 = w; if (last) update(last); } }).observe(el);
+    new ResizeObserver(() => { const c = q('map'), w = c.clientWidth ? `${c.clientWidth}x${c.clientHeight}` : 0; if (w && w !== w0) { w0 = w; if (last) update(last); } }).observe(el);   // 폭·높이(아래 칸 높이 조절) 바뀌면 다시 그림
   }
   clear();
   return { update };
