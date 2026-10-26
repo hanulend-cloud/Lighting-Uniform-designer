@@ -3,9 +3,9 @@
 // 타일마다 상태(대기·진행 %·완료·건너뜀) · 시험 중 값 → 지금까지 최고 · 후보별 길이/폭 U 점 그래프(목표선) · 진행 막대.
 // 시뮬레이션: 점진 계산 스냅숏마다 sample(snap, targetNoise) — 광자 수에 따른 잡음 %·길이/폭 U 추정과 진행률 %(잡음이 목표에 닿으면 100%).
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
-export const STAGES = [['milky', '① Milky 레벨'], ['leds', '② LED 배치'], ['shape', '③ LGP 형상'], ['housing', '④ 케이스 면'], ['height', '⑤ LED 높이'], ['final', '⑥ 검증 · 보완']];
-// 자동설계 진행 단계 이름 → 타일(현재안·기준·검증·보완 = ⑥)
-export const tileOf = (stage) => (['milky', 'leds', 'shape', 'housing', 'height'].includes(stage) ? stage : 'final');
+export const STAGES = [['milky', '① Milky'], ['position', '② 기구 위치 (LED 배치 · 높이)'], ['shape', '③ 기구 형상']];
+// 자동설계 진행 단계 이름 → 타일(LED 배치·높이 = ② 기구 위치). 현재안·기준·검증 = 타일 없음(머리 줄 문구로만)
+export const tileOf = (stage) => (stage === 'milky' || stage === 'shape' ? stage : stage === 'leds' || stage === 'height' ? 'position' : null);
 const f2 = (v) => (Number.isFinite(v) ? v.toFixed(2) : '–');
 
 // 후보 점 그래프(인라인 SVG, 순수) — 길이 U(파랑)·폭 U(초록) · 목표선(빨강 점선) · 최고 후보(동그라미)
@@ -32,32 +32,34 @@ export function createOptDash(el, h = {}) {
   const blank = () => Object.fromEntries(STAGES.map(([k]) => [k, { status: 'off', frac: 0, text: '', evals: [] }]));
   function reset({ stages = {}, tgLen, tgWid } = {}) {
     S = { tiles: blank(), tgLen, tgWid, t0: performance.now(), cur: null, note: '' };
-    for (const [k] of STAGES) S.tiles[k].status = k === 'final' || stages[k] ? 'wait' : 'off';
+    for (const [k] of STAGES) S.tiles[k].status = stages[k] ? 'wait' : 'off';
     draw();
   }
   // 보완 실행 — 새로 켠 항목을 '대기' 로(기존 결과는 남김)
   function addStages(stages, note = '') { if (!S) return; for (const [k] of STAGES) if (stages[k] && S.tiles[k].status === 'off') S.tiles[k].status = 'wait'; S.note = note; draw(); }
   function progress(stage, frac, text) {
     if (!S) return;
-    const k = tileOf(stage), t = S.tiles[k];
+    const k = tileOf(stage);
+    if (!k) { S.note = text ?? ''; draw(); return; }   // 현재안·검증 = 머리 줄 문구
+    const t = S.tiles[k]; S.note = '';
     if (S.cur && S.cur !== k && S.tiles[S.cur].status === 'run') S.tiles[S.cur].status = 'done';
     S.cur = k; t.status = 'run'; t.frac = Math.max(0, Math.min(1, frac ?? 0)); t.text = text ?? '';
     draw();
   }
-  function evals(stage, list) { if (!S) return; const t = S.tiles[tileOf(stage)]; t.evals.push(...list); if (t.status === 'off' || t.status === 'wait') t.status = 'run'; draw(); }
+  function evals(stage, list) { if (!S) return; const k = tileOf(stage); if (!k) { S.verify = list[list.length - 1] ?? S.verify; draw(); return; } const t = S.tiles[k]; t.evals.push(...list); if (t.status === 'off' || t.status === 'wait') t.status = 'run'; draw(); }
   function finish(ok, text = '') { if (!S) return; for (const [k] of STAGES) if (S.tiles[k].status === 'run') { S.tiles[k].status = 'done'; S.tiles[k].frac = 1; } S.note = text; S.ended = ok; draw(); }
-  function draw() { if (raf) return; raf = requestAnimationFrame(() => { raf = 0; render(); }); }
+  function draw() { if (raf) return; raf = setTimeout(() => { raf = 0; render(); }, 40); }   // setTimeout: 화면이 숨겨져도(다른 탭) 갱신 — rAF 는 멈춤
   function render() {
     const idle = !S || S.ended != null || S.stopped;
-    const head = !S ? `<div class="od-h">최적화 항목 <span class="mut">타일에서 바꿀 항목을 켜고 왼쪽 [▶ 실행] — 실행하면 같은 타일에 진행·값 변화가 실시간으로 보입니다</span></div>` : '';
-    if (!S) { el.innerHTML = `${head}<div class="od-grid">${STAGES.map(([k, name]) => { const c = k === 'final' ? { on: true, html: '<div class="od-why mut">현재안·최종안 정밀 재계산과 보완 자동 추가 단계</div>' } : h.config?.(k) ?? { on: false, html: '' }; return `<div class="od-tile ${c.on ? 'od-sel' : 'od-off'}"><div class="od-th"><b>${name}</b></div>${c.html}</div>`; }).join('')}</div>`; return; }
+    const head = !S ? `<div class="od-h">최적화 항목 <span class="mut">바꿀 항목을 켜고 [▶ 실행] — 실행하면 같은 타일에 진행·값 변화가 실시간으로 보입니다</span></div>` : '';
+    if (!S) { el.innerHTML = `${head}<div class="od-grid">${STAGES.map(([k, name]) => { const c = h.config?.(k) ?? { on: false, html: '' }; return `<div class="od-tile ${c.on ? 'od-sel' : 'od-off'}"><div class="od-th"><b>${name}</b></div>${c.html}</div>`; }).join('')}</div>`; return; }
     const sec = ((performance.now() - S.t0) / 1000) | 0, nEval = STAGES.reduce((a, [k]) => a + S.tiles[k].evals.length, 0);
     const tile = ([k, name]) => {
       const t = S.tiles[k], ev = t.evals;
       let bi = -1, bs = -Infinity; ev.forEach((e, i) => { const s = scoreOf(e, S.tgLen, S.tgWid); if (s > bs) { bs = s; bi = i; } });
       const last = ev[ev.length - 1], best = bi >= 0 ? ev[bi] : null;
       const chip = { off: '미사용', wait: '대기', run: `진행 ${Math.round(t.frac * 100)}%`, done: '완료' }[t.status];
-      const c = idle && k !== 'final' ? h.config?.(k) : null;   // 실행이 끝났으면 다시 고를 수 있게 스위치·설정을 같이
+      const c = idle ? h.config?.(k) : null;   // 실행이 끝났으면 다시 고를 수 있게 스위치·설정을 같이
       return `<div class="od-tile od-${t.status}${c?.on ? ' od-sel' : ''}"><div class="od-th"><b>${name}</b><span class="od-chip">${chip}</span></div>${c ? c.html : ''}
         ${t.status === 'off' ? (c ? '' : '<div class="mut od-off">이번 실행에서 쓰지 않음</div>') : `
         <div class="od-row"><span class="mut">시험</span> ${last ? `${esc(last.label)} → ${f2(last.Ulen)}/${f2(last.Uwid)}${last.ok === false ? ` <span class="od-bad">${esc(last.why ?? '탈락')}</span>` : ''}` : '<span class="mut">–</span>'}</div>
@@ -65,7 +67,7 @@ export function createOptDash(el, h = {}) {
         ${evalSparkSvg(ev, S.tgLen, S.tgWid, bi)}
         <div class="od-bar"><i style="width:${Math.round((t.status === 'done' ? 1 : t.frac) * 100)}%"></i></div><div class="od-tx mut">${esc(t.text)}</div>`}</div>`;
     };
-    el.innerHTML = `<div class="od-h">최적화 진행현황 <span class="mut">${S.ended == null ? `진행 ${sec}초` : S.ended ? '완료 — 목표 통과' : '완료 — 목표 미달'} · 시험한 후보 ${nEval}개 · 값 = 길이 U / 폭 U · 목표 ${f2(S.tgLen)}/${f2(S.tgWid)}</span>${S.note ? ` <span class="od-note">${esc(S.note)}</span>` : ''}</div>
+    el.innerHTML = `<div class="od-h">최적화 진행현황 <span class="mut">${S.ended == null ? `진행 ${sec}초` : S.ended ? '완료 — 목표 통과' : '완료 — 목표 미달'} · 시험한 후보 ${nEval}개 · 값 = 길이 U / 폭 U · 목표 ${f2(S.tgLen)}/${f2(S.tgWid)}</span>${S.verify && Number.isFinite(S.verify.Ulen) ? ` <span class="od-note">정밀 계산 ${esc(S.verify.label)} → ${f2(S.verify.Ulen)}/${f2(S.verify.Uwid)}</span>` : ''}${S.note ? ` <span class="od-note">${esc(S.note)}</span>` : ''}</div>
       <div class="od-legend"><i class="od-k1"></i>길이 U <i class="od-k2"></i>폭 U <i class="od-kt"></i>목표 <i class="od-kb"></i>최고</div>
       <div class="od-grid">${STAGES.map(tile).join('')}</div>`;
   }
@@ -90,7 +92,7 @@ export function createSimDash(el) {
     if (H.length > 400) H = H.filter((_, i) => i % 2 === 0 || i === H.length - 1);
     draw();
   }
-  function draw() { if (raf) return; raf = requestAnimationFrame(() => { raf = 0; render(); }); }
+  function draw() { if (raf) return; raf = setTimeout(() => { raf = 0; render(); }, 40); }   // setTimeout: 화면이 숨겨져도(다른 탭) 갱신 — rAF 는 멈춤
   function render() {
     const last = H[H.length - 1], pct = last ? simPct(last.noise, tgt) : 0;
     const w = 300, h = 120, x0 = 30, x1 = w - 30, y0 = 8, y1 = h - 18;

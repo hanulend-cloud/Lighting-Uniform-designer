@@ -390,7 +390,7 @@ function clearanceOf(i) {
 }
 
 // ---- 자동설계(P4) ----
-function adState() { return (A.ad ??= { open: (() => { try { return localStorage.getItem('uds.m3.autoOpen') === '1'; } catch { return false; } })(), sel: { milky: true, leds: false, shape: false, shapePart: -1, milkyMax: null, height: false, housing: false, housingPart: -1, housingSpecial: false, boost: true }, running: null, result: null, undo: null, milkyPart: null, runner: null, info: null, stepBusy: false, stepWorker: null }); }
+function adState() { return (A.ad ??= { open: (() => { try { return localStorage.getItem('uds.m3.autoOpen') === '1'; } catch { return false; } })(), sel: { milky: true, leds: false, shape: false, shapePart: -1, milkyMax: null, height: false, housing: false, housingPart: -1, housingSpecial: false, boost: false }, running: null, result: null, undo: null, milkyPart: null, runner: null, info: null, stepBusy: false, stepWorker: null }); }
 function adInfo() {   // 부품별 비 2.5D 비율(관측 방향) — 라인이 있을 때만. (기구·라인) 별 캐시(높이맵 계산이 무거움)
   const st = adState(), S = A.store.session, rt = getMech3d();
   if (!st.info || st.info.rt !== rt || st.info.line !== S.line) st.info = { rt, line: S.line, non25: S.line && rt ? rt.parts.map((p) => heightsFor(p, S.line.frame, 0.5).non25) : [], boxes: rt ? rt.parts.map((p) => bounds(p.positions)) : [] };   // boxes = ④ 기본 대상용 외곽
@@ -402,13 +402,19 @@ const adClone = (x) => (x == null ? null : JSON.parse(JSON.stringify(x)));
 const AD_OPEN_KEY = 'uds.m3.autoOpen';
 function adSetOpen(v) { adState().open = v; try { localStorage.setItem(AD_OPEN_KEY, v ? '1' : '0'); } catch {} renderAuto(); }
 // 자동설계 항목·설정 바꾸기(왼쪽 칸·가운데 타일 공용)
-function adSel(k, v) { const st = adState(); if (st.running) return; st.sel[k] = k === 'milkyMax' ? clampCap(v) : v; renderAuto(); }
+function adSel(k, v) {
+  const st = adState(); if (st.running) return;
+  if (k === 'position') { const av = stageAvailability(A.store.mspec, adInfo()); st.sel.leds = !!v && !!av.leds?.ok; st.sel.height = !!v && !!av.height?.ok; }   // ② 기구 위치 = LED 배치 + 높이
+  else st.sel[k] = k === 'milkyMax' ? clampCap(v) : v;
+  st.sel.housing = false; st.sel.boost = false;   // 반사율(④)·보완 자동 추가는 화면에서 뺌 — 부품 속성에서 직접
+  renderAuto();
+}
 function renderAuto() {
   const el = $('#m3-auto'), st = adState();
   el.hidden = false;   // 닫혀 있어도 한 줄 머리는 늘 보인다(메뉴가 사라진 것처럼 보이지 않게)
   $('#m3-dock')?.classList.toggle('collapsed', !st.open);   // 접으면 아래 칸 = 한 줄(대시보드 숨김)
   if (!st.open) {
-    el.innerHTML = '<button type="button" class="m3-ad-collapsed" data-ad="open" aria-expanded="false">✨ 자동설계 · 최적화 대시보드 <span class="mut">— 펼치기 ▴</span></button>';
+    el.innerHTML = '<button type="button" class="m3-ad-collapsed" data-ad="open" aria-expanded="false">✨ 자동설계 · 최적화 <span class="mut">— 펼치기 ▴</span></button>';
     el.querySelector('[data-ad="open"]').onclick = () => { adSetOpen(true); };
     return;
   }
@@ -533,7 +539,8 @@ const BOOST_LABEL = { housing: '④ 케이스 면', height: '⑤ LED 높이', le
 // 최적화 대시보드 — 실행 시작 때 체크한 항목으로 초기화, 끝나면 결과 표시
 function dashReset() {
   const st = adState(), avail = stageAvailability(A.store.mspec, adInfo()), O = A.store.mspec.observe;
-  A.optDash?.reset({ stages: Object.fromEntries(['milky', 'leds', 'shape', 'housing', 'height'].map((k) => [k, !!st.sel[k] && !!avail[k]?.ok])), tgLen: O.targetLen, tgWid: O.targetWid });
+  const on = (k) => !!st.sel[k] && !!avail[k]?.ok;
+  A.optDash?.reset({ stages: { milky: on('milky'), position: on('leds') || on('height'), shape: on('shape') }, tgLen: O.targetLen, tgWid: O.targetWid });
 }
 // 검증 후보 이름(⑥) — 바뀐 항목만 짧게
 function verifyLabel(d) {
@@ -556,7 +563,7 @@ async function adRunBoost() {
   let good = b0;
   for (const [i, set] of sets.entries()) {
     const added = set.map((k) => BOOST_LABEL[k]);
-    A.optDash?.addStages(Object.fromEntries(set.map((k) => [k, true])), `보완 ${i + 1}/${sets.length}: ${added.join(' + ')}`);
+    A.optDash?.addStages({ position: set.includes('leds') || set.includes('height') }, `보완 ${i + 1}/${sets.length}: ${added.join(' + ')}`);
     r = await adRun({ stages: { ...checked, ...Object.fromEntries(set.map((k) => [k, true])) }, added, base, step: `${i + 1}/${sets.length}` });
     if (!r) {   // 실패·중지 — 직전 결과를 다시 보여 줌
       if (A && !st.running) { st.result = { ...good, note: `보완(${added.join(' + ')}) 계산이 끝나지 못함 — 직전 결과를 표시` }; A.meshShown = null; renderView(); renderAuto(); }
@@ -660,7 +667,7 @@ async function adRun(opt = {}) {
         const { M: Md, parts } = designScene({ ...d, ...('dz' in c ? { dz: c.dz } : { finish: c.finish }) }, ctx);
         const r = await R.trace(adJob(Md, parts, ctx), { N, maxMs, minN: Math.min(N, 3e4), batches: 4 }), stt = tallyStats(G, r.batches, obs);
         out.push({ cand: c, ok: !stt.empty, stats: stt, eff: adEff(r) });
-        A.optDash?.evals(stages[stg] ? stg : 'final', [{ label: 'dz' in c ? `높이 ${c.dz >= 0 ? '+' : ''}${(+c.dz).toFixed(2)} mm` : finishText(c.finish, reflCat()), Ulen: stt.Ulen, Uwid: stt.Uwid, ok: !stt.empty }]);
+        if (stages[stg]) A.optDash?.evals(stg, [{ label: 'dz' in c ? `높이 ${c.dz >= 0 ? '+' : ''}${(+c.dz).toFixed(2)} mm` : finishText(c.finish, reflCat()), Ulen: stt.Ulen, Uwid: stt.Uwid, ok: !stt.empty }]);
       }
       return out;
     },

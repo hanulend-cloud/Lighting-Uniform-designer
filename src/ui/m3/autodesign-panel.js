@@ -109,9 +109,18 @@ const progHtml = (running) => {
 };
 // 최적화 타일(가운데 칸)의 켜기 스위치·항목 설정(순수) — 고르는 곳 = 진행을 보는 곳(아래 칸 대시보드와 한 자리)
 // state = { avail, sel, running, names, milkyPart, housingMat } → { on, html }(html = 스위치 + 설정, 쓸 수 없으면 이유)
-export const TILE_NOTE = { milky: 'Milky 값을 바꿔 균일도 최고점을 찾음(밝기는 줄어듦)', leds: 'LED 개수·피치·열을 바꿈', shape: '도광판 아랫면 형상(두께·끝단·가장자리)', housing: '케이스 반사율(소재 상한 안)', height: 'LED–커버 거리' };
+// 화면의 자동설계 = 3 항목: ① Milky · ② 기구 위치(= 엔진 ② LED 배치 + ⑤ LED 높이) · ③ 기구 형상. 케이스 반사율(④)은 부품 속성에서 직접
+export const AD_ITEMS = [['milky', '① Milky', ['milky']], ['position', '② 기구 위치', ['leds', 'height']], ['shape', '③ 기구 형상', ['shape']]];
+export const TILE_NOTE = { position: 'LED 개수·피치·열과 LED–커버 거리(높이)', milky: 'Milky 값을 바꿔 균일도 최고점을 찾음(밝기는 줄어듦)', leds: 'LED 개수·피치·열을 바꿈', shape: '도광판 아랫면 형상(두께·끝단·가장자리)', housing: '케이스 반사율(소재 상한 안)', height: 'LED–커버 거리' };
 export function tileConfigHtml(k, { avail, sel, running, names = [], milkyPart = null, housingMat = null }) {
-  const a = avail[k], pname = (i) => esc(names[i] ?? `부품 ${i + 1}`), dis = running ? ' disabled' : '';
+  const pname = (i) => esc(names[i] ?? `부품 ${i + 1}`), dis = running ? ' disabled' : '';
+  if (k === 'position') {   // ② 기구 위치 = LED 배치 + LED 높이(쓸 수 있는 것만)
+    const okL = !!avail.leds?.ok, okH = !!avail.height?.ok;
+    if (!okL && !okH) return { on: false, html: `<label class="od-sw off"><input type="checkbox" data-ad="position" disabled> 사용 안 함</label><div class="od-why mut">${esc(avail.leds?.why ?? avail.height?.why ?? '')}</div>` };
+    const on = !!(sel.leds || sel.height);
+    return { on, html: `<label class="od-sw"><input type="checkbox" data-ad="position"${on ? ' checked' : ''}${dis}> ${on ? '사용' : '사용 안 함'}</label><div class="od-why mut">${okL ? 'LED 개수·피치·열' : ''}${okL && okH ? ' + ' : ''}${okH ? 'LED–커버 거리(높이)' : ''}${okL && avail.leds.note ? ` · ${esc(avail.leds.note)}` : ''}</div>` };
+  }
+  const a = avail[k];
   if (!a) return { on: false, html: '' };
   if (!a.ok) return { on: false, html: `<label class="od-sw off"><input type="checkbox" data-ad="${k}" disabled> 사용 안 함</label><div class="od-why mut">${esc(a.why)}</div>` };
   const on = !!sel[k], sw = `<label class="od-sw"><input type="checkbox" data-ad="${k}"${on ? ' checked' : ''}${dis}> ${on ? '사용' : '사용 안 함'}</label>`;
@@ -122,15 +131,13 @@ export function tileConfigHtml(k, { avail, sel, running, names = [], milkyPart =
     <label class="od-opt"><input type="checkbox" data-ad="housingSpecial"${sel.housingSpecial ? ' checked' : ''}${dis}> 특수 표면처리 허용</label>`;
   return { on, html: `${sw}<div class="od-why mut">${esc(TILE_NOTE[k] ?? '')}${a.note ? ` · ${esc(a.note)}` : ''}</div>${opt}` };
 }
-// 왼쪽 칸(실행·결과) — 항목 고르기는 가운데 타일에서. noLine = 관측 라인 없음(실행 불가) · 실행 중에는 입력 비활성
+// 자동설계 한 줄(대시보드 맨 위) — 켠 항목 · [▶ 실행] · [되돌리기] · [접기]. 실행 중 = 진행 막대 · [중지]. 항목 고르기는 아래 타일에서
+// noLine = 관측 라인 없음(실행 불가)
 export function autoCardHtml({ avail, sel, running, canRevert = false, noLine = false, applied = null }) {
-  const dis = running ? ' disabled' : '';
-  const on = ITEMS.filter(([k]) => sel[k] && avail[k]?.ok).map(([, l]) => l.split(' ')[0]);
-  const boost = `<label class="m3-ad-item"><input type="checkbox" data-ad="boost"${sel.boost !== false ? ' checked' : ''}${dis}> 목표 미달이면 보완 항목 자동 추가 <span class="mut">— ④ · ⑤ · ② 중 적게 바꾸는 것부터</span></label>`;
+  const on = AD_ITEMS.filter(([, , ks]) => ks.some((k) => sel[k] && avail[k]?.ok)).map(([, l]) => l.split(' ')[0]);
   const run = `<button type="button" class="m3-ad-run" data-ad="run"${!on.length || noLine ? ' disabled' : ''}${noLine ? ' title="관측 라인이 없음"' : ''}>▶ 실행</button>`;
-  return `<div class="m3-h">자동설계 <span class="mut">순서 ②→⑤→④→①→③</span></div>
-    <div class="m3-row">${on.length ? `켠 항목: <b>${on.join(' ')}</b>` : '<span class="mut">가운데 타일에서 바꿀 항목을 켜세요</span>'}</div>${boost}
-    ${running ? progHtml(running) : `${appliedHtml(applied)}<div class="m3-row">${run}${canRevert ? '<button type="button" data-ad="revert" title="마지막 적용 전 값으로">↶ 되돌리기</button>' : ''}<button type="button" data-ad="close">접기</button></div>`}`;
+  if (running) return `<div class="m3-ad-bar"><b>✨ 자동설계</b>${progHtml(running)}</div>`;
+  return `<div class="m3-ad-bar"><b>✨ 자동설계</b><span class="m3-ad-on">${on.length ? `켠 항목 <b>${on.join(' ')}</b>` : '<span class="mut">아래 타일에서 바꿀 항목을 켜세요</span>'}</span>${run}${canRevert ? '<button type="button" data-ad="revert" title="마지막 적용 전 값으로">↶ 되돌리기</button>' : ''}<span class="m3-ad-sp"></span><button type="button" data-ad="close" title="아래 칸 접기">접기 ▾</button></div>${appliedHtml(applied)}`;
 }
 // 형상 문구 — 0 인 항 생략. e = 끝단 두께, c = 폭 가장자리 두께(+ 가장자리 두껍게 · − 얇게), h < 0 = 돌출
 const sg = (v) => `${v >= 0 ? '+' : '−'}${f2(Math.abs(v))}`, nz = (v) => Number.isFinite(v) && Math.abs(v) >= 5e-5;

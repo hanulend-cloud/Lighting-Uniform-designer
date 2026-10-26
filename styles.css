@@ -562,12 +562,13 @@ main:has(#m3-start:not([hidden])) { grid-template-rows: minmax(0, 1fr); }
 
 /* 아래 칸(자동설계 설정 | 최적화 진행현황 | 시뮬레이션 진행현황) — 2안: 평가 결과는 오른쪽, 최적화는 아래 */
 #mech3d-wrap { grid-template-rows: auto minmax(0, 1fr) auto auto; }
-.m3-dock { display: grid; grid-template-columns: 250px minmax(0, 1fr) 320px; border-top: 1px solid var(--m3-line); height: 360px; min-height: 0; }
+.m3-dock { display: grid; grid-template-columns: minmax(0, 1fr) 330px; border-top: 1px solid var(--m3-line); height: 360px; min-height: 0; }
 .m3-dock > div { min-height: 0; overflow: auto; padding: 8px 10px; }
 .m3-dock > div + div { border-left: 1px solid var(--m3-line); }
 .m3-dock #m3-auto { border: 0; max-height: none; }
 .m3-dock.collapsed { height: auto; grid-template-columns: 1fr; }
 .m3-dock.collapsed .m3-dock-dash, .m3-dock.collapsed .m3-dock-sim { display: none; }
+.m3-dock.collapsed .m3-dock-main { padding: 0; }
 @media (max-width: 1024px) { .m3-dock { grid-template-columns: 1fr; height: auto; } .m3-dock > div + div { border-left: 0; border-top: 1px solid var(--m3-line); } }
 .od-h { font-size: 12.5px; font-weight: 600; margin-bottom: 4px; }
 .od-h .mut { font-weight: 400; font-size: 11.5px; margin-left: 6px; }
@@ -609,3 +610,14 @@ main:has(#m3-start:not([hidden])) { grid-template-rows: minmax(0, 1fr); }
 .od-tile.od-sel { border-color: var(--m3-acc); }
 .od-tile.od-off .od-sw input { opacity: .8; }
 .m3-ad-run { font-weight: 600; padding: 5px 16px !important; }
+
+/* 아래 칸 가운데: 자동설계 한 줄(실행·결과) + 3 항목 타일 */
+.m3-dock-main { display: flex; flex-direction: column; gap: 6px; min-height: 0; overflow: auto; padding: 8px 10px; }
+.m3-dock .m3-dock-main > div { overflow: visible; padding: 0; border: 0; }
+.m3-ad-bar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 12.5px; }
+.m3-ad-bar .m3-ad-prog { flex: 1; margin: 0; min-width: 200px; }
+.m3-ad-on { color: var(--m3-mut); } .m3-ad-on b { color: var(--m3-acc); }
+.m3-ad-sp { flex: 1; }
+.m3-dock .od-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+@media (max-width: 900px) { .m3-dock .od-grid { grid-template-columns: 1fr; } }
+.m3-dock .od-spark { height: 70px; }

@@ -181,7 +181,7 @@ ok(clampCap(12) === 9.9 && clampCap(0.1) === 0.5 && clampCap(3) === 3 && clampCa
   const c = stepA([]), d = stepA([{ part: 1 }]);
   ok(!c.housing.ok && /불투명/.test(c.housing.why) && !c.height.ok && /발광면/.test(c.height.why) && d.height.ok, '④ 불투명 없음 → 불가 · ⑤ LED STEP 발광점 없음 → 불가, 있으면 가능');
   const h = card({ avail: a, sel: { height: true, housing: true, housingPart: 2 }, running: null, names: ['LGP', '케이스', '덮개'] });
-  ok(h.includes('data-ad="height" checked') && h.includes('data-ad="housing" checked') && /<option value="2" selected>덮개/.test(h) && h.includes('②→⑤→④→①→③') && !/data-ad="run" disabled/.test(h), '카드: ④⑤ 체크 · ④ 대상 선택 · 실행 순서');
+  ok(h.includes('data-ad="height" checked') && h.includes('data-ad="housing" checked') && /<option value="2" selected>덮개/.test(h) && !/data-ad="run" disabled/.test(h) && tileConfigHtml('position', { avail: a, sel: { height: true } }).html.includes('data-ad="position" checked'), '카드: ⑤ 켜짐 = ② 기구 위치 사용 · 실행 가능');
   const M = { parts, observe: { faces: [{ part: 0, face: 1 }] } };
   const box0 = [0, 0, 0, 10, 10, 2], small = [-1, -1, -1, 11, 11, 3], big = [-5, -5, -5, 15, 15, 5], far = [100, 0, 0, 200, 100, 50];
   ok(defaultHousingPart(M, [box0, small, big]) === 2 && defaultHousingPart(M, [box0, small, far]) === 1 && defaultHousingPart(M, [box0, far, [0, 0, 0, 1, 1, 1]]) === 1
@@ -313,7 +313,7 @@ ok(clampCap(12) === 9.9 && clampCap(0.1) === 0.5 && clampCap(3) === 3 && clampCa
   ok(a.y0 === 70 && a.y1 === 102 && b.y0 === 20 && c.y0 === 90, `plotRange: ${[a.y0, b.y0, c.y0]}`); }
 { // 최적화·시뮬레이션 대시보드(순수)
   const { tileOf, evalSparkSvg, simPct, STAGES } = await import('../src/ui/m3/opt-dash.js');
-  ok(STAGES.length === 6 && tileOf('milky') === 'milky' && tileOf('verify') === 'final' && tileOf('current') === 'final' && tileOf('ledsRef') === 'final', `6 타일 · 단계 → 타일`);
+  ok(STAGES.length === 3 && tileOf('milky') === 'milky' && tileOf('leds') === 'position' && tileOf('height') === 'position' && tileOf('shape') === 'shape' && tileOf('verify') === null && tileOf('housing') === null, `3 타일(Milky · 기구 위치 · 기구 형상) · 단계 → 타일`);
   const sv = evalSparkSvg([{ label: 'a', Ulen: 0.7, Uwid: 0.6 }, { label: 'b', ok: false, why: '간섭' }, { label: 'c', Ulen: 0.82, Uwid: 0.81 }], 0.8, 0.8, 2);
   ok(sv.includes('od-l1') && sv.includes('od-d1') && sv.includes('od-best') && sv.includes('od-tg') && sv.includes('×'), '후보 그래프: 점·최고·목표·탈락(×)');
   ok(evalSparkSvg([], 0.8, 0.8).includes('후보 결과 없음'), '후보 없음');
