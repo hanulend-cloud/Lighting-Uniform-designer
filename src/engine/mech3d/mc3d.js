@@ -42,7 +42,8 @@ function coinFlags(S) {
   return flag;
 }
 
-export function runMC3D(S, { source, N, seed = 1, onExit = null, onEscape = null, wMinRel = 1e-3, maxEvents = 100000, track = -1 }) {
+// onHit(part, face, x,y,z, dx,dy,dz, w, p, entering, tL, tK): 면에 닿을 때마다(상호작용 전) — entering = 그 부품 안쪽으로 향함. 짝 면이면 짝 부품 면도(반대 entering). '들어오는 빛' 관측용
+export function runMC3D(S, { source, N, seed = 1, onExit = null, onEscape = null, onHit = null, wMinRel = 1e-3, maxEvents = 100000, track = -1 }) {
   const t0 = typeof performance !== 'undefined' ? performance.now() : Date.now();
   const rnd = rng(seed), w0 = source.flux / N, wMin = w0 * wMinRel;
   const L = { emitted: 0, escaped: 0, absSurf: 0, absVol: 0, lost: 0, rrLoss: 0, rrGain: 0 };
@@ -143,6 +144,7 @@ export function runMC3D(S, { source, N, seed = 1, onExit = null, onEscape = null
           dir = [f.tx, f.ty, f.tz]; E = [f.etx, f.ety, f.etz]; return false;
         };
         const tri2 = partnerAt(tri, px, py, pz);
+        if (onHit) { onHit(q, face, px, py, pz, dx, dy, dz, w, p, entering, tL, tK); if (tri2 >= 0) onHit(partOf[tri2], faceOf[tri2], px, py, pz, dx, dy, dz, w, p, !entering, tL, tK); }
         if (tri2 >= 0) {
           // 짝 면: 이탈하는 부품 A → 들어가는 부품 B (진입 q ⇔ 짝 부품에서 이탈)
           const q2 = partOf[tri2], triA = entering ? tri2 : tri, triB = entering ? tri : tri2, A = partOf[triA], B = partOf[triB];

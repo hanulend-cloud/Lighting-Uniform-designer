@@ -646,3 +646,6 @@ main:has(#m3-start:not([hidden])) { grid-template-rows: minmax(0, 1fr); }
   .m3-res .m3-t { margin-bottom: 2px; }
   .m3-res .m3-withm { grid-template-columns: minmax(0, 1fr) 96px; gap: 6px; }
 }
+.m3-seg.m3-seg2 { grid-template-columns: 1fr 1fr; }
+.m3-seg.m3-seg2 button { padding: 4px 4px; font-size: 11.5px; }
+.m3-seg.m3-seg2 button .mut { font-size: 10px; font-weight: 400; }

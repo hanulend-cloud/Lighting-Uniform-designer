@@ -7,7 +7,7 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
 const KIND_COLOR = { milky: 0xdfe9f2, clear: 0x8cc8ff, whiteTrans: 0xf2efe6, opaque: 0x8a909c, pcb: 0x2f6b3a, led: 0xffcf3f };
 const KIND_OPACITY = { milky: 0.85, clear: 0.35, whiteTrans: 0.95, opaque: 1, pcb: 1, led: 1 };
-const LED_SEL = new THREE.Color(0xff7a1a), CONE_DARK = 0xffd84a, CONE_LIGHT = 0xc98a00, CONE_SEL = 0xff7a1a, CONE_SEG = 16, CONE_RAYS = 6;   // 빛 원뿔 = 노란 점선(흐리게), 선택 LED 몸체·원뿔 = 주황 점선
+const OBS_HI = 0x2ee6ff, LED_SEL = new THREE.Color(0xff7a1a), CONE_DARK = 0xffd84a, CONE_LIGHT = 0xc98a00, CONE_SEL = 0xff7a1a, CONE_SEG = 16, CONE_RAYS = 6;   // 빛 원뿔 = 노란 점선(흐리게), 선택 LED 몸체·원뿔 = 주황 점선
 const SEL_TINT = new THREE.Color(0xffb020), FACE_COLOR = new THREE.Color(0xff5a36), OBS_COLOR = new THREE.Color(0x29d3e0);
 // 보기 방향(카메라 쪽). 평면은 z 축과 아주 조금 어긋나게 — up(z) 을 바꾸지 않으려고(OrbitControls 회전축은 생성 때 up 으로 고정)
 const VIEW_DIR = { top: [0, -1e-3, 1], front: [0, -1, 0], side: [1, 0, 0], iso: [0.7, -1.1, 0.9] };
@@ -195,6 +195,25 @@ export function createMech3dView(canvas, { onPick, gizmo = null }) {
     hemi.groundColor.set(theme === 'dark' ? 0x404050 : 0xa8b0bd); hemi.intensity = theme === 'dark' ? 1.0 : 1.25; amb.intensity = theme === 'dark' ? 0 : 0.9;
     if (lastOver) setOverlay(lastOver); else render();
   }
+  // 관측면 테두리 — 고른 면 삼각형들의 바깥 모서리(한 번만 쓰인 모서리)만
+  function obsOutline(faces) {
+    if (!faces.length) return null;
+    const want = new Map(); for (const f of faces) { if (!want.has(f.part)) want.set(f.part, new Set()); want.get(f.part).add(f.face); }
+    const pts = [];
+    for (const [pi, set] of want) {
+      const p = partsRef[pi]; if (!p) continue;
+      const P = p.positions, T = p.triangles, cnt = new Map(), key = (i) => `${P[3 * i].toFixed(3)},${P[3 * i + 1].toFixed(3)},${P[3 * i + 2].toFixed(3)}`;
+      for (let t = 0; t < T.length / 3; t++) {
+        if (!set.has(p.faceIds[t])) continue;
+        for (let e = 0; e < 3; e++) { const a = T[3 * t + e], b = T[3 * t + ((e + 1) % 3)], ka = key(a), kb = key(b), k = ka < kb ? `${ka}|${kb}` : `${kb}|${ka}`, c = cnt.get(k); if (c) c.n++; else cnt.set(k, { n: 1, a, b }); }
+      }
+      for (const { n, a, b } of cnt.values()) if (n === 1) pts.push(new THREE.Vector3(P[3 * a], P[3 * a + 1], P[3 * a + 2]), new THREE.Vector3(P[3 * b], P[3 * b + 1], P[3 * b + 2]));
+    }
+    if (!pts.length) return null;
+    const ls = new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints(pts), new THREE.LineBasicMaterial({ color: OBS_HI, depthTest: false, transparent: true, opacity: 0.95 }));
+    ls.renderOrder = 4;
+    return ls;
+  }
   function setOverlay(over) {
     lastOver = over;
     const prev = obsSet;
@@ -205,6 +224,18 @@ export function createMech3dView(canvas, { onPick, gizmo = null }) {
       const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(over.line3d, 3));
       const ln = new THREE.Line(g, new THREE.LineBasicMaterial({ color: 0x29d3e0, depthTest: false }));
       ln.renderOrder = 2; overlay.add(ln);
+    }
+    // 관측면 강조: 고른 면들의 바깥 테두리(밝은 하늘색, 가려도 보이게) + 빛 방향 화살표(over.obsArrow = { pos, axis, len, incoming })
+    const ob = obsOutline(over.obsFaces ?? []);
+    if (ob) overlay.add(ob);
+    const oa = over.obsArrow;
+    if (oa) {
+      const a = new THREE.Vector3(...oa.axis).normalize(), L = oa.len, hl = 0.28 * L, base = new THREE.Vector3(...oa.pos);
+      const tail = oa.incoming ? base.clone().addScaledVector(a, L) : base.clone(), dirv = oa.incoming ? a.clone().negate() : a.clone();   // 들어오는 빛 = 면을 향해, 나가는 빛 = 면에서 밖으로
+      const g = new THREE.BufferGeometry().setFromPoints([tail, tail.clone().addScaledVector(dirv, L - hl)]);
+      const shaft = new THREE.Line(g, new THREE.LineBasicMaterial({ color: OBS_HI, depthTest: false })); shaft.renderOrder = 4; overlay.add(shaft);
+      const head = new THREE.Mesh(new THREE.ConeGeometry(0.32 * hl, hl, 16), new THREE.MeshBasicMaterial({ color: OBS_HI, depthTest: false }));
+      head.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dirv); head.position.copy(tail).addScaledVector(dirv, L - hl / 2); head.renderOrder = 4; overlay.add(head);
     }
     const cs = over.cones ?? [], on = cs.filter((c) => c.n === over.coneSel), off = cs.filter((c) => c.n !== over.coneSel);
     if (off.length) { coneMeshes.push(coneMesh(off, CONE_COLOR, 0)); overlay.add(coneLines(off, CONE_COLOR, 0.45)); }
@@ -249,12 +280,12 @@ export function createMech3dView(canvas, { onPick, gizmo = null }) {
     render();
   }
   // 관측면 색지도 덧그림(colormap.buildObsOverlay) — 모양은 격자가 바뀔 때만, 색은 setObsColors 로 자주.
-  // geom = { positions, triangles, dir? }: buildObsOverlay 가 이미 0.05mm 띄웠으므로, 큰 모델(lift = max(0.05, r·1e-4))에서
+  // geom = { positions, triangles, dir? }: buildObsOverlay 가 이미 0.01mm 띄웠으므로(가상 검출면), 큰 모델(lift = max(0.01, r·1e-4))에서
   // 모자라는 만큼만 관측 방향 dir 로 메쉬를 더 띄운다(dir 없으면 polygonOffset 만)
   let obsDir = null;
   function liftObs() {
     if (!obsMesh) return;
-    const extra = Math.max(0.05, model.r * 1e-4) - 0.05;
+    const extra = Math.max(0.01, model.r * 1e-4) - 0.01;
     if (obsDir && extra > 0) obsMesh.position.set(...obsDir).normalize().multiplyScalar(extra); else obsMesh.position.set(0, 0, 0);
   }
   function setObsSurface(geom) {

@@ -262,6 +262,7 @@ function guidance(snap) {
   if (snap.state === 'idle' && snap.reason === 'notReady') return '광원을 지정하세요 — 명령 막대의 💡 LED 지정';
   if (!snap.stats) return snap.state === 'pending' ? '' : '계산 시작 중…';
   if (snap.stats.empty) return '판정할 유효 셀이 없음 — 관측면이 너무 좁거나 가장자리 제외가 큼';
+  if (M.observe.mode === 'in' && (snap.photons ?? 0) > 3e5 && !(snap.photometry?.eff > 1e-4)) return '이 면에는 바깥에서 들어오는 빛이 거의 없음 — 빛이 들어오는 면(예: LED 쪽 도광판 아랫면)을 고르거나 "나가는 빛" 으로 바꾸세요';
   return '';
 }
 function onCalc(snap) {
@@ -498,6 +499,25 @@ function ledSW(M, line) {
   try { v = L.currentEmitters(M, line).map((e) => { const [s, w] = line.toSW(...line.to2D(e.pos)); return { s, w }; }); } catch { v = []; }
   ledSWCache = { key, line, v };
   return v;
+}
+// 관측면 빛 방향 화살표 — 고른 면들의 면적 가중 중심에서 관측 방향(d) 으로. 들어오는 빛(mode 'in') 이면 면을 향해 그림
+function obsArrow(M, line, rt) {
+  const O = M.observe; if (!O.faces?.length || !rt) return null;
+  const want = new Set(O.faces.map((f) => `${f.part}|${f.face}`)), c = [0, 0, 0];
+  let A = 0, lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
+  rt.parts.forEach((p, pi) => {
+    const P = p.positions, T = p.triangles;
+    for (let t = 0; t < T.length / 3; t++) {
+      if (!want.has(`${pi}|${p.faceIds[t]}`)) continue;
+      const a = T[3 * t] * 3, b = T[3 * t + 1] * 3, cc = T[3 * t + 2] * 3, u = [P[b] - P[a], P[b + 1] - P[a + 1], P[b + 2] - P[a + 2]], v = [P[cc] - P[a], P[cc + 1] - P[a + 1], P[cc + 2] - P[a + 2]];
+      const ar = Math.hypot(u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]) / 2;
+      for (let k = 0; k < 3; k++) { c[k] += ar * (P[a + k] + P[b + k] + P[cc + k]) / 3; for (const q of [a, b, cc]) { lo[k] = Math.min(lo[k], P[q + k]); hi[k] = Math.max(hi[k], P[q + k]); } }
+      A += ar;
+    }
+  });
+  if (!(A > 0)) return null;
+  const axis = O.dir ?? line?.frame?.d ?? obsDirection(rt.parts, O.faces), diag = Math.hypot(hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]);
+  return { pos: c.map((x) => x / A), axis, len: Math.max(4, Math.min(25, 0.18 * diag)), incoming: O.mode === 'in' };
 }
 // LED 몸체 반폭(관측 평면 u·v 투영 중 큰 쪽의 반) — LED STEP = 기준 LED 몸체, 직접 배치 = 발광면 크기의 반. ② 끝벽·측벽 여유
 function ledHalfWidth(M, line) {
@@ -1163,7 +1183,7 @@ function renderView() {
   const sp = (pv?.M ?? M).light.spec, half = sp.model === 'gaussian' ? sp.beam / 2 : 60, gaps = ledGaps(LS.em, pv?.M ?? M);
   const cones = LS.em.map((e, i) => ({ pos: e.pos, axis: e.axis, half, len: Number.isFinite(gaps[i]) ? Math.min(4, 0.4 * gaps[i]) : 4, n: e.led ?? i }));
   // 인식한 라인 중심선은 그리지 않음(가로줄이 결과 색을 가린다는 의견 — 2026-10-26). 라인 정보는 관측면 속성 창 글자로
-  v.setOverlay({ obsFaces: M.observe.faces, line3d: null, cones, coneSel: pv ? null : S.ledSel });
+  v.setOverlay({ obsFaces: M.observe.faces, line3d: null, cones, coneSel: pv ? null : S.ledSel, obsArrow: obsArrow(M, S.line, cur) });
   // 선택 모드: LED 발광면/제외 → LED STEP 부품만 클릭되고 기구물은 투시, 관측면·PCB 면 → 기구 부품만 클릭
   const nM = cur.parts.length, led = S.pick === 'led' || S.pick === 'ledx', mech = S.pick === 'obs' || S.pick === 'pcb';
   v.setPickMode(led ? (i) => i >= nM : mech ? (i) => i < nM : null, led ? (i) => i < nM : null);

@@ -51,6 +51,6 @@ ok(ramp(0).every((v, k) => Math.abs(v - [0x20, 0x30, 0x6e][k] / 255) < 1e-12) &&
   ok([0, 1, 2].every((c) => Math.abs(col[c] - r1[c]) < 1e-6 && Math.abs(col[3 + c] - NO_DATA[c]) < 1e-6), 'cellColors: 최대 칸 = 색 막대 끝, 칸 없음 = 회색');
 }
 { const ov = buildObsOverlay([top], faces, line, G);
-  ok(ov.triangles.length > 0 && ov.cells.length === ov.positions.length / 3 && Array.from(ov.cells).every((c) => c >= 0 && G.valid[c]) && Math.abs(ov.positions[2] - 2.05) < 1e-5,
-    `덧그림 메쉬: 삼각형 ${ov.triangles.length / 3}, 모든 정점이 유효 칸, 관측 방향으로 0.05mm 띄움`); }
+  ok(ov.triangles.length > 0 && ov.cells.length === ov.positions.length / 3 && Array.from(ov.cells).every((c) => c >= 0 && G.valid[c]) && Math.abs(ov.positions[2] - 2.01) < 1e-5,
+    `덧그림 메쉬: 삼각형 ${ov.triangles.length / 3}, 모든 정점이 유효 칸, 관측 방향으로 0.01mm 앞(가상 검출면)`); }
 done();

@@ -182,6 +182,9 @@ export function renderObserveProps(el, m, ui, h) {
   const O = m.observe;
   el.innerHTML = `<div class="m3-h">속성 · 관측면</div>
     <div class="m3-row">${pickBtn(ui, 'obs', '관측면 클릭(추가/제거)')} <span class="mut">면 ${O.faces.length}개</span> ${O.faces.length ? '<button data-lp-clear>비우기</button>' : ''}</div>
+    ${O.faces.length ? `<div class="m3-sub">측정할 빛 <span class="mut">관측면 = 고른 면을 0.01 mm 앞에 투영한 가상 검출면</span></div>
+    <div class="m3-seg m3-seg2" role="group" aria-label="측정할 빛"><button type="button" data-lp-mode="out" aria-pressed="${O.mode !== 'in'}">나가는 빛<br><span class="mut">면에서 나와 보이는 밝기</span></button><button type="button" data-lp-mode="in" aria-pressed="${O.mode === 'in'}">들어오는 빛<br><span class="mut">이 면에 닿는 빛</span></button></div>
+    <div class="m3-row mut">3D 의 하늘색 테두리 = 관측면, 화살표 = 측정하는 빛의 방향</div>` : ''}
     ${ui.lineInfo ? `<div class="m3-row">${esc(ui.lineInfo)}</div>` : ''}
     ${ui.lineErr ? `<div class="m3-row"><span class="warn">${esc(ui.lineErr)}</span> <button data-lp-reline>라인 다시 인식</button></div>` : ''}
     ${O.faces.length ? `<div class="m3-row">관측 방향 ${O.dir ? '' : '<span class="mut">(자동: 면 평균 법선)</span>'} x<input type="number" step="0.1" value="${numIn(ui.dir?.[0], 3)}" data-lp-dir="0"> y<input type="number" step="0.1" value="${numIn(ui.dir?.[1], 3)}" data-lp-dir="1"> z<input type="number" step="0.1" value="${numIn(ui.dir?.[2], 3)}" data-lp-dir="2"> ${O.dir ? '<button data-lp-dirauto>자동</button>' : ''}</div>` : ''}
@@ -191,6 +194,7 @@ export function renderObserveProps(el, m, ui, h) {
   wirePick(el, ui, h);
   on(el, '[data-lp-obs]', 'change', (x) => { const v = readNum(x); if (v != null || 'lpAuto' in x.dataset) h.onObs(x.dataset.lpObs, v); });   // 자동 칸은 빈칸 = null
   on(el, '[data-lp-clear]', 'click', () => h.onClearObs());
+  on(el, '[data-lp-mode]', 'click', (x) => { if ((O.mode === 'in' ? 'in' : 'out') !== x.dataset.lpMode) h.onObs('mode', x.dataset.lpMode); });
   on(el, '[data-lp-dir]', 'change', () => {
     const xs = [0, 1, 2].map((k) => el.querySelector(`[data-lp-dir="${k}"]`));
     if (xs.some((x) => x.value.trim() === '')) return;   // 세 칸 모두 있어야 함

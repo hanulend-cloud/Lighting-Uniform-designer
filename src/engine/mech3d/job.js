@@ -46,6 +46,7 @@ export function runChunk({ S, line, obs, G, emitters, ledSpec, N, seed, rw = nul
   let lastPart = -1, lastFace = -1, lastP = -1, escObs = 0;
   const r = runMC3D(S, {
     source: src, N, seed, track: rw ? rw.part : -1,
+    onHit: obs.mode === 'in' ? a.onHit : null,   // 들어오는 빛 관측
     onExit(part, face, x, y, z, dx, dy, dz, w, p) { a.onExit(part, face, x, y, z, dx, dy, dz, w, p); lastPart = part; lastFace = face; lastP = p; },
     onEscape(x, y, z, dx, dy, dz, w, p, tL, tK) {
       a.onEscape(x, y, z, dx, dy, dz, w, p, tL, tK);
@@ -65,7 +66,7 @@ export function runJob({ S, line, obs, G, emitters, ledSpec, N, seed, batches = 
   const per = Math.ceil(N / batches);
   for (let b = 0; b < batches; b++) {
     const a = makeAccumulator(G, line, obs);
-    const r = runMC3D(S, { source: src, N: per, seed: seed * 7919 + b, onExit: a.onExit, onEscape: a.onEscape });
+    const r = runMC3D(S, { source: src, N: per, seed: seed * 7919 + b, onExit: a.onExit, onEscape: a.onEscape, onHit: obs.mode === 'in' ? a.onHit : null });
     accs.push(a.acc); cnts.push(a.cnt); ms += r.ms;
     for (const k in ledger) ledger[k] += r.ledger[k];
   }

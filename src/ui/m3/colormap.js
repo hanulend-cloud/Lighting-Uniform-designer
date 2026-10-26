@@ -92,7 +92,8 @@ export function cellColors(cells, map, valid, out = null) {
   return c;
 }
 // 관측면 덧그림 메쉬: 관측면 삼각형을 min(ds, cell) 까지 세분, 관측 방향으로 lift 띄움, 정점별 칸 번호
-export function buildObsOverlay(parts, faces, line, G, { maxTris = 200000, lift = 0.05 } = {}) {
+// lift 0.01 mm: 관측면 = 고른 면을 면 방향으로 0.01 mm 앞에 그대로 투영한 가상 검출면(사용자 의견 2026-10-26) — 겹침 깜빡임은 polygonOffset 이 막음
+export function buildObsOverlay(parts, faces, line, G, { maxTris = 200000, lift = 0.01 } = {}) {
   const byPart = new Map();
   for (const f of faces) { if (!byPart.has(f.part)) byPart.set(f.part, new Set()); byPart.get(f.part).add(f.face); }
   const maxEdge = Math.min(G.ds, G.cell), d = line.frame.d, pos = [], tri = [];
