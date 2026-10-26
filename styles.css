@@ -467,7 +467,7 @@ canvas.m3-g { width: 100%; display: block; border-radius: 4px; background: #fafb
 #mech3d-wrap[data-theme="dark"] { --m3-line: #2c3546; --m3-mut: #8e98ab; --m3-acc: #5b9dff; --m3-accbg: #1d3150; --m3-ok: #4cc48a; --m3-bad: #f0705e; --m3-warn: #e0a445;
   background: #161c28; color: #dbe1ea; color-scheme: dark; }
 #mech3d-wrap[data-theme="dark"] input, #mech3d-wrap[data-theme="dark"] select, #mech3d-wrap[data-theme="dark"] textarea,
-#mech3d-wrap[data-theme="dark"] button:not(.on):not([aria-pressed=true]):not(.m3-link), #mech3d-wrap[data-theme="dark"] .m3-file {
+#mech3d-wrap[data-theme="dark"] button:not(.on):not([aria-pressed=true]):not(.m3-link):not([role=tab]), #mech3d-wrap[data-theme="dark"] .m3-file {
   background: #1f2736; color: #dbe1ea; border-color: #364055; }
 #mech3d-wrap[data-theme="dark"] .m3-seg button:not([aria-pressed=true]) { background: transparent; }
 #mech3d-wrap[data-theme="dark"] .m3-node:hover, #mech3d-wrap[data-theme="dark"] .m3-eye:hover { background: #222b3b; }
@@ -541,3 +541,16 @@ main:has(#m3-start:not([hidden])) { grid-template-rows: minmax(0, 1fr); }
 .m3-big-eq { font-size: 12.5px; display: flex; gap: 4px; align-items: center; }
 .m3-big-hd button { border: 1px solid #d3d8e0; background: #fff; border-radius: 6px; padding: 4px 10px; cursor: pointer; font: inherit; font-size: 12.5px; }
 .m3-big-cv { width: 100%; height: 100%; display: block; background: #fafbfc; border-radius: 6px; }
+
+/* 부품 속성 탭(기본 | 상세) */
+.m3-tabs { display: grid; grid-template-columns: 1fr 1fr; border-bottom: 1px solid var(--m3-line); margin: 4px 0 6px; }
+.m3-tabs [role=tab] { border: 0; background: transparent; padding: 6px 4px; font: inherit; font-size: 12.5px; color: var(--m3-mut); cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.m3-tabs [role=tab][aria-selected=true] { color: var(--m3-acc); border-bottom-color: var(--m3-acc); font-weight: 600; }
+.m3-tabs [role=tab]:focus-visible { outline: 2px solid var(--m3-acc); outline-offset: -2px; }
+.m3-tab-s { font-weight: 400; font-size: 10.5px; color: var(--m3-mut); }
+.m3-props .m3-card .m3-row label { min-width: 70px; }
+/* 다크 모드 버튼 공통 규칙보다 우선 */
+#mech3d-wrap .m3-tabs [role=tab] { background: transparent; border: 0; border-bottom: 2px solid transparent; color: var(--m3-mut); }
+#mech3d-wrap .m3-tabs [role=tab][aria-selected=true] { color: var(--m3-acc); border-bottom-color: var(--m3-acc); }
+/* 좁은 화면(≤1024px): 왼쪽 창이 3D 칸 높이를 넘으면 아래 결과 칸을 덮지 않고 스크롤 */
+@media (max-width: 1024px) and (min-width: 721px) { .m3-left { overflow: auto; min-height: 0; } }

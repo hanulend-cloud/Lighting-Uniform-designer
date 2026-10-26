@@ -6,7 +6,7 @@ import { checkLabels, statusWord, statusIcon, checkAria, isActivateKey, esc as e
 import { ramp, NO_DATA } from '../src/ui/m3/colormap.js';
 import { defaultLight, defaultObserve, defaultChecks } from '../src/engine/mech3d/defs.js';
 import { defaultPart, setPartMaterial, setPartMaterialParam } from '../src/engine/mech3d/materials.js';
-import { clearanceHtml, meshInfo, partHeaderText, reflRowHtml, reflAddFormHtml, partToDbMaterial, renderPartProps, kindSegHtml, clearanceSummaryHtml, partTitleText, xfSummaryText, sectionOpen, resetSections } from '../src/ui/mech3d-panel.js';
+import { setPartTab, clearanceHtml, meshInfo, partHeaderText, reflRowHtml, reflAddFormHtml, partToDbMaterial, renderPartProps, kindSegHtml, clearanceSummaryHtml, partTitleText, xfSummaryText, sectionOpen, resetSections } from '../src/ui/mech3d-panel.js';
 import { DEFAULT_FINISH_CATALOG, finishCandidatesFor, catalogOf } from '../src/engine/mech3d/housing-led.js';
 import { reflDbHtml } from '../src/ui/mech3d-light-panel.js';
 import { stepLayoutRowHtml, clampVirtual, virtCountMax, ledRowsHtml, defaultRowGap } from '../src/ui/mech3d-light-panel.js';
@@ -277,6 +277,10 @@ ok(clampCap(12) === 9.9 && clampCap(0.1) === 0.5 && clampCap(3) === 3 && clampCa
   const clr = { rows: [{ name: '커버', gap: 0, depth: 0 }], leds: [], ledMin: { led: 0, dist: 1.5 }, ledAxial: null };
   const sel = { part: 1, face: null, clearance: clr, xfInfo: { center0: [0, 0, 0], size0: [10, 10, 2], lim: null }, catalog: catalogOf(null), meshInfo: null };
   renderPartProps(el, P, sel, [], {});
+  // 기본 탭(처음): 소재 종류 · 반사 소재 · 반사율(최대) · 위치·크기 숫자만 · 경고 한 줄 — 접는 구역·가능 범위·비율 고정 없음
+  ok(/data-m3-tab="basic" aria-selected="true"/.test(html) && html.includes('data-m3-refl') && html.includes('data-m3-finishr="part"') && html.includes('이 소재 최대') && html.includes('data-m3-xf="c0"') && html.includes('data-m3-xf="z2"')
+    && !html.includes('data-m3-sec=') && !html.includes('data-m3-xflock') && !html.includes('data-m3-refladd') && html.includes('가장 가까운: 커버'), '기본 탭: 쉬운 항목만(소재 · 반사율 · 위치·크기) + 경고');
+  setPartTab('detail'); renderPartProps(el, P, sel, [], {});
   ok(['xf', 'finish', 'gap'].every((k) => html.includes(`data-m3-sec="${k}"`)) && !/<details[^>]* open/.test(html) && html.includes('<summary>'), '구역: 크기·위치 · 면 처리 · 간격 상세 = 기본 닫힘');
   ok(html.includes('>부품 2 · ') || html.includes(`>${P.parts[1].name} · `), '제목 = 이름 · 크기');
   ok(html.includes('data-m3-refl') && html.includes('data-m3-finishr="part"') && html.includes('상한 ') && !html.includes('data-m3-finish="part"') && html.includes('가장 가까운: 커버'), '불투명 + 반사 소재: 본 줄 = 소재 · 반사율 · 상한, 종류 선택 숨김');
@@ -292,7 +296,9 @@ ok(clampCap(12) === 9.9 && clampCap(0.1) === 0.5 && clampCap(3) === 3 && clampCa
   const P0 = { ...P, parts: [P.parts[0], { ...P.parts[1], reflMaterial: undefined }] }; renderPartProps(el, P0, sel, [], {});
   ok(html.includes('data-m3-finish="part"') && html.includes('— 미지정 —'), '반사 소재 미지정 → 면 처리 구역에 종류 선택');
   renderPartProps(el, P, { ...sel, part: 0 }, [], {});
-  ok(html.includes('data-m3-mat="milky"') && html.includes('data-m3-fitdlg') && html.includes('＋ 실측 데이터') && html.includes('data-m3-kind="milky" aria-pressed="true"'), 'Milky: 소재 · Milky 값 · 실측 링크');
+  ok(html.includes('data-m3-mat="dbId"') && html.includes('data-m3-fitdlg') && html.includes('＋ 실측 데이터') && !html.includes('data-m3-mat="milky"'), 'Milky 상세: 실측 소재 · 수지 · 실측 링크');
+  setPartTab('basic'); renderPartProps(el, P, { ...sel, part: 0 }, [], {});
+  ok(html.includes('data-m3-mat="milky"') && html.includes('확산 (Milky)') && html.includes('data-m3-kind="milky" aria-pressed="true"') && !html.includes('data-m3-fitdlg'), 'Milky 기본: 확산 값 하나');
   resetSections(); }
 { // 좌·우 창 폭 조절(splitter): 기본 260/430 · 비율 → px · 최소 폭 · 3D 최소 280px
   const { splitPx } = await import('../src/ui/m3/splitter.js');
