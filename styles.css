@@ -466,9 +466,14 @@ canvas.m3-g { width: 100%; display: block; border-radius: 4px; background: #fafb
 /* 다크 모드: 3D 화면과 함께 왼쪽(트리·속성)·오른쪽(자동설계·결과)·명령줄·상태줄도 어둡게 */
 #mech3d-wrap[data-theme="dark"] { --m3-line: #2c3546; --m3-mut: #8e98ab; --m3-acc: #5b9dff; --m3-accbg: #1d3150; --m3-ok: #4cc48a; --m3-bad: #f0705e; --m3-warn: #e0a445;
   background: #161c28; color: #dbe1ea; color-scheme: dark; }
-#mech3d-wrap[data-theme="dark"] input, #mech3d-wrap[data-theme="dark"] select, #mech3d-wrap[data-theme="dark"] textarea,
 #mech3d-wrap[data-theme="dark"] button:not(.on):not([aria-pressed=true]):not(.m3-link):not([role=tab]), #mech3d-wrap[data-theme="dark"] .m3-file {
   background: #1f2736; color: #dbe1ea; border-color: #364055; }
+/* 값 입력칸(숫자·글자·선택)은 테마와 관계없이 흰 바탕·검은 글씨 — 입력하는 곳이 잘 보이게 */
+#mech3d-wrap input:not([type=checkbox]):not([type=radio]):not([type=file]), #mech3d-wrap select, #mech3d-wrap textarea {
+  background: #ffffff; color: #1d2330; border: 1px solid #9aa6bb; border-radius: 4px; color-scheme: light; }
+#mech3d-wrap input:not([type=checkbox]):not([type=radio]):not([type=file]):focus, #mech3d-wrap select:focus, #mech3d-wrap textarea:focus {
+  outline: 2px solid var(--m3-acc); outline-offset: 0; border-color: var(--m3-acc); }
+#mech3d-wrap input:disabled, #mech3d-wrap select:disabled { background: #e3e7ee; color: #7a8394; }
 #mech3d-wrap[data-theme="dark"] .m3-seg button:not([aria-pressed=true]) { background: transparent; }
 #mech3d-wrap[data-theme="dark"] .m3-node:hover, #mech3d-wrap[data-theme="dark"] .m3-eye:hover { background: #222b3b; }
 #mech3d-wrap[data-theme="dark"] .m3-badge { background: #2a3344; color: #c9d1de; }
