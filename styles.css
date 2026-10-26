@@ -562,7 +562,7 @@ main:has(#m3-start:not([hidden])) { grid-template-rows: minmax(0, 1fr); }
 
 /* 아래 칸(자동설계 설정 | 최적화 진행현황 | 시뮬레이션 진행현황) — 2안: 평가 결과는 오른쪽, 최적화는 아래 */
 #mech3d-wrap { grid-template-rows: auto minmax(0, 1fr) auto auto; }
-.m3-dock { display: grid; grid-template-columns: 340px minmax(0, 1fr) 320px; border-top: 1px solid var(--m3-line); height: 360px; min-height: 0; }
+.m3-dock { display: grid; grid-template-columns: 250px minmax(0, 1fr) 320px; border-top: 1px solid var(--m3-line); height: 360px; min-height: 0; }
 .m3-dock > div { min-height: 0; overflow: auto; padding: 8px 10px; }
 .m3-dock > div + div { border-left: 1px solid var(--m3-line); }
 .m3-dock #m3-auto { border: 0; max-height: none; }
@@ -600,3 +600,12 @@ main:has(#m3-start:not([hidden])) { grid-template-rows: minmax(0, 1fr); }
 .od-legend { font-size: 10.5px; color: var(--m3-mut); display: flex; gap: 4px; align-items: center; flex-wrap: wrap; margin: 2px 0 4px; }
 .od-legend i { display: inline-block; width: 14px; height: 0; border-top: 2px solid; margin-left: 6px; }
 .od-k1 { border-color: #2f80ed !important; } .od-k2 { border-color: #2fb57a !important; } .od-kn { border-color: #e0703a !important; } .od-kt { border-top-style: dashed !important; border-color: #d9473a !important; } .od-kb { border-color: #f0b400 !important; width: 8px !important; height: 8px !important; border: 2px solid; border-radius: 50%; }
+/* 타일 = 항목 선택 겸 진행현황 */
+.od-sw { display: flex; align-items: center; gap: 4px; font-size: 11.5px; font-weight: 600; margin: 2px 0; cursor: pointer; }
+.od-sw.off { color: var(--m3-mut); font-weight: 400; cursor: default; }
+.od-why { font-size: 10.5px; margin-bottom: 2px; }
+.od-opt { font-size: 11px; display: flex; align-items: center; gap: 4px; margin: 2px 0; flex-wrap: wrap; }
+.od-opt input[type=number] { width: 56px; } .od-opt select { max-width: 110px; }
+.od-tile.od-sel { border-color: var(--m3-acc); }
+.od-tile.od-off .od-sw input { opacity: .8; }
+.m3-ad-run { font-weight: 600; padding: 5px 16px !important; }

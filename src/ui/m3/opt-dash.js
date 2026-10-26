@@ -25,8 +25,10 @@ export function evalSparkSvg(evals, tgLen, tgWid, bestIdx = -1, w = 220, h = 70)
 // 후보의 점수(목표 대비 여유 — 둘 다 있으면 작은 쪽)
 const scoreOf = (e, tl, tw) => (e.ok === false || !Number.isFinite(e.Ulen) ? -Infinity : Math.min(e.Ulen - tl, Number.isFinite(e.Uwid) && Number.isFinite(tw) ? e.Uwid - tw : Infinity));
 
-export function createOptDash(el) {
+// h = { config(k) → { on, html }(타일 머리의 켜기 스위치·설정), onSel(key, value) } — 실행 전·후에는 타일에서 항목을 고르고, 실행 중에는 진행을 봄
+export function createOptDash(el, h = {}) {
   let S = null, raf = 0;
+  el.addEventListener('change', (e) => { const x = e.target.closest('[data-ad]'); if (!x || !h.onSel) return; const k = x.dataset.ad; h.onSel(k, x.type === 'checkbox' ? x.checked : x.tagName === 'SELECT' ? +x.value : x.value === '' ? NaN : +x.value); });
   const blank = () => Object.fromEntries(STAGES.map(([k]) => [k, { status: 'off', frac: 0, text: '', evals: [] }]));
   function reset({ stages = {}, tgLen, tgWid } = {}) {
     S = { tiles: blank(), tgLen, tgWid, t0: performance.now(), cur: null, note: '' };
@@ -46,15 +48,18 @@ export function createOptDash(el) {
   function finish(ok, text = '') { if (!S) return; for (const [k] of STAGES) if (S.tiles[k].status === 'run') { S.tiles[k].status = 'done'; S.tiles[k].frac = 1; } S.note = text; S.ended = ok; draw(); }
   function draw() { if (raf) return; raf = requestAnimationFrame(() => { raf = 0; render(); }); }
   function render() {
-    if (!S) { el.innerHTML = '<div class="od-h">최적화 진행현황</div><div class="mut od-empty">자동설계를 실행하면 6개 항목이 어떻게 시험·적용되는지 여기에 실시간으로 보입니다.</div>'; return; }
+    const idle = !S || S.ended != null || S.stopped;
+    const head = !S ? `<div class="od-h">최적화 항목 <span class="mut">타일에서 바꿀 항목을 켜고 왼쪽 [▶ 실행] — 실행하면 같은 타일에 진행·값 변화가 실시간으로 보입니다</span></div>` : '';
+    if (!S) { el.innerHTML = `${head}<div class="od-grid">${STAGES.map(([k, name]) => { const c = k === 'final' ? { on: true, html: '<div class="od-why mut">현재안·최종안 정밀 재계산과 보완 자동 추가 단계</div>' } : h.config?.(k) ?? { on: false, html: '' }; return `<div class="od-tile ${c.on ? 'od-sel' : 'od-off'}"><div class="od-th"><b>${name}</b></div>${c.html}</div>`; }).join('')}</div>`; return; }
     const sec = ((performance.now() - S.t0) / 1000) | 0, nEval = STAGES.reduce((a, [k]) => a + S.tiles[k].evals.length, 0);
     const tile = ([k, name]) => {
       const t = S.tiles[k], ev = t.evals;
       let bi = -1, bs = -Infinity; ev.forEach((e, i) => { const s = scoreOf(e, S.tgLen, S.tgWid); if (s > bs) { bs = s; bi = i; } });
       const last = ev[ev.length - 1], best = bi >= 0 ? ev[bi] : null;
       const chip = { off: '미사용', wait: '대기', run: `진행 ${Math.round(t.frac * 100)}%`, done: '완료' }[t.status];
-      return `<div class="od-tile od-${t.status}"><div class="od-th"><b>${name}</b><span class="od-chip">${chip}</span></div>
-        ${t.status === 'off' ? '<div class="mut od-off">이번 실행에서 쓰지 않음</div>' : `
+      const c = idle && k !== 'final' ? h.config?.(k) : null;   // 실행이 끝났으면 다시 고를 수 있게 스위치·설정을 같이
+      return `<div class="od-tile od-${t.status}${c?.on ? ' od-sel' : ''}"><div class="od-th"><b>${name}</b><span class="od-chip">${chip}</span></div>${c ? c.html : ''}
+        ${t.status === 'off' ? (c ? '' : '<div class="mut od-off">이번 실행에서 쓰지 않음</div>') : `
         <div class="od-row"><span class="mut">시험</span> ${last ? `${esc(last.label)} → ${f2(last.Ulen)}/${f2(last.Uwid)}${last.ok === false ? ` <span class="od-bad">${esc(last.why ?? '탈락')}</span>` : ''}` : '<span class="mut">–</span>'}</div>
         <div class="od-row"><span class="mut">최고</span> ${best ? `<b>${esc(best.label)}</b> → <b class="${bs >= 0 ? 'od-ok' : ''}">${f2(best.Ulen)}/${f2(best.Uwid)}</b>` : '<span class="mut">–</span>'} <span class="mut">· 후보 ${ev.length}개</span></div>
         ${evalSparkSvg(ev, S.tgLen, S.tgWid, bi)}
@@ -65,7 +70,11 @@ export function createOptDash(el) {
       <div class="od-grid">${STAGES.map(tile).join('')}</div>`;
   }
   render();
-  return { reset, addStages, progress, evals, finish };
+  function stop() { if (S) { S.stopped = true; draw(); } }
+  // 고르기만 바뀜(실행 전) — 다시 그림. 실행 결과가 남아 있으면 그대로 두고 스위치만 갱신
+  function refresh() { draw(); }
+  function clear() { S = null; draw(); }
+  return { reset, addStages, progress, evals, finish, stop, refresh, clear };
 }
 
 // 시뮬레이션 진행현황 — 광자 수에 따른 잡음(%)·U 추정 · 진행률(잡음이 목표에 닿으면 100%)

@@ -12,13 +12,15 @@ import { reflDbHtml } from '../src/ui/mech3d-light-panel.js';
 import { stepLayoutRowHtml, clampVirtual, virtCountMax, ledRowsHtml, defaultRowGap } from '../src/ui/mech3d-light-panel.js';
 import { rowGapOptions } from '../src/engine/mech3d/placement.js';
 import { ok, done } from './mech3d-util.mjs';
-import { stageAvailability, autoCardHtml, compareHtml, clampCap, overallFrac, etaText, profileSvg, shapeText, screenSummary, reusableCurrent, defaultHousingPart, finishText, applyDz, applyFinish, capDefault, nextFinish } from '../src/ui/m3/autodesign-panel.js';
+import { stageAvailability, autoCardHtml, tileConfigHtml, compareHtml, clampCap, overallFrac, etaText, profileSvg, shapeText, screenSummary, reusableCurrent, defaultHousingPart, finishText, applyDz, applyFinish, capDefault, nextFinish } from '../src/ui/m3/autodesign-panel.js';
 
 const M = {
   name: 't', contacts: [{ a: 0, b: 1, mode: 'contact' }], checks: defaultChecks(),
   parts: [setPartMaterialParam(setPartMaterial(defaultPart(0, '커버', 1), 'milky'), 'milky', 3), setPartMaterial(defaultPart(1, '하우징', 1), 'opaque')],
   light: { ...defaultLight(), kind: 'manual' }, observe: { ...defaultObserve(), faces: [{ part: 0, face: 1 }] },
 };
+// 자동설계 왼쪽 칸 + 가운데 타일(항목 스위치·설정)을 합친 HTML — 카드 시험용
+const card = (o) => autoCardHtml(o) + ['milky', 'leds', 'shape', 'housing', 'height'].map((k) => tileConfigHtml(k, o).html).join('');
 { const N = treeNodes(M, { node: 'part:0', line: { kind: 'line', closed: false, length: 116, width: 16 } });
   ok(N.map((n) => n.id).join() === 'parts,part:0,part:1,light,leds,obs,target,contacts', `트리 노드: ${N.map((n) => n.id).join()}`);
   ok(N[1].badge === 'Milky 3.0' && N[1].sel && N[1].child && N[2].badge.startsWith('불투명') && N[3].badge === '직접 배치' && N[4].label === 'LED ×10' && N[4].badge === '균등'
@@ -93,8 +95,8 @@ ok(judgeText(0.8004, 0.8009).cls === 'ok' && judgeText(0.7999, 0.8).cls === 'bad
   const stepL = (emitters, excluded = []) => stageAvailability({ ...base, light: { kind: 'step', step: { leds: [1, 2], excluded, emitters } } }, { non25: [0, 0.5] }).leds;
   const s1 = stepL([{ part: 1 }, { part: 2 }]), s2 = stepL([{ part: 1, needsCheck: true }, { part: 2 }], [2]), s3 = stepL([{ part: 2 }], [1]);
   ok(s1.ok && s1.note === 'LED STEP — 기준 LED 를 복사해 개수·간격 조정' && !s2.ok && /기준/.test(s2.why) && s3.ok, 'LED STEP ②: 기준 발광점(확인 필요·제외 아님) 있으면 가능, 없으면 이유');
-  ok(autoCardHtml({ avail: { ...a, leds: s1 }, sel: { leds: true }, running: null }).includes('기준 LED 를 복사해 개수·간격 조정'), '카드: LED STEP ② 안내 문구');
-  const h = autoCardHtml({ avail: a, sel: { milky: true, leds: false, shape: false, shapePart: 0 }, running: null });
+  ok(card({ avail: { ...a, leds: s1 }, sel: { leds: true }, running: null }).includes('기준 LED 를 복사해 개수·간격 조정'), '카드: LED STEP ② 안내 문구');
+  const h = card({ avail: a, sel: { milky: true, leds: false, shape: false, shapePart: 0 }, running: null });
   ok(h.includes('data-ad="milky" checked') && h.includes('data-ad="run"') && !h.includes('disabled data-ad="milky"'), '카드: 체크 상태·실행 버튼');
   ok(autoCardHtml({ avail: a, sel: { milky: true }, running: null, canRevert: true }).includes('data-ad="revert"') && !h.includes('data-ad="revert"'), '카드: 적용 뒤에만 되돌리기');
   const c = compareHtml({ cur: { count: 5, pitch: 0, milky: 3, Ulen: 0.62, Uwid: 0.7, eff: 0.6 }, best: { count: 4, pitch: 0, milky: 3.5, Ulen: 0.81, Uwid: 0.72, eff: 0.55 }, feasible: true, reason: '', shape: null });
@@ -109,7 +111,7 @@ ok(judgeText(0.8004, 0.8009).cls === 'ok' && judgeText(0.7999, 0.8).cls === 'bad
 { // Milky 상한 기본: ① 만 = 9.9 · ② 함께 = max(현재, 5) · 카드 값도 같음
   const a = { milky: { ok: true }, leds: { ok: true }, shape: { ok: false } };
   ok(capDefault({ milky: true }, a, 3) === 9.9 && capDefault({ milky: true, leds: true }, a, 3) === 5 && capDefault({ milky: true, leds: true }, a, 6) === 6 && capDefault({ milky: true, leds: true }, { ...a, leds: { ok: false } }, 3) === 9.9, 'Milky 상한 기본: ① 만 9.9 · ② 함께 5');
-  const h1 = autoCardHtml({ avail: a, sel: { milky: true }, running: null }), h2 = autoCardHtml({ avail: a, sel: { milky: true, leds: true }, running: null });
+  const h1 = card({ avail: a, sel: { milky: true }, running: null }), h2 = card({ avail: a, sel: { milky: true, leds: true }, running: null });
   ok(h1.includes('value="9.9" data-ad="milkyMax"') && h1.includes('Milky 상한'), '카드: ① 만 → 상한 9.9');
   ok(h2.includes('value="5" data-ad="milkyMax"'), '카드: ② 함께 → 상한 5'); }
 // ④ 보완 계산 후보: 현재보다 높은 등급(gradeOf) 중 가장 낮은 것 · 최고 등급이면 null
@@ -125,9 +127,9 @@ ok(clampCap(12) === 9.9 && clampCap(0.1) === 0.5 && clampCap(3) === 3 && clampCa
 { const s = profileSvg([1, 2, NaN, 4], [3, 3, 3, 3]);
   ok((s.match(/<polyline/g) ?? []).length === 2 && s.includes('<svg') && profileSvg(null, [1]) === '' && profileSvg([], [1]) === '', '길이 프로파일 SVG: 선 2개 · 없으면 생략');
   const base = { parts: [{ material: { kind: 'milky' } }], light: { kind: 'manual' }, observe: { faces: [] } }, a = stageAvailability(base, { non25: [0] });
-  const run = autoCardHtml({ avail: a, sel: { milky: true, shape: true, shapePart: 0 }, running: { frac: 0.4, text: 'x' }, names: ['LGP'], milkyPart: 0 });
-  ok(/data-ad="milky" checked disabled/.test(run) && /data-ad="milkyMax"[^>]*disabled/.test(run) && /data-ad="shapePart"[^>]*disabled/.test(run) && /role="progressbar"[^>]*aria-valuenow="40"/.test(run) && run.includes('① 대상: LGP'), '실행 중: 입력 비활성 · 진행 막대 aria · ① 대상 부품');
-  const nl = autoCardHtml({ avail: a, sel: { milky: true }, running: null, noLine: true });
+  const run = card({ avail: a, sel: { milky: true, shape: true, shapePart: 0 }, running: { frac: 0.4, text: 'x' }, names: ['LGP'], milkyPart: 0 });
+  ok(/data-ad="milky" checked disabled/.test(run) && /data-ad="milkyMax"[^>]*disabled/.test(run) && /data-ad="shapePart"[^>]*disabled/.test(run) && /role="progressbar"[^>]*aria-valuenow="40"/.test(run) && run.includes('대상: LGP'), '실행 중: 입력 비활성 · 진행 막대 aria · ① 대상 부품');
+  const nl = card({ avail: a, sel: { milky: true }, running: null, noLine: true });
   ok(/data-ad="run" disabled title="관측 라인이 없음"/.test(nl) && /aria-label="Milky 상한"/.test(nl), '라인 없음 → 실행 비활성 · 상한 aria-label');
   const c = compareHtml({ cur: { count: 5, pitch: 0, milky: 3, Ulen: 0.6, Uwid: 0.7, eff: 0.5, shape: { dt: 0, h: 0.2, R: 3 }, profile: [1, 2] }, best: { count: 5, pitch: 0, milky: 3, Ulen: 0.8, Uwid: 0.7, eff: 0.5, profile: [2, 2] }, feasible: true, reason: '', shape: null });
   ok(c.includes('적용된 형상') && (c.match(/<polyline/g) ?? []).length === 2, '비교표: 적용된 형상 · 프로파일 SVG');
@@ -178,8 +180,8 @@ ok(clampCap(12) === 9.9 && clampCap(0.1) === 0.5 && clampCap(3) === 3 && clampCa
   const stepA = (emitters) => stageAvailability({ parts: [{ material: { kind: 'milky' } }], light: { kind: 'step', step: { leds: [1], emitters } }, observe: { faces: [] } }, { non25: [0] });
   const c = stepA([]), d = stepA([{ part: 1 }]);
   ok(!c.housing.ok && /불투명/.test(c.housing.why) && !c.height.ok && /발광면/.test(c.height.why) && d.height.ok, '④ 불투명 없음 → 불가 · ⑤ LED STEP 발광점 없음 → 불가, 있으면 가능');
-  const h = autoCardHtml({ avail: a, sel: { height: true, housing: true, housingPart: 2 }, running: null, names: ['LGP', '케이스', '덮개'] });
-  ok(h.includes('data-ad="height" checked') && h.includes('LED 높이(LED–커버 거리)') && h.includes('케이스 면 처리') && /<option value="2" selected>덮개/.test(h) && h.includes('②→⑤→④→①→③') && !/data-ad="run" disabled/.test(h), '카드: ④⑤ 체크 · ④ 대상 선택 · 실행 순서');
+  const h = card({ avail: a, sel: { height: true, housing: true, housingPart: 2 }, running: null, names: ['LGP', '케이스', '덮개'] });
+  ok(h.includes('data-ad="height" checked') && h.includes('data-ad="housing" checked') && /<option value="2" selected>덮개/.test(h) && h.includes('②→⑤→④→①→③') && !/data-ad="run" disabled/.test(h), '카드: ④⑤ 체크 · ④ 대상 선택 · 실행 순서');
   const M = { parts, observe: { faces: [{ part: 0, face: 1 }] } };
   const box0 = [0, 0, 0, 10, 10, 2], small = [-1, -1, -1, 11, 11, 3], big = [-5, -5, -5, 15, 15, 5], far = [100, 0, 0, 200, 100, 50];
   ok(defaultHousingPart(M, [box0, small, big]) === 2 && defaultHousingPart(M, [box0, small, far]) === 1 && defaultHousingPart(M, [box0, far, [0, 0, 0, 1, 1, 1]]) === 1
@@ -229,10 +231,10 @@ ok(clampCap(12) === 9.9 && clampCap(0.1) === 0.5 && clampCap(3) === 3 && clampCa
   const c1 = P.parts[0].coating; applyFinish(P, { part: 0, ...W(0.9) });
   ok(c1 === 'coat-white' && !('coating' in P.parts[0]) && P.parts[0].finish.R === 0.9 && !('coating' in P.parts[0].finish) && P.parts[0].reflMaterial === 'pc-white', '적용: 특수 처리 → coating 저장 · 일반 등급 → 해제');
   const a = { milky: { ok: false, why: 'x' }, leds: { ok: false, why: 'x' }, shape: { ok: false, why: 'x' }, height: { ok: false, why: 'x' }, housing: { ok: true, parts: [1] } };
-  const h1 = autoCardHtml({ avail: a, sel: { housing: true, housingPart: 1, housingSpecial: true }, running: null, names: ['LGP', '케이스'], housingMat: { name: '백색 PC(일반 착색)', max: 0.9 } });
-  const h0 = autoCardHtml({ avail: a, sel: { housing: true, housingPart: 1 }, running: null, names: ['LGP', '케이스'], housingMat: null });
-  ok(h1.includes('백색 PC(일반 착색) · 상한 90%') && /data-ad="housingSpecial" checked/.test(h1) && h1.includes('특수 표면처리 허용 (고반사 도장·시트·증착)'), '카드 ④: 소재·상한 · 특수 허용 체크');
-  ok(h0.includes('반사 소재 미지정') && /data-ad="housingSpecial"(?! checked)/.test(h0) && !autoCardHtml({ avail: a, sel: { housing: false }, running: null }).includes('housingSpecial'), '카드 ④: 소재 미지정 안내 · ④ 끄면 없음');
+  const h1 = card({ avail: a, sel: { housing: true, housingPart: 1, housingSpecial: true }, running: null, names: ['LGP', '케이스'], housingMat: { name: '백색 PC(일반 착색)', max: 0.9 } });
+  const h0 = card({ avail: a, sel: { housing: true, housingPart: 1 }, running: null, names: ['LGP', '케이스'], housingMat: null });
+  ok(h1.includes('백색 PC(일반 착색) · 최대 90%') && /data-ad="housingSpecial" checked/.test(h1) && h1.includes('특수 표면처리 허용'), '카드 ④: 소재·상한 · 특수 허용 체크');
+  ok(h0.includes('소재 미지정') && /data-ad="housingSpecial"(?! checked)/.test(h0) && !card({ avail: a, sel: { housing: false }, running: null }).includes('housingSpecial'), '카드 ④: 소재 미지정 안내 · ④ 끄면 없음');
   const r = reflRowHtml({ material: { kind: 'opaque' }, reflMaterial: 'pc-white' }, C), r0 = reflRowHtml({ material: { kind: 'opaque' } }, C);
   ok(/<option value="pc-white" selected>/.test(r) && (r.match(/<option/g) ?? []).length === 6 && !r.includes('coat-') && r0.includes('<option value="" selected>— 미지정 —'), '부품 편집기: 반사 소재(미지정 + 일반 5개)');
   ok(reflRowHtml({ material: { kind: 'milky' } }, C) === '', '불투명 아님 → 반사 소재 없음');

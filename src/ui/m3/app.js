@@ -27,7 +27,7 @@ import { positionsFromLayout, addPosition, alignPositions } from '../../engine/m
 import { createResultsPanel } from './results-panel.js';
 import { renderStatusBar } from './status-bar.js';
 import { createAdRunner } from './autodesign-run.js';
-import { renderAutoPanel, stageAvailability, clampCap, overallFrac, etaText, reusableCurrent, defaultHousingPart, applyDz, applyFinish, capDefault, nextFinish, finishText, shapeText } from './autodesign-panel.js';
+import { renderAutoPanel, stageAvailability, clampCap, overallFrac, etaText, reusableCurrent, defaultHousingPart, applyDz, applyFinish, capDefault, nextFinish, finishText, shapeText, tileConfigHtml } from './autodesign-panel.js';
 import { ledHeightRange, heightCandidates, catalogOf, finishCandidatesFor, setReflMaterial, partFinishEdit } from '../../engine/mech3d/housing-led.js';
 import { migrateFinishCatalog, reflectPatch, copyAsUser, entryFromForm, addSamples, parsePercents, uniqueReflId } from '../../model/reflect-db.js';
 import { intersectRay } from '../../engine/mech3d/bvh.js';
@@ -145,7 +145,7 @@ export async function mount(ctx) {
   const a = A = { ctx, store, pool, view: null, meshShown: null, lineKey: '', Gc: null, obsShown: null, checks: {}, markKey: '', timing: { start: 0, first: null, noise5: null } };
   a.prog = createProgressive({ ports: pool.ports(), onUpdate: onCalc, opts: { targetNoise: ctx.mspec.observe.targetNoise ?? 0.02 } });
   a.results = createResultsPanel($('#m3-res'));
-  a.optDash = createOptDash($('#m3-optdash')); a.simDash = createSimDash($('#m3-simdash'));   // 아래 칸 대시보드
+  a.optDash = createOptDash($('#m3-optdash'), { config: (k) => (A?.tileState ? tileConfigHtml(k, A.tileState) : { on: false, html: '' }), onSel: (k, v) => adSel(k, v) }); a.simDash = createSimDash($('#m3-simdash'));   // 아래 칸 대시보드(가운데 = 항목 선택 겸 진행현황)
   a.cmd = mountCommandBar($('#m3-cmd'), cmdHandlers());
   a.unsub = store.subscribe(onChange);
   a.keydown = onKey; window.addEventListener('keydown', onKey);
@@ -401,6 +401,8 @@ const adClone = (x) => (x == null ? null : JSON.parse(JSON.stringify(x)));
 // 자동설계 카드 펼침 상태 — 새로고침해도 기억(브라우저별 편의 설정)
 const AD_OPEN_KEY = 'uds.m3.autoOpen';
 function adSetOpen(v) { adState().open = v; try { localStorage.setItem(AD_OPEN_KEY, v ? '1' : '0'); } catch {} renderAuto(); }
+// 자동설계 항목·설정 바꾸기(왼쪽 칸·가운데 타일 공용)
+function adSel(k, v) { const st = adState(); if (st.running) return; st.sel[k] = k === 'milkyMax' ? clampCap(v) : v; renderAuto(); }
 function renderAuto() {
   const el = $('#m3-auto'), st = adState();
   el.hidden = false;   // 닫혀 있어도 한 줄 머리는 늘 보인다(메뉴가 사라진 것처럼 보이지 않게)
@@ -415,12 +417,14 @@ function renderAuto() {
   if (!st.running && !avail.housing.parts?.includes(st.sel.housingPart)) { const k = defaultHousingPart(M, adInfo().boxes); st.sel.housingPart = avail.housing.ok ? (avail.housing.parts.includes(k) ? k : avail.housing.parts[0]) : -1; }   // ④ 기본 = 관측 부품을 감싸는 가장 큰 불투명 부품
   const mp = st.running ? st.milkyPart : adMilkyPart(M, avail), sel = { ...st.sel, milkyMax: st.sel.milkyMax ?? capDefault(st.sel, avail, mp != null ? M.parts[mp].material.milky : 0) };
   const hm = st.sel.housingPart >= 0 ? reflCat().find((e) => !e.special && e.id === M.parts[st.sel.housingPart]?.reflMaterial) : null;   // ④ 대상 반사 소재
+  A.tileState = { avail, sel, running: st.running, names: M.parts.map((p) => p.name), milkyPart: mp, housingMat: hm ? { name: hm.name, max: hm.max } : null };
+  A.optDash?.refresh();
   renderAutoPanel(el, { avail, sel, running: st.running, result: st.result, names: M.parts.map((p) => p.name), canRevert: !!st.undo, applied: st.undo ? st.applied ?? null : null, noLine: !A.store.session.line, milkyPart: mp, housingMat: hm ? { name: hm.name, max: hm.max } : null, catalog: reflCat() }, {
-    onSel: (k, v) => { if (st.running) return; st.sel[k] = k === 'milkyMax' ? clampCap(v) : v; renderAuto(); },
+    onSel: (k, v) => adSel(k, v),
     onAction: (k) => ({ run: adRunBoost, stop: adStop, close: () => adSetOpen(false), apply: adApply, cancel: adCancel, revert: adRevert, step: adStep })[k]?.(),
   });
 }
-function adStop() { const st = adState(); if (!st.running || !st.runner) return; st.runner.cancel(); setStatus('자동설계 중지됨'); }
+function adStop() { const st = adState(); if (!st.running || !st.runner) return; st.runner.cancel(); setStatus('자동설계 중지됨'); A.optDash?.stop(); }
 // 실행 문맥 = 시작 때 스냅샷 { M0: mspec 복사, line, G, obs, rt: 기구 런타임, mp: ① 대상 부품 } — 평가·미리보기·적용이 모두 이것 기준
 // 형상 원본 = 원본 메쉬 + 크기·위치 조절(이미 적용된 shapeMod 는 빼고 — 적용 때 shapeMod 를 바꿔 끼우므로 평가와 같게)
 // 같은 (원본, xform) 이면 같은 객체 — 세분·높이맵 메모(메쉬 객체 기준)가 맞도록
