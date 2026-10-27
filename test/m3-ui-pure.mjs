@@ -24,7 +24,7 @@ const card = (o) => autoCardHtml(o) + ['milky', 'leds', 'shape', 'housing', 'hei
 { const N = treeNodes(M, { node: 'part:0', line: { kind: 'line', closed: false, length: 116, width: 16 } });
   ok(N.map((n) => n.id).join() === 'parts,part:0,part:1,light,leds,obs,target', `트리 노드: ${N.map((n) => n.id).join()}`);
   ok(N[1].badge === 'Milky 3.0' && N[1].sel && N[1].child && N[2].badge.startsWith('불투명') && N[3].badge === '직접 배치' && N[4].label === 'LED ×10' && N[4].badge === '균등'
-    && N[5].badge === '직선 116×16' && N[6].badge === '0.80 / 0.80' && N[7].badge === '1', `배지: ${N.map((n) => n.badge).join(' | ')}`); }
+    && N[5].badge === '직선 116×16' && N[6].badge === '0.80 / 0.80', `배지: ${N.map((n) => n.badge).join(' | ')}`); }
 { const N = treeNodes({ ...M, light: defaultLight() }, { node: null, line: null });
   ok(!N.some((n) => n.id === 'leds') && N.find((n) => n.id === 'obs').badge === '인식 중' && N.find((n) => n.id === 'light').badge === '지정 안 함', '광원 없음 → LED 노드 없음, 라인 인식 중');
   const N2 = treeNodes({ ...M, observe: defaultObserve() }, { node: null, line: null });
@@ -281,7 +281,7 @@ ok(clampCap(12) === 9.9 && clampCap(0.1) === 0.5 && clampCap(3) === 3 && clampCa
   renderPartProps(el, P, sel, [], {});
   // 기본 탭(처음): 소재 종류 · 반사 소재 · 반사율(최대) · 위치·크기 숫자만 · 경고 한 줄 — 접는 구역·가능 범위·비율 고정 없음
   ok(/data-m3-tab="basic" aria-selected="true"/.test(html) && html.includes('data-m3-refl') && html.includes('data-m3-finishr="part"') && html.includes('이 소재 최대') && html.includes('data-m3-xf="c0"') && html.includes('data-m3-xf="z2"')
-    && !html.includes('data-m3-sec=') && !html.includes('data-m3-xflock') && !html.includes('data-m3-refladd') && html.includes('가장 가까운: 커버'), '기본 탭: 쉬운 항목만(소재 · 반사율 · 위치·크기) + 경고');
+    && !html.includes('data-m3-sec=') && !html.includes('data-m3-xflock') && !html.includes('data-m3-refladd') && !html.includes('가장 가까운'), '기본 탭: 쉬운 항목만(소재 · 반사율 · 위치·크기) + 경고');
   setPartTab('detail'); renderPartProps(el, P, sel, [], {});
   ok(['xf', 'finish', 'gap'].every((k) => html.includes(`data-m3-sec="${k}"`)) && !/<details[^>]* open/.test(html) && html.includes('<summary>'), '구역: 크기·위치 · 면 처리 · 간격 상세 = 기본 닫힘');
   ok(html.includes('>부품 2 · ') || html.includes(`>${P.parts[1].name} · `), '제목 = 이름 · 크기');

@@ -96,7 +96,7 @@ export function stepLayoutRowHtml(st, line = null, n = null) {
 }
 // LED 노드 본문(순수 HTML): 인식 상태 · (LED STEP) 배치 · 배광 · 지향각 · 발광면 크기 · 광속(lm/개, 0 = 상대값) · PCB 색
 // adv = LED 속성 창의 '배치·인식 (고급)' 구역 — 배치·배광·광속은 창 위쪽에 있으므로 뺀다
-function ledNodeBodyHtml(m, ui, adv = false) {
+function ledNodeBodyHtml(m, ui, adv = false, showBeam = false) {   // showBeam = 노드 상세 탭(배광 모델·지향각 직접 입력)
   const L = m.light, st = L.step, v = L.kind === 'step' ? st?.virtual : null, lay = ui.lay ?? null;
   const nLed = (st?.leds ?? []).filter((i) => !(st.excluded ?? []).includes(i)).length;
   const failed = !!v && !lay?.virtual && (!!lay?.err || !!ui.line);   // 라인이 있는데 원래 배치로 돌아감(오류·메쉬 없음)
@@ -109,7 +109,7 @@ function ledNodeBodyHtml(m, ui, adv = false) {
     ${!adv && L.kind === 'step' && st ? stepLayoutRowHtml(st, ui.line ?? null, lay?.emitters?.length ?? null) : ''}
     ${L.kind === 'step' && st ? (v ? '<div class="m3-row mut">배치를 편집한 상태 — 발광면 다시 지정·제외 클릭은 [STEP 원래대로] 뒤에</div>' : `<div class="m3-row">${pickBtn(ui, 'led', 'LED 발광면 클릭')} ${pickBtn(ui, 'ledx', 'LED 제외/포함 클릭')}</div>`) : ''}
     ${ui.ledInfo ? `<div class="m3-row mut">${esc(ui.ledInfo)}</div>` : ''}
-    ${`<div class="m3-row"><label>배광</label><select data-lp-spec="model"><option value="lambertian" ${sel(L.spec.model, 'lambertian')}>램버시안</option><option value="gaussian" ${sel(L.spec.model, 'gaussian')}>가우시안</option></select>
+    ${adv && !showBeam ? '' : `<div class="m3-row"><label>배광</label><select data-lp-spec="model"><option value="lambertian" ${sel(L.spec.model, 'lambertian')}>램버시안</option><option value="gaussian" ${sel(L.spec.model, 'gaussian')}>가우시안</option></select>
       지향각<input type="number" min="10" max="170" step="5" value="${L.spec.beam}" data-lp-spec="beam">°</div>`}
     <div class="m3-row"><label>발광면</label><input type="number" min="0" step="0.1" value="${L.spec.sizeX}" data-lp-spec="sizeX">×<input type="number" min="0" step="0.1" value="${L.spec.sizeY}" data-lp-spec="sizeY">mm</div>
     ${adv ? '' : `<div class="m3-row"><label>광속</label><input type="number" min="0" step="1" value="${L.spec.fluxLm ?? 0}" data-lp-spec="fluxLm"> lm/개 <span class="mut">0 = 상대값(최대 대비 %)</span></div>`}
@@ -169,7 +169,7 @@ export function renderLedProps(el, m, ui, h) {
   if (L.kind === 'none') { el.innerHTML = '<div class="m3-h">속성 · LED</div><div class="mut">광원 노드에서 방식을 먼저 고르세요</div>'; return; }
   const d = ui.led ?? null;
   const nav = ledNavHtml(null, ui.ledTotal ?? 0);
-  el.innerHTML = d ? ledPanelHtml(m, ui) : `<div class="m3-h">속성 · LED</div>${tabsHtml('leds')}<div class="m3-edit" role="tabpanel">${LP_TAB.leds === 'basic' ? ledBasicHtml(m, ui, nav) : ledNodeBodyHtml(m, ui, true)}</div>`;
+  el.innerHTML = d ? ledPanelHtml(m, ui) : `<div class="m3-h">속성 · LED</div>${tabsHtml('leds')}<div class="m3-edit" role="tabpanel">${LP_TAB.leds === 'basic' ? ledBasicHtml(m, ui, nav) : ledNodeBodyHtml(m, ui, true, true)}</div>`;
   if (!d) wireTabs(el, 'leds', () => renderLedProps(el, m, ui, h));
   wireSections(el);
   wirePick(el, ui, h);

@@ -134,8 +134,8 @@ const peakRows = (ms, top, { len = 0.5, wid = 0.5, Uw = () => 0.9 } = {}) => ms.
   const io = { evalShapes: mk((c) => (c.c > 0 ? 0.3 : 0), seen), verify: async (d) => ({ stats: st(d.shape?.c > 0 ? 0.9 : 0.6, 0.9), eff: 0.5 }), progress() {}, shapePlan: (p) => plans.push(p), cancelled: () => false };
   const r = await runAutoDesign({ stages: { shape: true }, obs, current: cur, shapePart: 0, shapeRanges: rg }, io);
   const sc = r.steps.find((x) => x.stage === 'shapeScreen');
-  ok(sc.vars.join() === 'c' && seen[0].length === 7 && seen[1].length === 3 && seen[1].some((c) => c.c === 0 && c.dt === 0), `선별 → ['c'], 선별 7개 · 격자 3개(현재 포함): ${sc.vars}`);
-  ok(r.best.shape.c > 0 && !r.unchanged && plans.at(-1).total === shapeTotal(7, 3), `최종 형상 c=${r.best.shape?.c}, 분모 ${plans.at(-1)?.total}`);
+  ok(sc.vars.join() === 'c' && seen[0].length === 13 && seen[1].length === 5 && seen[1].some((c) => c.c === 0 && c.dt === 0), `선별 → ['c'], 선별 13개(끝값+½) · 격자 5개(변수 1개 = 5단계, 현재 포함): ${sc.vars}`);
+  ok(r.best.shape.c > 0 && !r.unchanged && plans.at(-1).total === shapeTotal(13, 5), `최종 형상 c=${r.best.shape?.c}, 분모 ${plans.at(-1)?.total}`);
   const io2 = { ...io, evalShapes: mk(() => 0), verify: async () => ({ stats: st(0.75, 0.9), eff: 0.5 }) };
   const r2 = await runAutoDesign({ stages: { shape: true }, obs, current: cur, shapePart: 0, shapeRanges: rg }, io2);
   ok(r2.unchanged && r2.best.shape === null && r2.reason === '형상 변수의 효과가 잡음 수준 — 현재 형상 유지', `효과 없음 → 현재안 유지: ${r2.reason}`); }
@@ -143,11 +143,11 @@ const peakRows = (ms, top, { len = 0.5, wid = 0.5, Uw = () => 0.9 } = {}) => ms.
   const rg = shapeVarRanges({ t0: 2, pitch: 5, hasCenters: true }), seen = [];
   const evalFn = async (cands) => { seen.push(cands); return cands.map((c) => ({ cand: c, stats: st(0.6 + (c.h > 0 ? 0.3 : 0), 0.9), eff: 0.5, ok: true })); };
   const sc = await screenShapeVars(evalFn, rg, obs);
-  ok(sc.vars.join() === 'h' && seen[0].length === 9 && seen[0].every((c) => c.R === 2.75), `h 선별(선별 9개(R 은 h 와 묶음), R=mid): ${sc.vars}`);
+  ok(sc.vars.join() === 'h' && seen[0].length === 17 && seen[0].every((c) => c.R === 2.75), `h 선별(선별 17개(R 은 h 와 묶음), R=mid): ${sc.vars}`);
   const io = { evalShapes: (d, c, N) => evalFn(c), verify: async (d) => ({ stats: st(d.shape?.h > 0 ? 0.9 : 0.6, 0.9), eff: 0.5 }), progress() {}, cancelled: () => false };
   const r = await runAutoDesign({ stages: { shape: true }, obs, current: { milky: 3, shape: null }, shapePart: 0, shapeRanges: rg }, io);
   const grid = seen[2], Rs = new Set(grid.map((c) => c.R));
-  ok(grid.length === 9 && Rs.size === 3 && r.best.shape.h > 0, `격자 ${grid.length}개, R ${[...Rs]}`); }
+  ok(grid.length === 15 && Rs.size === 3 && r.best.shape.h > 0, `격자 ${grid.length}개(h 5단계 × R 3), R ${[...Rs]}`); }
 { // 격자 차원 예산 3: h(+R) = 2 → 다른 변수 하나만 / h 가 예산을 넘으면 건너뜀
   const rg = shapeVarRanges({ t0: 2, pitch: 5, hasCenters: true });
   const fake = (g) => async (cands) => cands.map((c) => ({ cand: c, stats: st(0.5 + g(c), 0.9), eff: 0.5, ok: true }));
