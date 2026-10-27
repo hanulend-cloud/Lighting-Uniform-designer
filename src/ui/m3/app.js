@@ -17,7 +17,7 @@ import * as L from './leds.js';
 import { buildObsOverlay, cellColors, extractFaces } from './colormap.js';
 import { mountCommandBar } from './command-bar.js';
 import { renderFeatureTree, toggleVisibility } from './feature-tree.js';
-import { mountSplitter, mountDockSplitter } from './splitter.js';
+import { mountSplitter, mountDockSplitter, mountFacSplitter } from './splitter.js';
 import { createOptDash, createSimDash } from './opt-dash.js';
 import { partClearance, limitXform, axisLimits, TOL } from '../../engine/mech3d/clearance.js';
 import { renderPropertyPanel } from './property-panel.js';
@@ -140,6 +140,7 @@ const reflCat = () => catalogOf(A?.ctx.reflectDb?.() ?? null);
 export async function mount(ctx) {
   mountSplitter(document.querySelector('.m3-main'));   // 좌·우 창 폭 끌어서 조절(한 번만 붙음)
   mountDockSplitter(document.querySelector('#m3-dock'), document.querySelector('#mech3d-wrap'));   // 아래 칸 높이 조절
+  mountFacSplitter(document.querySelector('#m3-factor'), document.querySelector('.m3-right'));   // 오른쪽 맨 아래 설계 인자 현황 높이 조절
   if (A && A.ctx.mspec === ctx.mspec) { A.ctx = ctx; return; }   // 같은 기구 — 그대로
   unmount();
   const pool = getPool(ctx);
