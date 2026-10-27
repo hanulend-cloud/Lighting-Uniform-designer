@@ -5,11 +5,13 @@
 //   { type:'scene', id, sceneKey, mechParts, mspec, ledParts, lineData, G, obs, emitters } → { id, sceneKey, ready:true }
 //   { type:'chunk', id, sceneKey, seed, N, rw?:{part, milkies}, emitters? } → { id, sceneKey, acc, cnt, ledger, leak, escObs, ms, rw?:{acc, sf, sf2, n, milkies} } | { id, sceneKey, stale:true }
 //     (spec 2026-10-15 m3-cad-ui §4 — 장면은 한 번 만들고 청크만 반복. chunk-host.js 계약)
+//   init 에 gpu:true 면 GPU 를 찾아 청크를 GPU 로 추적 — 결과를 { gpu: { ok, name, error? } } 로 알림(id 없음). 실패·장치 소실 → CPU 로 계속
 //   오류: { id, error }
 import { initL2, l2State, browserLoader, bufferLoader, setMaterialDb } from '../l2/runtime.js';
 import { createDb } from '../../model/materials-db.js';
 import { recognizeLine } from './line.js';
 import { makeChunkHost } from './chunk-host.js';
+import { createGpuTracer } from './gpu-trace.js';
 
 let ready = null, db = null;
 const host = makeChunkHost({ getTable: () => l2State().table, getDb: () => db });
@@ -21,6 +23,12 @@ self.onmessage = async (ev) => {
       db = createDb(m.db?.base ?? [], m.db?.user ?? []);
       setMaterialDb(db);
       await ready;
+      if (m.gpu) {
+        let t = null, err = null;
+        try { t = await createGpuTracer(); } catch (e) { err = String(e?.message ?? e); }
+        if (t) host.setGpu(t, (msg) => self.postMessage({ gpu: { ok: false, name: t.name, error: msg } }));
+        self.postMessage({ gpu: { ok: !!t, name: t?.name ?? null, error: err } });
+      }
       return;
     }
     if (m.type === 'db') { db = createDb(m.db?.base ?? [], m.db?.user ?? []); setMaterialDb(db); return; }
@@ -30,7 +38,7 @@ self.onmessage = async (ev) => {
       return;
     }
     await ready;
-    const out = host.handle(m);
+    const out = await host.handle(m);
     if (out) self.postMessage({ id: m.id, ...out.reply }, out.transfer);
   } catch (e) { self.postMessage({ id: m.id, error: String(e?.message ?? e) }); }
 };

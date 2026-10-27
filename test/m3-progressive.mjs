@@ -180,12 +180,13 @@ const OPT = { chunkN: 1000, fixedChunk: true, bins: 10, debounceMs: 500, tickMs:
 // 합성 MC 포트: 셀 k 의 광자당 기댓값 mu[k], 광자당 표준편차 sig — 청크 합 = N·mu + √N·sig·z(시드 결정적). 속도 rate 광자/ms → ms 보고
 const mu = [0.85, 0.85, 1, 1, 1, 1, 0.95, 0.95], sig = 2;
 function gauss(seed, k) { let x = Math.sin(seed * 12.9898 + k * 78.233) * 43758.5453; const u1 = x - Math.floor(x); x = Math.sin(seed * 39.3468 + k * 11.135) * 24634.6345; const u2 = x - Math.floor(x); return Math.sqrt(-2 * Math.log(u1 + 1e-12)) * Math.cos(2 * Math.PI * u2); }
-const mcReply = (msg, rate) => ({ sceneKey: msg.sceneKey, acc: Float64Array.from(mu, (m, k) => msg.N * m + Math.sqrt(msg.N) * sig * gauss(msg.seed, k)), cnt: new Uint32Array(8).fill(msg.N / 100), ledger: { ...LED, emitted: msg.N }, leak: {}, ms: msg.N / rate });
+// 실제 엔진처럼 청크 결과 = 광원 광속 1회분(가중치 w0 = 1/N — 광자 수와 무관, 평균 mu·잡음 sig/√N), 개수 cnt 만 광자 수에 비례
+const mcReply = (msg, rate) => ({ sceneKey: msg.sceneKey, acc: Float64Array.from(mu, (m, k) => m + sig * gauss(msg.seed, k) / Math.sqrt(msg.N)), cnt: new Uint32Array(8).fill(msg.N / 100), ledger: { ...LED, emitted: 1 }, leak: {}, ms: msg.N / rate });
 function mcPort(T, rate) {
   const log = [];
   return { log, send(msg) { log.push(msg); return msg.type === 'scene' ? Promise.resolve({ sceneKey: msg.sceneKey, ready: true }) : new Promise((res) => T.setTimeout(() => res(mcReply(msg, rate)), msg.N / rate)); } };
 }
-const perPhoton = (s) => Array.from(s.sum, (v) => v / s.photons);
+const perPhoton = (s) => Array.from(s.sum, (v) => v / (s.photons / 25000));   // sum = 광자 수 가중(chunkN 25,000 = 1회분) 합
 {   // 적응형: 첫 청크 minChunk, 다음은 잰 속도 × 0.5초(상·하한), 포트마다 따로
   const T = fakeTimers(), slow = mcPort(T, 1.3), fast = mcPort(T, 40);   // 1,300 / 40,000 광자/초
   const P = createProgressive({ ports: [slow, fast], timers: T, opts: { bins: 10, debounceMs: 500, tickMs: 1000, maxPhotons: 1e9, targetNoise: 1e-9 } });

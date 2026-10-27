@@ -26,7 +26,7 @@ function sampleHG(g, u) {
 
 // 다른 부품의 반대 법선 삼각형이 근처에 있을 수 있는 삼각형 표시(점 단위 판정의 사전 거름) — 장면별 캐시
 const coinCache = new WeakMap();
-function coinFlags(S) {
+export function coinFlags(S) {
   if (coinCache.has(S)) return coinCache.get(S);
   const { P, T, normals: NM, partOf, bvh } = S, nT = partOf.length, flag = new Uint8Array(nT), buf = [];
   for (let t = 0; t < nT; t++) {

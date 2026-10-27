@@ -76,15 +76,16 @@ export function createProgressive({ ports, timers = globalThis, onUpdate = () =>
   function fail(g, e) { if (g !== gen) return; stopTick(); state = 'error'; error = String(e?.message ?? e); emit(); }
   function pumpAll(g) { ports.forEach((_, k) => { if (ready[k] === g && busy[k] !== g) pump(k, g); }); }
   // 다음 청크 크기 — 잰 계산 시간(Worker 의 r.ms, 없으면 왕복 시간)으로 ≈chunkMs 분량
-  function adapt(k, N, ms) {
+  // GPU 포트(응답 gpu:true)는 한 번에 많이 보낼수록 빠름(청크마다 광원 표본·되읽기 비용) — 목표 시간 ×3, 상한 ×20
+  function adapt(k, N, ms, gpu = false) {
     if (o.fixedChunk || !(ms > 0)) return;
-    size[k] = Math.max(o.minChunk, Math.min(o.maxChunk, Math.round((N / ms) * o.chunkMs)));
+    size[k] = Math.max(o.minChunk, Math.min(o.maxChunk * (gpu ? 20 : 1), Math.round((N / ms) * o.chunkMs * (gpu ? 3 : 1))));
   }
   // 포트 하나에 청크를 하나씩 보낸다(응답이 오면 다음 — Worker 에 청크를 쌓지 않아 새 장면은 진행 중 청크 1개만 기다림)
   async function pump(k, g) {
     busy[k] = g;
     try {
-      while (g === gen && state === 'running' && (retry.length > 0 || issued < o.maxPhotons)) {
+      while (g === gen && state === 'running' && (retry.length > 0 || issued < o.maxPhotons) && !ports[k].off?.()) {   // off: GPU 사용 중 쉬는 CPU 포트
         // 버려진(장면 불일치) 청크 번호를 먼저 다시 쓴다 — 시드가 빈틈없이 이어져야 runJob 과 같은 배치가 됨
         let c, N, b;
         if (retry.length > 0) ({ c, N, b } = retry.shift());
@@ -98,7 +99,7 @@ export function createProgressive({ ports, timers = globalThis, onUpdate = () =>
           if (++ignored > o.maxIgnored) { fail(g, new Error('Worker 장면이 맞지 않음 — 다시 계산하세요')); return; }
           continue;
         }
-        adapt(k, N, Number.isFinite(r.ms) && r.ms > 0 ? r.ms : now() - t0);
+        adapt(k, N, Number.isFinite(r.ms) && r.ms > 0 ? r.ms : now() - t0, !!r.gpu);
         accumulate(b, N, r);
         if (state !== 'running') { snap = compute(); emit(); }                              // 일시정지·완료 뒤 도착한 청크
         else if (photons >= o.maxPhotons) finish('max');
@@ -112,21 +113,24 @@ export function createProgressive({ ports, timers = globalThis, onUpdate = () =>
     let b = 0; for (let i = 1; i < o.bins; i++) if (binIssued[i] < binIssued[b]) b = i;
     return b;
   }
+  // 청크 결과는 광자 수와 무관하게 '광원 광속 1회분'(가중치 w0 = flux/N) — 광자 수 가중(f = N/chunkN)으로 더해야 크기가 다른 청크(적응형·GPU)가 섞여도
+  // 배치 평균이 바르다(예전엔 청크 개수 가중 → GPU 큰 청크가 섞이면 배치 간 차가 커져 잡음이 수렴하지 않음, 2026-10-27). 고정 크기면 f = 1(runJob 과 비트 일치)
   function accumulate(b, N, r) {
-    const n = r.acc.length;
+    const n = r.acc.length, f = N / o.chunkN;
     const B = bins[b] ?? (bins[b] = { acc: new Float64Array(n), cnt: new Float64Array(n), n: 0, photons: 0 });
-    for (let k = 0; k < n; k++) { B.acc[k] += r.acc[k]; B.cnt[k] += r.cnt[k]; }
+    for (let k = 0; k < n; k++) { B.acc[k] += r.acc[k] * f; B.cnt[k] += r.cnt[k]; }
     B.n++; B.photons += N; nMin = Math.min(nMin, N); nMax = Math.max(nMax, N);
-    for (const key in ledger) ledger[key] += r.ledger[key] ?? 0;
-    for (const key in r.leak ?? {}) leak[key] = (leak[key] ?? 0) + r.leak[key];
-    for (const key in r.paths ?? {}) paths[key] = (paths[key] ?? 0) + r.paths[key];   // 광경로(관측면으로 나온 빛이 거친 부품 차례)
+    for (const key in ledger) ledger[key] += (r.ledger[key] ?? 0) * f;
+    for (const key in r.leak ?? {}) leak[key] = (leak[key] ?? 0) + r.leak[key] * f;
+    for (const key in r.paths ?? {}) paths[key] = (paths[key] ?? 0) + r.paths[key] * f;   // 광경로(관측면으로 나온 빛이 거친 부품 차례)
     photons += N; doneChunks++;
   }
   function compute() {
     const filled = bins.filter(Boolean);
     if (!job || filled.length < 2) return { stats: null, sum: null, photometry: null };
     // 배치를 광자 수로 정규화 — 기준 = 청크 평균 광자 수. 청크 크기가 모두 같으면 ÷ 청크 수(1개면 그대로 — runJob 과 비트 일치)
-    const same = nMin === nMax, ref = photons / doneChunks;
+    // 배치 = chunkN 광자 1회분으로 정규화(acc 는 광자 수 가중으로 더했음). cnt 는 광자 수에 비례하므로 같은 비율. 고정 크기면 ÷ 청크 수
+    const same = nMin === nMax && nMin === o.chunkN, ref = o.chunkN;
     const norm = (B, a) => (same ? (B.n === 1 ? a : a.map((v) => v / B.n)) : a.map((v) => v * (ref / B.photons)));
     const accs = filled.map((B) => norm(B, B.acc)), cnts = filled.map((B) => norm(B, B.cnt));
     const stats = tallyStats(job.G, accs, job.obs, cnts);

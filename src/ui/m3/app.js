@@ -51,7 +51,8 @@ let viewP = null;   // 3D 뷰는 한 번만 만든다(같은 캔버스에 WebGL 
 // sceneKey 는 모듈 전체에서 이어지는 번호 — 유지된 Worker 의 장면 캐시가 다른 마운트의 같은 이름과 섞이지 않게
 let pool = null, sceneSeq = 0;
 function getPool(ctx) {
-  pool ??= createPool({ dbLists: ctx.dbLists, l2Raw: ctx.l2Raw ?? (() => null), onStatus: (t) => setStatus(t) });
+  pool ??= createPool({ dbLists: ctx.dbLists, l2Raw: ctx.l2Raw ?? (() => null), onStatus: (t) => setStatus(t), onGpu: gpuBadge });
+  gpuBadge(pool.gpu());
   return pool;
 }
 export function resetWorkers() { pool?.killAll('계산 Worker 초기화'); }
@@ -101,6 +102,15 @@ function exportMechStep() {
   };
   w.onerror = (e) => { setStatus(`STEP 실패: ${e.message ?? e}`); end(); };
   w.postMessage({ meshes: rt.parts.map((p) => ({ positions: p.positions, triangles: p.triangles })) });
+}
+// 제목 옆 계산 장치 표시 — GPU 사용 중 / CPU 만(GPU 없음·실패). g = pool.gpu(): null = 확인 중
+function gpuBadge(g) {
+  const el = document.getElementById('gpu-badge'); if (!el) return;
+  const cores = pool?.cpuWorkers?.() ?? Math.max(1, Math.min(15, (navigator.hardwareConcurrency ?? 4) - 1));
+  el.hidden = false;
+  el.className = `gpu-badge ${g?.ok ? 'on' : ''}`;
+  el.textContent = !g ? 'GPU 확인 중…' : g.ok ? '⚡ GPU 사용' : 'CPU 계산';
+  el.title = !g ? '계산 장치 확인 중' : g.ok ? `GPU 가속 사용 중: ${g.name ?? 'GPU'} + CPU ${cores}코어` : `GPU 사용 안 함${g.error ? ` (${g.error})` : ' (GPU 없음)'} — CPU ${cores}코어로 계산`;
 }
 globalThis.__m3 = () => A;   // 브라우저 점검용: __m3().prog.snapshot(), __m3().timing, __m3().checks
 

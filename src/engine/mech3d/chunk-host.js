@@ -2,13 +2,16 @@
 // 'scene': 장면·BVH·관측 라인을 한 번 만들어 sceneKey 로 기억. 'chunk': 기억한 장면과 sceneKey 가 같을 때만 runChunk.
 import { buildSceneMesh } from './runtime.js';
 import { lineFromData } from './line.js';
-import { composeScene, runChunk } from './job.js';
+import { composeScene, runChunk, runChunkGpu } from './job.js';
 import { milkyGridOptics, rwCoeffs } from './reweight.js';
 
 // getTable(): L2 산란 응답표, getDb(): 실측소재 DB(없으면 null)
 export function makeChunkHost({ getTable, getDb = () => null }) {
-  let cache = null;
+  let cache = null, gpu = null, gpuFail = () => {};
   return {
+    // GPU 추적기(gpu-trace.createGpuTracer) — 있으면 청크를 GPU 로(실패하면 끄고 CPU 로). onFail(메시지) 알림
+    setGpu(t, onFail = () => {}) { gpu = t; gpuFail = onFail; },
+    get gpu() { return gpu; },
     get sceneKey() { return cache?.sceneKey ?? null; },
     // 반환 { reply, transfer } — 처리할 메시지가 아니면 null
     handle(m) {
@@ -36,13 +39,19 @@ export function makeChunkHost({ getTable, getDb = () => null }) {
           const grid = milkyGridOptics(cache.mspec.parts[m.rw.part], { table: getTable(), db: cache.db }, m.rw.milkies);
           rw = { part: m.rw.part, C: rwCoeffs(S.optics[m.rw.part], grid) };
         }
-        const r = runChunk({ S, line, obs, G, emitters, ledSpec, N: m.N, seed: m.seed, rw });
-        const reply = { sceneKey: m.sceneKey, acc: r.acc, cnt: r.cnt, ledger: r.ledger, leak: r.leak, escObs: r.escObs, paths: r.paths, ms: r.ms };
-        const transfer = [r.acc.buffer, r.cnt.buffer];
-        if (r.rw) { reply.rw = { ...r.rw, milkies: m.rw.milkies }; transfer.push(r.rw.acc.buffer); }
-        return { reply, transfer };
+        const args = { S, line, obs, G, emitters, ledSpec, N: m.N, seed: m.seed, rw };
+        if (gpu && !gpu.lost) {
+          return runChunkGpu(gpu, args).then((r) => pack(m, r), (e) => { const msg = String(e?.message ?? e); gpu = null; gpuFail(msg); return pack(m, runChunk(args)); });
+        }
+        return pack(m, runChunk(args));
       }
       return null;
     },
   };
+  function pack(m, r) {
+    const reply = { sceneKey: m.sceneKey, acc: r.acc, cnt: r.cnt, ledger: r.ledger, leak: r.leak, escObs: r.escObs, paths: r.paths, ms: r.ms, ...(r.gpu ? { gpu: true } : {}) };
+    const transfer = [r.acc.buffer, r.cnt.buffer];
+    if (r.rw) { reply.rw = { ...r.rw, milkies: m.rw.milkies }; transfer.push(r.rw.acc.buffer); }
+    return { reply, transfer };
+  }
 }

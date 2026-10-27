@@ -8,6 +8,8 @@ import { SOLDER_R, LED_BODY_FINISH } from './defs.js';
 import { runMC3D } from './mc3d.js';
 import { ledSource, combineSources } from './sources.js';
 import { makeAccumulator } from './tally.js';
+import { rng } from '../l2/mc-slab.js';
+import { REC } from './gpu-trace.js';
 
 // ledParts 는 변환 전 원본이고 composeScene 이 st.offset/rot 로 변환한다. emitters 는 이미 변환된 좌표여야 한다(xform.transformEmitters).
 // rt: 기구 장면(getMech3d()), mspec: spec.mech3d, ledParts: LED STEP 원본 메쉬(없으면 null), line: 인식된 관측 라인(가상 PCB 용)
@@ -60,6 +62,33 @@ export function runChunk({ S, line, obs, G, emitters, ledSpec, N, seed, rw = nul
     },
   });
   return { acc: a.acc, cnt: a.cnt, ledger: r.ledger, leak, escObs, paths, ms: r.ms, rw: a.rw };
+}
+
+// GPU 청크 — runChunk 와 같은 결과 형식. 광원 표본은 CPU 가 뽑고(seed), GPU 가 추적한 광자별 기록(gpu-trace.js REC)을
+// 같은 집계기에 차례로 넣는다(마지막 출사 → 탈출). gpu = createGpuTracer() 결과
+export async function runChunkGpu(gpu, { S, line, obs, G, emitters, ledSpec, N, seed, rw = null }) {
+  const src = ledSources(emitters, ledSpec), a = makeAccumulator(G, line, obs, rw ? { C: rw.C } : null), rnd = rng(seed);
+  const starts = new Float32Array(N * 6);
+  for (let p = 0; p < N; p++) starts.set(src.sample(rnd), p * 6);
+  const w0 = src.flux / N, { rec, ms } = await gpu.trace(S, { starts, N, seed: (seed * 2654435761) >>> 0, track: rw ? rw.part : -1, w0, wMin: w0 * 1e-3 });
+  const faces = new Set(obs.faces.map((f) => `${f.part}|${f.face}`)), leak = {}, paths = {};
+  const ledger = { emitted: w0 * N, escaped: 0, absSurf: 0, absVol: 0, lost: 0, rrLoss: 0, rrGain: 0 };
+  let escObs = 0;
+  for (let p = 0; p < N; p++) {
+    const o = p * REC, ep = rec[o + 1];
+    ledger.absSurf += rec[o + 18]; ledger.absVol += rec[o + 19]; ledger.lost += rec[o + 20]; ledger.rrLoss += rec[o + 21]; ledger.rrGain += rec[o + 22];
+    if (ep >= 0) a.onExit(ep, rec[o + 2], rec[o + 3], rec[o + 4], rec[o + 5], 0, 0, 0, 0, p);
+    if (rec[o] < 0.5) continue;
+    const w = rec[o + 9];
+    ledger.escaped += w;
+    if (a.onEscape(0, 0, 0, rec[o + 6], rec[o + 7], rec[o + 8], w, p, rec[o + 10], rec[o + 11])) {
+      const seq = []; for (let k = 0; k < 5; k++) if (rec[o + 13 + k] >= 0) seq.push(rec[o + 13 + k]);
+      const key = `${rec[o + 12] > 0.5 ? 'R' : ''}:${seq.join('>')}`; paths[key] = (paths[key] ?? 0) + w;
+    }
+    const k = ep >= 0 ? `${ep}|${rec[o + 2]}` : '-1|-1';
+    if (faces.has(k)) escObs += w; else leak[k] = (leak[k] ?? 0) + w;
+  }
+  return { acc: a.acc, cnt: a.cnt, ledger, leak, escObs, paths, ms, rw: a.rw, gpu: true };
 }
 
 // 시드 규약: 배치 b 는 seed*7919+b 를 쓴다. 여러 Worker 로 나눌 때는 Worker 마다 서로 다른 seed 를 주고(배치 시드가 겹치지 않게), 각자 batches 개 배치를 돌려 합친다.

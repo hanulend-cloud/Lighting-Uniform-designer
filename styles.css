@@ -667,3 +667,6 @@ main:has(#m3-start:not([hidden])) { grid-template-rows: minmax(0, 1fr); }
 .m3-rmodal-in .m3-cmp { font-size: 13.5px; } .m3-rmodal-in .m3-cmp th, .m3-rmodal-in .m3-cmp td { padding: 5px 8px; }
 .m3-rmodal-in .m3-cmp td.chg { font-size: 14px; }
 .m3-ad-bar .ok { color: var(--m3-ok); font-weight: 600; } .m3-ad-bar .bad { color: var(--m3-bad); font-weight: 600; }
+/* 제목 옆 계산 장치 표시(GPU 사용 / CPU 계산) */
+.gpu-badge { font-size: 11px; font-weight: 600; padding: 1px 7px; border-radius: 9px; background: #e6e9ef; color: #556; vertical-align: middle; }
+.gpu-badge.on { background: #1f9d55; color: #fff; }

@@ -43,17 +43,18 @@ export function createAdRunner({ ports, now = () => globalThis.performance?.now?
     const ctl = { err: null };
     await Promise.all(ports.map(guard(ctl, async (p) => {
       let size = size0;
-      while (more()) {
+      while (more() && !p.off?.()) {
         check(ctl);
         const m = Math.min(size, N - issued);
         let b = 0; for (let i = 1; i < batches; i++) if (bIss[i] < bIss[b]) b = i;   // 보낸 광자가 가장 적은 배치(고정 청크면 k % batches 와 같음)
         issued += m; bIss[b] += m; k++;
         const t = now(), r = await send(job, { p, body: { N: m, ...(rw ? { rw } : {}) } });
-        if (timed) { const ms = r.ms > 0 ? r.ms : now() - t; if (ms > 0) size = Math.max(MIN_CHUNK, Math.min(chunkN, Math.round((m / ms) * chunkMs))); }
+        if (timed) { const ms = r.ms > 0 ? r.ms : now() - t; if (ms > 0) size = Math.max(MIN_CHUNK, Math.min(chunkN * (r.gpu ? 8 : 1), Math.round((m / ms) * chunkMs))); }   // GPU 포트는 큰 청크가 빠름
         bDone[b] += m;
-        for (let i = 0; i < nCell; i++) B[b][i] += r.acc[i];
-        for (const key in ledger) ledger[key] += r.ledger[key];
-        if (rw) { for (let i = 0; i < RB[b].length; i++) RB[b][i] += r.rw.acc[i]; for (let j = 0; j < sf.length; j++) { sf[j] += r.rw.sf[j]; sf2[j] += r.rw.sf2[j]; } n += r.rw.n; }
+        const f = m / chunkN;   // 청크 결과 = 광속 1회분(광자 수 무관) → 광자 수 가중으로 더함(크기가 다른 청크·GPU 가 섞여도 배치 평균이 바름). 같은 크기면 f = 1
+        for (let i = 0; i < nCell; i++) B[b][i] += r.acc[i] * f;
+        for (const key in ledger) ledger[key] += r.ledger[key] * f;
+        if (rw) { for (let i = 0; i < RB[b].length; i++) RB[b][i] += r.rw.acc[i] * f; for (let j = 0; j < sf.length; j++) { sf[j] += r.rw.sf[j]; sf2[j] += r.rw.sf2[j]; } n += r.rw.n; }
       }
     })));
     // 배치 무게가 다르면(청크 수·크기 차) 평균 광자 수로 정규화 — 합은 그대로(효율 = Σ/방출), 빈 배치는 뺌
@@ -73,7 +74,7 @@ export function createAdRunner({ ports, now = () => globalThis.performance?.now?
       return Math.max(Math.min(N, minN), Math.min(N, Math.floor((done / ms) * Math.max(0, maxMs - ms) / left)));
     };
     await Promise.all(ports.map(guard(ctl, async (p) => {
-      while (next < n) {
+      while (next < n && !p.off?.()) {
         check(ctl);
         const k = next++, m = size(n - k);
         const r = await send(job, { p, body: { N: m, emitters: emitterSets[k], ...(rw ? { rw } : {}) } });
