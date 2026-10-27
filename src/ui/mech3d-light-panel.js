@@ -22,6 +22,12 @@ function readNum(x) {
 }
 const pickBtn = (ui, mode, label) => `<button data-lp-pick="${mode}" class="${ui.pick === mode ? 'on' : ''}">${label}</button>`;
 const on = (el, q, ev, fn) => el.querySelectorAll(q).forEach((x) => x.addEventListener(ev, () => fn(x)));
+// 기본 | 상세 탭(LED·관측면 노드) — 노드별로 세션 동안 기억. 부품 속성 탭과 같은 모양
+const LP_TAB = { leds: 'basic', obs: 'basic' };
+export const lpTab = (k) => LP_TAB[k];
+export function setLpTab(k, t) { LP_TAB[k] = t === 'detail' ? 'detail' : 'basic'; }
+const tabsHtml = (k, dSum = '') => `<div class="m3-tabs" role="tablist"><button type="button" role="tab" data-lp-tab="basic" aria-selected="${LP_TAB[k] === 'basic'}">기본</button><button type="button" role="tab" data-lp-tab="detail" aria-selected="${LP_TAB[k] === 'detail'}">상세${dSum ? ` <span class="m3-tab-s">${esc(dSum)}</span>` : ''}</button></div>`;
+const wireTabs = (el, k, redraw) => on(el, '[data-lp-tab]', 'click', (x) => { if (LP_TAB[k] !== x.dataset.lpTab) { LP_TAB[k] = x.dataset.lpTab; redraw(); } });
 const wirePick = (el, ui, h) => on(el, '[data-lp-pick]', 'click', (x) => h.onPick(ui.pick === x.dataset.lpPick ? null : x.dataset.lpPick));
 
 // 폭 방향 열(spec P4 §2.2b) 입력(순수 HTML): 열 수 1|2 + (2열) 열 간격 ±δ. attr = 'man'(직접 배치) | 'virt'(가상 배치)
@@ -103,11 +109,23 @@ function ledNodeBodyHtml(m, ui, adv = false) {
     ${!adv && L.kind === 'step' && st ? stepLayoutRowHtml(st, ui.line ?? null, lay?.emitters?.length ?? null) : ''}
     ${L.kind === 'step' && st ? (v ? '<div class="m3-row mut">배치를 편집한 상태 — 발광면 다시 지정·제외 클릭은 [STEP 원래대로] 뒤에</div>' : `<div class="m3-row">${pickBtn(ui, 'led', 'LED 발광면 클릭')} ${pickBtn(ui, 'ledx', 'LED 제외/포함 클릭')}</div>`) : ''}
     ${ui.ledInfo ? `<div class="m3-row mut">${esc(ui.ledInfo)}</div>` : ''}
-    ${adv ? '' : `<div class="m3-row"><label>배광</label><select data-lp-spec="model"><option value="lambertian" ${sel(L.spec.model, 'lambertian')}>램버시안</option><option value="gaussian" ${sel(L.spec.model, 'gaussian')}>가우시안</option></select>
+    ${`<div class="m3-row"><label>배광</label><select data-lp-spec="model"><option value="lambertian" ${sel(L.spec.model, 'lambertian')}>램버시안</option><option value="gaussian" ${sel(L.spec.model, 'gaussian')}>가우시안</option></select>
       지향각<input type="number" min="10" max="170" step="5" value="${L.spec.beam}" data-lp-spec="beam">°</div>`}
     <div class="m3-row"><label>발광면</label><input type="number" min="0" step="0.1" value="${L.spec.sizeX}" data-lp-spec="sizeX">×<input type="number" min="0" step="0.1" value="${L.spec.sizeY}" data-lp-spec="sizeY">mm</div>
     ${adv ? '' : `<div class="m3-row"><label>광속</label><input type="number" min="0" step="1" value="${L.spec.fluxLm ?? 0}" data-lp-spec="fluxLm"> lm/개 <span class="mut">0 = 상대값(최대 대비 %)</span></div>`}
     <div class="m3-row"><label>PCB 색</label><select data-lp-solder>${['백색', '녹색', '흑색'].map((c) => `<option ${c === L.solder ? 'selected' : ''}>${c}</option>`).join('')}</select></div>`;
+}
+// LED 노드 기본 탭(순수) — 몇 개인지 · LED 고르기 · 빛 퍼짐(넓게/보통/좁게) · 밝기 · 배치(추가·같은 간격). 발광면 지정·배광 상세는 상세 탭
+function ledBasicHtml(m, ui, nav) {
+  const L = m.light, st = L.kind === 'step' ? L.step : null, lay = ui.lay ?? null, pre = beamPreset(L.spec);
+  const n = st ? (lay?.emitters?.length ?? (st.leds ?? []).filter((i) => !(st.excluded ?? []).includes(i)).length) : (L.manual?.count ?? 0) * (L.manual?.rows === 2 ? 2 : 1);
+  const seg = BEAM_PRESETS.map(([a, t]) => `<button type="button" data-lp-beam="${a}" aria-pressed="${pre === a ? 'true' : 'false'}">${t} ${a}°</button>`).join('');
+  const ready = st ? !!st.emitters?.length : true;
+  return `<div class="m3-card"><div class="m3-row"><b>LED ${n}개</b>${nav ? ` <span class="m3-ledsel">${nav}</span> <span class="mut">하나씩 보기 · 3D 에서 LED 클릭도 됨</span>` : ''}</div>
+      ${!ready ? '<div class="m3-row warn">LED 발광면을 아직 지정하지 않음 — 상세 탭의 [LED 발광면 클릭]</div>' : ''}</div>
+    <div class="m3-card"><div class="m3-sub">빛 퍼짐</div><div class="m3-seg m3-seg3" role="group" aria-label="빛 퍼짐">${seg}</div></div>
+    <div class="m3-card"><div class="m3-row"><label>밝기</label><input type="number" min="0" step="1" value="${L.spec.fluxLm ?? 0}" data-lp-spec="fluxLm" aria-label="LED 1개 광속 lm"> lm/개 <span class="mut">0 = 상대값(%)</span></div></div>
+    <div class="m3-card"><div class="m3-sub">배치</div>${st ? stepLayoutRowHtml(st, ui.line ?? null, n) : `<div class="m3-row">개수<input type="number" min="1" step="1" value="${L.manual.count}" data-lp-man="count" aria-label="LED 개수"> 피치<input type="number" min="0" step="0.5" value="${L.manual.pitch}" data-lp-man="pitch" aria-label="LED 피치 mm">mm <span class="mut">(0 = 균등)</span></div>`}</div>`;
 }
 // LED 고르기 ◀ ▶ (순수 HTML) — n = 선택 번호(0부터) | null, total = LED 수. 선택 없음: ◀ = 마지막, ▶ = 첫 LED
 export function ledNavHtml(n, total) {
@@ -151,9 +169,8 @@ export function renderLedProps(el, m, ui, h) {
   if (L.kind === 'none') { el.innerHTML = '<div class="m3-h">속성 · LED</div><div class="mut">광원 노드에서 방식을 먼저 고르세요</div>'; return; }
   const d = ui.led ?? null;
   const nav = ledNavHtml(null, ui.ledTotal ?? 0);
-  el.innerHTML = d ? ledPanelHtml(m, ui) : `<div class="m3-h">속성 · LED</div>
-    ${nav ? `<div class="m3-row">LED 고르기 <span class="m3-ledsel">${nav}</span> <span class="mut">3D 에서 LED·빛 원뿔을 클릭해도 됩니다</span></div>` : ''}
-    ${ledNodeBodyHtml(m, ui)}`;
+  el.innerHTML = d ? ledPanelHtml(m, ui) : `<div class="m3-h">속성 · LED</div>${tabsHtml('leds')}<div class="m3-edit" role="tabpanel">${LP_TAB.leds === 'basic' ? ledBasicHtml(m, ui, nav) : ledNodeBodyHtml(m, ui, true)}</div>`;
+  if (!d) wireTabs(el, 'leds', () => renderLedProps(el, m, ui, h));
   wireSections(el);
   wirePick(el, ui, h);
   on(el, '[data-lp-spec]', 'change', (x) => {
@@ -179,18 +196,26 @@ export function renderLedProps(el, m, ui, h) {
 // 관측면 노드: 면 클릭(추가/제거) · 라인 인식 결과 · 관측 방향 · 원뿔 · 집계 격자 · 가장자리 제외
 // ui = { pick, lineInfo, lineErr, auto:{cellS,cellW,winS}|null, dir }, h = { onPick, onClearObs(), onRetryLine(), onObsDir(v|null), onObs(key, v|null) }
 export function renderObserveProps(el, m, ui, h) {
-  const O = m.observe;
-  el.innerHTML = `<div class="m3-h">속성 · 관측면</div>
-    <div class="m3-row">${pickBtn(ui, 'obs', '관측면 클릭(추가/제거)')} <span class="mut">면 ${O.faces.length}개</span> ${O.faces.length ? '<button data-lp-clear>비우기</button>' : ''}</div>
-    ${O.faces.length ? '<div class="m3-row mut">3D 의 하늘색 테두리 = 관측면(고른 면을 0.01 mm 앞에 투영) · 화살표 = 보는 방향</div>' : ''}
-    ${ui.lineInfo ? `<div class="m3-row">${esc(ui.lineInfo)}</div>` : ''}
+  const O = m.observe, R = ui.result ?? null, tab = LP_TAB.obs;
+  const res = (v, tg) => (Number.isFinite(v) ? `<b class="${v + 1e-9 >= tg ? 'ok' : 'bad'}">${(Math.floor(v * 100 + 1e-9) / 100).toFixed(2)}</b> <span class="mut">${v + 1e-9 >= tg ? '목표 통과' : `목표까지 ${(tg - v).toFixed(2)}`}</span>` : '<span class="mut">계산 중</span>');
+  const basic = `<div class="m3-card"><div class="m3-row">${pickBtn(ui, 'obs', '👁 관측면 클릭 (추가/제거)')} <span class="mut">면 ${O.faces.length}개</span> ${O.faces.length ? '<button data-lp-clear>비우기</button>' : ''}</div>
+      <div class="m3-row mut">${O.faces.length ? '3D 의 하늘색 테두리 = 관측면 · 화살표 = 보는 방향' : '빛을 보는 면(예: 도광판 윗면)을 3D 에서 클릭하세요'}</div></div>
+    <div class="m3-card"><div class="m3-sub">목표 균일도</div>
+      <div class="m3-row"><label>길이 U</label><input type="number" min="0" max="1" step="0.05" value="${O.targetLen}" data-lp-tgt="targetLen" aria-label="길이 균일도 목표"> <label>폭 U</label><input type="number" min="0" max="1" step="0.05" value="${O.targetWid}" data-lp-tgt="targetWid" aria-label="폭 균일도 목표"></div></div>
+    ${O.faces.length ? `<div class="m3-card"><div class="m3-sub">지금 결과</div><div class="m3-row"><label>길이 U</label>${res(R?.Ulen, O.targetLen)}</div><div class="m3-row"><label>폭 U</label>${res(R?.Uwid, O.targetWid)}</div></div>` : ''}`;
+  const detail = `${ui.lineInfo ? `<div class="m3-row">${esc(ui.lineInfo)}</div>` : ''}
     ${ui.lineErr ? `<div class="m3-row"><span class="warn">${esc(ui.lineErr)}</span> <button data-lp-reline>라인 다시 인식</button></div>` : ''}
-    ${O.faces.length ? `<div class="m3-row">관측 방향 ${O.dir ? '' : '<span class="mut">(자동: 면 평균 법선)</span>'} x<input type="number" step="0.1" value="${numIn(ui.dir?.[0], 3)}" data-lp-dir="0"> y<input type="number" step="0.1" value="${numIn(ui.dir?.[1], 3)}" data-lp-dir="1"> z<input type="number" step="0.1" value="${numIn(ui.dir?.[2], 3)}" data-lp-dir="2"> ${O.dir ? '<button data-lp-dirauto>자동</button>' : ''}</div>` : ''}
-    <div class="m3-row">관측 원뿔 ±<input type="number" min="2" max="90" step="1" value="${O.cone}" data-lp-obs="cone">° <span class="mut">90 = 출사도(확산면 휘도), 좁히면 방향 휘도(잡음 큼)</span></div>
+    ${O.faces.length ? `<div class="m3-row">보는 방향 ${O.dir ? '' : '<span class="mut">(자동: 면 법선)</span>'} x<input type="number" step="0.1" value="${numIn(ui.dir?.[0], 3)}" data-lp-dir="0"> y<input type="number" step="0.1" value="${numIn(ui.dir?.[1], 3)}" data-lp-dir="1"> z<input type="number" step="0.1" value="${numIn(ui.dir?.[2], 3)}" data-lp-dir="2"> ${O.dir ? '<button data-lp-dirauto>자동</button>' : ''}</div>` : ''}
+    <div class="m3-row">관측 원뿔 ±<input type="number" min="2" max="90" step="1" value="${O.cone}" data-lp-obs="cone">° <span class="mut">90 = 확산면 밝기, 좁히면 정면 밝기(잡음 큼)</span></div>
     <div class="m3-row">가장자리 제외<input type="number" min="0" step="0.1" value="${O.edgeExcl}" data-lp-obs="edgeExcl">mm</div>
-    <div class="m3-row">s 구간<input type="number" min="0.2" step="0.5" value="${O.cellS ?? ''}" placeholder="${autoPh(ui.auto?.cellS)}" data-lp-obs="cellS" data-lp-auto>mm w 구간<input type="number" min="0.1" step="0.1" value="${O.cellW ?? ''}" placeholder="${autoPh(ui.auto?.cellW)}" data-lp-obs="cellW" data-lp-auto>mm 폭 판정 창<input type="number" min="1" step="1" value="${O.winS ?? ''}" placeholder="${autoPh(ui.auto?.winS)}" data-lp-obs="winS" data-lp-auto>mm <span class="mut">빈칸 = 자동</span></div>`;
+    <div class="m3-row">길이 칸<input type="number" min="0.2" step="0.5" value="${O.cellS ?? ''}" placeholder="${autoPh(ui.auto?.cellS)}" data-lp-obs="cellS" data-lp-auto>mm 폭 칸<input type="number" min="0.1" step="0.1" value="${O.cellW ?? ''}" placeholder="${autoPh(ui.auto?.cellW)}" data-lp-obs="cellW" data-lp-auto>mm 폭 판정 창<input type="number" min="1" step="1" value="${O.winS ?? ''}" placeholder="${autoPh(ui.auto?.winS)}" data-lp-obs="winS" data-lp-auto>mm <span class="mut">빈칸 = 자동</span></div>
+    <div class="m3-row">계산 오차 목표<input type="number" min="0.2" max="20" step="0.5" value="${num((O.targetNoise ?? 0.02) * 100, 1)}" data-lp-tgt="targetNoise" data-lp-pct>% <span class="mut">이하가 되면 계산 멈춤</span></div>`;
+  const dSum = [O.dir ? '방향 지정' : '', O.cone !== 90 ? `원뿔 ±${O.cone}°` : ''].filter(Boolean).join(' · ');
+  el.innerHTML = `<div class="m3-h">속성 · 관측면</div>${tabsHtml('obs', dSum)}<div class="m3-edit" role="tabpanel">${tab === 'basic' ? basic : detail}</div>`;
+  wireTabs(el, 'obs', () => renderObserveProps(el, m, ui, h));
   wirePick(el, ui, h);
   on(el, '[data-lp-obs]', 'change', (x) => { const v = readNum(x); if (v != null || 'lpAuto' in x.dataset) h.onObs(x.dataset.lpObs, v); });   // 자동 칸은 빈칸 = null
+  on(el, '[data-lp-tgt]', 'change', (x) => { const v = readNum(x); if (v != null) h.onTarget?.(x.dataset.lpTgt, 'lpPct' in x.dataset ? v / 100 : v); });
   on(el, '[data-lp-clear]', 'click', () => h.onClearObs());
   on(el, '[data-lp-dir]', 'change', () => {
     const xs = [0, 1, 2].map((k) => el.querySelector(`[data-lp-dir="${k}"]`));
