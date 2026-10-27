@@ -46,11 +46,12 @@ export function makeAccumulator(G, line, obs, rw = null) {
       if (!has || lp !== p) return;
       has = false;
       if (dx * d[0] + dy * d[1] + dz * d[2] < cosC) return;
-      add(lx, ly, lz, w, tL, tK);
+      return add(lx, ly, lz, w, tL, tK);   // 집계했으면 true(광경로 집계용)
     },
   };
   // 점 → (s,w) 칸에 더함. 점을 래스터 픽셀 중심으로 맞춘 뒤 분류 — 면적(area)을 픽셀 단위로 센 것과 같은 이산화라서 편향이 없다.
   function add(lx, ly, lz, w, tL, tK) {
+    let counted = false;
     {
       const [qx, qy] = line.to2D([lx, ly, lz]), pi = Math.floor((qx - R.x0) / R.cell), pj = Math.floor((qy - R.y0) / R.cell);
       if (pi < 0 || pj < 0 || pi >= R.nx || pj >= R.ny || !G.pixOk[pj * R.nx + pi]) return;   // 면적(area)과 같은 규칙 — 마스크 밖·제외 구역 광자는 세지 않음
@@ -61,11 +62,13 @@ export function makeAccumulator(G, line, obs, rw = null) {
       if (j < 0 || j >= G.nw) return;
       const k = i * G.nw + j;
       acc[k] += w; cnt[k]++;
+      counted = true;
       if (C) {
         nRw++;
         for (let g = 0; g < nJ; g++) { const f = Math.exp(tK * C.lr[g] - C.dm[g] * tL); racc[g * nCell + k] += w * f; sf[g] += f; sf2[g] += f * f; }
       }
     }
+    return counted;
   }
   return acc_;
 }

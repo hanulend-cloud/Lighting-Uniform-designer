@@ -42,18 +42,24 @@ export function ledSources(emitters, ledSpec) {
 // rw = { part, C } | null — 있으면 Milky 부품 경로를 추적(track)해 격자별 지도(rw.acc: 격자 수 × 셀)·Σf·Σf²·n 을 함께 돌려준다(spec P4 §2.1)
 export function runChunk({ S, line, obs, G, emitters, ledSpec, N, seed, rw = null }) {
   const src = ledSources(emitters, ledSpec), a = makeAccumulator(G, line, obs, rw ? { C: rw.C } : null);
-  const faces = new Set(obs.faces.map((f) => `${f.part}|${f.face}`)), leak = {};
-  let lastPart = -1, lastFace = -1, lastP = -1, escObs = 0;
+  const faces = new Set(obs.faces.map((f) => `${f.part}|${f.face}`)), leak = {}, paths = {};
+  let lastPart = -1, lastFace = -1, lastP = -1, escObs = 0, curP = -1, seq = [], refl = false;
   const r = runMC3D(S, {
     source: src, N, seed, track: rw ? rw.part : -1,
     onExit(part, face, x, y, z, dx, dy, dz, w, p) { a.onExit(part, face, x, y, z, dx, dy, dz, w, p); lastPart = part; lastFace = face; lastP = p; },
+    // 광경로: 광자가 들어간 부품 차례(투과 부품) · 불투명 면에서 반사됐는지
+    onHit(part, face, x, y, z, dx, dy, dz, w, p, entering) {
+      if (p !== curP) { curP = p; seq = []; refl = false; }
+      if (!entering || part < 0) return;
+      if (S.optics[part]?.transmissive) { if (seq[seq.length - 1] !== part && seq.length < 5) seq.push(part); } else refl = true;
+    },
     onEscape(x, y, z, dx, dy, dz, w, p, tL, tK) {
-      a.onEscape(x, y, z, dx, dy, dz, w, p, tL, tK);
+      if (a.onEscape(x, y, z, dx, dy, dz, w, p, tL, tK) && curP === p) { const key = `${refl ? 'R' : ''}:${seq.join('>')}`; paths[key] = (paths[key] ?? 0) + w; }
       const k = lastP === p ? `${lastPart}|${lastFace}` : '-1|-1';
       if (faces.has(k)) escObs += w; else leak[k] = (leak[k] ?? 0) + w;
     },
   });
-  return { acc: a.acc, cnt: a.cnt, ledger: r.ledger, leak, escObs, ms: r.ms, rw: a.rw };
+  return { acc: a.acc, cnt: a.cnt, ledger: r.ledger, leak, escObs, paths, ms: r.ms, rw: a.rw };
 }
 
 // 시드 규약: 배치 b 는 seed*7919+b 를 쓴다. 여러 Worker 로 나눌 때는 Worker 마다 서로 다른 seed 를 주고(배치 시드가 겹치지 않게), 각자 batches 개 배치를 돌려 합친다.

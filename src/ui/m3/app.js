@@ -273,7 +273,8 @@ function onCalc(snap) {
   if (T.start && snap.stats?.relNoise != null && snap.stats.relNoise <= 0.05 && T.noise5 == null) T.noise5 = (now - T.start) / 1000;
   updateLeakCheck(snap);
   A.results.update({ snap, observe: M.observe, message: guidance(snap), leds: ledSW(M, S.line) });
-  A.simDash?.sample(snap, M.observe.targetNoise ?? 0.02, M.observe);
+  A.simDash?.sample(snap, M.observe.targetNoise ?? 0.02, M.observe, M.parts.map((p) => p.name), M.parts.length);
+  drawLightPaths();
   paintObs(snap);
   A.cmd.update(S, snap);
   renderStatus();
@@ -496,6 +497,32 @@ function ledSW(M, line) {
   try { v = L.currentEmitters(M, line).map((e) => { const [s, w] = line.toSW(...line.to2D(e.pos)); return { s, w }; }); } catch { v = []; }
   ledSWCache = { key, line, v };
   return v;
+}
+// 3D 광경로 화살표 — 상위 경로 2개를 LED 중심 → 거친 부품 중심 → 관측면 중심으로(굵기·숫자 = 비중). 보기 메뉴로 켜고 끔(uds.m3.paths)
+let pathKey = '';
+export const pathsOn = () => { try { return localStorage.getItem('uds.m3.paths') !== '0'; } catch { return true; } };
+export function setPathsOn(v) { try { localStorage.setItem('uds.m3.paths', v ? '1' : '0'); } catch {} pathKey = ''; drawLightPaths(); }
+function drawLightPaths() {
+  if (!A?.view?.setLightPaths) return;
+  const M = A.store.mspec, S = A.store.session, rt = getMech3d(), P = pathsOn() ? (A.simDash?.paths() ?? []).slice(0, 2) : [];
+  const key = JSON.stringify(P.map((p) => [p.parts, p.refl, Math.round(p.share * 20)]));   // 5% 단위로 바뀔 때만 다시 그림
+  if (key === pathKey) return;
+  pathKey = key;
+  if (!P.length || !rt) { A.view.setLightPaths([]); return; }
+  let em = []; try { em = L.currentEmitters(M, S.line); } catch { em = []; }
+  const avg = (pts) => pts.reduce((a, q) => a.map((v, k) => v + q[k] / pts.length), [0, 0, 0]);
+  const ctr = (m) => { const b = bounds(m.positions); return [(b[0] + b[3]) / 2, (b[1] + b[4]) / 2, (b[2] + b[5]) / 2]; };
+  const oa = obsArrow(M, S.line, rt), led = em.length ? avg(em.map((e) => e.pos)) : null;
+  if (!led || !oa) { A.view.setLightPaths([]); return; }
+  // 부품이 한 축에 겹쳐 있으면(평판 적층) 화살표가 겹치므로 단계마다 옆(관측 방향에 수직)으로 조금씩 밀어 계단처럼 — 높이는 각 부품 높이 그대로
+  const ax = oa.axis, up = Math.abs(ax[2]) < 0.9 ? [0, 0, 1] : [1, 0, 0], side = S.line?.frame?.u ?? [ax[1] * up[2] - ax[2] * up[1], ax[2] * up[0] - ax[0] * up[2], ax[0] * up[1] - ax[1] * up[0]], sl = Math.hypot(...side) || 1;   // 옆 = 라인 길이 방향(정면·등각에서 보임)
+  const step = Math.max(6, Math.min(30, oa.len * 0.9)), shift = (q, i) => q.map((v, k) => v + (side[k] / sl) * step * i);
+  const along = (q) => { const t = (q[0] - oa.pos[0]) * ax[0] + (q[1] - oa.pos[1]) * ax[1] + (q[2] - oa.pos[2]) * ax[2]; return oa.pos.map((v, k) => v + ax[k] * t); };   // 관측면 중심을 지나는 축 위로(높이만 남김)
+  A.view.setLightPaths(P.map((p, i) => {
+    const stops = [['LED', along(led)], ...p.parts.map((q) => [M.parts[q]?.name ?? `부품 ${q + 1}`, along(ctr(rt.parts[q]))]), ['관측면', oa.pos]];
+    const pts = stops.map(([, q], j) => shift(q, j)), last = pts[pts.length - 1];
+    return { pts: [...pts, last.map((v, k) => v + ax[k] * oa.len * 0.6)], names: i === 0 ? stops.map(([n]) => n) : null, share: p.share, label: `${(p.share * 100).toFixed(0)}%${p.refl ? ' 반사' : ''}`, offset: i };
+  }));
 }
 // 관측면 빛 방향 화살표 — 고른 면들의 면적 가중 중심에서 관측 방향(d) 으로. 들어오는 빛(mode 'in') 이면 면을 향해 그림
 function obsArrow(M, line, rt) {

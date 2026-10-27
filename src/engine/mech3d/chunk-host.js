@@ -37,7 +37,7 @@ export function makeChunkHost({ getTable, getDb = () => null }) {
           rw = { part: m.rw.part, C: rwCoeffs(S.optics[m.rw.part], grid) };
         }
         const r = runChunk({ S, line, obs, G, emitters, ledSpec, N: m.N, seed: m.seed, rw });
-        const reply = { sceneKey: m.sceneKey, acc: r.acc, cnt: r.cnt, ledger: r.ledger, leak: r.leak, escObs: r.escObs, ms: r.ms };
+        const reply = { sceneKey: m.sceneKey, acc: r.acc, cnt: r.cnt, ledger: r.ledger, leak: r.leak, escObs: r.escObs, paths: r.paths, ms: r.ms };
         const transfer = [r.acc.buffer, r.cnt.buffer];
         if (r.rw) { reply.rw = { ...r.rw, milkies: m.rw.milkies }; transfer.push(r.rw.acc.buffer); }
         return { reply, transfer };

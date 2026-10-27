@@ -79,12 +79,23 @@ export function createOptDash(el, h = {}) {
   return { reset, addStages, progress, evals, finish, stop, refresh, clear };
 }
 
+// 광경로 순위(순수) — paths = { 'R:2>1': 가중 합 } → [{ parts:[번호], refl, share }] 비중 큰 순(기구 부품만, 같은 경로 합침)
+export function topPaths(paths, nMech, k = 3) {
+  const m = new Map(); let tot = 0;
+  for (const [key, w] of Object.entries(paths ?? {})) {
+    const [r, sq] = key.split(':'), parts = (sq ? sq.split('>').map(Number) : []).filter((q) => q < nMech), refl = r === 'R', kk = `${refl ? 'R' : ''}:${parts.join('>')}`;
+    tot += w; const o = m.get(kk) ?? { parts, refl, w: 0 }; o.w += w; m.set(kk, o);
+  }
+  return tot > 0 ? [...m.values()].sort((a, b) => b.w - a.w).slice(0, k).map((o) => ({ parts: o.parts, refl: o.refl, share: o.w / tot })) : [];
+}
+export const pathText = (p, names) => `LED → ${p.parts.map((q) => names[q] ?? `부품 ${q + 1}`).join(' → ')}${p.parts.length ? ' → ' : ''}관측면${p.refl ? ' (케이스 반사 포함)' : ''}`;
 // 시뮬레이션 진행현황 — 광자 수에 따른 잡음(%)·U 추정 · 진행률(잡음이 목표에 닿으면 100%)
 export function simPct(relNoise, target) { return Number.isFinite(relNoise) && relNoise > 0 ? Math.max(0, Math.min(100, (target / relNoise) ** 2 * 100)) : 0; }
 export function createSimDash(el) {
-  let H = [], tgt = 0.02, raf = 0, state = '', obs = null;
-  function sample(snap, targetNoise, observe) {
-    tgt = targetNoise ?? tgt; obs = observe ?? obs; state = snap?.state ?? '';
+  let H = [], tgt = 0.02, raf = 0, state = '', obs = null, P = [], names = [];
+  // names = 부품 이름, nMech = 기구 부품 수(LED STEP 부품 번호는 그 뒤 — 경로에서 뺌)
+  function sample(snap, targetNoise, observe, nm = names, nMech = nm.length) {
+    tgt = targetNoise ?? tgt; obs = observe ?? obs; state = snap?.state ?? ''; names = nm; P = topPaths(snap?.paths, nMech);
     const ph = snap?.photons ?? 0, st = snap?.stats;
     if (!st || st.empty || !ph) { if (!ph) H = []; draw(); return; }
     if (H.length && ph < H[H.length - 1].ph) H = [];   // 장면이 바뀌어 다시 시작
@@ -113,9 +124,10 @@ export function createSimDash(el) {
     el.innerHTML = `<div class="od-h">시뮬레이션 진행현황 <span class="mut">${esc(sTxt)}</span></div>
       <div class="od-pct"><b>${pct.toFixed(0)}%</b><div class="od-bar od-bar-big"><i style="width:${pct.toFixed(0)}%"></i></div></div>
       <div class="od-row mut">계산 오차 ${last && Number.isFinite(last.noise) ? `±${(last.noise * 100).toFixed(1)}%` : '–'} → 목표 ±${(tgt * 100).toFixed(1)}% · 광자 ${last ? last.ph.toLocaleString() : 0}${last ? ` · 길이 U ${f2(last.Ulen)} · 폭 U ${f2(last.Uwid)}` : ''}</div>
+      ${P.length ? `<div class="od-paths"><b>광경로</b> <span class="mut">관측면으로 나온 빛이 거친 부품</span>${P.map((p) => `<div class="od-path"><span class="od-pbar"><i style="width:${(p.share * 100).toFixed(0)}%"></i></span><b>${(p.share * 100).toFixed(0)}%</b> ${esc(pathText(p, names))}</div>`).join('')}</div>` : ''}
       ${svg || '<div class="mut od-empty">계산이 시작되면 수렴 그래프가 그려집니다.</div>'}
       <div class="od-legend"><i class="od-kn"></i>계산 오차(왼쪽 축) <i class="od-k1"></i>길이 U <i class="od-k2"></i>폭 U(오른쪽 축) <i class="od-kt"></i>오차 목표</div>`;
   }
   render();
-  return { sample };
+  return { sample, paths: () => P };
 }

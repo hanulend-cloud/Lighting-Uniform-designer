@@ -24,7 +24,7 @@ export function photometry(G, sum, ledger, { fluxLm = 0, nLeds = 0, cone = 90 } 
 export function createProgressive({ ports, timers = globalThis, onUpdate = () => {}, opts = {} }) {
   const o = { ...PROG_DEFAULTS, ...opts };
   let gen = 0, state = 'idle', reason = null, error = null, job = null, pendingJob = null, debounce = null, ticker = null;
-  let bins, binIssued, ledger, leak, nextChunk, issued, retry, doneChunks, photons, ignored, snap, early, nMin, nMax;
+  let paths = {}, bins, binIssued, ledger, leak, nextChunk, issued, retry, doneChunks, photons, ignored, snap, early, nMin, nMax;
   let wantPaused = false, disposed = false;   // wantPaused: 대기·시작 중 일시정지 요청 → 시작될 때 적용
   const busy = ports.map(() => 0);   // 포트별로 돌고 있는 펌프의 세대(0 = 쉼)
   const ready = ports.map(() => 0);  // 포트별로 장면이 준비된 세대 — 준비된 포트부터 바로 청크를 보낸다
@@ -32,7 +32,7 @@ export function createProgressive({ ports, timers = globalThis, onUpdate = () =>
   const now = () => (typeof timers.now === 'function' ? timers.now() : globalThis.performance?.now?.() ?? Date.now());
   resetAcc();
 
-  function resetAcc() { bins = Array.from({ length: o.bins }, () => null); binIssued = new Float64Array(o.bins); ledger = ledger0(); leak = {}; nextChunk = 0; issued = 0; retry = []; nMin = Infinity; nMax = 0; doneChunks = 0; photons = 0; ignored = 0; snap = null; early = false; }
+  function resetAcc() { bins = Array.from({ length: o.bins }, () => null); binIssued = new Float64Array(o.bins); ledger = ledger0(); leak = {}; paths = {}; nextChunk = 0; issued = 0; retry = []; nMin = Infinity; nMax = 0; doneChunks = 0; photons = 0; ignored = 0; snap = null; early = false; }
   function stopTick() { if (ticker != null) { timers.clearInterval(ticker); ticker = null; } }
   function startTick() { stopTick(); ticker = timers.setInterval(onTick, o.tickMs); }
   const emit = () => { if (!disposed) onUpdate(snapshot()); };
@@ -119,6 +119,7 @@ export function createProgressive({ ports, timers = globalThis, onUpdate = () =>
     B.n++; B.photons += N; nMin = Math.min(nMin, N); nMax = Math.max(nMax, N);
     for (const key in ledger) ledger[key] += r.ledger[key] ?? 0;
     for (const key in r.leak ?? {}) leak[key] = (leak[key] ?? 0) + r.leak[key];
+    for (const key in r.paths ?? {}) paths[key] = (paths[key] ?? 0) + r.paths[key];   // 광경로(관측면으로 나온 빛이 거친 부품 차례)
     photons += N; doneChunks++;
   }
   function compute() {
@@ -178,7 +179,7 @@ export function createProgressive({ ports, timers = globalThis, onUpdate = () =>
     return {
       state, reason, error, photons, chunks: doneChunks, ignored, sceneKey: job?.sceneKey ?? null,
       stats: snap?.stats ?? null, sum: snap?.sum ?? null, photometry: snap?.photometry ?? null,
-      ledger: { ...ledger }, leak: { ...leak }, bins: bins.map((b) => b && { acc: b.acc, n: b.n, photons: b.photons }),
+      ledger: { ...ledger }, leak: { ...leak }, paths: { ...paths }, bins: bins.map((b) => b && { acc: b.acc, n: b.n, photons: b.photons }),
       G: job?.G ?? null, obs: job?.obs ?? null, targetNoise: o.targetNoise,
     };
   }

@@ -321,4 +321,8 @@ ok(clampCap(12) === 9.9 && clampCap(0.1) === 0.5 && clampCap(3) === 3 && clampCa
 { // 아래 칸 높이: 최소 120 · 3D·결과 칸 최소 240(+명령·상태줄 90) 남김
   const { clampDock } = await import('../src/ui/m3/splitter.js');
   ok(clampDock(250, 900) === 250 && clampDock(50, 900) === 120 && clampDock(800, 900) === 570 && clampDock(300, 400) === 120, `clampDock: ${[clampDock(250, 900), clampDock(50, 900), clampDock(800, 900), clampDock(300, 400)]}`); }
+{ // 광경로 순위(순수): 기구 부품만 · 같은 경로 합침 · 비중 순
+  const { topPaths, pathText } = await import('../src/ui/m3/opt-dash.js');
+  const t = topPaths({ ':2>1': 50, 'R:2>1': 25, ':2>1>5': 10, 'R:2>1>2>1': 15 }, 3);
+  ok(t.length === 3 && t[0].share === 0.6 && t[0].parts.join() === '2,1' && !t[0].refl && t[1].refl && pathText(t[0], ['a', 'b', 'c']) === 'LED → c → b → 관측면', `topPaths: ${JSON.stringify(t.map((x) => [x.parts.join('>'), x.refl, x.share]))}`); }
 done();

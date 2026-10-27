@@ -254,6 +254,7 @@ function setupMenubar() {
       { id: 'show-all', label: '모든 부품 보기', enabled: m3 },
       '-',
       { id: 'theme', label: '3D 배경 어둡게', checked: () => m3app.theme() === 'dark', enabled: m3 },
+      { id: 'paths', label: '광경로 화살표', checked: () => m3app.pathsOn(), enabled: m3 },
       '-',
       { id: 'mode-3d', label: '3D 기구 설계 화면', checked: () => !flatMode() },
       { id: 'mode-flat', label: '평판 확산판 화면 (초기 검토)', checked: flatMode },
@@ -279,6 +280,7 @@ function setupMenubar() {
     if (id === 'mode-3d') { spec.mode = 'mech3d'; persist(); applyMode(); return; }
     if (id === 'mode-flat') { spec.mode = 'flat'; persist(); applyMode(); schedule(); return; }
     if (id === 'refl-db') return m3app.command('target');
+    if (id === 'paths') return m3app.setPathsOn(!m3app.pathsOn());
     if (id === 'guide') return alert(GUIDE);
     if (id === 'about') return alert(`Uniform Design Simulator ${APP_VERSION} (${APP_DATE})
 3D 기구 설계 — 도광·확산 부품의 균일도 해석과 자동설계

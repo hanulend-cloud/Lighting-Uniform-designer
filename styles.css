@@ -651,3 +651,8 @@ main:has(#m3-start:not([hidden])) { grid-template-rows: minmax(0, 1fr); }
 .m3-seg.m3-seg2 button .mut { font-size: 10px; font-weight: 400; }
 .m3-chk[hidden], .m3-chkok[hidden] { display: none !important; }
 .m3-chkok { color: var(--m3-ok); }
+/* 광경로 순위(시뮬레이션 칸) */
+.od-paths { font-size: 11px; margin: 4px 0; }
+.od-path { display: flex; align-items: center; gap: 5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1.6; }
+.od-pbar { width: 40px; height: 6px; background: var(--m3-line); border-radius: 3px; overflow: hidden; flex: none; } .od-pbar i { display: block; height: 100%; background: #ff5fa2; }
+.od-path:nth-child(3) .od-pbar i { background: #b388ff; }
