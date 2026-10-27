@@ -108,11 +108,13 @@ function getView() {
   viewP ??= import('../mech3d-view.js').then(({ createMech3dView }) => {
     const v = createMech3dView($('#mech3d-canvas'), { onPick: (s) => { if (A) onPick(s); }, gizmo: $('#m3-axes') });
     const el = $('#m3-views');
-    el.innerHTML = VIEWS.map(([k, t]) => `<button data-view="${k}">${t}</button>`).join('') + '<button type="button" data-theme-toggle aria-pressed="false"></button>';
+    el.innerHTML = VIEWS.map(([k, t]) => `<button data-view="${k}">${t}</button>`).join('') + '<button type="button" data-xray aria-pressed="false" title="전체 부품 반투명 — 속 구조를 봄">투시</button><button type="button" data-paths aria-pressed="false" title="광경로 화살표 켜기/끄기">광경로</button><button type="button" data-theme-toggle aria-pressed="false"></button>';
     el.querySelectorAll('[data-view]').forEach((b) => { b.onclick = () => { v.setView(b.dataset.view); A?.store.update('view', (_, s) => { s.view = b.dataset.view; }); }; });
     // 3D 배경 밝게/어둡게 — 보는 사람별 편의 설정(새로고침해도 유지)
     const tb = el.querySelector('[data-theme-toggle]'), vp = $('#mech3d-canvas').parentElement;
     const applyTheme = (t) => { v.setTheme(t); vp.dataset.theme = t; const wr = $('#mech3d-wrap'); if (wr) wr.dataset.theme = t; tb.textContent = t === 'dark' ? '☀ 밝게' : '☾ 어둡게'; tb.setAttribute('aria-pressed', String(t === 'dark')); tb.title = '3D 배경 밝게/어둡게'; };
+    el.querySelector('[data-xray]').onclick = () => setXrayOn(!xrayOn());
+    el.querySelector('[data-paths]').onclick = () => setPathsOn(!pathsOn());
     let t0 = 'light'; try { t0 = localStorage.getItem('uds.m3.theme') === 'dark' ? 'dark' : 'light'; } catch {}
     applyTheme(t0);
     tb.onclick = () => { const t = v.theme() === 'dark' ? 'light' : 'dark'; try { localStorage.setItem('uds.m3.theme', t); } catch {} applyTheme(t); };
@@ -501,7 +503,15 @@ function ledSW(M, line) {
 // 3D 광경로 화살표 — 상위 경로 2개를 LED 중심 → 거친 부품 중심 → 관측면 중심으로(굵기·숫자 = 비중). 보기 메뉴로 켜고 끔(uds.m3.paths)
 let pathKey = '';
 export const pathsOn = () => { try { return localStorage.getItem('uds.m3.paths') !== '0'; } catch { return true; } };
-export function setPathsOn(v) { try { localStorage.setItem('uds.m3.paths', v ? '1' : '0'); } catch {} pathKey = ''; drawLightPaths(); }
+export function setPathsOn(v) { try { localStorage.setItem('uds.m3.paths', v ? '1' : '0'); } catch {} pathKey = ''; drawLightPaths(); syncViewBtns(); }
+// 투시 보기(전체 반투명) — 보는 사람별 설정(uds.m3.xray)
+export const xrayOn = () => { try { return localStorage.getItem('uds.m3.xray') === '1'; } catch { return false; } };
+export function setXrayOn(v) { try { localStorage.setItem('uds.m3.xray', v ? '1' : '0'); } catch {} A?.view?.setXray?.(v); syncViewBtns(); }
+function syncViewBtns() {
+  const el = document.querySelector('#m3-views'); if (!el) return;
+  const set = (q, on) => { const b = el.querySelector(q); if (b) { b.classList.toggle('on', on); b.setAttribute('aria-pressed', String(on)); } };
+  set('[data-xray]', xrayOn()); set('[data-paths]', pathsOn());
+}
 function drawLightPaths() {
   if (!A?.view?.setLightPaths) return;
   const M = A.store.mspec, S = A.store.session, rt = getMech3d(), P = pathsOn() ? (A.simDash?.paths() ?? []).slice(0, 2) : [];
@@ -1213,6 +1223,8 @@ function renderView() {
   const nM = cur.parts.length, led = S.pick === 'led' || S.pick === 'ledx', mech = S.pick === 'obs' || S.pick === 'pcb';
   v.setPickMode(led ? (i) => i >= nM : mech ? (i) => i < nM : null, led ? (i) => i < nM : null);
   if (v.viewName() !== S.view) v.setView(S.view);
+  if (v.xray?.() !== xrayOn()) v.setXray(xrayOn());
+  syncViewBtns();
   $('#m3-views').querySelectorAll('[data-view]').forEach((b) => b.classList.toggle('on', b.dataset.view === S.view));
   v.setSection(S.section);
   renderSectionCtl();

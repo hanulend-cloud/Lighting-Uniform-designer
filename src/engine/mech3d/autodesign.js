@@ -362,7 +362,10 @@ export async function runAutoDesign(cfg, io) {
     const vt = uText(vs);
     if (reason.startsWith('형상 최적안도')) reason = `형상 최적안도 목표 미달 — ${vt}`;
     else if (!reason) reason = `최종 정밀 재계산에서 목표 미달 — ${vt} (후보 평가와 차이: 잡음·LED 몸체 영향)`;
-    else if (!reason.includes(vt)) reason += ` (최종 정밀 재계산: ${vt})`;
+    else {   // 문구 속 균일도는 정밀 재계산 값 하나만(후보 선별값·④ 함께 쓰기 선별값은 뺌 — 두 숫자가 섞이면 헷갈림)
+      reason = reason.replace(/( · ④ 케이스 .*?) 와 함께 쓰면 길이 U [\d.]+( · 폭 U [\d.]+)?/, '$1 를 함께 쓰면 나아짐');
+      reason = /길이 U [\d.]+( · 폭 U [\d.]+)?/.test(reason) ? reason.replace(/길이 U [\d.]+( · 폭 U [\d.]+)?/, vt) : `${reason} — ${vt}`;
+    }
   }
   return { feasible, best: d, steps, reason, verified, current: currentVerified, cancelled: false, hint };
 }

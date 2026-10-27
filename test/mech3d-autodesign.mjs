@@ -62,7 +62,7 @@ const peakRows = (ms, top, { len = 0.5, wid = 0.5, Uw = () => 0.9 } = {}) => ms.
   const r = await runAutoDesign({ stages: { milky: true }, obs, current: { milky: 1 }, housingProbe: probe, finishText: (f) => `백색 ${Math.round(f.R * 100)}%` }, io);
   ok(!r.feasible && /LED 리플/.test(r.reason) && /폭/.test(r.reason) && !/가장자리 감쇠/.test(r.reason), `폭 한계 · 리플: ${r.reason}`);
   ok(calls.length === 1 && calls[0].cs[0].finish === probe && calls[0].N === 3e5 && Math.abs(calls[0].milky - r.best.milky) < 1e-9 && r.hint?.Ulen === 0.93 && r.hint?.Uwid === 0.62 && r.hint.finish === probe
-    && /④ 케이스 백색 90% 와 함께 쓰면 길이 U 0\.93 · 폭 U 0\.62/.test(r.reason), `보완 계산 1회 → ${r.reason}`); }
+    && /④ 케이스 백색 90% 를 함께 쓰면 나아짐/.test(r.reason) && !/와 함께 쓰면 길이 U/.test(r.reason), `보완 계산 1회 → ${r.reason}`); }
 { // ① 만 · 상한 입력 없음 → 9.9 까지(U 가 계속 오름) · ②+① 이면 ② 기준은 5, ① 은 그대로 9.9 까지
   const seen = [], U = (m) => 0.5 + 0.02 * m;
   const io = { milkyRows: async (d, ms) => { seen.push(...ms); return rowsOf(ms, U); }, verify: async (d) => ({ stats: st(U(d.milky ?? 1), 0.9), eff: 1 }), progress() {}, cancelled: () => false };

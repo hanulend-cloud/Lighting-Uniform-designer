@@ -68,6 +68,7 @@ export function createMech3dView(canvas, { onPick, gizmo = null }) {
   }
   controls.addEventListener('change', () => { fitDepth(); render(); });
 
+  let xray = false;
   let meshes = [], partsRef = [], kinds = [], sel = null, obsSet = new Set(), overlay = null, obsMesh = null, markers = null, coneMeshes = [];
 
   function resize() {
@@ -96,7 +97,8 @@ export function createMech3dView(canvas, { onPick, gizmo = null }) {
     }
     col.needsUpdate = true;
     let op = ghost?.(i) ? Math.min(0.15, KIND_OPACITY[kinds[i]]) : KIND_OPACITY[kinds[i]];   // 투시: LED 선택 중 기구물 반투명
-    if (sel?.part === i && !ghost?.(i)) op = Math.max(op, 0.7);   // 선택 부품: 투명 소재여도 잘 보이게
+    if (xray) op = kinds[i] === 'led' ? 0.55 : Math.min(op, 0.16);   // 투시 보기: 전체 반투명 — 속 구조·광경로를 봄
+    if (sel?.part === i && !ghost?.(i)) op = Math.max(op, xray ? 0.45 : 0.7);   // 선택 부품: 투명 소재여도 잘 보이게
     m.material.opacity = op;
     m.material.transparent = op < 1;
     m.material.depthWrite = !m.material.transparent; m.renderOrder = m.material.transparent ? 1 : 0;
@@ -214,6 +216,29 @@ export function createMech3dView(canvas, { onPick, gizmo = null }) {
     ls.renderOrder = 4;
     return ls;
   }
+  // 투시 보기에서 관측면 채움(하늘색 반투명, 가려도 보임)
+  function obsFill(faces) {
+    const pos = [];
+    for (const f of faces) {
+      const p = partsRef[f.part]; if (!p) continue;
+      const P = p.positions, T = p.triangles;
+      for (let t = 0; t < T.length / 3; t++) if (p.faceIds[t] === f.face) for (let j = 0; j < 3; j++) { const v = T[3 * t + j]; pos.push(P[3 * v], P[3 * v + 1], P[3 * v + 2]); }
+    }
+    if (!pos.length) return null;
+    const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    const m = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ color: OBS_HI, transparent: true, opacity: 0.4, depthTest: false, depthWrite: false, side: THREE.DoubleSide }));
+    m.renderOrder = 3; return m;
+  }
+  // "관측면" 글자 — 빛 방향 화살표 끝(가려도 보임)
+  function obsLabel(oa) {
+    const cv = document.createElement('canvas'); cv.width = 160; cv.height = 48; const c2 = cv.getContext('2d');
+    c2.fillStyle = 'rgba(10,40,48,.8)'; c2.fillRect(0, 0, 160, 48); c2.fillStyle = '#2ee6ff'; c2.font = 'bold 28px sans-serif'; c2.textAlign = 'center'; c2.textBaseline = 'middle'; c2.fillText('관측면', 80, 25);
+    const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(cv), depthTest: false, transparent: true }));
+    const s2 = model.r * 0.07; sp.scale.set(s2 * 160 / 48, s2, 1);
+    sp.position.set(...oa.pos).addScaledVector(new THREE.Vector3(...oa.axis).normalize(), oa.len * 1.25); sp.renderOrder = 6;
+    return sp;
+  }
+  function setXray(on) { xray = !!on; meshes.forEach((_, i) => colorize(i)); if (lastOver) setOverlay(lastOver); else render(); }
   // 광경로 화살표(app.drawLightPaths) — paths = [{ pts:[[x,y,z]…], share, label, offset }]: 점 사이 화살표(굵기 ∝ 비중), 끝에 % 글자
   let pathGroup = null;
   function setLightPaths(paths) {
@@ -261,6 +286,9 @@ export function createMech3dView(canvas, { onPick, gizmo = null }) {
     // 관측면 강조: 고른 면들의 바깥 테두리(밝은 하늘색, 가려도 보이게) + 빛 방향 화살표(over.obsArrow = { pos, axis, len, incoming })
     const ob = obsOutline(over.obsFaces ?? []);
     if (ob) overlay.add(ob);
+    const of = xray ? obsFill(over.obsFaces ?? []) : null;
+    if (of) overlay.add(of);
+    if (over.obsArrow) overlay.add(obsLabel(over.obsArrow));
     const oa = over.obsArrow;
     if (oa) {
       const a = new THREE.Vector3(...oa.axis).normalize(), L = oa.len, hl = 0.28 * L, base = new THREE.Vector3(...oa.pos);
@@ -406,5 +434,5 @@ export function createMech3dView(canvas, { onPick, gizmo = null }) {
     onPick({ part, face: partsRef[part].faceIds[h.faceIndex], ray: rr, worldPerPixel: wpp });
   });
 
-  return { setTheme, theme: () => theme, setLightPaths, setParts, setKinds, setHidden, setSelection, setOverlay, setPickMode, render, setView, fit, viewName: () => viewName, setSection, setObsSurface, setObsColors, setCheckMarkers };
+  return { setTheme, theme: () => theme, setLightPaths, setXray, xray: () => xray, setParts, setKinds, setHidden, setSelection, setOverlay, setPickMode, render, setView, fit, viewName: () => viewName, setSection, setObsSurface, setObsColors, setCheckMarkers };
 }
