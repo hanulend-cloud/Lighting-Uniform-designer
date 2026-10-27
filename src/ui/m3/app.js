@@ -160,7 +160,7 @@ export async function mount(ctx) {
   const a = A = { ctx, store, pool, view: null, meshShown: null, lineKey: '', Gc: null, obsShown: null, checks: {}, markKey: '', timing: { start: 0, first: null, noise5: null } };
   a.prog = createProgressive({ ports: pool.ports(), onUpdate: onCalc, opts: { targetNoise: ctx.mspec.observe.targetNoise ?? 0.02 } });
   a.results = createResultsPanel($('#m3-res'));
-  a.optDash = createOptDash($('#m3-optdash'), { config: (k) => (A?.tileState ? tileConfigHtml(k, A.tileState) : { on: false, html: '' }), onSel: (k, v) => adSel(k, v) }); a.simDash = createSimDash($('#m3-simdash'), { onCtl: () => cmdHandlers().onToggleCalc() });   // 아래 칸 = 자동설계 · 오른쪽 맨 위 = 현재 설계 계산(항상 보임, 계산 제어 단추)
+  a.optDash = createOptDash($('#m3-optdash'), { config: (k) => (A?.tileState ? tileConfigHtml(k, A.tileState) : { on: false, html: '' }), onSel: (k, v) => adSel(k, v), board: $('#m3-factor'), now: () => (A ? factorNow() : {}) }); a.simDash = createSimDash($('#m3-simdash'), { onCtl: () => cmdHandlers().onToggleCalc() });   // 아래 칸 = 자동설계 · 오른쪽 맨 위 = 현재 설계 계산(항상 보임, 계산 제어 단추)
   a.cmd = mountCommandBar($('#m3-cmd'), cmdHandlers());
   a.unsub = store.subscribe(onChange);
   a.keydown = onKey; window.addEventListener('keydown', onKey);
@@ -290,7 +290,7 @@ function onCalc(snap) {
   A.simDash?.sample(snap, M.observe.targetNoise ?? 0.02, M.observe, M.parts.map((p) => p.name), M.parts.length, !!adState().running);
   drawLightPaths();
   paintObs(snap);
-  A.cmd.update(S, M);
+  A.cmd.update(S, M, snap.stats ?? null);
   renderStatus();
 }
 // 관측면 색지도: 격자가 바뀌면 덧그림 메쉬를 다시 만들고, 갱신마다 색만 바꾼다
@@ -422,6 +422,14 @@ function adSel(k, v) {
   else st.sel[k] = k === 'milkyMax' ? clampCap(v) : v;
   st.sel.housing = false; st.sel.boost = false;   // 반사율(④)·보완 자동 추가는 화면에서 뺌 — 부품 속성에서 직접
   renderAuto();
+}
+// 설계 인자 현황판의 '지금 설계' 값 — Milky(① 대상 부품) · LED 개수 · 형상 변경 여부 · 지금 균일도
+function factorNow() {
+  const M = A.store.mspec, S = A.store.session, st = adState(), mp = A.tileState?.milkyPart ?? null, sel = A.tileState?.sel ?? st.sel ?? {};
+  let n = null; try { n = ledsNow(M, S.line).list.length; } catch { n = null; }
+  const stt = A.prog?.snapshot()?.stats, on = (k) => !!st.sel?.[k];
+  return { milky: mp != null ? +M.parts[mp].material.milky : null, milkyCap: Number.isFinite(sel.milkyMax) ? sel.milkyMax : null, leds: n != null ? `LED ${n}개 · 높이 그대로` : '–', shape: M.parts.some((p) => p.shapeMod) ? '형상 변경됨' : '원래 형상',
+    on: { milky: on('milky'), position: on('leds') || on('height') || on('position'), shape: on('shape') }, Ulen: stt?.Ulen, Uwid: stt?.Uwid, tgLen: M.observe.targetLen, tgWid: M.observe.targetWid };
 }
 function renderAuto() {
   const el = $('#m3-auto'), st = adState();
@@ -692,7 +700,7 @@ async function adRun(opt = {}) {
       const hi = ms[Math.floor(ms.length / 2)] >= 6;   // 높은 Milky 는 광자당 매우 느림 — 탐색 창은 최소 광자를 낮춤(정밀 창은 그대로)
       const r = await R.trace(adJob(Md, parts, ctx), { ...(precise ? { N: 3e6, maxMs: 6000 } : { N: 1.5e6, maxMs: 2000, minN: hi ? 5e4 : 1e5 }), rw: { part: ctx.mp, milkies: ms } });
       const rows = milkyRows(G, obs, { milkies: ms, batches: r.rwBatches, ess: r.ess, emitted: r.ledger.emitted });
-      A.optDash?.evals('milky', rows.filter((q) => q.trusted).map((q) => ({ label: `Milky ${(+q.milky).toFixed(2)}`, Ulen: q.Ulen, Uwid: q.Uwid })));   // 믿을 수 있는(ESS 충분) 격자점만
+      A.optDash?.evals('milky', rows.filter((q) => q.trusted).map((q) => ({ label: `Milky ${(+q.milky).toFixed(2)}`, v: +q.milky, Ulen: q.Ulen, Uwid: q.Uwid })));   // 믿을 수 있는(ESS 충분) 격자점만
       return rows;
     },
     // ② 후보 = (s, w) 격자(spec P4 §2.2b): s 2 mm × w ∈ {0, ±δk}, δk = 0.2/0.27/0.33·W(반폭 − 0.5 로 자름) — 후보 수 ≈ (L/2+1)·7, 후보당 ≤ 1.2만 광자(60 s 예산)
