@@ -16,7 +16,7 @@ export function resetSections() { SEC_OPEN.clear(); SEC_FACE = null; PART_TAB = 
 // 접는 구역 열림 기억 연결(다른 패널에서도 같은 모양·기억 — LED 속성 창)
 export const wireSections = (el) => el.querySelectorAll('details[data-m3-sec]').forEach((d) => d.addEventListener('toggle', () => SEC_OPEN.set(d.dataset.m3Sec, d.open)));
 export const secHtml = (id, title, summary, body) => `<details class="m3-sec" data-m3-sec="${id}"${sectionOpen(id) ? ' open' : ''}><summary><span class="m3-sec-t">${title}</span>${summary ? ` <span class="m3-sec-s">${summary}</span>` : ''}</summary><div class="m3-sec-b">${body}</div></details>`;
-// 부품 속성 탭 — 'basic'(기본: 소재 종류·값 하나·위치·크기) | 'detail'(상세: 실측 소재·수지·반사 소재 DB·면별 처리·가능 범위·간격). 세션 동안 기억
+// 부품 속성 탭 — 'basic'(기본: 소재 종류·값 하나·위치·크기) | 'detail'(상세: 실측 소재·수지·반사 소재 DB·면별 처리·가능 범위). 세션 동안 기억
 let PART_TAB = 'basic';
 export const partTab = () => PART_TAB;
 export function setPartTab(t) { PART_TAB = t === 'detail' ? 'detail' : 'basic'; }
@@ -112,15 +112,11 @@ export function overlapWarnHtml(c) {
   const bad = c ? [...c.rows, ...(c.leds ?? [])].filter((r) => r.depth > 0) : [];
   return bad.length ? `<div class="m3-clash" role="alert">⚠ ${bad.map((r) => `${esc(r.name)}과 ${r.depth.toFixed(2)} mm 겹침`).join(' · ')} — 위치·크기를 고치세요</div>` : '';
 }
-// 간격 한 줄 요약(순수) — 가장 가까운 부품·LED 부품(간섭 = 빨강) · LED 최소 거리
-export function clearanceSummaryHtml(c) {
-  if (!c) return '';
-  const key = (r) => (r.depth > 0 ? r.depth : -r.gap);
-  const near = [...c.rows, ...(c.leds ?? [])].reduce((a, r) => (!a || key(r) > key(a) ? r : a), null);
-  const what = !near ? '<span class="mut">20 mm 안에 다른 부품 없음</span>'
-    : `가장 가까운: ${esc(near.name)} <b class="${near.depth > 0 ? 'bad' : near.gap <= 0.02 ? 'touch' : ''}">${near.depth > 0 ? '간섭' : near.gap <= 0.02 ? '접촉' : `${n1(near.gap)} mm`}</b>`;
-  const led = c.ledMin ? ` · LED까지 <b class="led">${n1(c.ledMin.dist)} mm</b>` : '';
-  return `<div class="m3-clr">${what}${led}</div>`;
+// LED 까지 거리 한 줄(순수, 기본 탭) — 이 부품에서 가장 가까운 LED 발광점까지 · 축 방향(LED 가 비추는 방향) 거리. 가까우면 LED 위가 밝게 보이는 핫스팟
+export function ledDistHtml(c) {
+  if (!c?.ledMin) return '';
+  const ax = c.ledAxial ? ` · 축 방향 <b>${n1(c.ledAxial.dist)} mm</b>` : '';
+  return `<div class="m3-clr" title="가까울수록 LED 바로 위가 밝게 보이기 쉬움(핫스팟) · 멀수록 고르지만 어두워짐">LED까지 <b class="led">${n1(c.ledMin.dist)} mm</b> <span class="mut">(LED ${c.ledMin.led + 1})</span>${ax}</div>`;
 }
 
 // 크기·위치 구역 요약 — 위치(외곽 중심)·크기 mm, 형상 변경 표시
@@ -149,18 +145,15 @@ function partEditor(p, sel, dbList) {
   const warn = `${overlapWarnHtml(sel.clearance)}${sel.xfMsg ? `<div class="m3-warn" role="status">${esc(sel.xfMsg)}</div>` : ''}`;
   const body = tab === 'basic'
     ? `${untraceHtml(p)}<div class="m3-card">${kindSegHtml(p.material.kind)}${basicMaterialHtml(p, dbList, cat)}</div>
-      <div class="m3-card"><div class="m3-sub">위치 · 크기 <span class="mut">mm</span></div>${xformEditor(p, sel.xfInfo, false, true)}</div>`
+      <div class="m3-card"><div class="m3-sub">위치 · 크기 <span class="mut">mm</span></div>${xformEditor(p, sel.xfInfo, false, true)}${ledDistHtml(sel.clearance)}</div>`
     : `<div class="m3-card"><div class="m3-sub">소재 상세</div>${detailMaterialHtml(p, dbList, cat, sel.reflForm ?? {})}</div>
       ${secHtml('finish', '면 처리 (면별)', face != null ? `면 #${face} 선택` : nOver ? `면 ${nOver}개 덮어씀` : '', `${partFin}${faceRow}<div class="mut m3-note">3D 뷰에서 면을 클릭하면 그 면만 다르게 지정할 수 있습니다</div>`)}
       ${secHtml('xf', '크기·위치 상세 (가능 범위 · 비율 고정)', esc(xfSummaryText(p, sel.xfInfo)), xformEditor(p, sel.xfInfo, sel.lock))}
-      ${sel.clearance ? secHtml('gap', '간격 상세', esc(clearanceText(sel.clearance)), clearanceHtml(sel.clearance)) : ''}
       ${secHtml('contact', '접촉면 (이 부품)', '', contactsForPartHtml(sel.contacts ?? [], sel.part, sel.names ?? []))}
       ${opaque ? secHtml('refldb', '반사 소재 DB (측정값 등록·관리)', '', '<div data-m3-refldb></div>') : ''}`;
   return `${warn}${tabs}<div class="m3-edit" role="tabpanel">${body}</div>`;
 }
 
-// 간격 구역 요약 — 가장 가까운 부품·LED 거리 한 줄(글자)
-const clearanceText = (c) => { const h = clearanceSummaryHtml(c); return h.replace(/<[^>]+>/g, ''); };
 // 이 부품의 접촉면(순수) — 체크 = 공기층 없음(이중사출·접착). 번호 = 전체 접촉면 목록 위치
 export function contactsForPartHtml(contacts, part, names) {
   const mine = contacts.map((c, i) => [c, i]).filter(([c]) => c.a === part || c.b === part);
@@ -189,16 +182,6 @@ export function xformFromInput(xf, key, v, lock, info) {
   }
   const xf2 = o.every((x) => x === 0) && s.every((x) => x === 1) ? null : { offset: o, scale: s };
   return { xf: xf2, clamped };
-}
-// 간격 표(순수) — c = app.js clearanceOf 결과: { rows, leds, ledMin, ledAxial }
-export function clearanceHtml(c) {
-  if (!c) return '';
-  const mm = (v) => `${v.toFixed(2)} mm`;
-  const row = (r) => `<div class="m3-gap ${r.depth > 0 ? 'bad' : r.gap <= 0.02 ? 'touch' : ''}"><span>${esc(r.name)}</span><b>${r.depth > 0 ? '간섭' : r.gap <= 0.02 ? '접촉' : mm(r.gap)}</b></div>`;
-  const led = c.ledMin ? `<div class="m3-gap led"><span>LED 최소 거리 (LED ${c.ledMin.led + 1})</span><b>${mm(c.ledMin.dist)}</b></div>` : '';
-  const ax = c.ledAxial ? `<div class="m3-gap led"><span>LED 축 방향 (LED ${c.ledAxial.led + 1})</span><b>${mm(c.ledAxial.dist)}</b></div>` : '';
-  return `<div class="mut m3-note">20 mm 안 · 3D 하늘색 선</div>
-    <div class="m3-gaps">${c.rows.map(row).join('') || '<div class="mut">20 mm 안에 다른 부품 없음</div>'}${c.leds.map(row).join('')}${led}${ax}</div>`;
 }
 const f2 = (v) => (Math.round(v * 100) / 100).toFixed(2);
 // 가능 범위 글자 — 무한은 '—'

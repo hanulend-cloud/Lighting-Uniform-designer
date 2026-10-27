@@ -345,7 +345,7 @@ function renderMarkers() {
     const t = extractFaces(rt.parts[w.part], new Set([w.face]));
     out.push({ type: 'tris', positions: t.positions, triangles: t.triangles, color: 0xff8c1a, opacity: f === 'leak' ? 0.8 : 0.5 });
   }
-  // 선택 부품의 간격 치수선: 이웃 부품(하늘색, 간섭은 빨강) · 가장 가까운 LED(초록)
+  // 선택 부품이 다른 부품·LED 와 겹친 곳만 빨간 고리(간격 표·치수선은 없앰)
   const cl = A.clrShown;
   if (cl) {
     for (const r of [...cl.rows, ...cl.leds]) {
