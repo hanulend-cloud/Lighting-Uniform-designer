@@ -273,7 +273,7 @@ function onCalc(snap) {
   if (T.start && snap.stats?.relNoise != null && snap.stats.relNoise <= 0.05 && T.noise5 == null) T.noise5 = (now - T.start) / 1000;
   updateLeakCheck(snap);
   A.results.update({ snap, observe: M.observe, message: guidance(snap), leds: ledSW(M, S.line) });
-  A.simDash?.sample(snap, M.observe.targetNoise ?? 0.02, M.observe, M.parts.map((p) => p.name), M.parts.length);
+  A.simDash?.sample(snap, M.observe.targetNoise ?? 0.02, M.observe, M.parts.map((p) => p.name), M.parts.length, !!adState().running);
   drawLightPaths();
   paintObs(snap);
   A.cmd.update(S, snap);
@@ -425,9 +425,9 @@ function renderAuto() {
   const hm = st.sel.housingPart >= 0 ? reflCat().find((e) => !e.special && e.id === M.parts[st.sel.housingPart]?.reflMaterial) : null;   // ④ 대상 반사 소재
   A.tileState = { avail, sel, running: st.running, names: M.parts.map((p) => p.name), milkyPart: mp, housingMat: hm ? { name: hm.name, max: hm.max } : null };
   A.optDash?.refresh();
-  renderAutoPanel(el, { avail, sel, running: st.running, result: st.result, names: M.parts.map((p) => p.name), canRevert: !!st.undo, applied: st.undo ? st.applied ?? null : null, noLine: !A.store.session.line, milkyPart: mp, housingMat: hm ? { name: hm.name, max: hm.max } : null, catalog: reflCat() }, {
+  renderAutoPanel(el, { avail, sel, running: st.running, result: st.result, resultOpen: !!st.resultOpen, names: M.parts.map((p) => p.name), canRevert: !!st.undo, applied: st.undo ? st.applied ?? null : null, noLine: !A.store.session.line, milkyPart: mp, housingMat: hm ? { name: hm.name, max: hm.max } : null, catalog: reflCat() }, {
     onSel: (k, v) => adSel(k, v),
-    onAction: (k) => ({ run: adRunBoost, stop: adStop, close: () => adSetOpen(false), apply: adApply, cancel: adCancel, revert: adRevert, step: adStep })[k]?.(),
+    onAction: (k) => ({ run: adRunBoost, stop: adStop, close: () => adSetOpen(false), apply: adApply, cancel: adCancel, revert: adRevert, step: adStep, view: () => { st.resultOpen = true; renderAuto(); }, hide: () => { st.resultOpen = false; renderAuto(); } })[k]?.(),
   });
 }
 function adStop() { const st = adState(); if (!st.running || !st.runner) return; st.runner.cancel(); setStatus('자동설계 중지됨'); A.optDash?.stop(); }
@@ -716,9 +716,9 @@ async function adRun(opt = {}) {
       }
       return out;
     },
-    async verify(d) {   // 정밀 재판정(현재안·최종안): 200만 광자 또는 6초(≥ 30만) — 잡음 ≈ ±2%
+    async verify(d) {   // 정밀 재판정(현재안·최종안): 250만 광자(최소 150만, 20초까지) — 광자가 적으면 균일도(최저÷최고)가 잡음 때문에 낮게 나옴(6초 제한 때 0.69 vs 실제 0.78)
       const { M: Md, parts } = designScene(d, ctx);
-      const r = await R.trace(adJob(Md, parts, ctx), { N: 2e6, maxMs: 6000, minN: 3e5, batches: 10 });
+      const r = await R.trace(adJob(Md, parts, ctx), { N: 2.5e6, maxMs: 20000, minN: 1.5e6, batches: 10 });
       const stt = tallyStats(G, r.batches, obs);
       A.optDash?.evals('final', [{ label: verifyLabel(d), Ulen: stt.Ulen, Uwid: stt.Uwid, ok: !stt.empty }]);
       return { stats: stt, eff: adEff(r) };
@@ -745,7 +745,8 @@ async function adRun(opt = {}) {
     const C = res.current;   // 현재안 = 최종안과 같은 추정기
     let nStep = null; if (M0.light.kind === 'step') { try { nStep = L.currentEmitters(M0, line).length; } catch { nStep = 0; } }
     const smI = sp >= 0 && M0.parts[sp]?.shapeMod ? sp : M0.parts.findIndex((p) => p.shapeMod), sm = smI >= 0 ? M0.parts[smI].shapeMod : null;   // 비교표 '현재' 열 — 이미 적용된 형상(표시만)
-    st.result = { design: res.best, feasible: res.feasible, reason: res.reason, hint: res.hint ?? null, shape: res.best.shape ?? null, screen: res.steps?.find((x) => x.stage === 'shapeScreen')?.gains ?? null, stepLeds: nStep, unchanged: !!res.unchanged, ctx, stages,
+    st.resultOpen = true;   // 끝나면 결과 창을 크게 띄움
+    st.result = { targets: { len: obs.targetLen, wid: obs.targetWid }, design: res.best, feasible: res.feasible, reason: res.reason, hint: res.hint ?? null, shape: res.best.shape ?? null, screen: res.steps?.find((x) => x.stage === 'shapeScreen')?.gains ?? null, stepLeds: nStep, unchanged: !!res.unchanged, ctx, stages,
       added: opt.added ?? [], base: opt.base ?? null, clash: designClash(res.best, ctx, M0, rt, line),
       finish: stages.housing ? (() => { const c = { ...M0.parts[hp].finish, ...(M0.parts[hp].coating ? { coating: M0.parts[hp].coating } : {}) }; return { cur: c, best: res.best.finish ?? c }; })() : null, height: stages.height && hInfo ? { dz: res.best.dz ?? 0, gap: hInfo.gap } : null,
       cur: { ...cur, shape: sm ? { dt: sm.dt, h: sm.h, R: sm.R, e: sm.e ?? 0, c: sm.c ?? 0 } : null, Ulen: C?.stats?.Ulen, Uwid: C?.stats?.Uwid, eff: C?.eff ?? NaN, profile: C?.stats?.profile ?? null },

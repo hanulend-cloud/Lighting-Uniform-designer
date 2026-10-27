@@ -94,8 +94,9 @@ export function simPct(relNoise, target) { return Number.isFinite(relNoise) && r
 export function createSimDash(el) {
   let H = [], tgt = 0.02, raf = 0, state = '', obs = null, P = [], names = [];
   // names = 부품 이름, nMech = 기구 부품 수(LED STEP 부품 번호는 그 뒤 — 경로에서 뺌)
-  function sample(snap, targetNoise, observe, nm = names, nMech = nm.length) {
-    tgt = targetNoise ?? tgt; obs = observe ?? obs; state = snap?.state ?? ''; names = nm; P = topPaths(snap?.paths, nMech);
+  let busy = false;   // 자동설계 중(점진 계산 일시정지)
+  function sample(snap, targetNoise, observe, nm = names, nMech = nm.length, adBusy = false) {
+    busy = adBusy; tgt = targetNoise ?? tgt; obs = observe ?? obs; state = snap?.state ?? ''; names = nm; P = topPaths(snap?.paths, nMech);
     const ph = snap?.photons ?? 0, st = snap?.stats;
     if (!st || st.empty || !ph) { if (!ph) H = []; draw(); return; }
     if (H.length && ph < H[H.length - 1].ph) H = [];   // 장면이 바뀌어 다시 시작
@@ -121,7 +122,7 @@ export function createSimDash(el) {
         <text class="od-ax" x="${x0}" y="${h - 4}">광자 ${H[0].ph.toLocaleString()}</text><text class="od-ax" x="${x1}" y="${h - 4}" text-anchor="end">${last.ph.toLocaleString()} (로그)</text></svg>`;
     }
     const sTxt = { running: '계산 중', paused: '일시정지', done: '수렴 — 멈춤', pending: '대기', starting: '장면 준비' }[state] ?? state ?? '';
-    el.innerHTML = `<div class="od-h">시뮬레이션 진행현황 <span class="mut">${esc(sTxt)}</span></div>
+    el.innerHTML = `<div class="od-h">현재 설계 계산 <span class="mut">${busy ? '자동설계 중 — 일시정지(끝나면 이어서)' : esc(sTxt)} · 오차가 목표에 닿으면 100%</span></div>
       <div class="od-pct"><b>${pct.toFixed(0)}%</b><div class="od-bar od-bar-big"><i style="width:${pct.toFixed(0)}%"></i></div></div>
       <div class="od-row mut">계산 오차 ${last && Number.isFinite(last.noise) ? `±${(last.noise * 100).toFixed(1)}%` : '–'} → 목표 ±${(tgt * 100).toFixed(1)}% · 광자 ${last ? last.ph.toLocaleString() : 0}${last ? ` · 길이 U ${f2(last.Ulen)} · 폭 U ${f2(last.Uwid)}` : ''}</div>
       ${P.length ? `<div class="od-paths"><b>광경로</b> <span class="mut">관측면으로 나온 빛이 거친 부품</span>${P.map((p) => `<div class="od-path"><span class="od-pbar"><i style="width:${(p.share * 100).toFixed(0)}%"></i></span><b>${(p.share * 100).toFixed(0)}%</b> ${esc(pathText(p, names))}</div>`).join('')}</div>` : ''}

@@ -656,3 +656,14 @@ main:has(#m3-start:not([hidden])) { grid-template-rows: minmax(0, 1fr); }
 .od-path { display: flex; align-items: center; gap: 5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1.6; }
 .od-pbar { width: 40px; height: 6px; background: var(--m3-line); border-radius: 3px; overflow: hidden; flex: none; } .od-pbar i { display: block; height: 100%; background: #ff5fa2; }
 .od-path:nth-child(3) .od-pbar i { background: #b388ff; }
+
+/* 자동설계 결과 창(끝나면 크게) */
+.m3-rmodal { position: fixed; inset: 0; z-index: 90; background: rgba(10,14,22,.5); display: grid; place-items: center; padding: 4vh 4vw; }
+.m3-rmodal-in { width: min(760px, 100%); max-height: 92vh; overflow: auto; background: #fff; color: #20262f; border-radius: 10px; padding: 12px 16px 16px; box-shadow: 0 10px 40px rgba(0,0,0,.3); font-size: 13px; }
+#mech3d-wrap[data-theme="dark"] .m3-rmodal-in { background: #1b2230; color: #dbe1ea; }
+.m3-rmodal-hd { display: flex; align-items: center; gap: 8px; font-size: 15px; margin-bottom: 6px; }
+.m3-rverdict { font-size: 18px; font-weight: 700; padding: 8px 10px; border-radius: 6px; margin-bottom: 8px; background: var(--m3-accbg); }
+.m3-rverdict.ok { color: var(--m3-ok); } .m3-rverdict.bad { color: var(--m3-bad); }
+.m3-rmodal-in .m3-cmp { font-size: 13.5px; } .m3-rmodal-in .m3-cmp th, .m3-rmodal-in .m3-cmp td { padding: 5px 8px; }
+.m3-rmodal-in .m3-cmp td.chg { font-size: 14px; }
+.m3-ad-bar .ok { color: var(--m3-ok); font-weight: 600; } .m3-ad-bar .bad { color: var(--m3-bad); font-weight: 600; }

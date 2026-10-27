@@ -166,7 +166,9 @@ const dl = (a, b, k = 1, u = '') => { if (!Number.isFinite(a) || !Number.isFinit
 // 총 LED 수(2열 = 열 수 × 열당, 위치 목록 = 그 수)
 const ledTotal = (x) => (x?.positions?.length ? x.positions.length : Number.isFinite(x?.count) ? x.count * (x.rows === 2 ? 2 : 1) : NaN);
 // 비교표 줄(현재 → 최적/적용 후) — compareHtml 과 적용 뒤 요약(appliedHtml)이 같이 씀
-function cmpRows({ cur, best, shape, stepLeds = null, finish = null, height = null, catalog = DEFAULT_FINISH_CATALOG }) {
+const passMark = (v, t) => (Number.isFinite(v) && Number.isFinite(t) ? (v + 1e-9 >= t ? ' <b class="ok">✓</b>' : ' <b class="bad">✕</b>') : '');
+// targets = { len, wid } — 균일도 줄에 목표·통과(✓/✕)
+function cmpRows({ cur, best, shape, stepLeds = null, finish = null, height = null, catalog = DEFAULT_FINISH_CATALOG, targets: tg = null }) {
   const tr = (label, a, b, d = '') => `<tr><th>${label}</th><td>${a}</td><td class="${a !== b ? 'chg' : ''}">${b}${d}</td></tr>`;
   const lay = (x) => `${x.rows === 2 ? '2열 × ' : ''}${x.count}개 ${x.pitch > 0 ? `피치 ${x.pitch}` : '균등'}${x.rows === 2 ? ` (열 간격 ±${(x.rowGap ?? 0).toFixed(1)} mm)` : ''}`;   // 2열 = 열당 개수(spec P4 §2.2b)
   const led = (x) => (x.layoutText ? x.layoutText : stepLeds == null ? lay(x) : x.stepOrig === false ? `${lay(x)}` : `LED STEP 현재 ${x.count ?? stepLeds}개`);   // layoutText = ② 배치 Solver 문구(같은 피치/끝 압축/자유 배치) · STEP: stepOrig = 원래 STEP 위치
@@ -175,7 +177,7 @@ function cmpRows({ cur, best, shape, stepLeds = null, finish = null, height = nu
   const tot = Number.isFinite(tc) && Number.isFinite(tb) && tb !== tc ? ` <b class="m3-tot">· 총 ${tb}개 (${tb > tc ? '+' : ''}${tb - tc})</b>` : '';
   return `${tr('LED', led(cur), led(best), tot)}
       ${tr('Milky', f2(cur.milky), f2(best.milky), dl(cur.milky, best.milky))}
-      ${tr('길이 U', f2(cur.Ulen), f2(best.Ulen), dl(cur.Ulen, best.Ulen))}${tr('폭 U', f2(cur.Uwid), f2(best.Uwid), dl(cur.Uwid, best.Uwid))}
+      ${tr(`길이 U${tg?.len != null ? ` <span class="mut">목표 ${f2(tg.len)}</span>` : ''}`, f2(cur.Ulen), f2(best.Ulen), `${dl(cur.Ulen, best.Ulen)}${passMark(best.Ulen, tg?.len)}`)}${tr(`폭 U${tg?.wid != null ? ` <span class="mut">목표 ${f2(tg.wid)}</span>` : ''}`, f2(cur.Uwid), f2(best.Uwid), `${dl(cur.Uwid, best.Uwid)}${passMark(best.Uwid, tg?.wid)}`)}
       ${tr('광 효율', `${f2(cur.eff * 100)}%`, `${f2(best.eff * 100)}%`, dl(cur.eff, best.eff, 100, '%p'))}
       ${shape || cur.shape ? tr('형상', curShape, shape ? shapeText(shape) : curShape) : ''}
       ${finish ? tr('케이스 면', finishText(finish.cur, catalog), finishText(finish.best ?? finish.cur, catalog)) : ''}
@@ -203,10 +205,20 @@ export function appliedHtml(applied) {
 
 // el 에 카드를 그리고 이벤트를 h 로 넘긴다. state = { avail, sel, running, result, names, canRevert, noLine, milkyPart }
 // 실행 중 카드 구조가 같으면 진행 막대·문구만 바꿈(갱신마다 innerHTML 을 다시 만들지 않게)
+// 결과 한 줄(아래 칸 맨 위) — 판정 · 길이/폭 U 전→후 · [결과 보기] [적용] [취소]
+export function resultLineHtml(r) {
+  const b = r.best, c = r.cur, tg = r.targets ?? {}, u = (k, t) => `${f2(c[k])}→<b>${f2(b[k])}</b>${passMark(b[k], t)}`;
+  return `<div class="m3-ad-bar"><b>✨ 자동설계 결과</b><span class="${r.unchanged ? 'mut' : r.feasible ? 'ok' : 'bad'}">${r.unchanged ? '현재안 유지' : r.feasible ? '목표 통과' : '목표 미달'}</span>
+    <span>길이 U ${u('Ulen', tg.len)} · 폭 U ${u('Uwid', tg.wid)}</span><button type="button" data-ad="view">결과 보기</button>
+    <button type="button" data-ad="apply"${r.unchanged ? ' disabled' : r.clash > 0 ? ' disabled title="LED 몸체가 부품과 겹침"' : ''}>적용</button><button type="button" data-ad="cancel">취소</button></div>`;
+}
+// el 에 그리고 이벤트를 h 로 넘김. state = { avail, sel, running, result, resultOpen, … } — 결과가 있으면 한 줄 + (열림) 결과 창
 export function renderAutoPanel(el, state, h) {
-  const html = state.result ? compareHtml({ ...state.result, canRevert: state.canRevert, ...(state.catalog ? { catalog: state.catalog } : {}) }) : autoCardHtml(state);
-  const key = state.result ? html : autoCardHtml({ ...state, running: state.running ? { frac: 0, text: '' } : null });
-  const bar = state.running && !state.result && el._adKey === key ? el.querySelector('.m3-ad-prog .bar') : null;
+  const r = state.result, full = r ? compareHtml({ ...r, canRevert: state.canRevert, ...(state.catalog ? { catalog: state.catalog } : {}) }) : '';
+  const html = r ? `${resultLineHtml(r)}${state.resultOpen ? `<div class="m3-rmodal" role="dialog" aria-modal="true" aria-label="자동설계 결과"><div class="m3-rmodal-in"><div class="m3-rmodal-hd"><b>자동설계 결과</b><span class="m3-ad-sp"></span><button type="button" data-ad="hide">닫기 (결과는 남음)</button></div>
+      <div class="m3-rverdict ${r.unchanged ? '' : r.feasible ? 'ok' : 'bad'}">${r.unchanged ? '현재 설계보다 나은 안을 찾지 못함 — 현재안 유지' : r.feasible ? '✓ 목표 통과' : '✕ 목표 미달 — 가장 가까운 안'}</div>${full}</div></div>` : ''}` : autoCardHtml(state);
+  const key = r ? html : autoCardHtml({ ...state, running: state.running ? { frac: 0, text: '' } : null });
+  const bar = state.running && !r && el._adKey === key ? el.querySelector('.m3-ad-prog .bar') : null;
   if (bar) {
     const pct = Math.round((state.running.frac ?? 0) * 100);
     bar.setAttribute('aria-valuenow', String(pct)); bar.firstElementChild.style.width = `${pct}%`;
@@ -220,4 +232,6 @@ export function renderAutoPanel(el, state, h) {
     else if (x.tagName === 'SELECT' || x.type === 'number') x.onchange = () => h.onSel(k, x.value === '' ? NaN : +x.value);
     else x.onclick = () => h.onAction(k);
   });
+  const m = el.querySelector('.m3-rmodal');
+  if (m) m.addEventListener('click', (e) => { if (e.target === m) h.onAction('hide'); });
 }
