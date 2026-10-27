@@ -16,6 +16,7 @@ export function partBadge(p) {
 export function treeNodes(M, S, lay) {
   const L = M.light, O = M.observe, out = [], hid = new Set(S.hidden ?? []);
   const node = (id, label, badge, child = false, kind = '', eye) => out.push({ id, label, badge, child, kind, sel: S.node === id, eye });
+  node('target', '◎ 목표', `${Math.round(O.targetLen * 100)}% / ${Math.round(O.targetWid * 100)}%`);   // 맨 위 — 무엇을 맞출지 먼저
   node('parts', '▾ 부품', String(M.parts.length), false, '', hid.size || S.hideLeds ? 'all' : undefined);
   M.parts.forEach((p, i) => node(`part:${i}`, p.name, partBadge(p), true, p.material.kind, hid.has(i) ? 'off' : 'on'));
   node('light', '▾ 광원', { none: '지정 안 함', step: 'LED STEP', manual: '직접 배치' }[L.kind]);
@@ -29,7 +30,6 @@ export function treeNodes(M, S, lay) {
   }
   const ln = S.line;
   node('obs', '▾ 관측면', ln ? `${LINE_KIND[ln.kind] ?? ln.kind} ${ln.length.toFixed(0)}×${ln.width.toFixed(0)}` : O.faces.length ? '인식 중' : '미지정');
-  node('target', '◎ 목표', `${O.targetLen.toFixed(2)} / ${O.targetWid.toFixed(2)}`);
   return out;
 }
 // 눈 단추 처리(순수): id = 'parts' | 'part:i' | 'leds', only = Shift(이 부품만) → { hidden, hideLeds }

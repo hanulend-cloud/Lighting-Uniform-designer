@@ -149,7 +149,8 @@ function partEditor(p, sel, dbList) {
       ${secHtml('finish', '면 처리 (면별)', face != null ? `면 #${face} 선택` : nOver ? `면 ${nOver}개 덮어씀` : '', `${partFin}${faceRow}<div class="mut m3-note">3D 뷰에서 면을 클릭하면 그 면만 다르게 지정할 수 있습니다</div>`)}
       ${secHtml('xf', '크기·위치 상세 (가능 범위 · 비율 고정)', esc(xfSummaryText(p, sel.xfInfo)), xformEditor(p, sel.xfInfo, sel.lock))}
       ${sel.clearance ? secHtml('gap', '간격 상세', esc(clearanceText(sel.clearance)), clearanceHtml(sel.clearance)) : ''}
-      ${secHtml('contact', '접촉면 (이 부품)', '', contactsForPartHtml(sel.contacts ?? [], sel.part, sel.names ?? []))}`;
+      ${secHtml('contact', '접촉면 (이 부품)', '', contactsForPartHtml(sel.contacts ?? [], sel.part, sel.names ?? []))}
+      ${opaque ? secHtml('refldb', '반사 소재 DB (측정값 등록·관리)', '', '<div data-m3-refldb></div>') : ''}`;
   return `${warn}${tabs}<div class="m3-edit" role="tabpanel">${body}</div>`;
 }
 
@@ -296,6 +297,7 @@ export function renderPartProps(el, m, sel0, dbList, h) {
   if (rcp) rcp.onclick = () => h.onReflCopy?.(i, p.reflMaterial);
   el.querySelectorAll('[data-m3-fitdlg]').forEach((b) => { b.onclick = () => h.onFitDialog?.(i); });
   el.querySelectorAll('[data-m3-contact]').forEach((c) => { c.onchange = () => h.onContact?.(+c.dataset.m3Contact, c.checked ? 'contact' : 'air'); });
+  sel0.afterRender?.(el);   // 붙여 그릴 것(반사 소재 DB 등)
   el.querySelectorAll('[data-m3-finish]').forEach((x) => {
     x.onchange = () => {
       const face = x.dataset.m3Finish === 'face' ? sel.face : null;

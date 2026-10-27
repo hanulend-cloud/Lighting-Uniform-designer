@@ -22,9 +22,10 @@ const M = {
 // 자동설계 왼쪽 칸 + 가운데 타일(항목 스위치·설정)을 합친 HTML — 카드 시험용
 const card = (o) => autoCardHtml(o) + ['milky', 'leds', 'shape', 'housing', 'height'].map((k) => tileConfigHtml(k, o).html).join('');
 { const N = treeNodes(M, { node: 'part:0', line: { kind: 'line', closed: false, length: 116, width: 16 } });
-  ok(N.map((n) => n.id).join() === 'parts,part:0,part:1,light,leds,obs,target', `트리 노드: ${N.map((n) => n.id).join()}`);
+  ok(N.map((n) => n.id).join() === 'target,parts,part:0,part:1,light,leds,obs' && N[0].badge === '80% / 80%', `트리 노드(목표 맨 위): ${N.map((n) => n.id).join()}`);
+  N.shift();
   ok(N[1].badge === 'Milky 3.0' && N[1].sel && N[1].child && N[2].badge.startsWith('불투명') && N[3].badge === '직접 배치' && N[4].label === 'LED ×10' && N[4].badge === '균등'
-    && N[5].badge === '직선 116×16' && N[6].badge === '0.80 / 0.80', `배지: ${N.map((n) => n.badge).join(' | ')}`); }
+    && N[5].badge === '직선 116×16', `배지: ${N.map((n) => n.badge).join(' | ')}`); }
 { const N = treeNodes({ ...M, light: defaultLight() }, { node: null, line: null });
   ok(!N.some((n) => n.id === 'leds') && N.find((n) => n.id === 'obs').badge === '인식 중' && N.find((n) => n.id === 'light').badge === '지정 안 함', '광원 없음 → LED 노드 없음, 라인 인식 중');
   const N2 = treeNodes({ ...M, observe: defaultObserve() }, { node: null, line: null });
@@ -42,9 +43,9 @@ ok(calcLabel({ state: 'running' }) === '⏸ 계산 중' && calcLabel({ state: 'p
 { const h = treeHtml(M, { node: 'part:0', line: null });
   ok(/role="button" tabindex="0" aria-current="true" data-node="part:0"/.test(h) && (h.match(/aria-current/g) ?? []).length === 1 && (h.match(/role="button" tabindex="0"(?: aria-current="true")? data-node=/g) ?? []).length === treeNodes(M, { node: 'part:0', line: null }).length,
     '트리 노드: role=button · tabindex=0 · 선택 노드만 aria-current'); }
-{ const N = treeNodes(M, { node: null, line: null, hidden: [1], hideLeds: false });
+{ const N = treeNodes(M, { node: null, line: null, hidden: [1], hideLeds: false }).filter((n) => n.id !== 'target');
   ok(N[0].eye === 'all' && N[1].eye === 'on' && N[2].eye === 'off' && N.find((n) => n.id === 'leds').eye === undefined, '눈 단추: 숨긴 부품 off · 머리 = 모두 보기 · 직접 배치 LED 없음');
-  ok(treeNodes(M, { node: null, line: null, hidden: [] })[0].eye === undefined, '숨긴 것 없으면 머리 눈 단추 없음');
+  ok(treeNodes(M, { node: null, line: null, hidden: [] }).find((n) => n.id === 'parts').eye === undefined, '숨긴 것 없으면 머리 눈 단추 없음');
   const h = treeHtml(M, { node: null, line: null, hidden: [1] });
   ok(/data-eye="part:1"[^>]*aria-pressed="false"/.test(h) && /class="m3-node child  hid"/.test(h), '눈 단추 HTML · 숨긴 행 흐리게');
   const stp = { ...M, light: { ...defaultLight(), kind: 'step', step: { leds: [0, 1], excluded: [] } } };

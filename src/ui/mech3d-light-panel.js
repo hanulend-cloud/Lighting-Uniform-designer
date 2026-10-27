@@ -250,23 +250,29 @@ const DB_ADD = new WeakMap();   // 패널 요소 → 측정값 추가 중인 id
 // 목표 노드: 균일도(길이·폭) · 평균 휘도 · 잡음 목표 · 설계 점검 기준
 // h = { onTarget(key, v|null), onCheckParam(key, v), onCatalog(id, key, v), onReflDb(op, id?, arg?) } — % 칸(data-lp-pct)은 0~1 로 바꿔 넘김 · cat = 반사 소재표 행(catalogOf(DB))
 // onReflDb op: 'rename'(id, 이름) · 'samples'(id, { values, cond, note } → 오류 문구|없음) · 'remove'(id) · 'copy'(id) · 'export' · 'import'(_, 텍스트)
-export function renderTargetProps(el, m, h, cat = catalogOf(null)) {
-  const O = m.observe, C = m.checks;
+// 목표 노드(쉽게): 길이·폭 균일도 % 두 칸 + (선택) 밝기 목표. 계산 오차·설계 점검 기준은 접는 구역. 반사 소재 DB 는 부품 상세 탭으로 옮김
+export function renderTargetProps(el, m, h) {
+  const O = m.observe, C = m.checks, pc = (v) => Math.round(v * 100);
   el.innerHTML = `<div class="m3-h">속성 · 목표</div>
-    <div class="m3-row"><label>길이 U</label><input type="number" min="0" max="1" step="0.05" value="${O.targetLen}" data-lp-tgt="targetLen"></div>
-    <div class="m3-row"><label>폭 U</label><input type="number" min="0" max="1" step="0.05" value="${O.targetWid}" data-lp-tgt="targetWid"></div>
-    <div class="m3-row"><label>평균 휘도</label><input type="number" min="0" step="10" value="${O.targetLum ?? ''}" placeholder="없음" data-lp-tgt="targetLum" data-lp-auto> cd/m² <span class="mut">LED 광속 필요</span></div>
-    <div class="m3-row"><label>잡음 목표</label><input type="number" min="0.2" max="20" step="0.5" value="${num((O.targetNoise ?? 0.02) * 100, 1)}" data-lp-tgt="targetNoise" data-lp-pct>% <span class="mut">이하가 되면 계산 멈춤</span></div>
-    <div class="m3-sub">설계 점검 기준</div>
-    <div class="m3-row"><label>최소 살두께</label><input type="number" min="0.1" step="0.1" value="${C.minWall}" data-lp-chk="minWall"> mm</div>
-    <div class="m3-row"><label>최소 도달률</label><input type="number" min="0" max="100" step="5" value="${num(C.minReach * 100, 0)}" data-lp-chk="minReach" data-lp-pct>%</div>
-    <div class="m3-row"><label>새는 빛 한도</label><input type="number" min="0" max="100" step="5" value="${num(C.maxLeak * 100, 0)}" data-lp-chk="maxLeak" data-lp-pct>%</div>
-    ${reflDbHtml(cat, { addFor: DB_ADD.get(el) ?? null })}`;
+    <div class="m3-card"><div class="m3-sub">균일도 목표 <span class="mut">가장 어두운 곳 ÷ 가장 밝은 곳</span></div>
+      <div class="m3-row"><label>길이 방향</label><input type="number" min="0" max="100" step="5" value="${pc(O.targetLen)}" data-lp-tgt="targetLen" data-lp-pct aria-label="길이 방향 균일도 목표 %"> %</div>
+      <div class="m3-row"><label>폭 방향</label><input type="number" min="0" max="100" step="5" value="${pc(O.targetWid)}" data-lp-tgt="targetWid" data-lp-pct aria-label="폭 방향 균일도 목표 %"> %</div></div>
+    <div class="m3-card"><div class="m3-row"><label>밝기 목표</label><input type="number" min="0" step="10" value="${O.targetLum ?? ''}" placeholder="없음" data-lp-tgt="targetLum" data-lp-auto aria-label="평균 휘도 목표 cd/m²"> cd/m² <span class="mut">선택 · LED 밝기(lm) 입력 필요</span></div></div>
+    ${secHtml('tgtadv', '계산 · 설계 점검 기준', '', `
+      <div class="m3-row"><label>계산 오차 목표</label><input type="number" min="0.2" max="20" step="0.5" value="${num((O.targetNoise ?? 0.02) * 100, 1)}" data-lp-tgt="targetNoise" data-lp-pct>% <span class="mut">이하가 되면 계산 멈춤</span></div>
+      <div class="m3-row"><label>최소 살두께</label><input type="number" min="0.1" step="0.1" value="${C.minWall}" data-lp-chk="minWall"> mm</div>
+      <div class="m3-row"><label>최소 도달률</label><input type="number" min="0" max="100" step="5" value="${num(C.minReach * 100, 0)}" data-lp-chk="minReach" data-lp-pct>%</div>
+      <div class="m3-row"><label>새는 빛 한도</label><input type="number" min="0" max="100" step="5" value="${num(C.maxLeak * 100, 0)}" data-lp-chk="maxLeak" data-lp-pct>%</div>`)}`;
+  wireSections(el);
   const val = (x) => { const v = readNum(x); return v == null ? null : 'lpPct' in x.dataset ? v / 100 : v; };
   on(el, '[data-lp-tgt]', 'change', (x) => { const v = val(x); if (v != null || 'lpAuto' in x.dataset) h.onTarget(x.dataset.lpTgt, v); });
   on(el, '[data-lp-chk]', 'change', (x) => { const v = val(x); if (v != null) h.onCheckParam(x.dataset.lpChk, v); });
+}
+// 반사 소재 DB(편집·측정값 추가·복사·삭제·내보내기·불러오기) — 부품 상세 탭(불투명 부품)에 붙임. redraw = 다시 그리기(측정값 추가 양식 열고 닫기)
+export function renderReflDb(el, cat, h, redraw) {
+  el.innerHTML = reflDbHtml(cat, { addFor: DB_ADD.get(el) ?? null });
   on(el, '[data-lp-cat]', 'change', (x) => { const v = readNum(x); if (v != null) h.onCatalog?.(x.dataset.lpCat, x.dataset.lpCatk, v / 100); });
-  const again = (id) => { DB_ADD.set(el, id); renderTargetProps(el, m, h, cat); };
+  const again = (id) => { DB_ADD.set(el, id); redraw ? redraw() : renderReflDb(el, cat, h); };
   on(el, '[data-lp-catname]', 'change', (x) => { if (x.value.trim()) h.onReflDb?.('rename', x.dataset.lpCatname, x.value.trim()); });
   on(el, '[data-lp-dbadd]', 'click', (x) => again(DB_ADD.get(el) === x.dataset.lpDbadd ? null : x.dataset.lpDbadd));
   on(el, '[data-lp-addno]', 'click', () => again(null));
