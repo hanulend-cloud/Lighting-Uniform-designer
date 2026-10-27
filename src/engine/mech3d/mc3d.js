@@ -47,7 +47,7 @@ export function runMC3D(S, { source, N, seed = 1, onExit = null, onEscape = null
   const t0 = typeof performance !== 'undefined' ? performance.now() : Date.now();
   const rnd = rng(seed), w0 = source.flux / N, wMin = w0 * wMinRel;
   const L = { emitted: 0, escaped: 0, absSurf: 0, absVol: 0, lost: 0, rrLoss: 0, rrGain: 0 };
-  const { P, T, optics, normals: NM, partOf, faceOf, fins, finOf, contact, film, bvh } = S;
+  const { P, T, optics, normals: NM, partOf, faceOf, fins, finOf, contact, film, bvh, skip = null } = S;   // skip: 추적 제외 부품의 삼각형(빛이 그냥 지나감)
   const nOf = (q) => (q < 0 ? 1 : optics[q].n);
   const flag = coinFlags(S), qbuf = [], lo = [0, 0, 0], hi = [0, 0, 0];
 
@@ -61,7 +61,7 @@ export function runMC3D(S, { source, N, seed = 1, onExit = null, onEscape = null
     let best = -1, bestD = Infinity;
     partnerTol = 0;
     for (const c of qbuf) {
-      if (partOf[c] === q) continue;
+      if (partOf[c] === q || (skip && skip[c])) continue;
       const cx = NM[c * 3], cy = NM[c * 3 + 1], cz = NM[c * 3 + 2];
       const dot = Nx * cx + Ny * cy + Nz * cz;
       if (dot > COIN_DOT) continue;
@@ -102,7 +102,7 @@ export function runMC3D(S, { source, N, seed = 1, onExit = null, onEscape = null
       if (e > maxEvents) { L.lost += w; break; }
       const cur = stack.length ? stack[stack.length - 1] : -1, med = cur >= 0 ? optics[cur] : null;
       const sFree = med && med.mus > 0 ? -Math.log(1 - rnd()) / med.mus : Infinity;
-      const h = intersectRay(bvh, px, py, pz, dx, dy, dz, T_MIN, sFree, lastTri, lastTri2);
+      const h = intersectRay(bvh, px, py, pz, dx, dy, dz, T_MIN, sFree, lastTri, lastTri2, skip);
       if (!h && !Number.isFinite(sFree)) {
         if (cur >= 0) { L.lost += w; break; }   // 매질 안에서 교차 없음 = 열린 메쉬(진단)
         L.escaped += w; if (onEscape) { if (track >= 0) onEscape(px, py, pz, dx, dy, dz, w, p, tL, tK); else onEscape(px, py, pz, dx, dy, dz, w, p); } break;

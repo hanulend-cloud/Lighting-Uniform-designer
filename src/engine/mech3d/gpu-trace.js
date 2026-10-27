@@ -44,7 +44,8 @@ fn tv(t: u32, k: u32) -> u32 { return U[prm.oT + t * 3u + k]; }
 fn tPart(t: u32) -> i32 { return i32(U[prm.oTI + t * 4u]); }
 fn tFace(t: u32) -> i32 { return i32(U[prm.oTI + t * 4u + 1u]); }
 fn tFin(t: u32) -> u32 { return U[prm.oTI + t * 4u + 2u]; }
-fn tCoin(t: u32) -> bool { return U[prm.oTI + t * 4u + 3u] != 0u; }
+fn tCoin(t: u32) -> bool { return (U[prm.oTI + t * 4u + 3u] & 1u) != 0u; }
+fn tSkip(t: u32) -> bool { return (U[prm.oTI + t * 4u + 3u] & 2u) != 0u; }   // 추적 제외 부품
 // 부품 광학: [n, mus, g, mua], [투과(1/0), 위상표 번호(−1 = HG), 0, 0]
 fn oN(q: i32) -> f32 { if (q < 0) { return 1.0; } return F[prm.oOPT + u32(q) * 8u]; }
 fn oMus(q: i32) -> f32 { return F[prm.oOPT + u32(q) * 8u + 1u]; }
@@ -86,7 +87,7 @@ fn intersect(o: vec3f, d: vec3f, tMax: f32, s1: i32, s2: i32) -> bool {
     if (cnt > 0) {
       for (var i = first; i < first + cnt; i = i + 1) {
         let tri = U[prm.oORD + u32(i)];
-        if (i32(tri) == s1 || i32(tri) == s2) { continue; }
+        if (i32(tri) == s1 || i32(tri) == s2 || tSkip(tri)) { continue; }
         let s = hitTri(tri, o, d);
         if (s >= T_MIN && s < hitT) { hitT = s; hitI = i32(tri); }
       }
@@ -109,7 +110,7 @@ fn partnerAt(tri: u32, x: vec3f) -> i32 {
     if (cnt > 0) {
       for (var i = first; i < first + cnt; i = i + 1) {
         let c = U[prm.oORD + u32(i)];
-        if (tPart(c) == q) { continue; }
+        if (tPart(c) == q || tSkip(c)) { continue; }
         let Nc = nrm(c); let dt = dot(Nt, Nc);
         if (dt > COIN_DOT) { continue; }
         let tol = select(COIN_GAP, COIN_GAP_PLANAR, dt <= COIN_PLANAR_DOT);
@@ -352,7 +353,7 @@ export async function createGpuTracer() {
   if (errs.length) throw new Error(`GPU 셰이더 오류: ${errs.map((m) => `${m.lineNum}:${m.message}`).join(' / ')}`);
   const pipe = await device.createComputePipelineAsync({ layout: 'auto', compute: { module: mod, entryPoint: 'main' } });
   const scenes = new WeakMap();
-  let slice0 = 4096;   // 슬라이스 크기 — 청크 사이에 기억(매 청크 4096 부터 다시 키우면 느림)
+  let slice0 = 1024, lastSc = null;   // 슬라이스 크기 — 청크 사이에 기억(매 청크 4096 부터 다시 키우면 느림)
   const name = [info.vendor, info.architecture, info.description].filter(Boolean).join(' ').trim() || 'GPU';
 
   // 장면 → GPU 버퍼(장면마다 한 번). 좌표는 장면 중심 기준(f32 정밀도)
@@ -377,7 +378,7 @@ export async function createGpuTracer() {
     const Fparts = [Pc, NM, box, ...phs.map((a) => Float32Array.from(a)), opt, fin];
     let off = 0; const fo = Fparts.map((a) => { const o = off; off += a.length; return o; });
     const F = new Float32Array(Math.max(4, off)); Fparts.forEach((a, k) => F.set(a, fo[k]));
-    const TI = new Uint32Array(nT * 4); for (let t = 0; t < nT; t++) { TI[t * 4] = partOf[t]; TI[t * 4 + 1] = faceOf[t]; TI[t * 4 + 2] = finOf[t]; TI[t * 4 + 3] = flag[t]; }
+    const TI = new Uint32Array(nT * 4); for (let t = 0; t < nT; t++) { TI[t * 4] = partOf[t]; TI[t * 4 + 1] = faceOf[t]; TI[t * 4 + 2] = finOf[t]; TI[t * 4 + 3] = flag[t] | (S.skip?.[t] ? 2 : 0); }
     const Uparts = [Uint32Array.from(T), TI, new Uint32Array(bvh.meta.buffer.slice(0)), Uint32Array.from(bvh.order), Uint32Array.from(con)];
     off = 0; const uo = Uparts.map((a) => { const o = off; off += a.length; return o; });
     const Ub = new Uint32Array(Math.max(4, off)); Uparts.forEach((a, k) => Ub.set(a, uo[k]));
@@ -395,6 +396,7 @@ export async function createGpuTracer() {
   async function trace(S, { starts, N, seed, track = -1, w0, wMin, maxEvents = 100000, targetMs = 120 }) {
     if (dead) throw new Error('GPU 장치를 잃음');
     const t0 = performance.now(), sc = upload(S);
+    if (sc !== lastSc) { lastSc = sc; slice0 = 1024; }   // 새 장면은 작은 슬라이스부터(이전 장면보다 훨씬 느릴 수 있음 — 한 번의 dispatch 가 길면 GPU 감시 시간 초과)
     const st = new Float32Array(N * 6); for (let i = 0; i < N * 6; i++) st[i] = starts[i] - (i % 6 < 3 ? sc.c[i % 6] : 0);
     const src = device.createBuffer({ size: Math.max(16, st.byteLength), usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST }); device.queue.writeBuffer(src, 0, st);
     const outBytes = N * REC * 4, out = device.createBuffer({ size: Math.max(16, outBytes), usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC });

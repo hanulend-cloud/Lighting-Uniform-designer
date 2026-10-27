@@ -68,7 +68,7 @@ export function createMech3dView(canvas, { onPick, gizmo = null }) {
   }
   controls.addEventListener('change', () => { fitDepth(); render(); });
 
-  let xray = false;
+  let xray = false, dim = null;
   let meshes = [], partsRef = [], kinds = [], sel = null, obsSet = new Set(), overlay = null, obsMesh = null, markers = null, coneMeshes = [];
 
   function resize() {
@@ -97,7 +97,8 @@ export function createMech3dView(canvas, { onPick, gizmo = null }) {
     }
     col.needsUpdate = true;
     let op = ghost?.(i) ? Math.min(0.15, KIND_OPACITY[kinds[i]]) : KIND_OPACITY[kinds[i]];   // 투시: LED 선택 중 기구물 반투명
-    if (xray) op = kinds[i] === 'led' ? 0.55 : Math.min(op, 0.16);   // 투시 보기: 전체 반투명 — 속 구조·광경로를 봄
+    if (xray) op = kinds[i] === 'led' ? 0.55 : Math.min(op, 0.16);
+    if (dim?.(i)) op = Math.min(op, 0.12);   // 추적 제외 부품: 아주 흐리게(남아 있지만 빛 계산엔 없음)   // 투시 보기: 전체 반투명 — 속 구조·광경로를 봄
     if (sel?.part === i && !ghost?.(i)) op = Math.max(op, xray ? 0.45 : 0.7);   // 선택 부품: 투명 소재여도 잘 보이게
     m.material.opacity = op;
     m.material.transparent = op < 1;
@@ -238,6 +239,7 @@ export function createMech3dView(canvas, { onPick, gizmo = null }) {
     sp.position.set(...oa.pos).addScaledVector(new THREE.Vector3(...oa.axis).normalize(), oa.len * 1.25); sp.renderOrder = 6;
     return sp;
   }
+  function setDim(fn) { dim = fn; meshes.forEach((_, i) => colorize(i)); render(); }
   function setXray(on) { xray = !!on; meshes.forEach((_, i) => colorize(i)); if (lastOver) setOverlay(lastOver); else render(); }
   // 광경로 화살표(app.drawLightPaths) — paths = [{ pts:[[x,y,z]…], share, label, offset }]: 점 사이 화살표(굵기 ∝ 비중), 끝에 % 글자
   let pathGroup = null;
@@ -441,5 +443,5 @@ export function createMech3dView(canvas, { onPick, gizmo = null }) {
     onPick({ part, face: partsRef[part].faceIds[h.faceIndex], ray: rr, worldPerPixel: wpp });
   });
 
-  return { setTheme, theme: () => theme, setLightPaths, setXray, xray: () => xray, setParts, setKinds, setHidden, setSelection, setOverlay, setPickMode, render, setView, fit, viewName: () => viewName, setSection, setObsSurface, setObsColors, setCheckMarkers };
+  return { setTheme, theme: () => theme, setLightPaths, setXray, xray: () => xray, setDim, setParts, setKinds, setHidden, setSelection, setOverlay, setPickMode, render, setView, fit, viewName: () => viewName, setSection, setObsSurface, setObsColors, setCheckMarkers };
 }

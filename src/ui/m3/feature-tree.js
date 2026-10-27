@@ -18,8 +18,10 @@ export function treeNodes(M, S, lay) {
   const node = (id, label, badge, child = false, kind = '', eye) => out.push({ id, label, badge, child, kind, sel: S.node === id, eye });
   node('target', '◎ 목표', `${Math.round(O.targetLen * 100)}% / ${Math.round(O.targetWid * 100)}%`);   // 맨 위 — 무엇을 맞출지 먼저
   node('parts', '▾ 부품', String(M.parts.length), false, '', hid.size || S.hideLeds ? 'all' : undefined);
-  M.parts.forEach((p, i) => node(`part:${i}`, p.name, partBadge(p), true, p.material.kind, hid.has(i) ? 'off' : 'on'));
-  node('light', '▾ 광원', { none: '지정 안 함', step: 'LED STEP', manual: '직접 배치' }[L.kind]);
+  // 도면에서 광원으로 옮긴 부품 = '→ 광원'(보기는 광원 그룹이 함) · 추적 제외 = '제외 ·' 접두
+  M.parts.forEach((p, i) => node(`part:${i}`, p.name, p.role === 'light' ? '→ 광원' : `${p.untrace ? '제외 · ' : ''}${partBadge(p)}`, true, p.role === 'light' ? 'led' : p.untrace ? 'off' : p.material.kind, p.role === 'light' ? undefined : hid.has(i) ? 'off' : 'on'));
+  // 광원 머리 눈 단추 = 광원 그룹(LED 몸체·PCB·지향각) 한 번에 켜기/끄기
+  node('light', '▾ 광원', L.kind === 'step' && L.step?.fromMech ? '3D 도면' : { none: '지정 안 함', step: 'LED STEP', manual: '직접 배치' }[L.kind], false, '', L.kind === 'step' ? (S.hideLeds ? 'off' : 'on') : undefined);
   if (L.kind !== 'none') {
     const ex = L.step?.excluded ?? [], vt = L.kind === 'step' ? L.step?.virtual : null;
     const failed = !!vt && lay !== undefined && !lay?.virtual && (!!lay?.err || !!S.line);   // 라인 대기 중은 실패 아님
@@ -36,7 +38,7 @@ export function treeNodes(M, S, lay) {
 export function toggleVisibility(id, only, nParts, hidden = [], hideLeds = false) {
   const h = new Set(hidden);
   if (id === 'parts') return { hidden: [], hideLeds: false };
-  if (id === 'leds') return only ? { hidden: [...Array(nParts).keys()], hideLeds: false } : { hidden: [...h], hideLeds: !hideLeds };
+  if (id === 'leds' || id === 'light') return only ? { hidden: [...Array(nParts).keys()], hideLeds: false } : { hidden: [...h], hideLeds: !hideLeds };
   const i = +id.slice(5);
   if (only) return { hidden: [...Array(nParts).keys()].filter((k) => k !== i), hideLeds: true };
   if (h.has(i)) h.delete(i); else h.add(i);

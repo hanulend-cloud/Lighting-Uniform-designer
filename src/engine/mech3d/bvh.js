@@ -65,7 +65,8 @@ export function hitTriangle(P, T, t, ox, oy, oz, dx, dy, dz) {
 }
 
 // 가장 가까운 적중 { t, tri, u, v } (tMin ≤ t < tMax) 또는 null. tri 는 원래 삼각형 번호. skipTri·skipTri2: 제외할 삼각형(직전 적중 면, 맞붙은 짝 면).
-export function intersectRay(bvh, ox, oy, oz, dx, dy, dz, tMin = 1e-6, tMax = Infinity, skipTri = -1, skipTri2 = -1) {
+// mask(Uint8Array, 삼각형별) — 1 이면 없는 것처럼 통과(추적 제외 부품)
+export function intersectRay(bvh, ox, oy, oz, dx, dy, dz, tMin = 1e-6, tMax = Infinity, skipTri = -1, skipTri2 = -1, mask = null) {
   const { box, meta, order, positions: P, triangles: T } = bvh;
   if (!order.length) return null;
   const ix = 1 / dx, iy = 1 / dy, iz = 1 / dz;
@@ -86,7 +87,7 @@ export function intersectRay(bvh, ox, oy, oz, dx, dy, dz, tMin = 1e-6, tMax = In
     if (cnt) {
       for (let i = meta[n * 2], e = i + cnt; i < e; i++) {
         const tri = order[i];
-        if (tri === skipTri || tri === skipTri2) continue;
+        if (tri === skipTri || tri === skipTri2 || (mask && mask[tri])) continue;
         const s = hitTriangle(P, T, tri, ox, oy, oz, dx, dy, dz);
         if (s >= tMin && s < best) { best = s; hit = tri; hu = hitUV.u; hv = hitUV.v; }
       }

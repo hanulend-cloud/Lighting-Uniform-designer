@@ -4,6 +4,7 @@
 //   observe → 관측 라인 다시 인식 · 물리 태그 → 점진 계산 재시작 · 기하 점검 태그 → 점검 ①②③ · target → 판정만 다시. 모두 다시 그림.
 // 점진 계산 갱신(1초마다)은 store 알림 없이 결과 패널·상태 띠·색지도만 다시 그린다(입력 중 속성 패널이 다시 그려지지 않게).
 import { getMech3d, getLedMesh, setLedMesh, saveLedIDB, applyPartMods, redetectContacts } from '../../engine/mech3d/runtime.js';
+import { findLeds } from '../../engine/mech3d/led-detect.js';
 import { setPartMaterial, setPartMaterialParam } from '../../engine/mech3d/materials.js';
 import { lineFromData, lightData, obsDirection } from '../../engine/mech3d/line.js';
 import { tallyGeometry, tallyStats } from '../../engine/mech3d/tally.js';
@@ -146,6 +147,7 @@ export async function mount(ctx) {
   applyPartMods(ctx.mspec.parts);   // 저장된 부품 크기·위치 조절을 장면에 반영
   const store = createStore(ctx.mspec, { persist: ctx.persist });
   L.resetLedCaches();
+  rebuildMechLight(ctx.mspec);   // 도면 광원: 메쉬가 없으면(저장소 비워짐) 기구 도면에서 다시 복사
   const v0 = L.validateLedStep(ctx.mspec, store.session);   // main.js:982 의 시작 시 검증을 여기서
   if (v0.status) store.session.status = v0.status;
   if (v0.changed) ctx.persist();
@@ -851,6 +853,42 @@ function adStep() {
   w.postMessage({ mesh: { positions: mesh.positions, triangles: mesh.triangles }, spline, name });
 }
 
+// 3D 도면에서 광원 지정 — 클릭한 부품과 같은 모양(면 수·부피·면적·크기)의 기구 부품을 모두 광원 그룹으로 옮긴다:
+// 메쉬를 LED STEP 처럼 복사(발광면 인식·배치 편집·자동설계를 그대로 씀)하고, 원본은 role 'light'(빛 계산·보기에서 빠짐 — 삭제 아님).
+// 클릭한 면 = 발광면(렌즈 윗면으로 보정). PCB 는 기구 부품 그대로 남김(면 처리 그대로 계산)
+function mechLightFromPick(s) {
+  const st = A.store, M = st.mspec, rt = getMech3d(), obsP = new Set(M.observe.faces.map((f) => f.part));
+  const cand = rt.parts.map((p, i) => ({ positions: p.positions, triangles: p.triangles, faceCount: rt.raw.parts[i]?.faceCount }));
+  const leds = findLeds(cand, s.part).filter((i) => !obsP.has(i));
+  if (!leds.includes(s.part)) { st.update('session', (_, x) => { x.status = '관측면 부품은 광원으로 지정할 수 없음'; }); return; }
+  const parts = leds.map((i) => { const p = rt.parts[i], r = rt.raw.parts[i] ?? {}; return { positions: p.positions.slice(), triangles: p.triangles.slice(), faceIds: p.faceIds.slice(), faceCount: r.faceCount, volume: r.volume }; });
+  const name = `${String(M.name ?? '3D 도면').replace(/\.(stp|step)$/i, '')} · 도면 광원 ${leds.length}개`;
+  if (!M.light.step?.fromMech) A.prevLight = { light: JSON.parse(JSON.stringify({ kind: M.light.kind, step: M.light.step ?? null })), mesh: getLedMesh() };   // 해제 때 되돌릴 이전 광원(LED STEP 메쉬 포함 — 이번 세션)
+  setLedMesh(name, parts); L.resetLedCaches(); if (A.ctx.canSave?.() !== false) saveLedIDB().catch(() => {});
+  st.update('light', (m, x) => {
+    m.parts = m.parts.map((p, i) => { const q = { ...p }; delete q.role; if (leds.includes(i)) q.role = 'light'; return q; });
+    m.light.kind = 'step';
+    m.light.step = { name, offset: [0, 0, 0], rot: [0, 0, 0], ref: null, leds: [], excluded: [], pcb: -1, emitters: [], fromMech: leds };
+    try { L.applyStepRecognition(m, x, m.light.step, { part: leds.indexOf(s.part), face: s.face }); x.ledInfo = `도면 부품 ${leds.length}개를 광원으로 — ${x.ledInfo}`; }
+    catch (e) { x.ledInfo = `발광면 인식 실패: ${e.message} — LED 노드에서 발광면을 다시 클릭하세요`; }
+    x.pick = null; x.node = 'light'; x.hideLeds = false;
+  });
+}
+function rebuildMechLight(M) {
+  const st = M.light?.step, rt = getMech3d(), ids = st?.fromMech;
+  if (!ids?.length || !rt || getLedMesh()?.name === st.name || !ids.every((i) => rt.parts[i])) return;
+  setLedMesh(st.name, ids.map((i) => { const p = rt.parts[i], r = rt.raw.parts[i] ?? {}; return { positions: p.positions.slice(), triangles: p.triangles.slice(), faceIds: p.faceIds.slice(), faceCount: r.faceCount, volume: r.volume }; }));
+}
+// 도면 광원 해제 — 옮긴 부품을 다시 기구 부품으로(빛 계산·보기 복귀), 광원은 지정 전 상태로(이번 세션에 지정했으면 LED STEP 메쉬까지) — 모르면 '지정 안 함'
+function mechLightClear() {
+  const pv = A.prevLight; A.prevLight = null;
+  if (pv?.mesh) { setLedMesh(pv.mesh.name, pv.mesh.parts); L.resetLedCaches(); if (A.ctx.canSave?.() !== false) saveLedIDB().catch(() => {}); }
+  A.store.update('light', (m, x) => {
+    m.parts = m.parts.map((p) => { if (p.role !== 'light') return p; const q = { ...p }; delete q.role; return q; });
+    if (pv) { m.light.kind = pv.light.kind; m.light.step = pv.light.step; } else { m.light.kind = 'none'; m.light.step = null; }
+    x.pick = null; x.ledInfo = pv ? '도면 광원 해제 — 이전 광원으로 되돌림' : '도면 광원 해제 — 부품을 다시 기구로 계산';
+  });
+}
 // ---- 3D 클릭 (main.js:393-425) — 기구 부품 수(nMech) 이상인 번호는 LED STEP 부품 ----
 function onPick(s) {
   const st = A.store, M = st.mspec, S = st.session, nMech = getMech3d().parts.length, pick = S.pick;
@@ -890,6 +928,7 @@ function onPick(s) {
     });
     return;
   }
+  if (pick === 'mled' && s && s.part != null) { if (s.part >= nMech) { say('기구 도면 부품(LED)을 클릭하세요'); return; } mechLightFromPick(s); return; }
   if (pick === 'pcb' && s && s.part < nMech) { st.update('light', (m, x) => { m.light.manual.pcb = { kind: 'face', part: s.part, face: s.face }; x.pick = null; }); return; }
   st.update('session', (_, x) => { x.sel = s && s.part < nMech ? s : null; x.ledSel = null; if (x.sel) x.node = `part:${x.sel.part}`; });   // LED STEP 부품은 소재 편집 대상이 아님
 }
@@ -900,6 +939,7 @@ function propHandlers() {
   const part = (i, fn) => st.update('material', (m) => { m.parts[i] = fn(m.parts[i]); });
   return {
     onKind: (i, k) => part(i, (p) => setPartMaterial(p, k)),
+    onUntrace: (i, on) => part(i, (p) => ({ ...p, untrace: on || undefined })),   // 추적 제외 — 'material' 태그로 다시 계산·점검
     onMat: (i, key, v) => part(i, (p) => {
       let q = setPartMaterialParam(p, key, v);
       // DB 소재 선택: Milky 칸을 그 소재의 피팅 μs' 에 해당하는 값으로(Milky = 농도 — 이후 사용자가 조절)
@@ -965,7 +1005,12 @@ function propHandlers() {
       if (applyPartMods(m.parts)) m.contacts = redetectContacts(m.contacts);
     }),
     onContact: (i, mode) => st.update('contacts', (m) => { m.contacts[i] = { ...m.contacts[i], mode }; }),
-    onLightKind: (k) => st.update('light', (m, x) => { m.light.kind = k; x.pick = null; }),
+    // 'mech' = 3D 도면에서 지정: 도면 LED 의 발광면 클릭 대기(pick 'mled'). 다른 방식으로 바꾸면 도면 광원 원본을 기구로 되돌림
+    onLightKind: (k) => {
+      if (k !== 'mech' && A.store.mspec.light.step?.fromMech) mechLightClear();
+      st.update('light', (m, x) => { if (k === 'mech') { x.pick = 'mled'; x.ledInfo = '3D 도면에서 LED 하나의 발광면(빛이 나오는 면)을 클릭하세요 — 같은 모양 부품을 모두 광원으로'; } else { m.light.kind = k; x.pick = null; } });
+    },
+    onMechLightClear: () => mechLightClear(),
     onLedFile: (f) => importLedStep(f),
     onPick: (mode) => st.update('session', (_, x) => { x.pick = mode; }),
     onStep: (key, v) => st.update('light', (m, x) => {
@@ -1226,7 +1271,9 @@ function renderView() {
     A.meshShown = meshKey; v.setParts([...(pv ?? cur).parts, ...(lp ?? [])], kinds, { keepCamera });
   } else v.setKinds(kinds);
   const hid = new Set(S.hidden), nMech = M.parts.length;
-  v.setHidden((i) => (i < nMech ? hid.has(i) : S.hideLeds));
+  v.setHidden((i) => (i < nMech ? hid.has(i) || M.parts[i]?.role === 'light' : S.hideLeds));   // 도면 광원 원본은 숨김(광원 그룹이 대신 보임)
+  const dk = M.parts.map((p) => (p.untrace ? 1 : 0)).join('');
+  if (A.dimKey !== dk) { A.dimKey = dk; v.setDim((i) => !!M.parts[i]?.untrace); }
   if (A.ledsHid !== !!S.hideLeds) { A.ledsHid = !!S.hideLeds; renderMarkers(); }   // LED 켜기/끄기 → 방향 화살표도
   const LS = ledsNow(pv?.M ?? M, S.line), body = !pv && S.ledSel != null ? LS.list[S.ledSel]?.part ?? null : null;
   v.setSelection(S.sel ?? (body != null && lp?.[body] ? { part: cur.parts.length + body, face: null } : null));   // 선택 LED 몸체 = 부품 선택처럼 강조
@@ -1236,7 +1283,7 @@ function renderView() {
   // 인식한 라인 중심선은 그리지 않음(가로줄이 결과 색을 가린다는 의견 — 2026-10-26). 라인 정보는 관측면 속성 창 글자로
   v.setOverlay({ obsFaces: M.observe.faces, line3d: null, cones, coneSel: pv ? null : S.ledSel, obsArrow: obsArrow(M, S.line, cur) });
   // 선택 모드: LED 발광면/제외 → LED STEP 부품만 클릭되고 기구물은 투시, 관측면·PCB 면 → 기구 부품만 클릭
-  const nM = cur.parts.length, led = S.pick === 'led' || S.pick === 'ledx', mech = S.pick === 'obs' || S.pick === 'pcb';
+  const nM = cur.parts.length, led = S.pick === 'led' || S.pick === 'ledx', mech = S.pick === 'obs' || S.pick === 'pcb' || S.pick === 'mled';
   v.setPickMode(led ? (i) => i >= nM : mech ? (i) => i < nM : null, led ? (i) => i < nM : null);
   if (v.viewName() !== S.view) v.setView(S.view);
   if (v.xray?.() !== xrayOn()) v.setXray(xrayOn());

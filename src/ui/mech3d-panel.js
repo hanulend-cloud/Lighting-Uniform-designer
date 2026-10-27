@@ -130,6 +130,11 @@ export function xfSummaryText(p, info) {
   return `${pos}크기 ${z0.map((v, k) => n1(v * s[k])).join('×')}${p.shapeMod ? ' · 형상 변경됨' : ''}`;
 }
 
+// 추적 제외(untrace) 스위치 — 부품은 남기고 빛 계산에서만 뺌. 도면에서 광원으로 옮긴 부품은 안내만
+export function untraceHtml(p) {
+  if (p.role === 'light') return '<div class="m3-card m3-untrace on"><b>광원으로 사용 중</b> <span class="mut">이 부품은 광원 그룹으로 옮겨져 계산함 — 해제는 광원 노드에서</span></div>';
+  return `<div class="m3-card m3-untrace${p.untrace ? ' on' : ''}"><label class="m3-sw"><input type="checkbox" data-m3-untrace${p.untrace ? ' checked' : ''}> 빛 계산에서 제외 <span class="mut">(삭제 아님 — 빛이 이 부품을 그냥 지나감)</span></label></div>`;
+}
 function partEditor(p, sel, dbList) {
   const face = sel.face, cat = sel.catalog ?? DEFAULT_FINISH_CATALOG, lim = finishLimit(p, cat), opaque = p.material.kind === 'opaque', tab = PART_TAB;
   // 면 처리(상세): 불투명 + 반사 소재 지정 → 종류는 소재가 정함 · 미지정 → 종류만 · 투과 부품 → 종류·반사율
@@ -143,7 +148,7 @@ function partEditor(p, sel, dbList) {
     <button type="button" role="tab" data-m3-tab="detail" aria-selected="${tab === 'detail'}">상세${dSum ? ` <span class="m3-tab-s">${esc(dSum)}</span>` : ''}</button></div>`;
   const warn = `${overlapWarnHtml(sel.clearance)}${sel.xfMsg ? `<div class="m3-warn" role="status">${esc(sel.xfMsg)}</div>` : ''}`;
   const body = tab === 'basic'
-    ? `<div class="m3-card">${kindSegHtml(p.material.kind)}${basicMaterialHtml(p, dbList, cat)}</div>
+    ? `${untraceHtml(p)}<div class="m3-card">${kindSegHtml(p.material.kind)}${basicMaterialHtml(p, dbList, cat)}</div>
       <div class="m3-card"><div class="m3-sub">위치 · 크기 <span class="mut">mm</span></div>${xformEditor(p, sel.xfInfo, false, true)}</div>`
     : `<div class="m3-card"><div class="m3-sub">소재 상세</div>${detailMaterialHtml(p, dbList, cat, sel.reflForm ?? {})}</div>
       ${secHtml('finish', '면 처리 (면별)', face != null ? `면 #${face} 선택` : nOver ? `면 ${nOver}개 덮어씀` : '', `${partFin}${faceRow}<div class="mut m3-note">3D 뷰에서 면을 클릭하면 그 면만 다르게 지정할 수 있습니다</div>`)}
@@ -255,6 +260,7 @@ export function renderPartProps(el, m, sel0, dbList, h) {
   const i = sel.part;
   el.querySelectorAll('[data-m3-tab]').forEach((b) => { b.onclick = () => { if (PART_TAB !== b.dataset.m3Tab) { PART_TAB = b.dataset.m3Tab; renderPartProps(el, m, sel0, dbList, h); } }; });
   el.querySelectorAll('details[data-m3-sec]').forEach((d) => d.addEventListener('toggle', () => SEC_OPEN.set(d.dataset.m3Sec, d.open)));
+  el.querySelector('[data-m3-untrace]')?.addEventListener('change', (e) => h.onUntrace?.(i, e.target.checked));
   el.querySelectorAll('[data-m3-kind]').forEach((b) => { b.onclick = () => { if (b.dataset.m3Kind !== p.material.kind) h.onKind(i, b.dataset.m3Kind); }; });
   el.querySelectorAll('[data-m3-mat]').forEach((x) => {
     x.onchange = () => {

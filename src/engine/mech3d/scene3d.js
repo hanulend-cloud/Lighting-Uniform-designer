@@ -2,6 +2,9 @@
 import { partOptics } from './optics.js';
 import { resolveFinish } from './materials.js';
 
+// 빛 계산에서 빠지는 부품: 사용자가 추적 제외(untrace) · 도면에서 광원으로 옮김(role 'light')
+export const isUntraced = (p) => !!(p?.untrace || p?.role === 'light');
+
 export function buildTraceScene(rt, mspec, ctx) {
   if (!rt || mspec.parts.length !== rt.parts.length) throw new Error('3D 기구: 부품 지정과 메쉬의 부품 수가 다름');
   const { positions: P, triangles: T, partOf, faceOf } = rt.combined;
@@ -30,5 +33,9 @@ export function buildTraceScene(rt, mspec, ctx) {
     m.set(`${c.b}|${c.faceB}`, { part: c.a, face: c.faceA });
   }
   const finishOfFace = (part, face) => resolveFinish(mspec.parts[part], face);
-  return { P, T, partOf, faceOf, normals, bvh: rt.bvh, optics, fins, finOf, contact, film, finishOfFace };
+  // 추적 제외(untrace) — 부품을 지우지 않고 빛이 지나가게(삼각형 표시). 도면에서 광원으로 옮긴 부품(role 'light')도 여기
+  const off = mspec.parts.map(isUntraced);
+  let skip = null;
+  if (off.some(Boolean)) { skip = new Uint8Array(nT); for (let t = 0; t < nT; t++) if (off[partOf[t]]) skip[t] = 1; }
+  return { P, T, partOf, faceOf, normals, bvh: rt.bvh, optics, fins, finOf, contact, film, finishOfFace, skip };
 }

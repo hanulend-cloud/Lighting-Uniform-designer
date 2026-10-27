@@ -670,3 +670,8 @@ main:has(#m3-start:not([hidden])) { grid-template-rows: minmax(0, 1fr); }
 /* 제목 옆 계산 장치 표시(GPU 사용 / CPU 계산) */
 .gpu-badge { font-size: 11px; font-weight: 600; padding: 1px 7px; border-radius: 9px; background: #e6e9ef; color: #556; vertical-align: middle; }
 .gpu-badge.on { background: #1f9d55; color: #fff; }
+/* 추적 제외 스위치 · 도면 광원 표시 */
+.m3-untrace { padding: 6px 8px; }
+.m3-untrace.on { border-left: 3px solid #f0a020; }
+.m3-untrace .m3-sw { display: flex; flex-wrap: wrap; gap: 4px 6px; align-items: center; cursor: pointer; width: auto; min-width: 0; font-weight: 600; }
+.m3-untrace .m3-sw .mut { font-weight: 400; flex-basis: 100%; }

@@ -27,6 +27,13 @@ const transmit = (S, N = 200000) => { let up = 0; const res = runMC3D(S, { sourc
   ok(Math.abs(one.T - T1) < 0.004, `판 1장: T ${one.T.toFixed(4)} (해석 ${T1.toFixed(4)})`);
   ok([c, g, s, one].every((x) => x.L.lost === 0 && balance(x.L) < 1e-9), 'V3D-2(투명): 원장 보존, lost 0');
 }
+{   // 추적 제외(untrace): 막는 불투명 판을 빼면 판 1장과 같고, 도면 광원으로 옮긴 부품(role 'light')도 같음
+  const a = boxMesh(0, 0, 0, 10, 10, 2), blk = boxMesh(0, 0, 4, 10, 10, 2), one = transmit(scene([a], [part(0, 'clear')]));
+  const on = transmit(scene([a, blk], [part(0, 'clear'), part(1, 'opaque')]));
+  const off = transmit(scene([a, blk], [part(0, 'clear'), { ...part(1, 'opaque'), untrace: true }]));
+  const lit = transmit(scene([a, blk], [part(0, 'clear'), { ...part(1, 'opaque'), role: 'light' }]));
+  ok(on.T < 0.1 && Math.abs(off.T - one.T) < 1e-12 && Math.abs(lit.T - one.T) < 1e-12 && balance(off.L) < 1e-9, `추적 제외: 막힘 T ${on.T.toFixed(4)} → 제외 ${off.T.toFixed(4)} = 판 1장 ${one.T.toFixed(4)}`);
+}
 {   // 전반사 도광: 100×4×4 투명 바 끝면(x=0)에 30° 입사 → 옆면 누설 없음
   const S = scene([boxMesh(0, 0, 0, 100, 4, 4)], [part(0, 'clear')]);
   const a = Math.PI / 6, src = { flux: 1, sample: (r) => [-1, 1.5 + r(), 1.5 + r() - Math.tan(a), Math.cos(a), 0, Math.sin(a)] };

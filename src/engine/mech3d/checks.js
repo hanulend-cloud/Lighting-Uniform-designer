@@ -3,6 +3,7 @@
 // 기하 점검(①②③)은 값이 바뀌면 바로, 새는 빛(④)은 점진 계산 결과(runChunk 의 leak)로 한다.
 import { intersectRay, queryBox } from './bvh.js';
 import { defaultChecks } from './defs.js';
+import { isUntraced } from './scene3d.js';
 
 const PARITY_DIR = [0.48, 0.6, 0.64];   // 단위 벡터, 축·대각과 어긋나게(모서리 스침 줄임)
 const sub = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
@@ -44,6 +45,7 @@ export function triBoxOverlap(c, h, a, b, d) {
 // mspec 가 있으면 투과 부품 안의 발광점(포팅 LED)은 'potted' 경고. exclude: 검사에서 뺄 부품 번호(LED STEP 의 PCB 등)
 export function checkInterference({ rt, mspec = null, emitters = [], bodies = [], tol = 0.02, lift = 0.05, exclude = [] }) {
   const ex = new Set(exclude);
+  if (mspec) mspec.parts.forEach((p, i) => { if (isUntraced(p)) ex.add(i); });   // 추적 제외 부품은 간섭 판단에서도 뺌
   if (!emitters.length && !bodies.length) return { status: 'na', count: 0, items: [] };
   const items = [], cand = [];
   emitters.forEach((e, i) => {
@@ -89,7 +91,7 @@ function traceToObs(rt, mspec, obsParts, o, d) {
     if (!h) return { hit: 'miss' };
     const q = rt.combined.partOf[h.tri];
     if (obsParts.has(q)) return { hit: 'obs', t: h.t };
-    if (!isTrans(mspec, q)) return { hit: 'block', part: q, t: h.t };
+    if (!isTrans(mspec, q) && !isUntraced(mspec.parts[q])) return { hit: 'block', part: q, t: h.t };   // 추적 제외 부품은 통과
     t0 = h.t + 1e-7; skip = h.tri;
   }
   return { hit: 'miss' };
@@ -117,7 +119,7 @@ export function checkReach({ rt, mspec, emitters = [], obsParts, beam = 120, nRa
 export function checkThinWall({ rt, mspec, minWall = defaultChecks().minWall, samples = 400 }) {
   let best = null; const items = [];
   rt.parts.forEach((part, p) => {
-    if (!isTrans(mspec, p)) return;
+    if (!isTrans(mspec, p) || isUntraced(mspec.parts[p])) return;
     const P = part.positions, T = part.triangles, nT = T.length / 3, order = [];
     for (let t = 0; t < nT; t++) { const ar = triInfo(P, T, t).area; if (ar >= 1e-9) order.push([t, ar]); }   // 퇴화(면적 0) 삼각형 제외
     order.sort((x, y) => y[1] - x[1]);

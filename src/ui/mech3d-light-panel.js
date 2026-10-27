@@ -45,8 +45,14 @@ const rowsTxt = (o) => (o?.rows === 2 ? `2열 × ${o.count}개` : `${o.count}개
 // 광원 노드: 방식 + LED STEP(불러오기·발광면/제외 클릭·위치 보정) 또는 직접 배치(PCB·개수·피치·발광 방향)
 // ui = { pick, ledInfo, line? }, h = { onLightKind(k), onLedFile(file), onPick(mode|null), onStep(key,val), onManual(key,val) }
 export function renderLightProps(el, m, ui, h) {
-  const L = m.light, st = L.step, man = L.manual;
-  const stepHtml = L.kind !== 'step' ? '' : `
+  const L = m.light, st = L.step, man = L.manual, fromMech = L.kind === 'step' && !!st?.fromMech;
+  // 3D 도면에서 지정한 광원: 파일·위치 보정 대신 다시 지정 · 해제
+  const mechHtml = fromMech ? `
+    <div class="m3-row">${ui.ledInfo ? esc(ui.ledInfo) : `도면 부품 ${st.fromMech.length}개 → LED ${st.leds.length}개`}</div>
+    <div class="m3-row">${pickBtn(ui, 'mled', '다른 LED 로 다시 지정')} <button type="button" data-lp-mclear>도면 광원 해제</button></div>
+    <div class="mut m3-note">발광면 수정·LED 제외는 LED 노드 · 트리 '광원' 눈 단추 = LED·지향각 한 번에 켜기/끄기</div>`
+    : ui.pick === 'mled' ? `<div class="m3-row">${esc(ui.ledInfo ?? '')}</div><div class="m3-row">${pickBtn(ui, 'mled', '클릭 대기 중 — 취소')}</div>` : '';
+  const stepHtml = L.kind !== 'step' || fromMech || ui.pick === 'mled' ? '' : `
     <div class="m3-row"><label class="shape-btn">LED STEP 불러오기<input type="file" accept=".stp,.step" hidden data-lp-file></label>
       ${st ? `<span class="mut">${esc(st.name)}</span>` : ''}</div>
     ${st ? `<div class="m3-row">${ui.ledInfo ? esc(ui.ledInfo) : st.emitters?.length ? `LED ${st.leds.length}개 인식됨` : '<span class="mut">LED 하나의 발광면(빛이 나오는 면)을 클릭하세요</span>'}${st.excluded?.length ? ` <span class="mut">· 제외 ${st.excluded.length}개</span>` : ''} <span class="mut">(발광면·제외 클릭은 LED 노드)</span></div>
@@ -60,9 +66,10 @@ export function renderLightProps(el, m, ui, h) {
     ${ledRowsHtml(man, ui.line ?? null, 'man')}
     <div class="m3-row">발광 <select data-lp-man="side"><option value="direct" ${sel(man.side, 'direct')}>직하(관측 방향)</option><option value="left" ${sel(man.side, 'left')}>측면 왼쪽</option><option value="right" ${sel(man.side, 'right')}>측면 오른쪽</option></select></div>`;
   el.innerHTML = `<div class="m3-h">속성 · 광원</div>
-    <div class="m3-row"><select data-lp-kind><option value="none" ${sel(L.kind, 'none')}>지정 안 함</option><option value="step" ${sel(L.kind, 'step')}>LED STEP 불러오기</option><option value="manual" ${sel(L.kind, 'manual')}>관측 라인 따라 직접 배치</option></select></div>
-    ${stepHtml}${manHtml}`;
+    <div class="m3-row"><select data-lp-kind><option value="none" ${sel(L.kind, 'none')}>지정 안 함</option><option value="mech" ${fromMech || ui.pick === 'mled' ? 'selected' : ''}>3D 도면에서 지정</option><option value="step" ${L.kind === 'step' && !fromMech && ui.pick !== 'mled' ? 'selected' : ''}>LED STEP 불러오기</option><option value="manual" ${sel(L.kind, 'manual')}>관측 라인 따라 직접 배치</option></select></div>
+    ${mechHtml}${stepHtml}${manHtml}`;
   on(el, '[data-lp-kind]', 'change', (x) => h.onLightKind(x.value));
+  on(el, '[data-lp-mclear]', 'click', () => h.onMechLightClear?.());
   on(el, '[data-lp-file]', 'change', (x) => { const f = x.files?.[0]; if (f) h.onLedFile(f); x.value = ''; });
   wirePick(el, ui, h);
   on(el, '[data-lp-step]', 'change', (x) => { const v = readNum(x); if (v != null) h.onStep(x.dataset.lpStep, v); });
