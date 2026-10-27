@@ -332,8 +332,8 @@ function renderMarkers() {
   for (const it of C.interference?.items ?? []) out.push({ type: 'ring', pos: it.pos, color: it.kind === 'potted' ? 0xffa000 : 0xff3b30, size: size('interference') });   // 포팅 LED(투과 부품 안) = 주황 경고
   for (const it of C.reach?.items ?? []) {
     const warn = it.reach < (M.checks?.minReach ?? 0.5), col = warn ? 0xffa000 : 0x4cd964;
-    // LED 방향 = 화살표, 빛 원뿔(len = min(4, 0.4·간격))보다 1.6배 길게 — 단 닿는 면을 넘지 않게(간격의 90%)
-    if (it.dist != null) out.push({ type: 'arrow', pos: it.pos, axis: it.axis, len: Math.min(1.6 * Math.min(4, 0.4 * it.dist), 0.9 * it.dist), color: col });
+    // LED 방향 = 화살표, 빛 원뿔(len = min(4, 0.4·간격))보다 1.6배 길게 — 단 닿는 면을 넘지 않게(간격의 90%). LED 를 끄면(hideLeds) 함께 숨김
+    if (it.dist != null && !A.store.session.hideLeds) out.push({ type: 'arrow', pos: it.pos, axis: it.axis, len: Math.min(1.6 * Math.min(4, 0.4 * it.dist), 0.9 * it.dist), color: col });
     if (warn || f === 'reach') out.push({ type: 'ring', pos: it.pos, color: col, size: size('reach') });
   }
   if (C.wall?.pos && (C.wall.status === 'warn' || f === 'wall')) out.push({ type: 'ring', pos: C.wall.pos, color: 0xffa000, size: size('wall') });
@@ -1227,10 +1227,12 @@ function renderView() {
   } else v.setKinds(kinds);
   const hid = new Set(S.hidden), nMech = M.parts.length;
   v.setHidden((i) => (i < nMech ? hid.has(i) : S.hideLeds));
+  if (A.ledsHid !== !!S.hideLeds) { A.ledsHid = !!S.hideLeds; renderMarkers(); }   // LED 켜기/끄기 → 방향 화살표도
   const LS = ledsNow(pv?.M ?? M, S.line), body = !pv && S.ledSel != null ? LS.list[S.ledSel]?.part ?? null : null;
   v.setSelection(S.sel ?? (body != null && lp?.[body] ? { part: cur.parts.length + body, face: null } : null));   // 선택 LED 몸체 = 부품 선택처럼 강조
   const sp = (pv?.M ?? M).light.spec, half = sp.model === 'gaussian' ? sp.beam / 2 : 60, gaps = ledGaps(LS.em, pv?.M ?? M);
-  const cones = LS.em.map((e, i) => ({ pos: e.pos, axis: e.axis, half, len: Number.isFinite(gaps[i]) ? Math.min(4, 0.4 * gaps[i]) : 4, n: e.led ?? i }));
+  // LED 를 끄면(트리 눈 단추) 지향각(빛 원뿔·방향 화살표)도 함께 숨김
+  const cones = S.hideLeds ? [] : LS.em.map((e, i) => ({ pos: e.pos, axis: e.axis, half, len: Number.isFinite(gaps[i]) ? Math.min(4, 0.4 * gaps[i]) : 4, n: e.led ?? i }));
   // 인식한 라인 중심선은 그리지 않음(가로줄이 결과 색을 가린다는 의견 — 2026-10-26). 라인 정보는 관측면 속성 창 글자로
   v.setOverlay({ obsFaces: M.observe.faces, line3d: null, cones, coneSel: pv ? null : S.ledSel, obsArrow: obsArrow(M, S.line, cur) });
   // 선택 모드: LED 발광면/제외 → LED STEP 부품만 클릭되고 기구물은 투시, 관측면·PCB 면 → 기구 부품만 클릭
