@@ -22,7 +22,7 @@ const M = {
 // 자동설계 왼쪽 칸 + 가운데 타일(항목 스위치·설정)을 합친 HTML — 카드 시험용
 const card = (o) => autoCardHtml(o) + ['milky', 'leds', 'shape', 'housing', 'height'].map((k) => tileConfigHtml(k, o).html).join('');
 { const N = treeNodes(M, { node: 'part:0', line: { kind: 'line', closed: false, length: 116, width: 16 } });
-  ok(N.map((n) => n.id).join() === 'parts,part:0,part:1,light,leds,obs,target,contacts', `트리 노드: ${N.map((n) => n.id).join()}`);
+  ok(N.map((n) => n.id).join() === 'parts,part:0,part:1,light,leds,obs,target', `트리 노드: ${N.map((n) => n.id).join()}`);
   ok(N[1].badge === 'Milky 3.0' && N[1].sel && N[1].child && N[2].badge.startsWith('불투명') && N[3].badge === '직접 배치' && N[4].label === 'LED ×10' && N[4].badge === '균등'
     && N[5].badge === '직선 116×16' && N[6].badge === '0.80 / 0.80' && N[7].badge === '1', `배지: ${N.map((n) => n.badge).join(' | ')}`); }
 { const N = treeNodes({ ...M, light: defaultLight() }, { node: null, line: null });

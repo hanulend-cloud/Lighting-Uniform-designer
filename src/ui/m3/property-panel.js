@@ -8,7 +8,7 @@ export function renderPropertyPanel(el, M, S, ui, h) {
   const id = S.node ?? 'parts';
   if (id.startsWith('part:')) {
     const i = +id.slice(5);
-    renderPartProps(el, M, { part: i, face: S.sel?.part === i ? S.sel.face : null, clearance: ui.clearance, xfMsg: ui.xfMsg, xfInfo: ui.xfInfo, meshInfo: ui.meshInfo ?? null, catalog: ui.catalog ?? catalogOf(null) }, ui.dbList, h);
+    renderPartProps(el, M, { part: i, face: S.sel?.part === i ? S.sel.face : null, contacts: M.contacts, names: M.parts.map((p) => p.name), clearance: ui.clearance, xfMsg: ui.xfMsg, xfInfo: ui.xfInfo, meshInfo: ui.meshInfo ?? null, catalog: ui.catalog ?? catalogOf(null) }, ui.dbList, h);
     return;
   }
   switch (id) {

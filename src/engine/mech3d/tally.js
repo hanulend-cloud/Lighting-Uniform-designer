@@ -37,23 +37,16 @@ export function makeAccumulator(G, line, obs, rw = null) {
   const R = G.pix, nCell = G.ns * G.nw, acc = new Float64Array(nCell), cnt = new Uint32Array(nCell);
   const C = rw?.C ?? null, nJ = C ? C.n : 0, racc = C ? new Float64Array(nJ * nCell) : null, sf = C ? new Float64Array(nJ) : null, sf2 = C ? new Float64Array(nJ) : null;
   let lx = 0, ly = 0, lz = 0, has = false, lp = -1, nRw = 0;
-  const incoming = obs.mode === 'in';   // 'out'(기본) = 관측면에서 나가 관측 방향으로 탈출하는 빛 · 'in' = 관측면에 들어오는 빛
   const acc_ = {
     acc, cnt,
     get rw() { return C ? { acc: racc, sf, sf2, n: nRw } : null; },
     // p = 광자 번호(runMC3D 가 마지막 인자로 전달). 탈출 광자가 마지막 출사 광자와 같을 때만 집계 — 흡수·소실된 광자의 낡은 출사점을 쓰지 않는다.
     onExit(part, face, x, y, z, dx, dy, dz, w, p) { has = faces.has(`${part}|${face}`); lx = x; ly = y; lz = z; lp = p; },
     onEscape(x, y, z, dx, dy, dz, w, p, tL = 0, tK = 0) {   // tL/tK 는 runMC3D 의 track 옵션이 줌 — rw 인데 track 없으면 모든 f = 1
-      if (incoming || !has || lp !== p) return;
+      if (!has || lp !== p) return;
       has = false;
       if (dx * d[0] + dy * d[1] + dz * d[2] < cosC) return;
       add(lx, ly, lz, w, tL, tK);
-    },
-    // 들어오는 빛(obs.mode = 'in'): 관측면에 바깥에서 닿는 광자(관측 방향 d 의 반대로 ±cone) — 닿을 때마다 그 자리에(재순환 빛 포함 = 면 조도)
-    onHit(part, face, x, y, z, dx, dy, dz, w, p, entering, tL = 0, tK = 0) {
-      if (!incoming || !entering || !faces.has(`${part}|${face}`)) return;
-      if (-(dx * d[0] + dy * d[1] + dz * d[2]) < cosC) return;
-      add(x, y, z, w, tL, tK);
     },
   };
   // 점 → (s,w) 칸에 더함. 점을 래스터 픽셀 중심으로 맞춘 뒤 분류 — 면적(area)을 픽셀 단위로 센 것과 같은 이산화라서 편향이 없다.

@@ -31,7 +31,7 @@ const IDS = ['interference', 'reach', 'wall', 'leak'];
 function init(el) {
   el.innerHTML = `<span class="m3-rel">신뢰도 <span class="m3-barw"><span class="m3-barf"></span></span>
       <b data-s="rn"></b><span class="mut" data-s="info"></span></span>
-    <span class="mut">설계 점검</span>
+    <span class="mut m3-chkok" data-s="ok">✓ 설계 점검 이상 없음</span>
     ${IDS.map((id) => `<span class="m3-chk" role="button" tabindex="0" data-chk="${id}"><span class="m3-dot na"></span><span class="m3-ico" aria-hidden="true"></span><span data-t></span></span>`).join('')}
     <span class="m3-stxt" data-s="txt" hidden></span>`;
   const S = {
@@ -56,13 +56,16 @@ export function renderStatusBar(el, d, h) {
   setText(S.rn, Number.isFinite(rn) ? `±${(rn * 100).toFixed(1)}%` : '–');
   setText(S.info, `목표 ±${(d.targetNoise * 100).toFixed(1)}% · 광자 ${(c?.photons ?? 0).toLocaleString()} · ${stTxt}`);
   for (const x of checkLabels(d.checks ?? {})) {
-    const o = S.chk[x.id], on = d.focus === x.id, cls = `m3-chk${on ? ' on' : ''}`;
+    const o = S.chk[x.id], on = d.focus === x.id, cls = `m3-chk${on ? ' on' : ''}`, show = x.st === 'warn' || x.st === 'bad';   // 문제일 때만 배지
+    if (o.n.hidden !== !show) o.n.hidden = !show;
     if (o.n.className !== cls) o.n.className = cls;
     const dc = `m3-dot ${x.st}`;
     if (o.dot.className !== dc) o.dot.className = dc;
     setText(o.ico, statusIcon(x.st)); setText(o.t, x.text);
     setAttr(o.n, 'aria-label', checkAria(x)); setAttr(o.n, 'aria-pressed', on ? 'true' : 'false');
   }
+  const anyBad = checkLabels(d.checks ?? {}).some((x) => x.st === 'warn' || x.st === 'bad'), okN = S.ok ?? (S.ok = S.bar.closest('.m3-status')?.querySelector('[data-s="ok"]'));
+  if (okN && okN.hidden !== anyBad) okN.hidden = anyBad;
   const tx = d.text ? String(d.text) : '';
   setText(S.txt, tx);
   if (S.txt.hidden !== !tx) S.txt.hidden = !tx;

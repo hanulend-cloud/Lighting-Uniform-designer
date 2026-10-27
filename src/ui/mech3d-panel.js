@@ -107,6 +107,11 @@ export function reflRowHtml(p, catalog = DEFAULT_FINISH_CATALOG, form = {}) {
     ${form.addOpen ? reflAddFormHtml(form.msg) : ''}`;
 }
 
+// 겹침 경고(순수) — 다른 부품·LED 와 겹칠 때만(간격·접촉은 문제가 아니므로 표시 안 함)
+export function overlapWarnHtml(c) {
+  const bad = c ? [...c.rows, ...(c.leds ?? [])].filter((r) => r.depth > 0) : [];
+  return bad.length ? `<div class="m3-clash" role="alert">⚠ ${bad.map((r) => `${esc(r.name)}과 ${r.depth.toFixed(2)} mm 겹침`).join(' · ')} — 위치·크기를 고치세요</div>` : '';
+}
 // 간격 한 줄 요약(순수) — 가장 가까운 부품·LED 부품(간섭 = 빨강) · LED 최소 거리
 export function clearanceSummaryHtml(c) {
   if (!c) return '';
@@ -136,17 +141,26 @@ function partEditor(p, sel, dbList) {
   const tabs = `<div class="m3-tabs" role="tablist" aria-label="부품 속성">
     <button type="button" role="tab" data-m3-tab="basic" aria-selected="${tab === 'basic'}">기본</button>
     <button type="button" role="tab" data-m3-tab="detail" aria-selected="${tab === 'detail'}">상세${dSum ? ` <span class="m3-tab-s">${esc(dSum)}</span>` : ''}</button></div>`;
-  const warn = `${clearanceSummaryHtml(sel.clearance)}${sel.xfMsg ? `<div class="m3-warn" role="status">${esc(sel.xfMsg)}</div>` : ''}`;
+  const warn = `${overlapWarnHtml(sel.clearance)}${sel.xfMsg ? `<div class="m3-warn" role="status">${esc(sel.xfMsg)}</div>` : ''}`;
   const body = tab === 'basic'
     ? `<div class="m3-card">${kindSegHtml(p.material.kind)}${basicMaterialHtml(p, dbList, cat)}</div>
       <div class="m3-card"><div class="m3-sub">위치 · 크기 <span class="mut">mm</span></div>${xformEditor(p, sel.xfInfo, false, true)}</div>`
     : `<div class="m3-card"><div class="m3-sub">소재 상세</div>${detailMaterialHtml(p, dbList, cat, sel.reflForm ?? {})}</div>
       ${secHtml('finish', '면 처리 (면별)', face != null ? `면 #${face} 선택` : nOver ? `면 ${nOver}개 덮어씀` : '', `${partFin}${faceRow}<div class="mut m3-note">3D 뷰에서 면을 클릭하면 그 면만 다르게 지정할 수 있습니다</div>`)}
       ${secHtml('xf', '크기·위치 상세 (가능 범위 · 비율 고정)', esc(xfSummaryText(p, sel.xfInfo)), xformEditor(p, sel.xfInfo, sel.lock))}
-      ${sel.clearance ? secHtml('gap', '간격 상세', '', clearanceHtml(sel.clearance)) : ''}`;
+      ${sel.clearance ? secHtml('gap', '간격 상세', esc(clearanceText(sel.clearance)), clearanceHtml(sel.clearance)) : ''}
+      ${secHtml('contact', '접촉면 (이 부품)', '', contactsForPartHtml(sel.contacts ?? [], sel.part, sel.names ?? []))}`;
   return `${warn}${tabs}<div class="m3-edit" role="tabpanel">${body}</div>`;
 }
 
+// 간격 구역 요약 — 가장 가까운 부품·LED 거리 한 줄(글자)
+const clearanceText = (c) => { const h = clearanceSummaryHtml(c); return h.replace(/<[^>]+>/g, ''); };
+// 이 부품의 접촉면(순수) — 체크 = 공기층 없음(이중사출·접착). 번호 = 전체 접촉면 목록 위치
+export function contactsForPartHtml(contacts, part, names) {
+  const mine = contacts.map((c, i) => [c, i]).filter(([c]) => c.a === part || c.b === part);
+  if (!mine.length) return '<div class="mut">이 부품에 닿은 다른 부품 없음</div>';
+  return `<div class="mut m3-note">체크 = 공기층 없이 붙음(이중사출·접착)</div><div class="m3-contacts">${mine.map(([c, i]) => `<label><input type="checkbox" data-m3-contact="${i}" ${c.mode === 'contact' ? 'checked' : ''}> ${esc(names[c.a === part ? c.b : c.a] ?? '?')} · ${(c.area ?? 0).toFixed(1)} mm²</label>`).join('')}</div>`;
+}
 // 크기·위치 조절(순수). info = { center0, size0, lim } — center0·size0: 원본 외곽 중심·크기(mm),
 // lim: app.js 가 여유(tol)를 뺀 가능 범위 { move: [[−,+]×3](현재에서 이동량), size: [최대 mm×3], uniform: 비율 고정 최대 배수 } | null
 // key = 'c0..2'(중심 위치 mm) | 'z0..2'(크기 mm). 범위를 넘으면 한계값으로 맞춘다 → { xf(null = 원래대로), clamped }
@@ -281,6 +295,7 @@ export function renderPartProps(el, m, sel0, dbList, h) {
   const rcp = el.querySelector('[data-m3-reflcopy]');
   if (rcp) rcp.onclick = () => h.onReflCopy?.(i, p.reflMaterial);
   el.querySelectorAll('[data-m3-fitdlg]').forEach((b) => { b.onclick = () => h.onFitDialog?.(i); });
+  el.querySelectorAll('[data-m3-contact]').forEach((c) => { c.onchange = () => h.onContact?.(+c.dataset.m3Contact, c.checked ? 'contact' : 'air'); });
   el.querySelectorAll('[data-m3-finish]').forEach((x) => {
     x.onchange = () => {
       const face = x.dataset.m3Finish === 'face' ? sel.face : null;

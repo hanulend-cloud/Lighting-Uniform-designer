@@ -262,7 +262,6 @@ function guidance(snap) {
   if (snap.state === 'idle' && snap.reason === 'notReady') return '광원을 지정하세요 — 명령 막대의 💡 LED 지정';
   if (!snap.stats) return snap.state === 'pending' ? '' : '계산 시작 중…';
   if (snap.stats.empty) return '판정할 유효 셀이 없음 — 관측면이 너무 좁거나 가장자리 제외가 큼';
-  if (M.observe.mode === 'in' && (snap.photons ?? 0) > 3e5 && !(snap.photometry?.eff > 1e-4)) return '이 면에는 바깥에서 들어오는 빛이 거의 없음 — 빛이 들어오는 면(예: LED 쪽 도광판 아랫면)을 고르거나 "나가는 빛" 으로 바꾸세요';
   return '';
 }
 function onCalc(snap) {
@@ -334,10 +333,8 @@ function renderMarkers() {
   const cl = A.clrShown;
   if (cl) {
     for (const r of [...cl.rows, ...cl.leds]) {
-      if (r.depth > 0) out.push({ type: 'ring', pos: r.pa, color: 0xff3b30, size: 14 });
-      else if (r.gap > TOL) out.push({ type: 'line', a: r.pa, b: r.pb, color: 0x18a0fb });
+      if (r.depth > 0) out.push({ type: 'ring', pos: r.pa, color: 0xff3b30, size: 14 });   // 겹칠 때만 표시(간격 선은 그리지 않음 — 2026-10-27)
     }
-    if (cl.ledMin) out.push({ type: 'line', a: cl.ledMin.pa, b: cl.ledMin.pb, color: 0x2fbf4f });
   }
   A.view.setCheckMarkers(out);
 }
@@ -517,7 +514,7 @@ function obsArrow(M, line, rt) {
   });
   if (!(A > 0)) return null;
   const axis = O.dir ?? line?.frame?.d ?? obsDirection(rt.parts, O.faces), diag = Math.hypot(hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]);
-  return { pos: c.map((x) => x / A), axis, len: Math.max(4, Math.min(25, 0.18 * diag)), incoming: O.mode === 'in' };
+  return { pos: c.map((x) => x / A), axis, len: Math.max(4, Math.min(25, 0.18 * diag)), incoming: false };
 }
 // LED 몸체 반폭(관측 평면 u·v 투영 중 큰 쪽의 반) — LED STEP = 기준 LED 몸체, 직접 배치 = 발광면 크기의 반. ② 끝벽·측벽 여유
 function ledHalfWidth(M, line) {

@@ -30,7 +30,6 @@ export function treeNodes(M, S, lay) {
   const ln = S.line;
   node('obs', '▾ 관측면', ln ? `${LINE_KIND[ln.kind] ?? ln.kind} ${ln.length.toFixed(0)}×${ln.width.toFixed(0)}` : O.faces.length ? '인식 중' : '미지정');
   node('target', '◎ 목표', `${O.targetLen.toFixed(2)} / ${O.targetWid.toFixed(2)}`);
-  node('contacts', '접촉면', String(M.contacts.length));
   return out;
 }
 // 눈 단추 처리(순수): id = 'parts' | 'part:i' | 'leds', only = Shift(이 부품만) → { hidden, hideLeds }
