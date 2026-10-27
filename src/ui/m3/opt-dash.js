@@ -23,7 +23,7 @@ export function evalSparkSvg(evals, tgLen, tgWid, bestIdx = -1, w = 220, h = 70)
   return `<svg class="od-spark" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">${tg(tgLen, 'od-tg')}${tg(tgWid, 'od-tg od-tg2')}${line('Ulen', 'od-l1')}${line('Uwid', 'od-l2')}${dots('Ulen', 'od-d1')}${dots('Uwid', 'od-d2')}${best}
     <text class="od-ax" x="2" y="10">${hi.toFixed(2)}</text><text class="od-ax" x="2" y="${h - 2}">${lo.toFixed(2)}</text></svg>`;
 }
-// 설계 인자 현황판(순수, 오른쪽 창 맨 아래) — S = 최적화 상태(null = 실행 전), nw = 지금 설계 { milky, milkyCap, leds, shape, on:{milky,position,shape}, Ulen, Uwid, tgLen, tgWid }
+// 설계 인자 현황판(순수, 왼쪽 창 맨 아래) — S = 최적화 상태(null = 실행 전), nw = 지금 설계 { milky, milkyCap, leds, shape, on:{milky,position,shape}, Ulen, Uwid, tgLen, tgWid }
 // 인자 3개마다 그래프 1개: 시험한 후보의 길이 U(파랑)·폭 U(초록) · 목표선(빨강) · 지금 설계(회색 점선) · 최고 후보(노란 원). Milky 는 가로축 = Milky 값(지금 값 세로선)
 // 세 그래프의 세로축은 같은 범위 — 어느 인자가 균일도를 더 바꾸는지 바로 비교
 export function factorBoardHtml(S, nw = {}) {
@@ -33,7 +33,7 @@ export function factorBoardHtml(S, nw = {}) {
   const vals = [...all.flatMap((e) => [e.Ulen, e.Uwid]), tl, tw, nw.Ulen, nw.Uwid].filter(Number.isFinite);
   const lo = vals.length ? Math.max(0, Math.floor((Math.min(...vals) - 0.02) * 20) / 20) : 0, hi = vals.length ? Math.min(1, Math.ceil((Math.max(...vals) + 0.01) * 20) / 20) : 1;
   const bestOf = (ev) => { let b = null; for (const e of ev) if (!b || scoreOf(e, tl, tw) > scoreOf(b, tl, tw)) b = e; return b; };
-  const W = 320, H = 54, x0 = 26, x1 = W - 8, y0 = 4, y1 = H - 12, Y = (v) => y0 + (1 - (v - lo) / (hi - lo || 1)) * (y1 - y0);
+  const W = 250, H = 54, x0 = 26, x1 = W - 8, y0 = 4, y1 = H - 12, Y = (v) => y0 + (1 - (v - lo) / (hi - lo || 1)) * (y1 - y0);
   const chart = (k, ev, on) => {
     const hl = (v, cls) => (Number.isFinite(v) ? `<line class="${cls}" x1="${x0}" x2="${x1}" y1="${Y(v).toFixed(1)}" y2="${Y(v).toFixed(1)}"/>` : '');
     const ax = `<text class="od-ax" x="2" y="${y0 + 6}">${hi.toFixed(2)}</text><text class="od-ax" x="2" y="${y1}">${lo.toFixed(2)}</text>`;

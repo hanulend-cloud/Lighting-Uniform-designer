@@ -76,14 +76,14 @@ export function mountDockSplitter(dock, wrap) {
   apply();
 }
 
-// 오른쪽 창 맨 아래 설계 인자 현황판 높이 조절 — 위 경계를 위아래로 끌기(uds.m3.facH, px). 결과 칸은 최소 FAC_KEEP 을 남김. 두 번 클릭 = 기본
-const FAC_KEY = 'uds.m3.facH', FAC_DEF = 220, FAC_MIN = 90, FAC_KEEP = 240;
+// 왼쪽 창 맨 아래 설계 인자 현황판 높이 조절 — 위 경계를 위아래로 끌기(uds.m3.facH, px). 부품 속성 칸은 최소 FAC_KEEP 을 남김. 두 번 클릭 = 기본
+const FAC_KEY = 'uds.m3.facH', FAC_DEF = 220, FAC_MIN = 90, FAC_KEEP = 160;
 export const clampFac = (h, colH) => Math.round(Math.max(FAC_MIN, Math.min(h, Math.max(FAC_MIN, colH - FAC_KEEP))));
 export function mountFacSplitter(card, col) {
   if (!card || card.dataset.split) return;
   card.dataset.split = '1';
   let h = FAC_DEF; try { const v = +localStorage.getItem(FAC_KEY); if (v > 0) h = v; } catch {}
-  const room = () => col.clientHeight - (col.firstElementChild?.offsetHeight ?? 0);   // 맨 위 계산 카드를 뺀 높이
+  const room = () => col.clientHeight - (col.firstElementChild?.offsetHeight ?? 0);   // 맨 위 피처 트리를 뺀 높이
   const apply = () => { if (window.innerWidth <= NARROW) { card.style.removeProperty('--m3-fac-h'); return; } card.style.setProperty('--m3-fac-h', `${clampFac(h, room())}px`); };
   const hd = document.createElement('div');
   hd.className = 'm3-fac-split'; hd.setAttribute('role', 'separator'); hd.setAttribute('aria-orientation', 'horizontal'); hd.title = '설계 인자 현황 높이 — 위아래로 끌어 조절 · 두 번 클릭 = 기본';

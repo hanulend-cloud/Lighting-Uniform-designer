@@ -276,7 +276,7 @@ main:has(#mech3d-wrap:not([hidden])) { grid-template-rows: minmax(0, 1fr); }
 .m3-sep { width: 1px; height: 22px; background: var(--m3-line); margin: 0 4px; }
 .m3-hint { margin-left: auto; color: var(--m3-mut); font-size: 12px; }
 .m3-main { display: grid; grid-template-columns: 260px minmax(0, 1fr) 430px; min-height: 0; }
-.m3-left { border-right: 1px solid var(--m3-line); display: grid; grid-template-rows: auto minmax(0, 1fr); min-height: 0; }
+.m3-left { border-right: 1px solid var(--m3-line); display: grid; grid-template-rows: auto minmax(0, 1fr) auto; min-height: 0; }
 .m3-tree { padding: 10px; border-bottom: 1px solid var(--m3-line); overflow: auto; max-height: 42vh; }
 .m3-props { padding: 10px; overflow: auto; }
 .m3-props input[type=number] { width: 60px; }
@@ -692,8 +692,8 @@ main:has(#m3-start:not([hidden])) { grid-template-rows: minmax(0, 1fr); }
 .m3-cmd .m3-step.done i { background: #1f9d55; color: #fff; }
 .m3-cmd .m3-arrow { color: #8a96a8; font-weight: 700; padding: 0 2px; }
 
-/* 오른쪽 창 맨 아래: 설계 인자 현황판(인자 3개 그래프) — 아래 칸 접기와 상관없이 항상 보임, 위 경계를 끌어 높이 조절 */
-.m3-faccard { position: relative; flex: none; height: var(--m3-fac-h, 220px); min-height: 0; overflow: auto; padding: 6px 10px; border-left: 1px solid var(--m3-line); border-top: 1px solid var(--m3-line); font-size: 12px; }
+/* 왼쪽 창 맨 아래(부품 속성 밑): 설계 인자 현황판(인자 3개 그래프) — 아래 칸 접기와 상관없이 항상 보임, 위 경계를 끌어 높이 조절 */
+.m3-faccard { position: relative; flex: none; height: var(--m3-fac-h, 220px); min-height: 0; overflow: auto; padding: 6px 10px; border-top: 1px solid var(--m3-line); font-size: 12px; }
 .m3-fac-split { position: sticky; display: block; top: -6px; margin: -6px -10px 0; height: 8px; cursor: row-resize; z-index: 6; touch-action: none; }
 .m3-fac-split::after { content: ""; position: absolute; left: 0; right: 0; top: 0; height: 2px; background: transparent; transition: background .15s; }
 .m3-fac-split:hover::after, .m3-splitting-f .m3-fac-split::after { background: var(--m3-acc); opacity: .6; }
