@@ -693,21 +693,21 @@ main:has(#m3-start:not([hidden])) { grid-template-rows: minmax(0, 1fr); }
 .m3-cmd .m3-arrow { color: #8a96a8; font-weight: 700; padding: 0 2px; }
 
 /* 왼쪽 창 맨 아래(부품 속성 밑): 설계 인자 현황판(인자 3개 그래프) — 아래 칸 접기와 상관없이 항상 보임, 위 경계를 끌어 높이 조절 */
-.m3-faccard { position: relative; flex: none; height: var(--m3-fac-h, 220px); min-height: 0; overflow: auto; padding: 6px 10px; border-top: 1px solid var(--m3-line); font-size: 12px; }
-.m3-fac-split { position: sticky; display: block; top: -6px; margin: -6px -10px 0; height: 8px; cursor: row-resize; z-index: 6; touch-action: none; }
-.m3-fac-split::after { content: ""; position: absolute; left: 0; right: 0; top: 0; height: 2px; background: transparent; transition: background .15s; }
+.m3-faccard { position: relative; flex: none; height: var(--m3-fac-h, 220px); min-height: 0; overflow: hidden; padding: 6px 10px; border-top: 1px solid var(--m3-line); font-size: 12px; display: flex; flex-direction: column; }
+.m3-fac-split { position: absolute; left: 0; right: 0; top: -4px; height: 8px; cursor: row-resize; z-index: 6; touch-action: none; }
+.m3-fac-split::after { content: ""; position: absolute; left: 0; right: 0; top: 3px; height: 2px; background: transparent; transition: background .15s; }
 .m3-fac-split:hover::after, .m3-splitting-f .m3-fac-split::after { background: var(--m3-acc); opacity: .6; }
 .m3-splitting-f { user-select: none; cursor: row-resize; }
-.fb-chart { width: 100%; height: 54px; display: block; margin: 1px 0 2px; }
-.fb-chart .od-now { stroke: #8a96a8; stroke-dasharray: 2 2; stroke-width: 1; vector-effect: non-scaling-stroke; }
-.fb-chart .fb-mv { stroke: #8a96a8; stroke-width: 1; vector-effect: non-scaling-stroke; }
-.fb-empty { padding: 10px 4px; font-size: 11.5px; }
-.fb-row { display: grid; grid-template-columns: 10px auto 1fr; gap: 2px 6px; align-items: center; padding: 3px 0; border-top: 1px dashed var(--m3-line); }
+.fb-body { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.fb-body .od-h, .fb-body .od-legend { flex: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin: 0 0 2px; }
+.fb-body .od-legend { display: block; }
+.fb-plot { flex: 1; min-height: 30px; overflow: hidden; }
+.fb-chart { display: block; }
+.fb-chart .od-now { stroke: #8a96a8; stroke-width: 1; }
+.fb-row { flex: none; display: grid; grid-template-columns: 9px auto auto minmax(0, 1fr); gap: 5px; align-items: center; padding: 2px 0; border-top: 1px dashed var(--m3-line); font-size: 11.5px; }
 .fb-row.fb-off { opacity: .5; }
-.fb-row .od-chip { justify-self: end; }
 .fb-dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
-.fb-val { grid-column: 2 / -1; font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.fb-row .fb-chart { grid-column: 1 / -1; }
-@media (max-width: 1024px) { .m3-faccard { height: auto; border-left: 0; } .m3-fac-split { display: none; } }
+.fb-val { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+@media (max-width: 1024px) { .m3-faccard { height: auto; border-left: 0; } .m3-fac-split { display: none; } .fb-plot { flex: none; height: 130px; } }
 .m3-cmd .m3-now { margin-left: 6px; font-size: 12.5px; padding: 3px 8px; border-radius: 6px; background: var(--m3-accbg, #eef3ff); }
 .m3-cmd .m3-now b.ok { color: #1f9d55; } .m3-cmd .m3-now b.bad { color: #d64545; }

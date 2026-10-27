@@ -24,41 +24,50 @@ export function evalSparkSvg(evals, tgLen, tgWid, bestIdx = -1, w = 220, h = 70)
     <text class="od-ax" x="2" y="10">${hi.toFixed(2)}</text><text class="od-ax" x="2" y="${h - 2}">${lo.toFixed(2)}</text></svg>`;
 }
 // 설계 인자 현황판(순수, 왼쪽 창 맨 아래) — S = 최적화 상태(null = 실행 전), nw = 지금 설계 { milky, milkyCap, leds, shape, on:{milky,position,shape}, Ulen, Uwid, tgLen, tgWid }
-// 인자 3개마다 그래프 1개: 시험한 후보의 길이 U(파랑)·폭 U(초록) · 목표선(빨강) · 지금 설계(회색 점선) · 최고 후보(노란 원). Milky 는 가로축 = Milky 값(지금 값 세로선)
-// 세 그래프의 세로축은 같은 범위 — 어느 인자가 균일도를 더 바꾸는지 바로 비교
+// 그래프 1개에 인자 3개: 시험 순서대로 후보의 길이 U(실선)·폭 U(점선)를 인자 색으로 · 목표선(빨강) · 지금 설계(회색) · 최고 후보(노란 원)
+// 아래 인자별 한 줄(상태 · 지금 → 최고). 그래프는 .fb-plot 자리의 실제 크기로 factorChartSvg 가 그림(스크롤 없이 칸에 맞춤)
+const FB_COL = { milky: '#3b82f6', position: '#f59e0b', shape: '#a855f7' };
 export function factorBoardHtml(S, nw = {}) {
-  const tl = S?.tgLen ?? nw.tgLen, tw = S?.tgWid ?? nw.tgWid, BAND = { milky: '#3b82f6', position: '#f59e0b', shape: '#a855f7' };
-  const evOf = (k) => (S?.tiles?.[k]?.evals ?? []).filter((e) => e.ok !== false && Number.isFinite(e.Ulen));
-  const all = ['milky', 'position', 'shape'].flatMap(evOf);
-  const vals = [...all.flatMap((e) => [e.Ulen, e.Uwid]), tl, tw, nw.Ulen, nw.Uwid].filter(Number.isFinite);
-  const lo = vals.length ? Math.max(0, Math.floor((Math.min(...vals) - 0.02) * 20) / 20) : 0, hi = vals.length ? Math.min(1, Math.ceil((Math.max(...vals) + 0.01) * 20) / 20) : 1;
-  const bestOf = (ev) => { let b = null; for (const e of ev) if (!b || scoreOf(e, tl, tw) > scoreOf(b, tl, tw)) b = e; return b; };
-  const W = 250, H = 54, x0 = 26, x1 = W - 8, y0 = 4, y1 = H - 12, Y = (v) => y0 + (1 - (v - lo) / (hi - lo || 1)) * (y1 - y0);
-  const chart = (k, ev, on) => {
-    const hl = (v, cls) => (Number.isFinite(v) ? `<line class="${cls}" x1="${x0}" x2="${x1}" y1="${Y(v).toFixed(1)}" y2="${Y(v).toFixed(1)}"/>` : '');
-    const ax = `<text class="od-ax" x="2" y="${y0 + 6}">${hi.toFixed(2)}</text><text class="od-ax" x="2" y="${y1}">${lo.toFixed(2)}</text>`;
-    const base = `<rect x="${x0}" y="${y0}" width="${x1 - x0}" height="${y1 - y0}" fill="${BAND[k]}" opacity=".07"/>${hl(tl, 'od-tg')}${hl(tw, 'od-tg od-tg2')}${hl(nw.Ulen, 'od-now')}`;
-    if (!ev.length) return `<svg class="fb-chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">${base}${ax}<text class="od-none" x="${(x0 + x1) / 2}" y="${(y0 + y1) / 2 + 4}" text-anchor="middle">${on ? '아직 시험한 후보 없음' : '자동설계에서 꺼짐'}</text></svg>`;
-    const byV = k === 'milky' && ev.every((e) => Number.isFinite(e.v)), pts = byV ? [...ev].sort((a, b) => a.v - b.v) : ev;
-    const cap = byV ? Math.max(nw.milkyCap ?? 0, ...pts.map((e) => e.v), nw.milky ?? 0, 1) : 0, n = pts.length;
-    const X = byV ? (e) => x0 + (e.v / cap) * (x1 - x0) : (e, i) => x0 + (n > 1 ? (i / (n - 1)) * (x1 - x0) : (x1 - x0) / 2);
-    const pl = (key, cls) => { const d = pts.map((e, i) => (Number.isFinite(e[key]) ? `${X(e, i).toFixed(1)},${Y(e[key]).toFixed(1)}` : null)).filter(Boolean); return d.length > 1 ? `<polyline class="${cls}" points="${d.join(' ')}"/>` : ''; };
-    const dots = (key, cls) => pts.map((e, i) => (Number.isFinite(e[key]) ? `<circle class="${cls}" cx="${X(e, i).toFixed(1)}" cy="${Y(e[key]).toFixed(1)}" r="1.8"/>` : '')).join('');
-    const b = bestOf(ev), bi = pts.indexOf(b);
-    const best = b ? `<circle class="od-best" cx="${X(b, bi).toFixed(1)}" cy="${Y(b.Ulen).toFixed(1)}" r="4.5"/>` : '';
-    const mv = byV && Number.isFinite(nw.milky) ? `<line class="fb-mv" x1="${X({ v: nw.milky }).toFixed(1)}" x2="${X({ v: nw.milky }).toFixed(1)}" y1="${y0}" y2="${y1}"/>` : '';
-    const xl = byV ? `<text class="od-ax" x="${x0}" y="${H - 2}">Milky 0</text><text class="od-ax" x="${x1}" y="${H - 2}" text-anchor="end">${f2(cap)}</text>` : `<text class="od-ax" x="${x0}" y="${H - 2}">후보 1</text><text class="od-ax" x="${x1}" y="${H - 2}" text-anchor="end">${n}</text>`;
-    return `<svg class="fb-chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">${base}${mv}${pl('Ulen', 'od-l1')}${pl('Uwid', 'od-l2')}${dots('Ulen', 'od-d1')}${dots('Uwid', 'od-d2')}${best}${ax}${xl}</svg>`;
-  };
+  const tl = S?.tgLen ?? nw.tgLen, tw = S?.tgWid ?? nw.tgWid;
   const row = (k, name, nowTxt) => {
-    const t = S?.tiles?.[k], on = t ? t.status !== 'off' : !!nw.on?.[k], ev = evOf(k), b = bestOf(ev);
+    const t = S?.tiles?.[k], on = t ? t.status !== 'off' : !!nw.on?.[k];
+    const ev = (t?.evals ?? []).filter((e) => e.ok !== false && Number.isFinite(e.Ulen)); let b = null;
+    for (const e of ev) if (!b || scoreOf(e, tl, tw) > scoreOf(b, tl, tw)) b = e;
     const chip = t ? { off: '미사용', wait: '대기', run: `진행 ${Math.round(t.frac * 100)}%`, done: '완료' }[t.status] : on ? '켜짐' : '꺼짐';
-    return `<div class="fb-row${on ? '' : ' fb-off'}"><i class="fb-dot" style="background:${BAND[k]}"></i><b>${name}</b><span class="od-chip">${chip}</span>
-      <div class="fb-val"><span class="mut">지금</span> ${esc(nowTxt)}${b ? ` → <b>${esc(b.label)}</b> <span class="mut">(${f2(b.Ulen)}/${f2(b.Uwid)}${ev.length > 1 ? ` · 후보 ${ev.length}` : ''})</span>` : ''}</div>${chart(k, ev, on)}</div>`;
+    const txt = `지금 ${nowTxt}${b ? ` → ${b.label} (${f2(b.Ulen)}/${f2(b.Uwid)})` : ''}`;
+    return `<div class="fb-row${on ? '' : ' fb-off'}" title="${esc(txt)}"><i class="fb-dot" style="background:${FB_COL[k]}"></i><b>${name}</b><span class="od-chip">${chip}</span><span class="fb-val"><span class="mut">지금</span> ${esc(nowTxt)}${b ? ` → <b>${esc(b.label)}</b> <span class="mut">(${f2(b.Ulen)}/${f2(b.Uwid)})</span>` : ''}</span></div>`;
   };
-  return `<div class="od-h">설계 인자 현황 <span class="mut">인자별 균일도 변화${Number.isFinite(nw.Ulen) ? ` · 지금 ${f2(nw.Ulen)}/${f2(nw.Uwid)}` : ''}</span></div>
-    <div class="od-legend"><i class="od-k1"></i>길이 U <i class="od-k2"></i>폭 U <i class="od-kt"></i>목표 <i style="border-color:#8a96a8;border-top-style:dashed"></i>지금 · <span style="color:#f0b400">○</span> 최고</div>
-    ${row('milky', '① Milky', Number.isFinite(nw.milky) ? f2(nw.milky) : '확산 부품 없음')}${row('position', '② 기구 위치', nw.leds ?? '–')}${row('shape', '③ 기구 형상', nw.shape ?? '원래 형상')}`;
+  return `<div class="od-h">설계 인자 현황 <span class="mut">${Number.isFinite(nw.Ulen) ? `지금 ${f2(nw.Ulen)}/${f2(nw.Uwid)}` : ''}</span></div>
+    <div class="od-legend">색 = 인자 · 실선 길이 U · 점선 폭 U <i class="od-kt"></i>목표 <i style="border-color:#8a96a8"></i>지금 <span style="color:#f0b400">○</span>최고</div>
+    <div class="fb-plot"></div>
+    ${row('milky', '① Milky', Number.isFinite(nw.milky) ? f2(nw.milky) : '확산 부품 없음')}${row('position', '② 위치', nw.leds ?? '–')}${row('shape', '③ 형상', nw.shape ?? '원래 형상')}`;
+}
+// 인자 3개를 한 그래프로(순수) — W×H = 실제 px(글자가 늘어나지 않게). 가로 = 시험 순서(S.seq), 세로 = 균일도 U(목표·지금 포함 범위)
+export function factorChartSvg(S, nw = {}, W = 240, H = 100) {
+  const tl = S?.tgLen ?? nw.tgLen, tw = S?.tgWid ?? nw.tgWid, seq = S?.seq ?? [];
+  const okE = (e) => e.ok !== false && Number.isFinite(e.Ulen);
+  const vals = [...seq.filter(okE).flatMap((e) => [e.Ulen, e.Uwid]), tl, tw, nw.Ulen, nw.Uwid].filter(Number.isFinite);
+  const lo = vals.length ? Math.max(0, Math.floor((Math.min(...vals) - 0.02) * 20) / 20) : 0, hi = vals.length ? Math.min(1, Math.ceil((Math.max(...vals) + 0.01) * 20) / 20) : 1;
+  const x0 = 26, x1 = W - 6, y0 = 5, y1 = H - 13, Y = (v) => y0 + (1 - (v - lo) / (hi - lo || 1)) * (y1 - y0);
+  const n = seq.length, step = n > 1 ? (x1 - x0) / (n - 1) : 0, X = (i) => x0 + (n > 1 ? i * step : (x1 - x0) / 2);
+  const hl = (v, cls) => (Number.isFinite(v) ? `<line class="${cls}" x1="${x0}" x2="${x1}" y1="${Y(v).toFixed(1)}" y2="${Y(v).toFixed(1)}"/>` : '');
+  let body = '';
+  if (seq.some(okE)) {
+    let s0 = 0;   // 인자 구간 띠
+    for (let i = 1; i <= n; i++) if (i === n || seq[i].k !== seq[s0].k) { const xa = Math.max(x0, X(s0) - step / 2), xb = Math.min(x1, X(i - 1) + step / 2); body += `<rect x="${xa.toFixed(1)}" y="${y0}" width="${Math.max(1, xb - xa).toFixed(1)}" height="${y1 - y0}" fill="${FB_COL[seq[s0].k] ?? '#888'}" opacity=".08"/>`; s0 = i; }
+    body += hl(tl, 'od-tg') + hl(tw, 'od-tg od-tg2') + hl(nw.Ulen, 'od-now');
+    let best = -1;
+    seq.forEach((e, i) => { if (okE(e) && (best < 0 || scoreOf(e, tl, tw) > scoreOf(seq[best], tl, tw))) best = i; });
+    for (const k of Object.keys(FB_COL)) {
+      const idx = seq.map((e, i) => i).filter((i) => seq[i].k === k && okE(seq[i]));
+      if (!idx.length) continue;
+      const pl = (key, dash) => { const d = idx.filter((i) => Number.isFinite(seq[i][key])).map((i) => `${X(i).toFixed(1)},${Y(seq[i][key]).toFixed(1)}`); return d.length > 1 ? `<polyline points="${d.join(' ')}" fill="none" stroke="${FB_COL[k]}" stroke-width="1.6"${dash ? ' stroke-dasharray="3 2"' : ''}/>` : ''; };
+      body += pl('Ulen', false) + pl('Uwid', true) + idx.map((i) => `<circle cx="${X(i).toFixed(1)}" cy="${Y(seq[i].Ulen).toFixed(1)}" r="2" fill="${FB_COL[k]}"/>`).join('');
+    }
+    if (best >= 0) body += `<circle class="od-best" cx="${X(best).toFixed(1)}" cy="${Y(seq[best].Ulen).toFixed(1)}" r="5"><title>최고 ${esc(seq[best].label)} (${f2(seq[best].Ulen)}/${f2(seq[best].Uwid)})</title></circle>`;
+    body += `<text class="od-ax" x="${x0}" y="${H - 2}">후보 1</text><text class="od-ax" x="${x1}" y="${H - 2}" text-anchor="end">${n}</text>`;
+  } else body += hl(tl, 'od-tg') + hl(tw, 'od-tg od-tg2') + hl(nw.Ulen, 'od-now') + `<text class="od-none" x="${(x0 + x1) / 2}" y="${(y0 + y1) / 2 + 4}" text-anchor="middle">자동설계를 실행하면 후보 균일도가 그려짐</text>`;
+  return `<svg class="fb-chart" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}"><rect x="${x0}" y="${y0}" width="${x1 - x0}" height="${y1 - y0}" fill="none" stroke="#c7cfdb" stroke-width=".5"/>${body}<text class="od-ax" x="2" y="${y0 + 6}">${hi.toFixed(2)}</text><text class="od-ax" x="2" y="${y1}">${lo.toFixed(2)}</text></svg>`;
 }
 // 후보의 점수(목표 대비 여유 — 둘 다 있으면 작은 쪽)
 const scoreOf = (e, tl, tw) => (e.ok === false || !Number.isFinite(e.Ulen) ? -Infinity : Math.min(e.Ulen - tl, Number.isFinite(e.Uwid) && Number.isFinite(tw) ? e.Uwid - tw : Infinity));
@@ -88,7 +97,8 @@ export function createOptDash(el, h = {}) {
   function finish(ok, text = '') { if (!S) return; for (const [k] of STAGES) if (S.tiles[k].status === 'run') { S.tiles[k].status = 'done'; S.tiles[k].frac = 1; } S.note = text; S.ended = ok; draw(); }
   function draw() { if (raf) return; raf = setTimeout(() => { raf = 0; render(); renderBoard(); }, 40); }   // setTimeout: 화면이 숨겨져도(다른 탭) 갱신 — rAF 는 멈춤
   // 높이 조절 손잡이(.m3-fac-split)는 남기고 내용만 바꿈
-  function renderBoard() { if (!h.board) return; let c = h.board.querySelector('.fb-body'); if (!c) { c = document.createElement('div'); c.className = 'fb-body'; h.board.appendChild(c); } c.innerHTML = factorBoardHtml(S, h.now?.() ?? {}); }
+  function renderBoard() { if (!h.board) return; let c = h.board.querySelector('.fb-body'); if (!c) { c = document.createElement('div'); c.className = 'fb-body'; h.board.appendChild(c); } const nw = h.now?.() ?? {}; c.innerHTML = factorBoardHtml(S, nw); const p = c.querySelector('.fb-plot'); if (p && p.clientWidth > 40 && p.clientHeight > 30) p.innerHTML = factorChartSvg(S, nw, p.clientWidth, p.clientHeight); }
+  if (h.board && typeof ResizeObserver !== 'undefined') { let w0 = 0, h0 = 0; new ResizeObserver(() => { const b = h.board; if (b.clientWidth === w0 && b.clientHeight === h0) return; w0 = b.clientWidth; h0 = b.clientHeight; renderBoard(); }).observe(h.board); }   // 칸 크기가 바뀌면 그래프를 그 크기로 다시
   function render() {
     const idle = !S || S.ended != null || S.stopped;
     const head = !S ? `<div class="od-h">최적화 항목 <span class="mut">바꿀 항목을 켜고 [▶ 실행] — 실행하면 같은 타일에 진행·값 변화가 실시간으로 보입니다</span></div>` : '';
