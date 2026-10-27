@@ -247,7 +247,7 @@ export function createMech3dView(canvas, { onPick, gizmo = null }) {
       pathGroup = new THREE.Group();
       const COL = [0xff5fa2, 0xb388ff];
       for (const p of paths) {
-        const col = COL[p.offset % COL.length], sh = Math.max(0.15, Math.min(1, p.share)), r = model.r * 0.006 * (0.6 + sh), off = new THREE.Vector3(1, 1, 0).normalize().multiplyScalar(model.r * 0.025 * p.offset);
+        const col = COL[p.offset % COL.length], sh = Math.max(0.15, Math.min(1, p.share)), r = model.r * 0.006 * (0.6 + sh), off = new THREE.Vector3();   // 나란히 놓기는 app 이 함
         const V = p.pts.map((q) => new THREE.Vector3(...q).add(off)), mat = new THREE.MeshBasicMaterial({ color: col, depthTest: false, transparent: true, opacity: 0.85 });
         for (let i = 0; i + 1 < V.length; i++) {
           const a = V[i], b = V[i + 1], d = b.clone().sub(a), L = d.length();
@@ -256,17 +256,24 @@ export function createMech3dView(canvas, { onPick, gizmo = null }) {
           const cyl = new THREE.Mesh(new THREE.CylinderGeometry(r, r, L - hl, 8), mat); cyl.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir); cyl.position.copy(a).addScaledVector(dir, (L - hl) / 2); cyl.renderOrder = 5; pathGroup.add(cyl);
           const cone = new THREE.Mesh(new THREE.ConeGeometry(r * 2.4, hl, 12), mat); cone.quaternion.copy(cyl.quaternion); cone.position.copy(a).addScaledVector(dir, L - hl / 2); cone.renderOrder = 5; pathGroup.add(cone);
         }
-        // 첫 경로: 머무는 곳마다 이름(LED · 부품 · 관측면)
-        (p.names ?? []).forEach((nm, j) => {
-          const c3 = document.createElement('canvas'); c3.width = 160; c3.height = 40; const g3 = c3.getContext('2d');
-          g3.fillStyle = 'rgba(20,26,38,.7)'; g3.fillRect(0, 0, 160, 40); g3.fillStyle = '#e6ebf2'; g3.font = '24px sans-serif'; g3.textAlign = 'center'; g3.textBaseline = 'middle'; g3.fillText(nm, 80, 21);
-          const t3 = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(c3), depthTest: false, transparent: true })), s3 = model.r * 0.05;
-          t3.scale.set(s3 * 4, s3, 1); t3.position.copy(V[j]).add(new THREE.Vector3(0, 0, -s3 * 0.9)); t3.renderOrder = 6; pathGroup.add(t3);
-        });
+        // 첫 경로: 머무는 곳마다 점 + 이름표. 이름표는 옆(p.side)으로 빼서 축 방향으로 고르게 벌려 세움(얇은 적층에서도 안 겹침) + 가는 지시선
+        if (p.names?.length) {
+          const s3 = model.r * 0.05, ax = new THREE.Vector3(...(p.axis ?? [0, 0, 1])).normalize(), sd = new THREE.Vector3(...(p.side ?? [1, 0, 0])).normalize();
+          const n = p.names.length, base = V[0].clone().addScaledVector(sd, -s3 * 5), span = Math.max(V[0].distanceTo(V[n - 1]), s3 * 1.4 * (n - 1));
+          const lmat = new THREE.LineBasicMaterial({ color: 0x9aa7b8, depthTest: false, transparent: true, opacity: 0.8 });
+          p.names.forEach((nm, j) => {
+            const dot = new THREE.Mesh(new THREE.SphereGeometry(r * 1.8, 10, 8), mat); dot.position.copy(V[j]); dot.renderOrder = 5; pathGroup.add(dot);
+            const c3 = document.createElement('canvas'); c3.width = 160; c3.height = 40; const g3 = c3.getContext('2d');
+            g3.fillStyle = 'rgba(20,26,38,.78)'; g3.fillRect(0, 0, 160, 40); g3.fillStyle = '#e6ebf2'; g3.font = '24px sans-serif'; g3.textAlign = 'center'; g3.textBaseline = 'middle'; g3.fillText(nm, 80, 21);
+            const t3 = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(c3), depthTest: false, transparent: true }));
+            t3.scale.set(s3 * 4, s3, 1); t3.position.copy(base).addScaledVector(ax, n > 1 ? (span * j) / (n - 1) : 0); t3.renderOrder = 6; pathGroup.add(t3);
+            const ln = new THREE.Line(new THREE.BufferGeometry().setFromPoints([t3.position.clone().addScaledVector(sd, s3 * 2), V[j]]), lmat); ln.renderOrder = 5; pathGroup.add(ln);
+          });
+        }
         const cv = document.createElement('canvas'); cv.width = 200; cv.height = 48; const c2 = cv.getContext('2d');
         c2.fillStyle = 'rgba(20,26,38,.75)'; c2.fillRect(0, 0, 200, 48); c2.fillStyle = '#' + col.toString(16).padStart(6, '0'); c2.font = 'bold 30px sans-serif'; c2.textAlign = 'center'; c2.textBaseline = 'middle'; c2.fillText(p.label, 100, 25);
         const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(cv), depthTest: false, transparent: true }));
-        const s2 = model.r * 0.07; sp.scale.set(s2 * 200 / 48, s2, 1); sp.position.copy(V[V.length - 1]); sp.renderOrder = 6; pathGroup.add(sp);
+        const s2 = model.r * 0.07; sp.scale.set(s2 * 200 / 48, s2, 1); sp.position.copy(V[V.length - 1]).addScaledVector(new THREE.Vector3(...(p.side ?? [1, 0, 0])).normalize(), s2 * 3.2 * p.offset); sp.renderOrder = 6; pathGroup.add(sp);   // 두 번째 경로 % 는 옆으로(겹침 방지)
       }
       scene.add(pathGroup);
     }

@@ -532,16 +532,20 @@ function drawLightPaths() {
   let em = []; try { em = L.currentEmitters(M, S.line); } catch { em = []; }
   const avg = (pts) => pts.reduce((a, q) => a.map((v, k) => v + q[k] / pts.length), [0, 0, 0]);
   const ctr = (m) => { const b = bounds(m.positions); return [(b[0] + b[3]) / 2, (b[1] + b[4]) / 2, (b[2] + b[5]) / 2]; };
-  const oa = obsArrow(M, S.line, rt), led = em.length ? avg(em.map((e) => e.pos)) : null;
-  if (!led || !oa) { A.view.setLightPaths([]); return; }
-  // 부품이 한 축에 겹쳐 있으면(평판 적층) 화살표가 겹치므로 단계마다 옆(관측 방향에 수직)으로 조금씩 밀어 계단처럼 — 높이는 각 부품 높이 그대로
-  const ax = oa.axis, up = Math.abs(ax[2]) < 0.9 ? [0, 0, 1] : [1, 0, 0], side = S.line?.frame?.u ?? [ax[1] * up[2] - ax[2] * up[1], ax[2] * up[0] - ax[0] * up[2], ax[0] * up[1] - ax[1] * up[0]], sl = Math.hypot(...side) || 1;   // 옆 = 라인 길이 방향(정면·등각에서 보임)
-  const step = Math.max(6, Math.min(30, oa.len * 0.9)), shift = (q, i) => q.map((v, k) => v + (side[k] / sl) * step * i);
-  const along = (q) => { const t = (q[0] - oa.pos[0]) * ax[0] + (q[1] - oa.pos[1]) * ax[1] + (q[2] - oa.pos[2]) * ax[2]; return oa.pos.map((v, k) => v + ax[k] * t); };   // 관측면 중심을 지나는 축 위로(높이만 남김)
+  const oa = obsArrow(M, S.line, rt);
+  if (!em.length || !oa) { A.view.setLightPaths([]); return; }
+  // 빛 기둥 하나: 관측면 중심에 가장 가까운 LED 에서 관측 방향(축)으로 곧게 — 거친 부품마다 그 깊이에 멈춤점(이름표), 끝은 관측면.
+  // (예전: LED 평균점에서 단계마다 옆으로 밀어 계단 → 화살표가 퍼져 판 가장자리 분포처럼 보임, 2026-10-27 의견)
+  const ax = oa.axis, dotA = (q) => (q[0] - oa.pos[0]) * ax[0] + (q[1] - oa.pos[1]) * ax[1] + (q[2] - oa.pos[2]) * ax[2];
+  const perp = (q) => { const t = dotA(q); return Math.hypot(...q.map((v, k) => v - oa.pos[k] - ax[k] * t)); };
+  const led = em.map((e) => e.pos).reduce((a, q) => (perp(q) < perp(a) ? q : a));
+  const at = (t) => led.map((v, k) => v + ax[k] * (t - dotA(led)));   // LED 를 지나는 축 위 깊이 t 의 점
+  const up = Math.abs(ax[2]) < 0.9 ? [0, 0, 1] : [1, 0, 0], side = S.line?.frame?.u ?? [ax[1] * up[2] - ax[2] * up[1], ax[2] * up[0] - ax[0] * up[2], ax[0] * up[1] - ax[1] * up[0]], sl = Math.hypot(...side) || 1;
+  const gap = Math.max(1.5, Math.min(6, oa.len * 0.2));   // 경로 2개는 나란히(살짝 옆)
   A.view.setLightPaths(P.map((p, i) => {
-    const stops = [['LED', along(led)], ...p.parts.map((q) => [M.parts[q]?.name ?? `부품 ${q + 1}`, along(ctr(rt.parts[q]))]), ['관측면', oa.pos]];
-    const pts = stops.map(([, q], j) => shift(q, j)), last = pts[pts.length - 1];
-    return { pts: [...pts, last.map((v, k) => v + ax[k] * oa.len * 0.6)], names: i === 0 ? stops.map(([n]) => n) : null, share: p.share, label: `${(p.share * 100).toFixed(0)}%${p.refl ? ' 반사' : ''}`, offset: i };
+    const stops = [['LED', at(dotA(led))], ...p.parts.map((q) => [M.parts[q]?.name ?? `부품 ${q + 1}`, at(dotA(ctr(rt.parts[q])))]), ['관측면', at(0)]];
+    const pts = stops.map(([, q]) => q.map((v, k) => v + (side[k] / sl) * gap * i)), last = pts[pts.length - 1];
+    return { pts: [...pts, last.map((v, k) => v + ax[k] * oa.len * 0.6)], names: i === 0 ? stops.map(([n]) => n) : null, axis: ax, side: side.map((v) => v / sl), share: p.share, label: `${(p.share * 100).toFixed(0)}%${p.refl ? ' 반사' : ''}`, offset: i };
   }));
 }
 // 관측면 빛 방향 화살표 — 고른 면들의 면적 가중 중심에서 관측 방향(d) 으로. 들어오는 빛(mode 'in') 이면 면을 향해 그림
