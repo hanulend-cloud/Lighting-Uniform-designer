@@ -562,12 +562,12 @@ main:has(#m3-start:not([hidden])) { grid-template-rows: minmax(0, 1fr); }
 
 /* 아래 칸(자동설계 설정 | 최적화 진행현황 | 시뮬레이션 진행현황) — 2안: 평가 결과는 오른쪽, 최적화는 아래 */
 #mech3d-wrap { grid-template-rows: auto minmax(0, 1fr) auto auto; }
-.m3-dock { display: grid; grid-template-columns: minmax(0, 1fr) 330px; border-top: 1px solid var(--m3-line); height: 360px; min-height: 0; }
+.m3-dock { display: grid; grid-template-columns: minmax(0, 1fr); border-top: 1px solid var(--m3-line); height: 360px; min-height: 0; }
 .m3-dock > div { min-height: 0; overflow: auto; padding: 8px 10px; }
 .m3-dock > div + div { border-left: 1px solid var(--m3-line); }
 .m3-dock #m3-auto { border: 0; max-height: none; }
 .m3-dock.collapsed { height: auto; grid-template-columns: 1fr; }
-.m3-dock.collapsed .m3-dock-dash, .m3-dock.collapsed .m3-dock-sim { display: none; }
+.m3-dock.collapsed .m3-dock-dash { display: none; }
 .m3-dock.collapsed .m3-dock-main { padding: 0; }
 @media (max-width: 1024px) { .m3-dock { grid-template-columns: 1fr; height: auto; } .m3-dock > div + div { border-left: 0; border-top: 1px solid var(--m3-line); } }
 .od-h { font-size: 12.5px; font-weight: 600; margin-bottom: 4px; }
@@ -675,3 +675,19 @@ main:has(#m3-start:not([hidden])) { grid-template-rows: minmax(0, 1fr); }
 .m3-untrace.on { border-left: 3px solid #f0a020; }
 .m3-untrace .m3-sw { display: flex; flex-wrap: wrap; gap: 4px 6px; align-items: center; cursor: pointer; width: auto; min-width: 0; font-weight: 600; }
 .m3-untrace .m3-sw .mut { font-weight: 400; flex-basis: 100%; }
+
+/* 오른쪽 맨 위 '현재 설계 계산' 카드(항상 보임) — 계산 제어 단추 포함 */
+.m3-simcard { flex: none; padding: 6px 10px 4px; border-left: 1px solid var(--m3-line); border-bottom: 1px solid var(--m3-line); }
+.m3-simcard .od-simh { display: flex; align-items: center; gap: 6px; margin-bottom: 2px; }
+.m3-simcard .od-simh button { font: inherit; font-size: 12px; padding: 2px 8px; border: 1px solid var(--m3-line); border-radius: 5px; background: #fff; cursor: pointer; }
+.m3-simcard .od-simh button:disabled { opacity: .5; cursor: default; }
+.m3-simcard .od-sim { height: 70px; margin: 2px 0; }
+.m3-simcard .od-row { font-size: 11.5px; }
+.m3-simcard .od-paths { font-size: 11.5px; margin-top: 2px; }
+.m3-simcard .od-more { font-size: 11.5px; }
+.m3-simcard .od-more summary { cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.m3-right > .m3-res { border-left: 1px solid var(--m3-line); }
+/* 명령 막대: 사용 순서 단계 ① → ② → ③ */
+.m3-cmd .m3-step i { display: inline-grid; place-items: center; width: 17px; height: 17px; border-radius: 50%; background: #cfd6e0; color: #223; font-style: normal; font-size: 11px; font-weight: 700; margin-right: 3px; }
+.m3-cmd .m3-step.done i { background: #1f9d55; color: #fff; }
+.m3-cmd .m3-arrow { color: #8a96a8; font-weight: 700; padding: 0 2px; }

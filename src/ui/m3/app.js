@@ -160,7 +160,7 @@ export async function mount(ctx) {
   const a = A = { ctx, store, pool, view: null, meshShown: null, lineKey: '', Gc: null, obsShown: null, checks: {}, markKey: '', timing: { start: 0, first: null, noise5: null } };
   a.prog = createProgressive({ ports: pool.ports(), onUpdate: onCalc, opts: { targetNoise: ctx.mspec.observe.targetNoise ?? 0.02 } });
   a.results = createResultsPanel($('#m3-res'));
-  a.optDash = createOptDash($('#m3-optdash'), { config: (k) => (A?.tileState ? tileConfigHtml(k, A.tileState) : { on: false, html: '' }), onSel: (k, v) => adSel(k, v) }); a.simDash = createSimDash($('#m3-simdash'));   // 아래 칸 대시보드(가운데 = 항목 선택 겸 진행현황)
+  a.optDash = createOptDash($('#m3-optdash'), { config: (k) => (A?.tileState ? tileConfigHtml(k, A.tileState) : { on: false, html: '' }), onSel: (k, v) => adSel(k, v) }); a.simDash = createSimDash($('#m3-simdash'), { onCtl: () => cmdHandlers().onToggleCalc() });   // 아래 칸 = 자동설계 · 오른쪽 맨 위 = 현재 설계 계산(항상 보임, 계산 제어 단추)
   a.cmd = mountCommandBar($('#m3-cmd'), cmdHandlers());
   a.unsub = store.subscribe(onChange);
   a.keydown = onKey; window.addEventListener('keydown', onKey);
@@ -290,7 +290,7 @@ function onCalc(snap) {
   A.simDash?.sample(snap, M.observe.targetNoise ?? 0.02, M.observe, M.parts.map((p) => p.name), M.parts.length, !!adState().running);
   drawLightPaths();
   paintObs(snap);
-  A.cmd.update(S, snap);
+  A.cmd.update(S, M);
   renderStatus();
 }
 // 관측면 색지도: 격자가 바뀌면 덧그림 메쉬를 다시 만들고, 갱신마다 색만 바꾼다
@@ -1143,6 +1143,7 @@ function cmdHandlers() {
     onImport: (f) => A.ctx.onImportMech3d(f),
     onLed: () => A.store.update('session', (m, x) => { const stp = m.light.kind === 'step' && m.light.step; x.node = stp ? 'leds' : 'light'; x.pick = stp && !stp.virtual ? (x.pick === 'led' ? null : 'led') : null; }),
     onObs: () => A.store.update('session', (_, x) => { x.node = 'obs'; x.pick = x.pick === 'obs' ? null : 'obs'; }),
+    onTarget: () => A.store.update('session', (_, x) => { x.node = 'target'; x.sel = null; x.ledSel = null; x.pick = null; }),
     onSection: () => A.store.update('view', (_, x) => {
       if (x.section) { x.section = null; return; }
       const b = bounds(getMech3d().combined.positions);
@@ -1244,7 +1245,7 @@ function renderAll(tag = 'all') {
   if (clr !== A.clrShown) { A.clrShown = clr; renderMarkers(); }
   if (tag !== 'view') renderPropertyPanel($('#m3-props'), M, S, { dbList: A.ctx.materialDb()?.list() ?? [], catalog: reflCat(), auto: autoGrid(), dir: M.observe.dir ?? S.line?.frame.d, lineInfo: lineInfo(), clearance: clr, xfInfo: pi >= 0 ? xformInfoOf(pi) : null, meshInfo: pi >= 0 ? partMeshInfo(pi) : null, xfMsg: S.xfMsg?.part === pi ? S.xfMsg.text : '', lay: lay ?? null, led: S.node === 'leds' && S.ledSel != null ? ledUi(LS, S.ledSel) : null, ledTotal: LS.list.length }, propHandlers());
   if (tag === 'session' || tag === 'all') renderMarkers();
-  A.cmd.update(S, S.calc);
+  A.cmd.update(S, M);
   renderStatus();
   renderAuto();
 }

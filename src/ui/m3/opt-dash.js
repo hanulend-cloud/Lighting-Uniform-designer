@@ -2,6 +2,7 @@
 // 최적화: app.js 의 자동설계 io 가 progress(stage, frac, text) · evals(stage, [{label, Ulen, Uwid, ok, why}]) 를 부른다.
 // 타일마다 상태(대기·진행 %·완료·건너뜀) · 시험 중 값 → 지금까지 최고 · 후보별 길이/폭 U 점 그래프(목표선) · 진행 막대.
 // 시뮬레이션: 점진 계산 스냅숏마다 sample(snap, targetNoise) — 광자 수에 따른 잡음 %·길이/폭 U 추정과 진행률 %(잡음이 목표에 닿으면 100%).
+import { calcLabel } from './command-bar.js';
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
 export const STAGES = [['milky', '① Milky'], ['position', '② 기구 위치 (LED 배치 · 높이)'], ['shape', '③ 기구 형상']];
 // 자동설계 진행 단계 이름 → 타일(LED 배치·높이 = ② 기구 위치). 현재안·기준·검증 = 타일 없음(머리 줄 문구로만)
@@ -91,12 +92,13 @@ export function topPaths(paths, nMech, k = 3) {
 export const pathText = (p, names) => `LED → ${p.parts.map((q) => names[q] ?? `부품 ${q + 1}`).join(' → ')}${p.parts.length ? ' → ' : ''}관측면${p.refl ? ' (케이스 반사 포함)' : ''}`;
 // 시뮬레이션 진행현황 — 광자 수에 따른 잡음(%)·U 추정 · 진행률(잡음이 목표에 닿으면 100%)
 export function simPct(relNoise, target) { return Number.isFinite(relNoise) && relNoise > 0 ? Math.max(0, Math.min(100, (target / relNoise) ** 2 * 100)) : 0; }
-export function createSimDash(el) {
-  let H = [], tgt = 0.02, raf = 0, state = '', obs = null, P = [], names = [];
+// 오른쪽 맨 위 카드(항상 보임) — onCtl = 계산 제어 단추(일시정지·재개·다시 계산). 광경로 목록은 접는 칸
+export function createSimDash(el, { onCtl = null } = {}) {
+  let H = [], tgt = 0.02, raf = 0, state = '', obs = null, P = [], names = [], reason = '';
   // names = 부품 이름, nMech = 기구 부품 수(LED STEP 부품 번호는 그 뒤 — 경로에서 뺌)
   let busy = false;   // 자동설계 중(점진 계산 일시정지)
   function sample(snap, targetNoise, observe, nm = names, nMech = nm.length, adBusy = false) {
-    busy = adBusy; tgt = targetNoise ?? tgt; obs = observe ?? obs; state = snap?.state ?? ''; names = nm; P = topPaths(snap?.paths, nMech);
+    busy = adBusy; tgt = targetNoise ?? tgt; obs = observe ?? obs; state = snap?.state ?? ''; reason = snap?.reason ?? ''; names = nm; P = topPaths(snap?.paths, nMech);
     const ph = snap?.photons ?? 0, st = snap?.stats;
     if (!st || st.empty || !ph) { if (!ph) H = []; draw(); return; }
     if (H.length && ph < H[H.length - 1].ph) H = [];   // 장면이 바뀌어 다시 시작
@@ -107,7 +109,7 @@ export function createSimDash(el) {
   function draw() { if (raf) return; raf = setTimeout(() => { raf = 0; render(); }, 40); }   // setTimeout: 화면이 숨겨져도(다른 탭) 갱신 — rAF 는 멈춤
   function render() {
     const last = H[H.length - 1], pct = last ? simPct(last.noise, tgt) : 0;
-    const w = 300, h = 120, x0 = 30, x1 = w - 30, y0 = 8, y1 = h - 18;
+    const w = 300, h = 70, x0 = 30, x1 = w - 30, y0 = 6, y1 = h - 14;
     let svg = '';
     if (H.length > 1) {
       const lp = (v) => Math.log10(Math.max(1, v)), a = lp(H[0].ph), b = lp(last.ph) || a + 1, X = (ph) => x0 + ((lp(ph) - a) / (b - a || 1)) * (x1 - x0);
@@ -122,12 +124,24 @@ export function createSimDash(el) {
         <text class="od-ax" x="${x0}" y="${h - 4}">광자 ${H[0].ph.toLocaleString()}</text><text class="od-ax" x="${x1}" y="${h - 4}" text-anchor="end">${last.ph.toLocaleString()} (로그)</text></svg>`;
     }
     const sTxt = { running: '계산 중', paused: '일시정지', done: '수렴 — 멈춤', pending: '대기', starting: '장면 준비' }[state] ?? state ?? '';
-    el.innerHTML = `<div class="od-h">현재 설계 계산 <span class="mut">${busy ? '자동설계 중 — 일시정지(끝나면 이어서)' : esc(sTxt)} · 오차가 목표에 닿으면 100%</span></div>
-      <div class="od-pct"><b>${pct.toFixed(0)}%</b><div class="od-bar od-bar-big"><i style="width:${pct.toFixed(0)}%"></i></div></div>
-      <div class="od-row mut">계산 오차 ${last && Number.isFinite(last.noise) ? `±${(last.noise * 100).toFixed(1)}%` : '–'} → 목표 ±${(tgt * 100).toFixed(1)}% · 광자 ${last ? last.ph.toLocaleString() : 0}${last ? ` · 길이 U ${f2(last.Ulen)} · 폭 U ${f2(last.Uwid)}` : ''}</div>
-      ${P.length ? `<div class="od-paths"><b>광경로</b> <span class="mut">관측면으로 나온 빛이 거친 부품</span>${P.map((p) => `<div class="od-path"><span class="od-pbar"><i style="width:${(p.share * 100).toFixed(0)}%"></i></span><b>${(p.share * 100).toFixed(0)}%</b> ${esc(pathText(p, names))}</div>`).join('')}</div>` : ''}
-      ${svg || '<div class="mut od-empty">계산이 시작되면 수렴 그래프가 그려집니다.</div>'}
-      <div class="od-legend"><i class="od-kn"></i>계산 오차(왼쪽 축) <i class="od-k1"></i>길이 U <i class="od-k2"></i>폭 U(오른쪽 축) <i class="od-kt"></i>오차 목표</div>`;
+    const ctl = busy ? '자동설계 중' : calcLabel({ state, reason });
+    // 틀은 한 번만 만들고 칸마다 바뀐 것만 고침 — 계산 중 갱신이 잦아도 단추 클릭·접는 칸이 끊기지 않게
+    if (!el.querySelector('.od-simh')) {
+      el.innerHTML = `<div class="od-h od-simh">현재 설계 계산 <span class="mut" data-s="st"></span><span class="m3-ad-sp"></span>${onCtl ? '<button type="button" data-sim-ctl></button>' : ''}</div>
+        <div class="od-pct"><b data-s="pct"></b><div class="od-bar od-bar-big" title="계산 오차가 목표에 닿으면 100%"><i data-s="bar"></i></div></div>
+        <div class="od-row mut" data-s="row"></div>
+        <details class="od-more"><summary><span data-s="sum">수렴 그래프 · 광경로</span></summary><div data-s="svg"></div><div data-s="paths"></div></details>`;
+      el.querySelector('[data-sim-ctl]')?.addEventListener('click', () => onCtl?.());
+    }
+    const set = (k, html) => { const n = el.querySelector(`[data-s="${k}"]`); if (n && n.innerHTML !== html) n.innerHTML = html; };
+    set('st', busy ? '자동설계 중 — 일시정지(끝나면 이어서)' : esc(sTxt));
+    const btn = el.querySelector('[data-sim-ctl]'); if (btn) { if (btn.textContent !== ctl) btn.textContent = ctl; btn.disabled = busy; }
+    set('pct', `${pct.toFixed(0)}%`); el.querySelector('[data-s="bar"]').style.width = `${pct.toFixed(0)}%`;
+    set('row', `오차 ${last && Number.isFinite(last.noise) ? `±${(last.noise * 100).toFixed(1)}%` : '–'} → 목표 ±${(tgt * 100).toFixed(1)}% · 광자 ${last ? last.ph.toLocaleString() : 0}${last ? ` · 길이 U ${f2(last.Ulen)} · 폭 U ${f2(last.Uwid)}` : ''}`);
+    set('svg', svg);
+    // 접힌 줄에는 주 광경로 한 줄 요약, 펼치면 수렴 그래프 + 광경로 목록
+    set('sum', P.length ? `수렴 그래프 · 광경로 <span class="mut">${(P[0].share * 100).toFixed(0)}% ${esc(pathText(P[0], names))}</span>` : '수렴 그래프 · 광경로');
+    set('paths', P.length ? `<div class="od-paths">${P.map((p) => `<div class="od-path"><span class="od-pbar"><i style="width:${(p.share * 100).toFixed(0)}%"></i></span><b>${(p.share * 100).toFixed(0)}%</b> ${esc(pathText(p, names))}</div>`).join('')}</div>` : '');
   }
   render();
   return { sample, paths: () => P };
