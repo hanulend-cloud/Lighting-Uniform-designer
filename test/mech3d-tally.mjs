@@ -107,4 +107,9 @@ ok(S.counted === nV && S.noiseWarn === false, `집계 셀 ${S.counted}, 잡음 �
   ok(Array.isArray(S.win) && wp.length === G.nw && f.length >= 2 && Math.abs(Math.min(...f) / Math.max(...f) - S.Uwid) < 1e-12,
     `windowProfile: 창 [${S.win}] 유효 ${f.length}칸, min/max = Uwid ${S.Uwid.toFixed(4)}`);
 }
+{ // 잡음 = U 를 만드는 줄·열 기준 — 2D 칸 하나보다 작다(폭 방향 칸 수만큼 합쳐짐). 같은 광자 수면 √nw 쯤
+  const r = rng(7), B = 10, accs3 = Array.from({ length: B }, () => { const a = new Float64Array(G.ns * G.nw); for (let k = 0; k < a.length; k++) if (G.valid[k]) { let s = 0; for (let n = 0; n < 50; n++) s += r() < 0.5 ? 1 : 0; a[k] = (s / 50) * G.area[k]; } return a; });
+  const S3 = tallyStats(G, accs3, obs);
+  ok(S3.relNoise > 0 && S3.relNoiseCell > 0 && S3.relNoise < S3.relNoiseCell * 0.8, `잡음: 줄·열 ${(S3.relNoise * 100).toFixed(2)}% < 칸 ${(S3.relNoiseCell * 100).toFixed(2)}%`);
+}
 done();

@@ -6,7 +6,7 @@
 //   fixedChunk: true 면 chunkN 고정(runJob 과 비트 일치 시험용).
 import { tallyStats } from '../../engine/mech3d/tally.js';
 
-export const PROG_DEFAULTS = { chunkN: 25000, fixedChunk: false, minChunk: 1000, maxChunk: 50000, chunkMs: 500, bins: 10, targetNoise: 0.02, maxPhotons: 5e6, debounceMs: 500, tickMs: 1000, seedBase: 1, maxIgnored: 16, sceneTimeoutMs: 60000, chunkTimeoutMs: 30000 };
+export const PROG_DEFAULTS = { chunkN: 25000, fixedChunk: false, minChunk: 1000, maxChunk: 50000, chunkMs: 500, bins: 10, targetNoise: 0.02, maxPhotons: 1e8, debounceMs: 500, tickMs: 1000, seedBase: 1, maxIgnored: 16, sceneTimeoutMs: 60000, chunkTimeoutMs: 30000 };
 export const chunkSeed = (seedBase, c) => seedBase * 7919 + c;
 const ledger0 = () => ({ emitted: 0, escaped: 0, absSurf: 0, absVol: 0, lost: 0, rrLoss: 0, rrGain: 0 });
 

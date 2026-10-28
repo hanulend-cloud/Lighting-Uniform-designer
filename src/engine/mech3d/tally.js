@@ -76,7 +76,9 @@ export function makeAccumulator(G, line, obs, rw = null) {
 // accs: 배치별 누적(같은 광자 수). 값 = 셀 출사/면적(상대 휘도).
 // 길이 U: s 칸별(폭 방향 유효 셀 면적가중 평균)의 min/max. 폭 U: s 창(길이 winS, 유효 s 범위를 균등 분할, 닫힌 경로는 순환)마다
 //   창 평균 폭 프로파일(w 칸별 Σ출사/Σ면적, 창 안 면적이 가득 찬 값의 ≥ 50% 인 w 칸만)의 min/max 를 구하고 그 최저를 취한다.
-// relNoise = 집계 칸별 (배치 간 표준편차/평균)/√B 의 중앙값 — min/max 의 낮은 쪽 편향을 만드는 칸 잡음의 크기.
+// relNoise = U 를 만드는 값들의 잡음: 길이 프로파일 s 칸(폭 방향 합) · 폭 판정 창의 w 칸(창 안 s 합) 각각 (배치 간 표준편차/평균)/√B 의 중앙값 중 큰 쪽
+//   — min/max 의 낮은 쪽 편향을 만드는 잡음의 크기. 예전엔 2D 칸 하나하나의 잡음이라, 관측면이 좁고 효율이 낮으면(ㄱ자 Milky 출구 등)
+//   필요한 광자가 수억 개가 되어 수렴하지 않았다(2026-10-28). relNoiseCell = 2D 칸 잡음(색지도 얼룩 참고용).
 export function tallyStats(G, accs, obs, cnts = null) {
   const B = accs.length, nCell = G.ns * G.nw, { ns, nw, ds, area, valid } = G;
   let nValid = 0; for (let k = 0; k < nCell; k++) if (valid[k]) nValid++;
@@ -94,17 +96,19 @@ export function tallyStats(G, accs, obs, cnts = null) {
     let mn = Infinity, mx = -Infinity; for (const v of p) if (Number.isFinite(v)) { mn = Math.min(mn, v); mx = Math.max(mx, v); }
     const Ulen = mx > 0 ? mn / mx : 0;
     let Uwid = Infinity, iWin = -1;
+    const cols = [];   // 창별 w 칸 값(쓰지 않는 칸 = NaN — 배치끼리 같은 자리)
     wins.forEach(([s0, s1], wi) => {
-      const col = [];
+      const col = [], all = [];
       for (let j = 0; j < nw; j++) {
         let s = 0, ar = 0; for (let i = s0; i < s1; i++) { const ii = i % ns, k = ii * nw + j; s += a[k]; ar += area[k]; }
-        if (ar >= 0.5 * (s1 - s0) * ds * G.cell) col.push(s / ar);
+        if (ar >= 0.5 * (s1 - s0) * ds * G.cell) { col.push(s / ar); all.push(s / ar); } else all.push(NaN);
       }
+      cols.push(all);
       if (col.length < 2) return;
       const cm = Math.min(...col), cx = Math.max(...col), u = cx > 0 ? cm / cx : 0;
       if (u < Uwid) { Uwid = u; iWin = wi; }
     });
-    return { p, Ulen, Uwid: iWin < 0 ? null : Uwid, iWin };
+    return { p, Ulen, Uwid: iWin < 0 ? null : Uwid, iWin, cols };
   };
   const sum = new Float64Array(nCell); for (const a of accs) for (let k = 0; k < nCell; k++) sum[k] += a[k];
   const main = analyze(sum), narrow = main.Uwid === null;
@@ -115,11 +119,20 @@ export function tallyStats(G, accs, obs, cnts = null) {
   let counted = 0; for (let k = 0; k < nCell; k++) if (valid[k] && sum[k] > 0) counted++;
   const rel = [];
   if (B >= 2) for (let k = 0; k < nCell; k++) if (valid[k] && sum[k] > 0) { let m = sum[k] / B, v = 0; for (const a of accs) v += (a[k] - m) ** 2; rel.push(Math.sqrt(v / (B - 1)) / m / Math.sqrt(B)); }
-  rel.sort((x, y) => x - y); const relNoise = rel.length ? rel[rel.length >> 1] : null;
+  const med = (a) => { a.sort((x, y) => x - y); return a.length ? a[a.length >> 1] : null; };
+  const relNoiseCell = med(rel);
+  // 길이 프로파일 s 칸 · 폭 창 w 칸의 배치 간 잡음
+  const relOf = (vals) => { const v = vals.filter(Number.isFinite); if (v.length < 2 || v.length < B) return null; const m = v.reduce((s, x) => s + x, 0) / v.length; if (!(m > 0)) return null; return Math.sqrt(v.reduce((s, x) => s + (x - m) ** 2, 0) / (v.length - 1)) / m / Math.sqrt(v.length); };
+  const relRows = [], relCols = [];
+  if (B >= 2) {
+    for (let i = 0; i < ns; i++) { const r = relOf(per.map((x) => x.p[i])); if (r !== null) relRows.push(r); }
+    if (!narrow) main.cols.forEach((c, wi) => c.forEach((v, j) => { if (!Number.isFinite(v)) return; const r = relOf(per.map((x) => x.cols[wi][j])); if (r !== null) relCols.push(r); }));
+  }
+  const nr = med(relRows), nc = med(relCols), relNoise = nr === null && nc === null ? relNoiseCell : Math.max(nr ?? 0, nc ?? 0);
   let nbar = 0; if (cnts) { let tot = 0; for (const c of cnts) for (let k = 0; k < nCell; k++) if (valid[k]) tot += c[k]; nbar = tot / nValid / B; }
   const tol = Math.min(Math.max(0.01, 1 - obs.targetLen), Math.max(0.01, 1 - obs.targetWid));
   return {
-    profile: main.p, map: mean, Ulen: main.Ulen, seLen, Uwid: main.Uwid, seWid, sWorst: narrow ? null : ((wins[main.iWin][0] + wins[main.iWin][1]) / 2) * ds, win: narrow ? null : wins[main.iWin], narrow, nbar, relNoise,
+    profile: main.p, map: mean, Ulen: main.Ulen, seLen, Uwid: main.Uwid, seWid, sWorst: narrow ? null : ((wins[main.iWin][0] + wins[main.iWin][1]) / 2) * ds, win: narrow ? null : wins[main.iWin], narrow, nbar, relNoise, relNoiseCell,
     passLen: main.Ulen >= obs.targetLen, passWid: narrow ? null : main.Uwid >= obs.targetWid, counted,
     noiseWarn: counted === 0 || B < 2 || relNoise === null || 3 * relNoise > tol,
   };

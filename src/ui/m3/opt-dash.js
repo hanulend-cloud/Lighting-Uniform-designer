@@ -141,6 +141,16 @@ export function topPaths(paths, nMech, k = 3) {
 export const pathText = (p, names) => `LED → ${p.parts.map((q) => names[q] ?? `부품 ${q + 1}`).join(' → ')}${p.parts.length ? ' → ' : ''}관측면${p.refl ? ' (케이스 반사 포함)' : ''}`;
 // 시뮬레이션 진행현황 — 광자 수에 따른 잡음(%)·U 추정 · 진행률(잡음이 목표에 닿으면 100%)
 export function simPct(relNoise, target) { return Number.isFinite(relNoise) && relNoise > 0 ? Math.max(0, Math.min(100, (target / relNoise) ** 2 * 100)) : 0; }
+// 남은 계산 예상(순수) — 오차는 광자 수의 제곱근에 반비례 → 필요 광자 = 지금 × (오차/목표)². 속도 = 최근 10초 광자 증가
+const human = (n) => (n >= 1e8 ? `${(n / 1e8).toFixed(1)}억` : n >= 1e4 ? `${Math.round(n / 1e4).toLocaleString()}만` : String(Math.round(n)));
+export function etaText(H, tgt) {
+  const last = H[H.length - 1];
+  if (!last || !(last.noise > tgt) || H.length < 3) return '';
+  const need = last.ph * (last.noise / tgt) ** 2, ref = H.find((p) => last.t - p.t <= 10000) ?? H[0], rate = (last.ph - ref.ph) / Math.max(1e-3, (last.t - ref.t) / 1000);
+  if (!(rate > 0)) return '';
+  const sec = (need - last.ph) / rate, tm = sec < 90 ? `${Math.max(1, Math.round(sec))}초` : sec < 5400 ? `${Math.round(sec / 60)}분` : `${(sec / 3600).toFixed(1)}시간`;
+  return ` · 필요 광자 ≈ ${human(need)} · 남은 ≈ ${tm}`;
+}
 // 오른쪽 맨 위 카드(항상 보임) — onCtl = 계산 제어 단추(일시정지·재개·다시 계산). 광경로 목록은 접는 칸
 export function createSimDash(el, { onCtl = null } = {}) {
   let H = [], tgt = 0.02, raf = 0, state = '', obs = null, P = [], names = [], reason = '';
@@ -151,7 +161,7 @@ export function createSimDash(el, { onCtl = null } = {}) {
     const ph = snap?.photons ?? 0, st = snap?.stats;
     if (!st || st.empty || !ph) { if (!ph) H = []; draw(); return; }
     if (H.length && ph < H[H.length - 1].ph) H = [];   // 장면이 바뀌어 다시 시작
-    if (!H.length || ph > H[H.length - 1].ph) H.push({ ph, noise: st.relNoise, Ulen: st.Ulen, Uwid: st.Uwid });
+    if (!H.length || ph > H[H.length - 1].ph) H.push({ ph, t: performance.now(), noise: st.relNoise, Ulen: st.Ulen, Uwid: st.Uwid });
     if (H.length > 400) H = H.filter((_, i) => i % 2 === 0 || i === H.length - 1);
     draw();
   }
@@ -186,7 +196,7 @@ export function createSimDash(el, { onCtl = null } = {}) {
     set('st', busy ? '자동설계 중 — 일시정지(끝나면 이어서)' : esc(sTxt));
     const btn = el.querySelector('[data-sim-ctl]'); if (btn) { if (btn.textContent !== ctl) btn.textContent = ctl; btn.disabled = busy; }
     set('pct', `${pct.toFixed(0)}%`); el.querySelector('[data-s="bar"]').style.width = `${pct.toFixed(0)}%`;
-    set('row', `오차 ${last && Number.isFinite(last.noise) ? `±${(last.noise * 100).toFixed(1)}%` : '–'} → 목표 ±${(tgt * 100).toFixed(1)}% · 광자 ${last ? last.ph.toLocaleString() : 0}${last ? ` · 길이 U ${f2(last.Ulen)} · 폭 U ${f2(last.Uwid)}` : ''}`);
+    set('row', `오차 ${last && Number.isFinite(last.noise) ? `±${(last.noise * 100).toFixed(1)}%` : '–'} → 목표 ±${(tgt * 100).toFixed(1)}% · 광자 ${last ? last.ph.toLocaleString() : 0}${last ? ` · 길이 U ${f2(last.Ulen)} · 폭 U ${f2(last.Uwid)}` : ''}${state === 'running' ? etaText(H, tgt) : ''}`);
     set('svg', svg);
     // 접힌 줄에는 주 광경로 한 줄 요약, 펼치면 수렴 그래프 + 광경로 목록
     set('sum', P.length ? `수렴 그래프 · 광경로 <span class="mut">${(P[0].share * 100).toFixed(0)}% ${esc(pathText(P[0], names))}</span>` : '수렴 그래프 · 광경로');

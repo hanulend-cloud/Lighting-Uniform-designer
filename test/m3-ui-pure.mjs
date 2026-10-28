@@ -335,3 +335,7 @@ done();
   const base = { unchanged: true, feasible: true, cur: { Ulen: 0.83, Uwid: 0.8 }, best: { Ulen: 0.83, Uwid: 0.8 }, targets: { len: 0.8, wid: 0.8 } };
   const a = resultLineHtml({ ...base, alt: { design: { milky: 2.47 }, milky: 2.47, Ulen: 0.84, Uwid: 0.8 } }), b = resultLineHtml(base);
   ok5(/data-ad="apply" disabled/.test(a) && a.includes('data-ad="applyAlt"') && a.includes('그래도 적용 (Milky 2.47) · 0.84/0.80') && !b.includes('applyAlt'), '현재안 유지 + 찾은 후보 → [그래도 적용]'); }
+{ const { etaText } = await import('../src/ui/m3/opt-dash.js');
+  const H = [{ ph: 1e6, t: 0, noise: 0.1 }, { ph: 2e6, t: 5000, noise: 0.07 }, { ph: 3e6, t: 10000, noise: 0.0577 }];
+  const e = etaText(H, 0.02);
+  console.log(e.includes('필요 광자 ≈ 2,497만') && e.includes('남은 ≈ 2분') && etaText([{ ph: 1, t: 0, noise: 0.01 }], 0.02) === '' ? 'PASS 남은 계산 예상(필요 광자·시간)' : (process.exitCode = 1, `FAIL 남은 계산 예상: ${e}`)); }
