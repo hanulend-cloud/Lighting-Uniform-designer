@@ -1,5 +1,5 @@
 // LED STEP 인식: node test/mech3d-led.mjs
-import { findLeds, findEmitters, pcbIndex, faceInfo, refineEmitterFace, emitterFaceAway } from '../src/engine/mech3d/led-detect.js';
+import { findLeds, findEmitters, pcbIndex, faceInfo, refineEmitterFace, emitterFaceAway, autoLedGroup } from '../src/engine/mech3d/led-detect.js';
 import { transformMesh, eulerMatrix, applyPoint } from '../src/engine/mech3d/xform.js';
 import { boxMesh, mergeMeshes, ok, done } from './mech3d-util.mjs';
 
@@ -101,4 +101,10 @@ ok(refineEmitterFace(domeLed, 1) === 6, '몸체 윗면 클릭 → 돔(가장 바
 const sup = boxMesh(-5, -5, -1, 10, 10, 1);
 ok(emitterFaceAway(led0, 0, sup) === 7 && emitterFaceAway(led0, 4, sup) === 7 && emitterFaceAway(led0, 7, sup) === 7, '받침 부품 반대쪽: 아랫면·옆면·렌즈 클릭 → 렌즈 윗면(7)');
 ok(emitterFaceAway(domeLed, 2, sup) === 6, '돔 LED 옆면 클릭 → 돔(6)');
+// 자동 인식: PCB 위 돔 LED 6개 + 나사 2개(같은 모양 2개 — 개수 부족) + 확산판 → LED 6개, 발광면 = 돔
+const scene = [boxMesh(-40, -5, -1, 80, 10, 1), boxMesh(-40, -5, 6, 80, 10, 3), ...[-25, -15, -5, 5, 15, 25].map((x) => transformMesh(domeLed, [x, 0, 0], [0, 0, 0])), boxMesh(-39, -4, -3, 1, 1, 2), boxMesh(38, -4, -3, 1, 1, 2)];
+const au = autoLedGroup(scene);
+ok(au && au.leds.join() === '2,3,4,5,6,7' && au.face === 6 && au.support === 0, `자동 인식: LED ${au?.leds.join()} · 면 ${au?.face} · 받침 ${au?.support}`);
+ok(autoLedGroup(scene, { skip: new Set([2, 3, 4]) }) === null, '관측면 등으로 빠져 3개만 남으면 → 인식 안 함');
+ok(autoLedGroup([scene[0], scene[1], ...[-25, -15, -5, 5].map((x) => transformMesh(domeLed, [x, 0, 2], [0, 0, 0]))]) === null, '떠 있는 반복 부품(받침 없음) → 인식 안 함');
 done();

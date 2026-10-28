@@ -4,7 +4,7 @@
 //   observe → 관측 라인 다시 인식 · 물리 태그 → 점진 계산 재시작 · 기하 점검 태그 → 점검 ①②③ · target → 판정만 다시. 모두 다시 그림.
 // 점진 계산 갱신(1초마다)은 store 알림 없이 결과 패널·상태 띠·색지도만 다시 그린다(입력 중 속성 패널이 다시 그려지지 않게).
 import { getMech3d, getLedMesh, setLedMesh, saveLedIDB, applyPartMods, redetectContacts } from '../../engine/mech3d/runtime.js';
-import { findLeds, supportPart, emitterFaceAway } from '../../engine/mech3d/led-detect.js';
+import { findLeds, supportPart, emitterFaceAway, autoLedGroup } from '../../engine/mech3d/led-detect.js';
 import { loadClear, saveClear, clearExportJson, clearImport, parseMaterialFile } from '../../model/material-io.js';
 import { setPartMaterial, setPartMaterialParam, CLEAR_BASE, applyClearEntry, clearEntryFromForm, editClearEntry, syncClearParts } from '../../engine/mech3d/materials.js';
 import { lineFromData, lightData, obsDirection } from '../../engine/mech3d/line.js';
@@ -897,7 +897,19 @@ function adStep() {
 // 3D 도면에서 광원 지정 — 클릭한 부품과 같은 모양(면 수·부피·면적·크기)의 기구 부품을 모두 광원 그룹으로 옮긴다:
 // 메쉬를 LED STEP 처럼 복사(발광면 인식·배치 편집·자동설계를 그대로 씀)하고, 원본은 role 'light'(빛 계산·보기에서 빠짐 — 삭제 아님).
 // 클릭한 면 = 발광면(렌즈 윗면으로 보정). PCB 는 기구 부품 그대로 남김(면 처리 그대로 계산)
-function mechLightFromPick(s) {
+// 새 기구 STEP 을 불러온 직후: 같은 모양이 반복되는 작은 부품(LED)을 찾아 바로 도면 광원으로(발광면 = PCB 반대쪽).
+// 광원이 이미 지정돼 있거나 못 찾으면 그대로. 틀렸으면 광원 노드의 [다른 LED 로 다시 지정]·[도면 광원 해제]로 고친다
+export function autoMechLight() {
+  if (!A) return null;
+  const M = A.store.mspec, rt = getMech3d();
+  if (!rt || (M.light.kind && M.light.kind !== 'none')) return null;
+  const cand = rt.parts.map((p, i) => ({ positions: p.positions, triangles: p.triangles, faceIds: p.faceIds, faceCount: rt.raw.parts[i]?.faceCount }));
+  const g = autoLedGroup(cand, { skip: new Set(M.observe.faces.map((f) => f.part)) });
+  if (!g) return null;
+  mechLightFromPick({ part: g.ref, face: g.face }, true);
+  return g.leds.length;
+}
+function mechLightFromPick(s, auto = false) {
   const st = A.store, M = st.mspec, rt = getMech3d(), obsP = new Set(M.observe.faces.map((f) => f.part));
   const cand = rt.parts.map((p, i) => ({ positions: p.positions, triangles: p.triangles, faceCount: rt.raw.parts[i]?.faceCount }));
   const leds = findLeds(cand, s.part).filter((i) => !obsP.has(i));
@@ -912,7 +924,7 @@ function mechLightFromPick(s) {
     m.parts = m.parts.map((p, i) => { const q = { ...p }; delete q.role; if (leds.includes(i)) q.role = 'light'; return q; });
     m.light.kind = 'step';
     m.light.step = { name, offset: [0, 0, 0], rot: [0, 0, 0], ref: null, leds: [], excluded: [], pcb: -1, emitters: [], fromMech: leds };
-    try { L.applyStepRecognition(m, x, m.light.step, { part: leds.indexOf(s.part), face }); x.ledInfo = `도면 부품 ${leds.length}개를 광원으로 — ${x.ledInfo}${face !== s.face ? ' (받침 부품 반대쪽 면에서 발광)' : ''}`; }
+    try { L.applyStepRecognition(m, x, m.light.step, { part: leds.indexOf(s.part), face }); x.ledInfo = auto ? `LED ${leds.length}개 자동 인식(같은 모양 반복 부품 · PCB 반대쪽 발광) — 틀리면 [다른 LED 로 다시 지정]` : `도면 부품 ${leds.length}개를 광원으로 — ${x.ledInfo}${face !== s.face ? ' (받침 부품 반대쪽 면에서 발광)' : ''}`; }
     catch (e) { x.ledInfo = `발광면 인식 실패: ${e.message} — LED 노드에서 발광면을 다시 클릭하세요`; }
     x.pick = null; x.node = 'light'; x.hideLeds = false;
   });

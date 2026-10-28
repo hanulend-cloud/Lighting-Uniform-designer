@@ -405,9 +405,11 @@ function importMech3d(file, onDone = null) {
         spec.mech3d = ms; spec.mode = 'mech3d'; spec.mech3dPending = null;
         tabLock.write('mech3dIDB', () => saveMech3dIDB().catch(() => {}));
         persist(); applyMode(); onDone?.();
+        if (!restored) for (let i = 0; i < 200 && !m3app.isMounted(); i++) await new Promise((r) => setTimeout(r, 50));   // mount 는 비동기
+        const nLed = restored ? null : m3app.autoMechLight();   // 새 기구: 반복되는 작은 부품(LED)을 광원으로 자동 지정
         m3app.setStatus(restored
           ? `복원함: 저장된 3D 설정 — ${file.name} · 부품 ${ms.parts.length}개 · 접촉면 ${ms.contacts.length}개${pend.name && pend.name !== file.name ? ` (저장 이름 ${pend.name})` : ''}`
-          : `불러옴: ${file.name} · 부품 ${m.data.parts.length}개 · 접촉면 ${ms.contacts.length}개 — Milky 부품부터 지정하세요`);
+          : `불러옴: ${file.name} · 부품 ${m.data.parts.length}개 · 접촉면 ${ms.contacts.length}개${nLed ? ` · LED ${nLed}개 자동 인식(틀리면 광원에서 다시 지정)` : ''} — Milky 부품부터 지정하세요`);
       } catch (e) { say(`불러오기 실패: ${e.message ?? e}`); }
     };
     w.onerror = (e) => { w.terminate(); say(`불러오기 실패: ${e.message ?? e}`); };

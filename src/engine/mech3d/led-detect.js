@@ -272,3 +272,26 @@ function faceAlong(m, v) {
   }
   return face >= 0 ? refineEmitterFace(m, face) : -1;
 }
+
+// 도면 광원 자동 인식(STEP 불러온 직후): 같은 모양이 minCount 개 이상 반복되는 작은 부품(크기 ≤ maxDiag mm) 무리 중 가장 많은 것.
+// 받침 부품(LED 가 닿아 있는 가장 가까운 부품 — 보통 PCB)이 있어야 하고, 발광면 = 받침 반대쪽 면. 못 찾으면 null.
+// skip = 후보에서 뺄 부품 번호(관측면 부품 등). 반환 { leds, ref, face, support }
+export function autoLedGroup(parts, { skip = new Set(), minCount = 4, maxDiag = 20 } = {}) {
+  const seen = new Set(), groups = [];
+  parts.forEach((p, i) => {
+    if (!p || seen.has(i) || skip.has(i)) return;
+    const st = meshStats(p);
+    if (2 * st.rmax > maxDiag) return;
+    const g = findLeds(parts, i).filter((k) => !skip.has(k));
+    g.forEach((k) => seen.add(k));
+    if (g.length >= minCount) groups.push({ g, vol: st.volume });
+  });
+  groups.sort((a, b) => b.g.length - a.g.length || a.vol - b.vol);
+  for (const { g } of groups) {
+    const ref = g[0], sup = supportPart(parts, parts[ref], new Set(g));
+    if (sup < 0 || closestOnMesh(parts[sup], meshStats(parts[ref]).center).d2 > (meshStats(parts[ref]).rmax / 2) ** 2) continue;   // 받침이 LED 에 닿아 있지 않음(중심 거리 > 반경의 반)
+    const v = towardLed(parts[sup], meshStats(parts[ref]).center), face = v ? faceAlong(parts[ref], v) : -1;
+    if (face >= 0) return { leds: g, ref, face, support: sup };
+  }
+  return null;
+}
