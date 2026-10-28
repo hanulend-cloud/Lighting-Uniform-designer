@@ -9,6 +9,7 @@ import { particleOptics, volumeFractionFromMus, wtFromVolume } from '../engine/l
 import { BEADS, HOST } from '../engine/l2/mie-material.js';
 import { runSlab, totals } from '../engine/l2/mc-slab.js';
 import { hpaStats } from '../engine/l2/slab-table.js';
+import { readMeasTxt, measTxtSummary } from '../engine/meas-txt.js';
 
 // 레시피(설계 방향) 상태 — 비드 종류·지름은 화면 로컬 선택값
 const recipe = { bead: 'PMMA', d: 3 };
@@ -52,17 +53,34 @@ function build(el, ctx) {
       </div>
       <table class="adv-samples"><thead><tr><th>두께 mm</th><th>전투과 T %</th><th>전반사 R %</th><th>Haze %</th><th>HPA °</th><th>투과 각분포 CSV</th><th>곡선 종류</th></tr></thead>
         <tbody>${[0, 1].map((i) => `<tr data-row="${i}">
-          <td><input data-s="t" type="number" step="0.1" ${i === 0 ? 'value="2"' : ''}></td><td><input data-s="T" type="number" step="0.1"></td>
-          <td><input data-s="R" type="number" step="0.1"></td><td><input data-s="haze" type="number" step="0.1"></td>
-          <td><input data-s="hpa" type="number" step="0.5"></td><td><input data-s="curve" type="file" accept=".csv,.txt"></td>
+          <td><input data-s="t" type="number" step="0.1" ${i === 0 ? 'value="2"' : ''}></td><td><input data-s="T" type="number" step="0.1"><label class="adv-txt" title="파장별 투과율 txt → V(λ) 가중 T">txt<input type="file" accept=".txt,.csv,.dat" data-spec="T" hidden></label></td>
+          <td><input data-s="R" type="number" step="0.1"><label class="adv-txt" title="파장별 반사율 txt → V(λ) 가중 R">txt<input type="file" accept=".txt,.csv,.dat" data-spec="R" hidden></label></td><td><input data-s="haze" type="number" step="0.1"></td>
+          <td><input data-s="hpa" type="number" step="0.5"></td><td><input data-s="curve" type="file" accept=".csv,.txt,.dat" title="각도별 BSDF 또는 파장별 BSDF(3열·표) txt"></td>
           <td><select data-s="curveType"><option value="intensity">광도 I(θ)</option><option value="btdf">BTDF(θ)</option></select></td></tr>`).join('')}</tbody></table>
-      <div class="mut">법선 입사 측정. 곡선 CSV = 각도(°), 값 두 열(크기 무관 — 모양만 사용, 0~75° 이상). 두께 2종이면 교차두께 검증(V9)까지 수행.
+      <div class="adv-meas-note mut" data-meas-note></div>
+      <div class="mut">법선 입사 측정. 측정 txt: 각분포 칸 = 각도별 BSDF(각도°, 값) 또는 파장별 BSDF(파장·각도·값 3열 / 머리글이 파장·각도인 표), T·R 칸 [txt] = 파장별 투과율·반사율(파장 nm, 값 % 또는 0~1).
+        파장별 값은 V(λ)(눈 밝기) 가중 평균 한 값으로 씁니다. 곡선 크기는 무관(모양만 사용, 0~75° 이상). 두께 2종이면 교차두께 검증(V9)까지 수행.
         비드를 지정하면 HG 로 재현되지 않을 때 Mie(입자) 모델로 다시 피팅합니다(수십 초~수 분, 백그라운드).</div>
       <div class="adv-btns"><button data-act="fit">피팅</button><button data-act="save" disabled>DB 저장</button></div>
       <div data-adv-fit></div>
     </details>`;
   el.addEventListener('click', (ev) => onClick(el, ev));
   el.querySelector('[data-act="import"]').addEventListener('change', (ev) => onImport(el, ev));
+  // 파장별 T·R txt → 그 칸에 V(λ) 가중 % · 각분포 파일 → 종류 알림
+  const note = (t) => { const n = el.querySelector('[data-meas-note]'); if (n) n.textContent = t; };
+  el.querySelectorAll('input[data-spec]').forEach((inp) => inp.addEventListener('change', async () => {
+    const txt = await readFile(inp); inp.value = ''; if (!txt) return;
+    try {
+      const r = readMeasTxt(txt);
+      if (r.kind !== 'spectral') throw new Error('파장별 값(파장 nm, 값 두 열) 파일이 아님');
+      inp.closest('td').querySelector('[data-s]').value = (Math.round(r.value * 1000) / 10).toFixed(1);
+      note(`${inp.dataset.spec === 'T' ? '투과율' : '반사율'}: ${measTxtSummary(r)}`);
+    } catch (e) { note(`txt 읽기 실패: ${e.message}`); }
+  }));
+  el.querySelectorAll('input[data-s="curve"]').forEach((inp) => inp.addEventListener('change', async () => {
+    const txt = await readFile(inp); if (!txt) return;
+    try { const r = readMeasTxt(txt); note(r.kind === 'spectral' ? '각분포 칸에 파장별 투과율·반사율 파일 — T·R 칸의 [txt] 로 넣으세요' : `각분포: ${measTxtSummary(r)}`); } catch (e) { note(`각분포 파일: ${e.message} — CSV(각도, 값)로 읽음`); }
+  }));
 }
 
 function renderView(v, ctx, desc) {
@@ -177,7 +195,10 @@ async function collectEntry(el) {
     for (const k of ['T', 'R', 'haze']) { const v = parseFloat(g(k).value); if (Number.isFinite(v)) s[k] = v / 100; }
     const h = parseFloat(g('hpa').value); if (Number.isFinite(h)) s.hpa = h;
     const txt = await readFile(g('curve'));
-    if (txt) { s.curve = parseAngleCsv(txt); s.curveType = g('curveType').value; }
+    if (txt) {   // 각도별 BSDF · 파장별 BSDF(V(λ) 가중 각분포) — 읽지 못하면 예전 CSV 읽기
+      let curve = null; try { const r = readMeasTxt(txt); if (r.kind !== 'spectral') curve = r.curve; } catch {}
+      s.curve = curve ?? parseAngleCsv(txt); s.curveType = g('curveType').value;
+    }
     if (s.T != null || s.R != null || s.hpa != null || s.curve) samples.push(s);
   }
   const bead = q('bead'), assumed = el.querySelector('.adv-grid [data-k="assumed"]').checked;
