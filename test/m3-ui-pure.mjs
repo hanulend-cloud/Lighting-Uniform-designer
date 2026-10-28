@@ -326,3 +326,7 @@ ok(clampCap(12) === 9.9 && clampCap(0.1) === 0.5 && clampCap(3) === 3 && clampCa
   const t = topPaths({ ':2>1': 50, 'R:2>1': 25, ':2>1>5': 10, 'R:2>1>2>1': 15 }, 3);
   ok(t.length === 3 && t[0].share === 0.6 && t[0].parts.join() === '2,1' && !t[0].refl && t[1].refl && pathText(t[0], ['a', 'b', 'c']) === 'LED → c → b → 관측면', `topPaths: ${JSON.stringify(t.map((x) => [x.parts.join('>'), x.refl, x.share]))}`); }
 done();
+
+{ const { clearDbHtml } = await import('../src/ui/mech3d-panel.js');
+  const h = clearDbHtml([{ id: 'u:A', name: 'A<', base: 'PMMA', n: 1.49, T: 0.9, tRef: 2, note: '' }], { 'u:A': 2 });
+  console.log(h.includes('data-m3-cdb="u:A"') && h.includes('부품 2개 사용') && h.includes('value="1.49"') && h.includes('A&lt;') && h.includes('data-m3-cdbdel') && clearDbHtml([]).includes('등록한 측정값 없음') ? 'PASS 투명 측정값 DB 관리 표' : (process.exitCode = 1, 'FAIL 투명 측정값 DB 관리 표')); }

@@ -23,6 +23,28 @@ export function applyClearEntry(part, e) {
   if (part.material.kind === 'clear') { material.T = e.T; material.tRef = e.tRef; }
   return { ...part, material };
 }
+// 측정 항목 한 칸 고치기(순수) — key = name|n|T(%)|tRef|base|note, 문자열 값 → { entry } | { error }. 이름을 바꿔도 id 는 그대로(부품 연결 유지)
+export function editClearEntry(e, key, raw) {
+  const v = String(raw ?? '').trim();
+  switch (key) {
+    case 'name': return v ? { entry: { ...e, name: v } } : { error: '이름을 넣으세요' };
+    case 'n': { const n = +v; return v !== '' && n >= 1.2 && n <= 2.5 ? { entry: { ...e, n: Math.round(n * 10000) / 10000 } } : { error: '굴절률은 1.2 ~ 2.5' }; }
+    case 'T': { const T = +v / 100; return v !== '' && T > 0 && T <= 1 ? { entry: { ...e, T: Math.round(T * 10000) / 10000 } } : { error: '투과율은 0 초과 100% 이하' }; }
+    case 'tRef': { const t = +v; return t > 0 ? { entry: { ...e, tRef: t } } : { error: '측정 두께는 0 초과' }; }
+    case 'base': return RESIN_N[v] ? { entry: { ...e, base: v } } : { error: `수지 오류: ${v}` };
+    case 'note': return { entry: { ...e, note: v } };
+    default: return { error: `알 수 없는 칸: ${key}` };
+  }
+}
+// 측정 항목이 바뀌거나(e) 지워지면(e = null) 그 항목을 쓰던 부품 소재를 맞춤(불변) — 지우면 바탕 수지의 기본값으로
+export function syncClearParts(parts, id, e) {
+  return parts.map((p) => {
+    if (p.material?.matId !== id) return p;
+    if (e) return applyClearEntry(p, e);
+    const { n, matId, ...m } = p.material;
+    return applyClearEntry({ ...p, material: m }, CLEAR_BASE.find((b) => b.id === m.resin) ?? CLEAR_BASE[0]);   // 바탕 수지 기본 항목(굴절률·투과율·두께)
+  });
+}
 // 측정값 양식 → 사용자 투명 소재 항목(순수). f = { name, base, n, T(%), t(mm), note } — 굴절률 빈칸 = 바탕 수지 값
 export function clearEntryFromForm(f) {
   const name = String(f.name ?? '').trim(), base = RESIN_N[f.base] ? f.base : 'PC';

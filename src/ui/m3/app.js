@@ -5,7 +5,7 @@
 // 점진 계산 갱신(1초마다)은 store 알림 없이 결과 패널·상태 띠·색지도만 다시 그린다(입력 중 속성 패널이 다시 그려지지 않게).
 import { getMech3d, getLedMesh, setLedMesh, saveLedIDB, applyPartMods, redetectContacts } from '../../engine/mech3d/runtime.js';
 import { findLeds } from '../../engine/mech3d/led-detect.js';
-import { setPartMaterial, setPartMaterialParam, CLEAR_BASE, applyClearEntry, clearEntryFromForm } from '../../engine/mech3d/materials.js';
+import { setPartMaterial, setPartMaterialParam, CLEAR_BASE, applyClearEntry, clearEntryFromForm, editClearEntry, syncClearParts } from '../../engine/mech3d/materials.js';
 import { lineFromData, lightData, obsDirection } from '../../engine/mech3d/line.js';
 import { tallyGeometry, tallyStats } from '../../engine/mech3d/tally.js';
 import { bounds } from '../../engine/mech3d/mesh.js';
@@ -989,6 +989,16 @@ function propHandlers() {
       const e = CLEAR_BASE.find((x) => x.id === id) ?? clearUser().find((x) => x.id === id);
       if (e) st.update('material', (m, x) => { m.parts[i] = applyClearEntry(m.parts[i], e); x.status = `투명 소재 "${e.name}" — 굴절률 ${e.n} · 투과율 ${Math.round(e.T * 1000) / 10}%(${e.tRef} mm)`; });
     },
+    // 투명 소재 측정값 DB 관리(상세 탭) — edit: arg = { key, value } · delete. 쓰던 부품 소재도 맞춤. 오류 문구 | null
+    onClearDb: (op, id, arg) => {
+      const list = clearUser(), k = list.findIndex((e) => e.id === id);
+      if (k < 0) return '없는 항목';
+      let e = null;
+      if (op === 'edit') { const r = editClearEntry(list[k], arg.key, arg.value); if (r.error) return r.error; e = r.entry; list[k] = e; } else if (op === 'delete') list.splice(k, 1); else return null;
+      saveClearUser(list);
+      st.update('material', (m, x) => { m.parts = syncClearParts(m.parts, id, e); x.status = e ? `측정 소재 "${e.name}" 수정 — 쓰는 부품에 반영` : '측정 소재 삭제 — 쓰던 부품은 바탕 수지 기본값으로'; });
+      return null;
+    },
     // 측정값으로 투명 소재 등록(같은 이름 = 덮어씀) 후 이 부품에 적용. f = 양식 문자열 → 오류 문구 | null
     onClearAdd: (i, f) => {
       const r = clearEntryFromForm(f); if (r.error) return r.error;
@@ -1269,7 +1279,7 @@ function renderAll(tag = 'all') {
   }, lay);
   const pi = S.node?.startsWith('part:') ? +S.node.slice(5) : -1, clr = pi >= 0 ? clearanceOf(pi) : null;
   if (clr !== A.clrShown) { A.clrShown = clr; renderMarkers(); }
-  if (tag !== 'view') renderPropertyPanel($('#m3-props'), M, S, { dbList: A.ctx.materialDb()?.list() ?? [], catalog: reflCat(), clearList: clearUser(), auto: autoGrid(), dir: M.observe.dir ?? S.line?.frame.d, lineInfo: lineInfo(), clearance: clr, xfInfo: pi >= 0 ? xformInfoOf(pi) : null, meshInfo: pi >= 0 ? partMeshInfo(pi) : null, xfMsg: S.xfMsg?.part === pi ? S.xfMsg.text : '', lay: lay ?? null, led: S.node === 'leds' && S.ledSel != null ? ledUi(LS, S.ledSel) : null, ledTotal: LS.list.length }, propHandlers());
+  if (tag !== 'view') renderPropertyPanel($('#m3-props'), M, S, { dbList: A.ctx.materialDb()?.list() ?? [], catalog: reflCat(), clearList: clearUser(), clearUsed: M.parts.reduce((o, p) => { const id = p.material?.matId; if (id) o[id] = (o[id] ?? 0) + 1; return o; }, {}), auto: autoGrid(), dir: M.observe.dir ?? S.line?.frame.d, lineInfo: lineInfo(), clearance: clr, xfInfo: pi >= 0 ? xformInfoOf(pi) : null, meshInfo: pi >= 0 ? partMeshInfo(pi) : null, xfMsg: S.xfMsg?.part === pi ? S.xfMsg.text : '', lay: lay ?? null, led: S.node === 'leds' && S.ledSel != null ? ledUi(LS, S.ledSel) : null, ledTotal: LS.list.length }, propHandlers());
   if (tag === 'session' || tag === 'all') renderMarkers();
   A.cmd.update(S, M);
   renderStatus();

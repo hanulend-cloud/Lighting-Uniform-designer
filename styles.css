@@ -707,3 +707,5 @@ main:has(#m3-start:not([hidden])) { grid-template-rows: minmax(0, 1fr); }
 /* 시작 중(모드·기구 복원 전): 예전 평판 화면이 잠깐 보이지 않게 가림 — 배치는 유지(visibility) */
 body.booting main, body.booting #inputbar { visibility: hidden; }
 body.booting::after { content: "불러오는 중…"; position: fixed; left: 50%; top: 45%; transform: translateX(-50%); color: #8a96a8; font-size: 14px; }
+.m3-cdb { border-top: 1px dashed var(--m3-line); padding: 4px 0; }
+.m3-cdb input[data-m3-cdbk="name"] { flex: 1; min-width: 0; font-weight: 600; }

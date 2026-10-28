@@ -52,6 +52,17 @@ export function clearAddFormHtml(msg = '') {
     ${msg ? `<div class="m3-warn" role="status">${esc(msg)}</div>` : ''}
     <div class="m3-row"><button data-m3-caok>등록하고 적용</button><button data-m3-cacancel>취소</button></div></div>`;
 }
+// 투명 소재 측정값 DB 관리(순수, 상세 탭) — 칸을 바로 고침(바뀌면 그 소재를 쓰는 부품에 반영) · 삭제(쓰던 부품은 바탕 수지 기본값으로)
+// used = { id: 쓰는 부품 수 }
+export function clearDbHtml(list, used = {}) {
+  if (!list.length) return '<div class="mut">등록한 측정값 없음 — 기본 탭의 [＋ 측정값 (굴절률·투과율)] 로 등록</div>';
+  const row = (e) => `<div class="m3-cdb" data-m3-cdb="${esc(e.id)}">
+    <div class="m3-row"><input data-m3-cdbk="name" value="${esc(e.name)}" aria-label="이름"><span class="mut">${used[e.id] ? `부품 ${used[e.id]}개 사용` : '미사용'}</span><button type="button" class="m3-link" data-m3-cdbdel="${esc(e.id)}">삭제</button></div>
+    <div class="m3-row"><label>굴절률</label><input type="number" min="1.2" max="2.5" step="0.001" value="${esc(e.n)}" data-m3-cdbk="n" aria-label="굴절률"> <label class="mut">바탕</label><select data-m3-cdbk="base" aria-label="바탕 수지">${CLEAR_BASE.map((b) => `<option value="${b.id}"${b.id === e.base ? ' selected' : ''}>${esc(b.id)}</option>`).join('')}</select></div>
+    <div class="m3-row"><label>투과율</label><input type="number" min="1" max="100" step="0.1" value="${esc(pct(e.T))}" data-m3-cdbk="T" aria-label="투과율 %">% <label class="mut">두께</label><input type="number" min="0.1" step="0.1" value="${esc(e.tRef)}" data-m3-cdbk="tRef" aria-label="측정 두께 mm"> mm</div>
+    <div class="m3-row"><label>메모</label><input data-m3-cdbk="note" value="${esc(e.note ?? '')}" aria-label="메모"></div></div>`;
+  return `<div class="mut m3-note">고치면 그 소재를 쓰는 부품에 바로 반영 · 모든 프로젝트 공용(이 브라우저)</div>${list.map(row).join('')}`;
+}
 // 투명 소재 고르기(순수) — 기본(일반값: 굴절률·투과율) / 측정(사용자) 그룹. 값 = 기본 수지 id | 사용자 id(u:…)
 function clearSelHtml(mat, user) {
   const cur = mat.matId && user.some((e) => e.id === mat.matId) ? mat.matId : mat.resin;
@@ -162,7 +173,8 @@ function partEditor(p, sel, dbList) {
     : `${secHtml('finish', '면 처리 (면별)', face != null ? `면 #${face} 선택` : nOver ? `면 ${nOver}개 덮어씀` : '', `${partFin}${faceRow}<div class="mut m3-note">3D 뷰에서 면을 클릭하면 그 면만 다르게 지정할 수 있습니다</div>`)}
       ${secHtml('xf', '크기·위치 상세 (가능 범위 · 비율 고정)', esc(xfSummaryText(p, sel.xfInfo)), xformEditor(p, sel.xfInfo, sel.lock))}
       ${secHtml('contact', '접촉면 (이 부품)', '', contactsForPartHtml(sel.contacts ?? [], sel.part, sel.names ?? []))}
-      ${opaque ? secHtml('refldb', '반사 소재 DB (측정값 등록·관리)', '', '<div data-m3-refldb></div>') : ''}`;
+      ${opaque ? secHtml('refldb', '반사 소재 DB (측정값 등록·관리)', '', '<div data-m3-refldb></div>') : ''}
+      ${p.material.kind === 'clear' ? secHtml('cleardb', '투명 소재 측정값 DB (편집·삭제)', (sel.clearList ?? []).length ? `${sel.clearList.length}개` : '', clearDbHtml(sel.clearList ?? [], sel.clearUsed ?? {})) : ''}`;
   return `${warn}${tabs}<div class="m3-edit" role="tabpanel">${body}</div>`;
 }
 
@@ -297,6 +309,8 @@ export function renderPartProps(el, m, sel0, dbList, h) {
   const rcp = el.querySelector('[data-m3-reflcopy]');
   if (rcp) rcp.onclick = () => h.onReflCopy?.(i, p.reflMaterial);
   el.querySelectorAll('[data-m3-fitdlg]').forEach((b) => { b.onclick = () => h.onFitDialog?.(i); });
+  el.querySelectorAll('[data-m3-cdbk]').forEach((x) => { x.onchange = () => { const id = x.closest('[data-m3-cdb]').dataset.m3Cdb, err = h.onClearDb?.('edit', id, { key: x.dataset.m3Cdbk, value: x.value }); if (err) { x.setCustomValidity?.(err); x.reportValidity?.(); } }; });
+  el.querySelectorAll('[data-m3-cdbdel]').forEach((b) => { b.onclick = () => { const e = (sel.clearList ?? []).find((x) => x.id === b.dataset.m3Cdbdel); if (globalThis.confirm?.(`"${e?.name ?? ''}" 측정값을 지울까요? 이 소재를 쓰는 부품은 바탕 수지의 기본값으로 돌아갑니다.`)) h.onClearDb?.('delete', b.dataset.m3Cdbdel); }; });
   const csel = el.querySelector('[data-m3-clear]');
   if (csel) csel.onchange = () => { if (csel.value) h.onClear?.(i, csel.value); };
   const cform = (f) => { CLEAR_FORM.set(el, { ...f, part: i }); renderPartProps(el, m, sel0, dbList, h); };

@@ -48,3 +48,16 @@ done();
   const { partOptics } = await import('../src/engine/mech3d/optics.js');
   ok2(partOptics(b, { table: null }).n === 1.583, '광학 물성: 측정 굴절률로 계산');
 }
+
+// 투명 측정 항목 고치기 · 부품 맞춤
+{
+  const M = await import('../src/engine/mech3d/materials.js');
+  const ok3 = (c, m) => { if (!c) { console.log('FAIL', m); process.exitCode = 1; } else console.log('PASS', m); };
+  const e = M.clearEntryFromForm({ name: 'A', base: 'PC', n: '1.58', T: '88', t: '2' }).entry;
+  ok3(M.editClearEntry(e, 'n', '1.6').entry.n === 1.6 && M.editClearEntry(e, 'T', '90').entry.T === 0.9 && M.editClearEntry(e, 'name', 'B').entry.id === e.id && M.editClearEntry(e, 'n', '9').error && M.editClearEntry(e, 'name', ' ').error, '측정 항목 고치기 · 이름 바꿔도 id 유지 · 범위 오류');
+  const parts = [M.applyClearEntry({ material: { kind: 'clear', resin: 'PMMA', T: 1, tRef: 2 } }, e), { material: { kind: 'clear', resin: 'PC', T: 1, tRef: 2 } }];
+  const e2 = M.editClearEntry(e, 'n', '1.6').entry, s1 = M.syncClearParts(parts, e.id, e2);
+  ok3(s1[0].material.n === 1.6 && s1[1] === parts[1], '수정 → 쓰는 부품만 반영');
+  const s2 = M.syncClearParts(parts, e.id, null);
+  ok3(s2[0].material.n == null && s2[0].material.matId == null && s2[0].material.resin === 'PC' && s2[0].material.T === 0.89 && s2[0].material.tRef === 2, '삭제 → 바탕 수지 기본값(굴절률·투과율·두께)');
+}
