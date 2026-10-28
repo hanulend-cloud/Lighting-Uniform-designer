@@ -18,6 +18,8 @@ class NoCacheHandler(http.server.SimpleHTTPRequestHandler):
 
 class ThreadingHTTPServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
     daemon_threads = True
+    # 접속 대기열 — 기본 5 는 계산 Worker 여러 개가 모듈 수십 개를 한꺼번에 받을 때 넘쳐 연결이 거절됨(Worker 로드 실패 = '계산 Worker 오류')
+    request_queue_size = 512
 
 
 class ThreadingHTTPServer6(ThreadingHTTPServer):

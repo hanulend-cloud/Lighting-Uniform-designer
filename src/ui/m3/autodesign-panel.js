@@ -194,7 +194,7 @@ export function compareHtml(r) {
     <table class="m3-cmp"><tr><th></th><th>현재</th><th>최적</th></tr>
       ${cmpRows(r)}
     </table>${twoRow}${effDrop}${profileSvg(cur.profile, best.profile)}${screen ? `<div class="m3-row mut">${esc(screenSummary(screen))}</div>` : ''}
-    <div class="m3-row"><button type="button" data-ad="apply"${unchanged ? ' disabled title="현재안과 같음"' : r.clash > 0 ? ' disabled title="LED 몸체가 부품과 겹침"' : ''}>적용</button><button type="button" data-ad="cancel">취소</button>${shape ? '<button type="button" data-ad="step">STEP 내보내기</button>' : ''}${canRevert ? '<button type="button" data-ad="revert">되돌리기</button>' : ''}</div>`;
+    <div class="m3-row"><button type="button" data-ad="apply"${unchanged ? ' disabled title="현재안과 같음"' : r.clash > 0 ? ' disabled title="LED 몸체가 부품과 겹침"' : ''}>적용</button>${altBtn(r)}<button type="button" data-ad="cancel">취소</button>${shape ? '<button type="button" data-ad="step">STEP 내보내기</button>' : ''}${canRevert ? '<button type="button" data-ad="revert">되돌리기</button>' : ''}</div>`;
 }
 // 적용 뒤에도 남는 요약(이전 → 적용 후) — applied = 적용한 결과(compareHtml 인자와 같은 꼴) + at(시각 문구)
 export function appliedHtml(applied) {
@@ -205,18 +205,20 @@ export function appliedHtml(applied) {
 
 // el 에 카드를 그리고 이벤트를 h 로 넘긴다. state = { avail, sel, running, result, names, canRevert, noLine, milkyPart }
 // 실행 중 카드 구조가 같으면 진행 막대·문구만 바꿈(갱신마다 innerHTML 을 다시 만들지 않게)
+// '현재안 유지'인데 시험한 후보가 있으면(차이가 잡음 수준) [그래도 적용] — 후보 값을 함께 보임
+const altBtn = (r) => (r.unchanged && r.alt ? `<button type="button" data-ad="applyAlt" title="찾은 후보가 현재안보다 계산 잡음 수준만큼만 나아 '현재안 유지'로 판정됨 — 그래도 바꾸려면">그래도 적용${r.alt.milky != null ? ` (Milky ${(+r.alt.milky).toFixed(2)})` : ''} · ${f2(r.alt.Ulen)}/${f2(r.alt.Uwid)}</button>` : '');
 // 결과 한 줄(아래 칸 맨 위) — 판정 · 길이/폭 U 전→후 · [결과 보기] [적용] [취소]
 export function resultLineHtml(r) {
   const b = r.best, c = r.cur, tg = r.targets ?? {}, u = (k, t) => `${f2(c[k])}→<b>${f2(b[k])}</b>${passMark(b[k], t)}`;
   return `<div class="m3-ad-bar"><b>✨ 자동설계 결과</b><span class="${r.unchanged ? 'mut' : r.feasible ? 'ok' : 'bad'}">${r.unchanged ? '현재안 유지' : r.feasible ? '목표 통과' : '목표 미달'}</span>
     <span>길이 U ${u('Ulen', tg.len)} · 폭 U ${u('Uwid', tg.wid)}</span><button type="button" data-ad="view">결과 보기</button>
-    <button type="button" data-ad="apply"${r.unchanged ? ' disabled' : r.clash > 0 ? ' disabled title="LED 몸체가 부품과 겹침"' : ''}>적용</button><button type="button" data-ad="cancel">취소</button></div>`;
+    <button type="button" data-ad="apply"${r.unchanged ? ' disabled title="현재안이 이미 최선(차이 없음)"' : r.clash > 0 ? ' disabled title="LED 몸체가 부품과 겹침"' : ''}>적용</button>${altBtn(r)}<button type="button" data-ad="cancel">취소</button></div>`;
 }
 // el 에 그리고 이벤트를 h 로 넘김. state = { avail, sel, running, result, resultOpen, … } — 결과가 있으면 한 줄 + (열림) 결과 창
 export function renderAutoPanel(el, state, h) {
   const r = state.result, full = r ? compareHtml({ ...r, canRevert: state.canRevert, ...(state.catalog ? { catalog: state.catalog } : {}) }) : '';
   const html = r ? `${resultLineHtml(r)}${state.resultOpen ? `<div class="m3-rmodal" role="dialog" aria-modal="true" aria-label="자동설계 결과"><div class="m3-rmodal-in"><div class="m3-rmodal-hd"><b>자동설계 결과</b><span class="m3-ad-sp"></span><button type="button" data-ad="hide">닫기 (결과는 남음)</button></div>
-      <div class="m3-rverdict ${r.unchanged ? '' : r.feasible ? 'ok' : 'bad'}">${r.unchanged ? '현재 설계보다 나은 안을 찾지 못함 — 현재안 유지' : r.feasible ? '✓ 목표 통과' : '✕ 목표 미달 — 가장 가까운 안'}</div>${full}</div></div>` : ''}` : autoCardHtml(state);
+      <div class="m3-rverdict ${r.unchanged ? '' : r.feasible ? 'ok' : 'bad'}">${r.unchanged ? `현재 설계보다 나은 안을 찾지 못함 — 현재안 유지${r.alt ? ' (찾은 후보와 차이가 계산 잡음 수준 — 원하면 [그래도 적용])' : ''}` : r.feasible ? '✓ 목표 통과' : '✕ 목표 미달 — 가장 가까운 안'}</div>${full}</div></div>` : ''}` : autoCardHtml(state);
   const key = r ? html : autoCardHtml({ ...state, running: state.running ? { frac: 0, text: '' } : null });
   const bar = state.running && !r && el._adKey === key ? el.querySelector('.m3-ad-prog .bar') : null;
   if (bar) {

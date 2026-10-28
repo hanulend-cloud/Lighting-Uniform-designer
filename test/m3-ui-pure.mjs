@@ -330,3 +330,8 @@ done();
   ok4(pickOf({ material: { kind: 'milky', dbId: '' } }) === 'milky' && pickOf({ material: { kind: 'clear', resin: 'PMMA' } }) === 'clear:PMMA' && pickOf({ material: { kind: 'clear', resin: 'PC', matId: 'u:A' } }) === 'clear:u:A' && pickOf({ material: { kind: 'whiteTrans' } }) === 'wt' && pickOf({ material: { kind: 'opaque' }, reflMaterial: 'x' }) === 'opaque:x', '소재 고르기 id');
   ok4(materialSummary({ material: { kind: 'clear', resin: 'PMMA', T: 0.92, tRef: 2 } }) === '굴절률 1.49 · 투과율 92% (2 mm)' && materialSummary({ material: { kind: 'opaque' }, reflMaterial: 'gone', finish: { kind: 'whiteDiffuse', R: 0.8 } }, { refl: [] }).includes('없는 소재'), '물성 한 줄');
   ok4(materialGroups({}).length === 4 && materialGroups({}).every((g) => g.items.length > 0), '목록 묶음 4개'); }
+{ const { resultLineHtml } = await import('../src/ui/m3/autodesign-panel.js');
+  const ok5 = (c, m) => { console.log(`${c ? 'PASS' : 'FAIL'} ${m}`); if (!c) process.exitCode = 1; };
+  const base = { unchanged: true, feasible: true, cur: { Ulen: 0.83, Uwid: 0.8 }, best: { Ulen: 0.83, Uwid: 0.8 }, targets: { len: 0.8, wid: 0.8 } };
+  const a = resultLineHtml({ ...base, alt: { design: { milky: 2.47 }, milky: 2.47, Ulen: 0.84, Uwid: 0.8 } }), b = resultLineHtml(base);
+  ok5(/data-ad="apply" disabled/.test(a) && a.includes('data-ad="applyAlt"') && a.includes('그래도 적용 (Milky 2.47) · 0.84/0.80') && !b.includes('applyAlt'), '현재안 유지 + 찾은 후보 → [그래도 적용]'); }
