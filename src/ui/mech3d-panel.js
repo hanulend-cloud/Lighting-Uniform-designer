@@ -173,7 +173,7 @@ function partEditor(p, sel, dbList) {
     : `${secHtml('finish', '면 처리 (면별)', face != null ? `면 #${face} 선택` : nOver ? `면 ${nOver}개 덮어씀` : '', `${partFin}${faceRow}<div class="mut m3-note">3D 뷰에서 면을 클릭하면 그 면만 다르게 지정할 수 있습니다</div>`)}
       ${secHtml('xf', '크기·위치 상세 (가능 범위 · 비율 고정)', esc(xfSummaryText(p, sel.xfInfo)), xformEditor(p, sel.xfInfo, sel.lock))}
       ${secHtml('contact', '접촉면 (이 부품)', '', contactsForPartHtml(sel.contacts ?? [], sel.part, sel.names ?? []))}
-      ${opaque ? secHtml('refldb', '반사 소재 DB (측정값 등록·관리)', '', '<div data-m3-refldb></div>') : ''}
+      ${opaque ? secHtml('refldb', '반사 소재 DB (측정값 등록·관리)', '', `<div class="m3-links"><button type="button" class="m3-link" data-m3-refladd aria-expanded="${sel.reflForm?.addOpen ? 'true' : 'false'}" title="측정한 반사율로 사용자 소재를 만들고 이 부품에 적용">＋ 측정값으로 새 소재</button> <span class="mut">기본 소재 값을 고치려면 [복사] 후 [＋측정]</span></div>${sel.reflForm?.addOpen ? reflAddFormHtml(sel.reflForm.msg) : ''}<div data-m3-refldb></div>`) : ''}
       ${p.material.kind === 'clear' ? secHtml('cleardb', '투명 소재 측정값 DB (편집·삭제)', (sel.clearList ?? []).length ? `${sel.clearList.length}개` : '', clearDbHtml(sel.clearList ?? [], sel.clearUsed ?? {})) : ''}`;
   return `${warn}${tabs}<div class="m3-edit" role="tabpanel">${body}</div>`;
 }

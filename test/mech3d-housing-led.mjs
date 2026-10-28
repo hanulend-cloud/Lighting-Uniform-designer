@@ -28,10 +28,10 @@ const lab = (f) => `${f.kind === 'metal' ? 'M' : f.kind === 'whiteDiffuse' ? 'W'
   ok(t.length === 7 && t[0] === -0.1 && t.includes(0) && t.at(-1) === 6, `한쪽이 짧아도 양쪽 끝 포함: ${t}`); }
 // ④ 소재별 반사율 상한(spec P4 §2.3d)
 { const C = DEFAULT_FINISH_CATALOG, ids = C.map((e) => e.id).join();
-  ok(ids === 'abs-white,pc-white,pbt-white,pc-hr,al-raw,coat-white,coat-metal', `기본 카탈로그 id: ${ids}`);
+  ok(ids === 'abs-white,pc-white,pbt-white,pc-hr,al-raw,pp-white,pom-white,pa-white,si-white,pet-white,paint-white,abs-gray,abs-black,al-polish,sus,coat-white,coat-metal', `기본 카탈로그 id: ${ids}`);
   const pc = C.find((e) => e.id === 'pc-white'), cm = C.find((e) => e.id === 'coat-metal');
   ok(pc.kind === 'whiteDiffuse' && pc.R === 0.85 && pc.max === 0.9 && !pc.special && cm.special && cm.kind === 'metal' && cm.max === 0.95 && cm.R == null, '표 값(백색 PC 85/90 · 증착 특수 95)');
-  ok(catalogOf({}).every((e, k) => e.max === C[k].max) && catalogOf(null).length === 7 && catalogOf(null).every((e) => e.status === 'example'), 'DB 없음 → 기본');
+  ok(catalogOf({}).every((e, k) => e.max === C[k].max) && catalogOf(null).length === 17 && catalogOf(null).every((e) => e.status === 'example'), 'DB 없음 → 기본');
   const o = catalogOf([{ id: 'u1', name: '사내', kind: 'whiteDiffuse', status: 'measured', R: 0.95, Rmax: 0.9, samples: [{ R: 0.9 }], origin: 'user' }, { id: 's', name: 's', kind: 'metal', status: 'example', R: null, Rmax: 0.95, special: true, samples: [] }]);
   ok(o.length === 2 && o[0].R === 0.9 && o[0].max === 0.9 && o[0].nSamples === 1 && o[0].origin === 'user' && o[1].special && o[1].R === null && o[1].origin === 'base', `DB 항목 → 행(R ≤ 상한): ${JSON.stringify(o)}`); }
 { const C = DEFAULT_FINISH_CATALOG, W = (R) => ({ kind: 'whiteDiffuse', R });

@@ -9,10 +9,10 @@ const BASE = json.entries;
 const near = (a, b) => Math.abs(a - b) < 1e-9;
 
 // 공용 DB = 기본 소재표(예시)
-{ ok(BASE.length === 7 && BASE.every((e) => !validateReflect(e).length && e.status === 'example' && e.samples.length === 0), `공용 DB 7개 모두 유효·예시: ${BASE.map((e) => validateReflect(e)).flat()}`);
+{ ok(BASE.length === 17 && BASE.every((e) => !validateReflect(e).length && e.status === 'example' && e.samples.length === 0), `공용 DB 17개 모두 유효·예시: ${BASE.map((e) => validateReflect(e)).flat()}`);
   const a = catalogOf(BASE), b = catalogOf(null);
-  ok(a.length === 7 && a.every((r, k) => r.id === b[k].id && r.name === b[k].name && r.kind === b[k].kind && r.R === b[k].R && r.max === b[k].max && !!r.special === !!b[k].special && r.short === b[k].short), 'JSON = DEFAULT_FINISH_CATALOG');
-  ok(b.every((r) => r.status === 'example' && r.nSamples === 0) && DEFAULT_FINISH_CATALOG.length === 7, '대체 소재표(DB 없음) = 기본·예시'); }
+  ok(a.length === 17 && a.every((r, k) => r.id === b[k].id && r.name === b[k].name && r.kind === b[k].kind && r.R === b[k].R && r.max === b[k].max && !!r.special === !!b[k].special && r.short === b[k].short), 'JSON = DEFAULT_FINISH_CATALOG');
+  ok(b.every((r) => r.status === 'example' && r.nSamples === 0) && DEFAULT_FINISH_CATALOG.length === 17, '대체 소재표(DB 없음) = 기본·예시'); }
 // 검증
 { const g = { id: 'x', name: 'X', kind: 'whiteDiffuse', status: 'datasheet', R: 0.8, Rmax: 0.85, samples: [] };
   ok(!validateReflect(g).length, '정상 항목');
@@ -29,25 +29,25 @@ const near = (a, b) => Math.abs(a - b) < 1e-9;
 // DB: 추가·중복·수정·삭제·내보내기/불러오기
 { let saved = null;
   const db = createReflectDb(BASE, [{ id: 'bad' }], (l) => { saved = l; });
-  ok(db.list().length === 7 && db.get('pc-white').origin === 'base', '잘못된 사용자 항목 제외');
+  ok(db.list().length === 17 && db.get('pc-white').origin === 'base', '잘못된 사용자 항목 제외');
   let threw = false; try { db.add({ ...BASE[0] }); } catch { threw = true; }
   ok(threw, '공용과 같은 id 거부');
   threw = false; try { db.add({ id: 'q', name: 'q', kind: 'metal', status: 'example', R: 2, Rmax: 2, samples: [] }); } catch { threw = true; }
   ok(threw, '잘못된 항목 거부');
   const e = entryFromSamples({ name: '사내', samples: [{ R: 0.85 }, { R: 0.87 }] });
   db.add(e);
-  ok(db.list().length === 8 && db.get(e.id).origin === 'user' && saved.length === 1 && !('origin' in saved[0]), '사용자 추가 → 저장(origin 없음)');
+  ok(db.list().length === 18 && db.get(e.id).origin === 'user' && saved.length === 1 && !('origin' in saved[0]), '사용자 추가 → 저장(origin 없음)');
   ok(db.update(e.id, { name: '사내2', Rmax: 0.9 }).name === '사내2' && db.get(e.id).Rmax === 0.9 && saved[0].name === '사내2', '사용자 항목 수정');
   threw = false; try { db.update('pc-white', { R: 0.5 }); } catch { threw = true; }
   ok(threw && db.get('pc-white').R === 0.85, '공용 항목 수정 거부');
   threw = false; try { db.update(e.id, { R: 0.95 }); } catch { threw = true; }
   ok(threw && db.get(e.id).R === 0.86, '수정 결과 무효 → 거부');
   const ex = db.exportJson('user'), all = JSON.parse(db.exportJson());
-  ok(JSON.parse(ex).entries.length === 1 && all.entries.length === 8 && all.version === 1, '내보내기(사용자 / 전체)');
+  ok(JSON.parse(ex).entries.length === 1 && all.entries.length === json.entries.length + 1 && all.version === 1, '내보내기(사용자 / 전체)');
   const db2 = createReflectDb(BASE, [], () => {});
   const r = db2.importJson(JSON.stringify({ entries: [...JSON.parse(ex).entries, BASE[1], { id: 'z', name: 'z' }] }));
   ok(r.added.length === 1 && r.rejected.length === 2 && db2.get(e.id).name === '사내2', `불러오기 왕복 · 공용 중복·무효 거부: ${r.rejected}`);
-  ok(!db.remove('pc-white') && db.remove(e.id) && db.list().length === 7 && saved.length === 0, '삭제 = 사용자만'); }
+  ok(!db.remove('pc-white') && db.remove(e.id) && db.list().length === 17 && saved.length === 0, '삭제 = 사용자만'); }
 // 소재표 칸 고침 · 사용자 사본
 { const pc = BASE.find((e) => e.id === 'pc-white'), cw = BASE.find((e) => e.id === 'coat-white');
   const p1 = reflectPatch(pc, 'max', 0.8), p2 = reflectPatch(pc, 'R', 0.99), p3 = reflectPatch(cw, 'max', 1.5);
@@ -66,7 +66,7 @@ const near = (a, b) => Math.abs(a - b) < 1e-9;
   ok(m.parts[0].reflMaterial === pu.id && m.parts[1].reflMaterial === 'abs-white' && m.parts[1].coating === cu.id, '부품 참조 → 새 id');
   const m2 = { finishCatalog: [{ id: 'pc-white', R: 0.88, max: 0.92 }], parts: [{ reflMaterial: 'pc-white' }] };
   const r2 = migrateFinishCatalog(m2, db);
-  ok(db.list().length === 9 && m2.parts[0].reflMaterial === pu.id && r2.moved.length === 1, '같은 값이 이미 있으면 재사용');
+  ok(db.list().length === 19 && m2.parts[0].reflMaterial === pu.id && r2.moved.length === 1, '같은 값이 이미 있으면 재사용');
   const m3 = { finishCatalog: [{ id: 'pc-white', R: 0.85, max: 0.9 }] };
   ok(migrateFinishCatalog(m3, db).moved.length === 0 && !('finishCatalog' in m3), '기본과 같으면 삭제만');
   const m4 = { parts: [] }; ok(migrateFinishCatalog(m4, db).moved.length === 0 && migrateFinishCatalog(null, db).moved.length === 0, '소재표 없음 → 그대로'); }
@@ -74,7 +74,7 @@ const near = (a, b) => Math.abs(a - b) < 1e-9;
 { const db = createReflectDb(BASE, [], () => {});
   const e = entryFromSamples({ name: '사내', samples: [{ R: 0.85 }, { R: 0.87 }] }); db.add(e);
   const row = catalogOf(db).find((r) => r.id === e.id);
-  ok(row && row.status === 'measured' && row.nSamples === 2 && near(row.R, 0.86) && near(row.max, 0.87) && row.origin === 'user' && catalogOf(db).length === 8, `DB 행: ${JSON.stringify(row)}`); }
+  ok(row && row.status === 'measured' && row.nSamples === 2 && near(row.R, 0.86) && near(row.max, 0.87) && row.origin === 'user' && catalogOf(db).length === 18, `DB 행: ${JSON.stringify(row)}`); }
 // Task 2: 측정값 추가·양식 해석·상태 문구(spec P4 §2.3e)
 { const e = entryFromSamples({ name: '사내 백색 PC', samples: [{ R: 0.855 }, { R: 0.861 }] });
   const p = addSamples(e, [{ R: 0.858, cond: 'SCI 8°/d', note: 'n' }]);

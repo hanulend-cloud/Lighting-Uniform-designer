@@ -234,7 +234,7 @@ ok(clampCap(12) === 9.9 && clampCap(0.1) === 0.5 && clampCap(3) === 3 && clampCa
   ok(h1.includes('백색 PC(일반 착색) · 최대 90%') && /data-ad="housingSpecial" checked/.test(h1) && h1.includes('특수 표면처리 허용'), '카드 ④: 소재·상한 · 특수 허용 체크');
   ok(h0.includes('소재 미지정') && /data-ad="housingSpecial"(?! checked)/.test(h0) && !card({ avail: a, sel: { housing: false }, running: null }).includes('housingSpecial'), '카드 ④: 소재 미지정 안내 · ④ 끄면 없음');
   const r = reflRowHtml({ material: { kind: 'opaque' }, reflMaterial: 'pc-white' }, C), r0 = reflRowHtml({ material: { kind: 'opaque' } }, C);
-  ok(/<option value="pc-white" selected>/.test(r) && (r.match(/<option/g) ?? []).length === 6 && !r.includes('coat-') && r0.includes('<option value="" selected>— 미지정 —'), '부품 편집기: 반사 소재(미지정 + 일반 5개)');
+  ok(/<option value="pc-white" selected>/.test(r) && (r.match(/<option/g) ?? []).length === 16 && !r.includes('coat-') && r0.includes('<option value="" selected>— 미지정 —'), '부품 편집기: 반사 소재(미지정 + 일반 15개)');
   ok(reflRowHtml({ material: { kind: 'milky' } }, C) === '', '불투명 아님 → 반사 소재 없음');
   const q = setPartMaterial({ ...defaultPart(0, 'c', 1), reflMaterial: 'pc-white', coating: 'coat-white' }, 'opaque');
   ok(!('reflMaterial' in q) && !('coating' in q), '소재 종류 바꾸면 반사 소재·특수 표시 해제');
@@ -243,7 +243,7 @@ ok(clampCap(12) === 9.9 && clampCap(0.1) === 0.5 && clampCap(3) === 3 && clampCa
   ok(/data-lp-catname="u1"[^>]*value="사내 PC"|value="사내 PC"[^>]*data-lp-catname="u1"/.test(t1) && /data-lp-cat="u1" data-lp-catk="R"[^>]*value="85"|value="85"[^>]*data-lp-cat="u1" data-lp-catk="R"/.test(t1) && t1.includes('data-lp-catk="max"') && t1.includes('data-lp-dbadd="u1"') && t1.includes('data-lp-dbdel="u1"') && t1.includes('실측 3회') && !t1.includes('data-lp-addv'), '소재 DB: 사용자 = 이름·R·상한 편집 · 측정값 추가 · 삭제');
   const t2 = reflDbHtml([U], { addFor: 'u1' });
   ok(t2.includes('data-lp-addv') && t2.includes('data-lp-addok="u1"') && t2.includes('<option>SCI 8°/d</option>') && t2.includes('data-lp-addn'), '소재 DB: 측정값 추가 인라인(값 %·조건·메모)');
-  const sp = reflDbHtml([{ ...catalogOf(null)[5], id: 'u2', origin: 'user' }]);
+  const sp = reflDbHtml([{ ...catalogOf(null).find((e) => e.special), id: 'u2', origin: 'user' }]);
   ok(!/data-lp-cat="u2" data-lp-catk="R"/.test(sp) && /data-lp-cat="u2" data-lp-catk="max"/.test(sp) && sp.includes('특수'), '소재 DB: 특수 처리 = 상한만');
   // 부품 속성: 그룹·상태·없는 소재·복사·추가 양식
   const CU = [...catalogOf(null), U];
@@ -279,7 +279,7 @@ ok(clampCap(12) === 9.9 && clampCap(0.1) === 0.5 && clampCap(3) === 3 && clampCa
   setPartTab('detail'); renderPartProps(el, P, sel, [], {});
   ok(['xf', 'finish'].every((k) => html.includes(`data-m3-sec="${k}"`)) && !html.includes('data-m3-sec="gap"') && !/<details[^>]* open/.test(html) && html.includes('<summary>'), '구역: 크기·위치 · 면 처리 = 기본 닫힘 · 간격 상세 없음');
   ok(html.includes('>부품 2 · ') || html.includes(`>${P.parts[1].name} · `), '제목 = 이름 · 크기');
-  ok(!html.includes('data-m3-refl ') && !html.includes('data-m3-refladd') && html.includes('면 처리 종류는 반사 소재가 정함') && !html.includes('data-m3-finish="part"'), '불투명 + 반사 소재: 상세 탭엔 소재 고르기 없음 · 종류 선택 숨김');
+  ok(!html.includes('data-m3-refl ') && html.includes('＋ 측정값으로 새 소재') && html.includes('면 처리 종류는 반사 소재가 정함') && !html.includes('data-m3-finish="part"'), '불투명 + 반사 소재: 상세 탭엔 소재 고르기 없음 · 종류 선택 숨김');
   secs.xf.open = true; secs.xf.toggle();
   renderPartProps(el, P, sel, [], {});
   ok(/data-m3-sec="xf" open/.test(html) && !/data-m3-sec="gap" open/.test(html) && sectionOpen('xf'), '열린 구역: 다시 그려도 열림 유지(1)');
