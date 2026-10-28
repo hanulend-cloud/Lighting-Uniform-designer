@@ -4,6 +4,9 @@
 // 회전·이동·확대는 OrbitControls(Z 위): 드래그 회전, 휠 확대, 우클릭·Shift 드래그 이동.
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { LineSegments2 } from 'three/addons/lines/LineSegments2.js';
+import { LineSegmentsGeometry } from 'three/addons/lines/LineSegmentsGeometry.js';
+import { LineMaterial } from 'three/addons/lines/LineMaterial.js';
 
 const KIND_COLOR = { milky: 0xdfe9f2, clear: 0x8cc8ff, whiteTrans: 0xf2efe6, opaque: 0x8a909c, pcb: 0x2f6b3a, led: 0xffcf3f };
 const KIND_OPACITY = { milky: 0.85, clear: 0.35, whiteTrans: 0.95, opaque: 1, pcb: 1, led: 1 };
@@ -69,6 +72,7 @@ export function createMech3dView(canvas, { onPick, gizmo = null }) {
   controls.addEventListener('change', () => { fitDepth(); render(); });
 
   let xray = false, dim = null;
+  const fatMats = new Set();   // 굵은 선 재질 — 창 크기가 바뀌면 resolution 갱신
   let meshes = [], partsRef = [], kinds = [], sel = null, obsSet = new Set(), overlay = null, obsMesh = null, markers = null, coneMeshes = [];
 
   function resize() {
@@ -78,6 +82,7 @@ export function createMech3dView(canvas, { onPick, gizmo = null }) {
     renderer.setPixelRatio(dpr); if (gz) gz.r.setPixelRatio(dpr);
     const w = canvas.clientWidth, h = canvas.clientHeight || 400, a = w / h, half = orthoHalf / Math.min(1, a);
     renderer.setSize(w, h, false);
+    for (const m of fatMats) m.resolution.set(w, h);   // 굵은 선(관측면 테두리) 두께 = 화면 px
     persp.aspect = a; persp.updateProjectionMatrix();
     ortho.left = -half * a; ortho.right = half * a; ortho.top = half; ortho.bottom = -half; ortho.updateProjectionMatrix();
     if (gz) gz.r.setSize(gizmo.clientWidth || 90, gizmo.clientHeight || 90, false);
@@ -213,12 +218,19 @@ export function createMech3dView(canvas, { onPick, gizmo = null }) {
       for (const { n, a, b } of cnt.values()) if (n === 1) pts.push(new THREE.Vector3(P[3 * a], P[3 * a + 1], P[3 * a + 2]), new THREE.Vector3(P[3 * b], P[3 * b + 1], P[3 * b + 2]));
     }
     if (!pts.length) return null;
-    const ls = new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints(pts), new THREE.LineBasicMaterial({ color: OBS_HI, depthTest: false, transparent: true, opacity: 0.95 }));
-    ls.renderOrder = 4;
-    return ls;
+    // 굵은 선 2겹(화면 px 두께, 가려도 보임): 바깥 짙은 테두리 7px + 안쪽 밝은 하늘색 4px — 어떤 배경·색지도 위에서도 또렷하게
+    const arr = new Float32Array(pts.length * 3); pts.forEach((v, k) => arr.set([v.x, v.y, v.z], 3 * k));
+    const grp = new THREE.Group(), w = canvas.clientWidth || 800, h = canvas.clientHeight || 400;
+    for (const [col, lw, ro] of [[0x062a33, 7, 4], [OBS_HI, 4, 4.1]]) {
+      const g = new LineSegmentsGeometry(); g.setPositions(arr);
+      const m = new LineMaterial({ color: col, linewidth: lw, depthTest: false, transparent: true, opacity: 0.95 }); m.resolution.set(w, h); fatMats.add(m);
+      m.addEventListener('dispose', () => fatMats.delete(m));
+      const ls = new LineSegments2(g, m); ls.renderOrder = ro; grp.add(ls);
+    }
+    return grp;
   }
-  // 투시 보기에서 관측면 채움(하늘색 반투명, 가려도 보임)
-  function obsFill(faces) {
+  // 관측면 채움(하늘색 반투명, 가려도 보임) — opacity: 투시 0.4 · 보통 0.3 · 결과 색지도 위 0.12
+  function obsFill(faces, opacity = 0.4) {
     const pos = [];
     for (const f of faces) {
       const p = partsRef[f.part]; if (!p) continue;
@@ -227,7 +239,7 @@ export function createMech3dView(canvas, { onPick, gizmo = null }) {
     }
     if (!pos.length) return null;
     const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-    const m = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ color: OBS_HI, transparent: true, opacity: 0.4, depthTest: false, depthWrite: false, side: THREE.DoubleSide }));
+    const m = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ color: OBS_HI, transparent: true, opacity, depthTest: false, depthWrite: false, side: THREE.DoubleSide }));
     m.renderOrder = 3; return m;
   }
   // "관측면" 글자 — 빛 방향 화살표 끝(가려도 보임)
@@ -295,7 +307,7 @@ export function createMech3dView(canvas, { onPick, gizmo = null }) {
     // 관측면 강조: 고른 면들의 바깥 테두리(밝은 하늘색, 가려도 보이게) + 빛 방향 화살표(over.obsArrow = { pos, axis, len, incoming })
     const ob = obsOutline(over.obsFaces ?? []);
     if (ob) overlay.add(ob);
-    const of = xray ? obsFill(over.obsFaces ?? []) : null;
+    const of = obsFill(over.obsFaces ?? [], xray ? 0.4 : obsMesh ? 0.12 : 0.3);
     if (of) overlay.add(of);
     if (over.obsArrow) overlay.add(obsLabel(over.obsArrow));
     const oa = over.obsArrow;
@@ -359,6 +371,7 @@ export function createMech3dView(canvas, { onPick, gizmo = null }) {
     if (obsDir && extra > 0) obsMesh.position.set(...obsDir).normalize().multiplyScalar(extra); else obsMesh.position.set(0, 0, 0);
   }
   function setObsSurface(geom) {
+    const had = !!obsMesh;
     if (obsMesh) { scene.remove(obsMesh); obsMesh.geometry.dispose(); obsMesh.material.dispose(); obsMesh = null; }
     if (geom) {
       const g = new THREE.BufferGeometry();
@@ -370,6 +383,7 @@ export function createMech3dView(canvas, { onPick, gizmo = null }) {
       obsDir = geom.dir ?? null; liftObs();
       scene.add(obsMesh);
     }
+    if (had !== !!obsMesh && lastOver) { setOverlay(lastOver); return; }   // 색지도가 생기거나 없어지면 관측면 채움 진하기를 바꿈
     render();
   }
   function setObsColors(colors) {
