@@ -7,7 +7,7 @@
   <link rel="stylesheet" href="./styles.css" />
   <script type="importmap">{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/" } }</script>
 </head>
-<body>
+<body class="booting"><script>setTimeout(() => document.body.classList.remove("booting"), 10000);   /* 시작 중 오류가 나도 10초 뒤엔 보이게 */</script>
   <header>
     <div class="hd-left">
       <h1>Uniform Design Simulator <small id="app-ver"></small> <small id="gpu-badge" class="gpu-badge" hidden></small></h1>

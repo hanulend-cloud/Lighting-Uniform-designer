@@ -704,3 +704,6 @@ main:has(#m3-start:not([hidden])) { grid-template-rows: minmax(0, 1fr); }
 @media (max-width: 1024px) { .m3-faccard { height: auto; border-left: 0; } .m3-fac-split { display: none; } .fb-plot { flex: none; height: 130px; } }
 .m3-cmd .m3-now { margin-left: 6px; font-size: 12.5px; padding: 3px 8px; border-radius: 6px; background: var(--m3-accbg, #eef3ff); }
 .m3-cmd .m3-now b.ok { color: #1f9d55; } .m3-cmd .m3-now b.bad { color: #d64545; }
+/* 시작 중(모드·기구 복원 전): 예전 평판 화면이 잠깐 보이지 않게 가림 — 배치는 유지(visibility) */
+body.booting main, body.booting #inputbar { visibility: hidden; }
+body.booting::after { content: "불러오는 중…"; position: fixed; left: 50%; top: 45%; transform: translateX(-50%); color: #8a96a8; font-size: 14px; }
