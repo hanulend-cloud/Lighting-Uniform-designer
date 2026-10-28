@@ -140,19 +140,41 @@ function wireHover(cv) {
 // 최저점 표시(값·위치), 마우스 위치 읽기. equal = 가로세로 같은 축척(실제 비율, 확대 창에서 선택). 모든 치수는 dpr 배
 // v = { G, map, leds:[{s,w}] } · cv._mapv 에 저장 → 마우스 읽기·확대 창이 다시 그림
 const MAP_PAD = { l: 40, r: 64, t: 8, b: 30 };
-function mapBox(cv, G, dpr, equal) {
-  const W = cv.width, H = cv.height, w0 = G.w0, w1 = G.w0 + G.nw * G.cell, L = G.L;
-  let ox = MAP_PAD.l * dpr, oy = MAP_PAD.t * dpr, PW = W - (MAP_PAD.l + MAP_PAD.r) * dpr, PH = H - (MAP_PAD.t + MAP_PAD.b) * dpr;
-  if (equal) { const sc = Math.min(PW / L, PH / (w1 - w0)), pw = L * sc, ph = (w1 - w0) * sc; ox += (PW - pw) / 2; oy += (PH - ph) / 2; PW = pw; PH = ph; }
-  return { ox, oy, PW, PH, w0, w1, L };
+// 지도 배치(순수) — 길고 좁은 관측면(길이 ≥ 폭 × 15, 예: 440 × 5.5 mm)은 상자에 그대로 늘리면 폭이 수십 배 과장된다.
+// 길이를 K 줄로 접어 쌓는다(줄마다 segL mm, K = 1~8).
+// equal = 가로세로 같은 축척(확대 창에서 선택) — 줄 안에서 정확히 1:1.
+// 반환 { ox, oy, PW, rowH, pitch, K, segL, w0, w1, L, xy(s, w) → [x, y], at(x, y) → [s, w] | null, exag(폭 과장 배수) }
+export function mapLayout(G, W, H, dpr = 1, equal = false) {
+  const w0 = G.w0, w1 = G.w0 + G.nw * G.cell, wd = w1 - w0 || 1, L = G.L;
+  let ox = MAP_PAD.l * dpr, oy = MAP_PAD.t * dpr, PW = W - (MAP_PAD.l + MAP_PAD.r) * dpr;
+  const PH = H - (MAP_PAD.t + MAP_PAD.b) * dpr, gap = 16 * dpr;
+  // K: 줄 높이 ≥ 14 px 인 것 중 폭 과장(줄 세로 축척 ÷ 가로 축척)이 1.5배에 가장 가까운 것(조금 과장해야 폭 방향 얼룩이 보임)
+  let K = 1;
+  if (L / wd >= 15) {
+    let best = Infinity;
+    for (let k = 1; k <= 8; k++) { const rh = (PH - gap * (k - 1)) / k; if (rh < 14 * dpr) break; const e = Math.abs(Math.log(rh / wd / (PW / (L / k)) / 1.5)); if (e < best) { best = e; K = k; } }
+  }
+  const segL = L / K;
+  let rowH = K > 1 ? (PH - gap * (K - 1)) / K : PH;
+  if (equal) { const sc = Math.min(PW / segL, rowH / wd), pw = segL * sc, rh = wd * sc; ox += (PW - pw) / 2; oy += K > 1 ? 0 : (PH - rh) / 2; PW = pw; rowH = rh; }
+  const pitch = rowH + (K > 1 ? gap : 0);
+  const rowOf = (s) => Math.max(0, Math.min(K - 1, Math.floor(s / segL - 1e-9)));
+  const xy = (s, w) => { const r = rowOf(s); return [ox + ((s - r * segL) / segL) * PW, oy + r * pitch + ((w1 - w) / wd) * rowH]; };
+  const at = (px, py) => {
+    const r = Math.floor((py - oy) / pitch), y = py - oy - r * pitch;
+    if (r < 0 || r >= K || y < 0 || y > rowH || px < ox || px > ox + PW) return null;
+    return [r * segL + ((px - ox) / PW) * segL, w1 - (y / rowH) * wd];
+  };
+  return { ox, oy, PW, rowH, pitch, K, segL, w0, w1, L, xy, at, exag: rowH / wd / (PW / segL) };
 }
-function drawMap(cv, v, dpr = 1, hover = null, equal = false) {
+function mapBox(cv, G, dpr, equal) { return mapLayout(G, cv.width, cv.height, dpr, equal); }
+export function drawMap(cv, v, dpr = 1, hover = null, equal = false) {
   cv._mapv = { v, dpr, equal };
   LUT ??= buildLut();
-  const { G, map, leds = [] } = v, x = cv.getContext('2d'), W = cv.width, H = cv.height, { ox, oy, PW, PH, w0, w1, L } = mapBox(cv, G, dpr, equal);
+  const { G, map, leds = [] } = v, x = cv.getContext('2d'), W = cv.width, H = cv.height, B = mapBox(cv, G, dpr, equal), { ox, oy, PW, rowH, pitch, K, segL, w0, w1, L, xy } = B;
   x.clearRect(0, 0, W, H);
   let mx = 0; for (let k = 0; k < map.length; k++) if (G.valid[k] && map[k] > mx) mx = map[k];
-  // 칸 그림(가로 = s, 세로 위 = +w) → 확대해 붙임
+  // 칸 그림(가로 = s, 세로 위 = +w) → 줄마다 잘라 붙임(전체 띠를 K 배 길이로 그리고 그 줄 영역만 보이게)
   const tmp = document.createElement('canvas'); tmp.width = G.ns; tmp.height = G.nw;
   const tx = tmp.getContext('2d'), img = tx.createImageData(G.ns, G.nw), d = img.data, [nr, ng, nb] = NO_DATA_RGB;
   let kMin = -1;
@@ -163,51 +185,61 @@ function drawMap(cv, v, dpr = 1, hover = null, equal = false) {
     d[q + 3] = 255;
   }
   tx.putImageData(img, 0, 0);
-  x.imageSmoothingEnabled = PW / G.ns > 6;   // 칸이 크게 보이면 부드럽게, 작으면 칸 그대로
-  x.drawImage(tmp, ox, oy, PW, PH);
-  x.strokeStyle = 'rgba(128,140,160,.7)'; x.lineWidth = dpr; x.strokeRect(ox, oy, PW, PH);
-  const SX = (s) => ox + (s / L) * PW, WY = (w) => oy + ((w1 - w) / (w1 - w0)) * PH;
-  // 눈금
-  x.font = `${10.5 * dpr}px sans-serif`; x.fillStyle = '#8a93a6';
-  const ss = niceStep(L, Math.max(3, Math.round(PW / (70 * dpr))));
-  x.textAlign = 'center'; x.textBaseline = 'top';
-  for (let s = 0; s <= L + 1e-9; s += ss) { x.strokeStyle = 'rgba(128,140,160,.6)'; x.beginPath(); x.moveTo(SX(s), oy + PH); x.lineTo(SX(s), oy + PH + 3 * dpr); x.stroke(); x.fillText(`${+s.toFixed(1)}`, SX(s), oy + PH + 5 * dpr); }
-  x.textAlign = 'right'; x.fillText('s (mm)', ox + PW, oy + PH + 17 * dpr);
-  const ws = niceStep(w1 - w0, Math.max(2, Math.round(PH / (28 * dpr))));
-  x.textBaseline = 'middle';
+  x.imageSmoothingEnabled = (PW * K) / G.ns > 6;   // 칸이 크게 보이면 부드럽게, 작으면 칸 그대로
+  x.font = `${10.5 * dpr}px sans-serif`;
+  const ss = niceStep(segL, Math.max(2, Math.round(PW / (70 * dpr))));
+  for (let r = 0; r < K; r++) {
+    const ry = oy + r * pitch, s0 = r * segL, s1 = (r + 1) * segL;
+    x.save(); x.beginPath(); x.rect(ox, ry, PW, rowH); x.clip(); x.drawImage(tmp, ox - r * PW, ry, PW * K, rowH); x.restore();
+    x.strokeStyle = 'rgba(128,140,160,.7)'; x.lineWidth = dpr; x.strokeRect(ox, ry, PW, rowH);
+    x.fillStyle = '#8a93a6'; x.textAlign = 'center'; x.textBaseline = 'top';   // s 눈금(줄 아래)
+    for (let sv = Math.ceil(s0 / ss - 1e-9) * ss; sv <= s1 + 1e-9; sv += ss) {
+      const px = ox + ((sv - s0) / segL) * PW;
+      x.strokeStyle = 'rgba(128,140,160,.6)'; x.beginPath(); x.moveTo(px, ry + rowH); x.lineTo(px, ry + rowH + 3 * dpr); x.stroke();
+      x.fillText(`${+sv.toFixed(1)}`, px, ry + rowH + 4 * dpr);
+    }
+  }
+  const yEnd = oy + (K - 1) * pitch + rowH;
+  x.fillStyle = '#8a93a6'; x.textAlign = 'right'; x.textBaseline = 'top';
+  x.fillText(K > 1 ? `s (mm) · 길이를 ${K}줄로 접음(줄마다 ${+segL.toFixed(1)} mm)${B.exag > 1.6 ? ` · 폭 ×${B.exag.toFixed(1)}` : ''}` : 's (mm)', ox + PW, yEnd + 17 * dpr);
+  // w 눈금(첫 줄 왼쪽)
+  const ws = niceStep(w1 - w0, Math.max(2, Math.round(rowH / (28 * dpr)))), WY = (w) => oy + ((w1 - w) / (w1 - w0)) * rowH;
+  x.textBaseline = 'middle'; x.strokeStyle = 'rgba(128,140,160,.6)';
   for (let w = Math.ceil(w0 / ws - 1e-9) * ws; w <= w1 + 1e-9; w += ws) { x.beginPath(); x.moveTo(ox - 3 * dpr, WY(w)); x.lineTo(ox, WY(w)); x.stroke(); x.fillText(`${+w.toFixed(1)}`, ox - 5 * dpr, WY(w)); }
-  x.save(); x.translate(10 * dpr, oy + PH / 2); x.rotate(-Math.PI / 2); x.textAlign = 'center'; x.fillText('w (mm)', 0, 0); x.restore();
+  x.save(); x.translate(10 * dpr, oy + rowH / 2); x.rotate(-Math.PI / 2); x.textAlign = 'center'; x.fillText('w (mm)', 0, 0); x.restore();
   // LED 위치
   for (const p of leds) {
     if (p.s < -1e-9 || p.s > L + 1e-9 || p.w < w0 - 1e-9 || p.w > w1 + 1e-9) continue;
+    const [px, py] = xy(p.s, p.w);
     x.fillStyle = 'rgba(255,214,64,.95)'; x.strokeStyle = 'rgba(20,26,38,.8)'; x.lineWidth = dpr;
-    x.beginPath(); x.arc(SX(p.s), WY(p.w), 2.6 * dpr, 0, 2 * Math.PI); x.fill(); x.stroke();
+    x.beginPath(); x.arc(px, py, 2.6 * dpr, 0, 2 * Math.PI); x.fill(); x.stroke();
   }
   // 색 막대(0~100%) + 최저 표시
-  const bx = W - (MAP_PAD.r - 12) * dpr, bw = 11 * dpr;
+  const PH = yEnd - oy, bx = W - (MAP_PAD.r - 12) * dpr, bw = 11 * dpr;
   for (let i = 0; i < PH; i++) { const l = lutIndex(1 - i / PH) * 3; x.fillStyle = `rgb(${LUT[l]},${LUT[l + 1]},${LUT[l + 2]})`; x.fillRect(bx, oy + i, bw, 1.5); }
   x.strokeStyle = 'rgba(128,140,160,.7)'; x.strokeRect(bx, oy, bw, PH);
   x.fillStyle = '#8a93a6'; x.textAlign = 'left'; x.textBaseline = 'middle';
   for (let p = 0; p <= 100; p += 20) x.fillText(`${p}%`, bx + bw + 4 * dpr, oy + (1 - p / 100) * PH);
   if (kMin >= 0) {
-    const t = map[kMin] / mx, i = Math.floor(kMin / G.nw), j = kMin % G.nw, cs = (i + 0.5) * G.ds, cw = w0 + (j + 0.5) * G.cell;
+    const t = map[kMin] / mx, i = Math.floor(kMin / G.nw), j = kMin % G.nw, cs = (i + 0.5) * G.ds, cw = w0 + (j + 0.5) * G.cell, [px, py] = xy(cs, cw);
     x.strokeStyle = '#ffffff'; x.lineWidth = 1.5 * dpr; x.beginPath(); x.moveTo(bx - 4 * dpr, oy + (1 - t) * PH); x.lineTo(bx + bw, oy + (1 - t) * PH); x.stroke();
-    x.beginPath(); x.arc(SX(cs), WY(cw), 5 * dpr, 0, 2 * Math.PI); x.stroke();
-    const lbl = `최저 ${(t * 100).toFixed(1)}% (s ${cs.toFixed(1)}, w ${cw.toFixed(1)})`, right = SX(cs) > ox + PW * 0.6;
-    x.font = `600 ${10.5 * dpr}px sans-serif`; const tw = x.measureText(lbl).width, lx = right ? SX(cs) - 8 * dpr - tw : SX(cs) + 8 * dpr, ly = Math.max(oy + 2 * dpr, Math.min(oy + PH - 15 * dpr, WY(cw) - 7 * dpr));
+    x.beginPath(); x.arc(px, py, 5 * dpr, 0, 2 * Math.PI); x.stroke();
+    const lbl = `최저 ${(t * 100).toFixed(1)}% (s ${cs.toFixed(1)}, w ${cw.toFixed(1)})`, right = px > ox + PW * 0.6;
+    x.font = `600 ${10.5 * dpr}px sans-serif`; const tw = x.measureText(lbl).width, lx = right ? px - 8 * dpr - tw : px + 8 * dpr, ly = Math.max(oy + 2 * dpr, Math.min(yEnd - 15 * dpr, py - 7 * dpr));
     x.fillStyle = 'rgba(20,26,38,.75)'; x.fillRect(lx - 3 * dpr, ly - 1 * dpr, tw + 6 * dpr, 14 * dpr);
     x.fillStyle = '#ffffff'; x.textAlign = 'left'; x.textBaseline = 'top'; x.fillText(lbl, lx, ly);
     x.font = `${10.5 * dpr}px sans-serif`;
   }
-  // 마우스 위치 읽기(칸 [i, j])
+  // 마우스 위치 읽기(칸 [i, j]) — 그 줄 안에서 십자선
   if (hover && mx > 0) {
     const [i, j] = hover, k = i * G.nw + j, cs = (i + 0.5) * G.ds, cw = w0 + (j + 0.5) * G.cell, val = G.valid[k] ? `${((map[k] / mx) * 100).toFixed(1)}%` : '관측면 밖';
+    const [px, py] = xy(cs, cw), ry = oy + Math.max(0, Math.min(K - 1, Math.floor(cs / segL - 1e-9))) * pitch;
     x.strokeStyle = 'rgba(255,255,255,.75)'; x.lineWidth = dpr; x.setLineDash([3 * dpr, 3 * dpr]);
-    x.beginPath(); x.moveTo(SX(cs), oy); x.lineTo(SX(cs), oy + PH); x.moveTo(ox, WY(cw)); x.lineTo(ox + PW, WY(cw)); x.stroke(); x.setLineDash([]);
+    x.beginPath(); x.moveTo(px, ry); x.lineTo(px, ry + rowH); x.moveTo(ox, py); x.lineTo(ox + PW, py); x.stroke(); x.setLineDash([]);
     const lbl = `s ${cs.toFixed(1)} · w ${cw.toFixed(1)} mm · ${val}`, tw = x.measureText(lbl).width;
-    const lx = Math.max(ox + 3 * dpr, SX(cs) + tw + 14 * dpr > ox + PW ? SX(cs) - tw - 10 * dpr : SX(cs) + 6 * dpr);
-    x.fillStyle = 'rgba(20,26,38,.88)'; x.fillRect(lx - 3 * dpr, oy + 3 * dpr, tw + 6 * dpr, 15 * dpr);
-    x.fillStyle = '#e6ebf2'; x.textAlign = 'left'; x.textBaseline = 'top'; x.fillText(lbl, lx, oy + 5 * dpr);
+    const lx = Math.max(ox + 3 * dpr, px + tw + 14 * dpr > ox + PW ? px - tw - 10 * dpr : px + 6 * dpr);
+    x.fillStyle = 'rgba(20,26,38,.88)'; x.fillRect(lx - 3 * dpr, ry + 3 * dpr, tw + 6 * dpr, 15 * dpr);
+    x.fillStyle = '#e6ebf2'; x.textAlign = 'left'; x.textBaseline = 'top'; x.fillText(lbl, lx, ry + 5 * dpr);
   }
 }
 function wireMapHover(cv) {
@@ -216,8 +248,9 @@ function wireMapHover(cv) {
   const cell = (e) => {
     const M = cv._mapv; if (!M) return null;
     const r = cv.getBoundingClientRect(), px = (e.clientX - r.left) * (cv.width / r.width), py = (e.clientY - r.top) * (cv.height / r.height), b = mapBox(cv, M.v.G, M.dpr, M.equal);
-    const i = Math.floor(((px - b.ox) / b.PW) * M.v.G.ns), j = M.v.G.nw - 1 - Math.floor(((py - b.oy) / b.PH) * M.v.G.nw);
-    return i >= 0 && i < M.v.G.ns && j >= 0 && j < M.v.G.nw ? [i, j] : null;
+    const sw = b.at(px, py); if (!sw) return null;
+    const G = M.v.G, i = Math.floor(sw[0] / G.ds), j = Math.floor((sw[1] - G.w0) / G.cell);
+    return i >= 0 && i < G.ns && j >= 0 && j < G.nw ? [i, j] : null;
   };
   cv.addEventListener('mousemove', (e) => { const M = cv._mapv; if (M) drawMap(cv, M.v, M.dpr, cell(e), M.equal); });
   cv.addEventListener('mouseleave', () => { const M = cv._mapv; if (M) drawMap(cv, M.v, M.dpr, null, M.equal); });

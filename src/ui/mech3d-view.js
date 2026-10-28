@@ -58,6 +58,8 @@ export function createMech3dView(canvas, { onPick, gizmo = null }) {
     gz = { r, s, c };
   }
   const render = () => {
+    if (pathItems.length) pathLayout();   // 광경로 화살표·글씨 = 화면 px 크기
+    if (obsUi) obsLayout();
     renderer.render(scene, camera);
     if (gz) { gz.c.position.copy(camera.position).sub(controls.target).normalize().multiplyScalar(4); gz.c.up.copy(camera.up); gz.c.lookAt(0, 0, 0); gz.r.render(gz.s, gz.c); }
   };
@@ -73,6 +75,7 @@ export function createMech3dView(canvas, { onPick, gizmo = null }) {
 
   let xray = false, dim = null;
   const fatMats = new Set();   // 굵은 선 재질 — 창 크기가 바뀌면 resolution 갱신
+  let pathGroup = null, pathItems = [], obsUi = null;   // 광경로 그룹 · 화면 크기 맞춤 항목 · 관측면 표시(render 가 쓰므로 위에 선언)
   let meshes = [], partsRef = [], kinds = [], sel = null, obsSet = new Set(), overlay = null, obsMesh = null, markers = null, coneMeshes = [];
 
   function resize() {
@@ -243,51 +246,91 @@ export function createMech3dView(canvas, { onPick, gizmo = null }) {
     m.renderOrder = 3; return m;
   }
   // "관측면" 글자 — 빛 방향 화살표 끝(가려도 보임)
-  function obsLabel(oa) {
-    const cv = document.createElement('canvas'); cv.width = 160; cv.height = 48; const c2 = cv.getContext('2d');
-    c2.fillStyle = 'rgba(10,40,48,.8)'; c2.fillRect(0, 0, 160, 48); c2.fillStyle = '#2ee6ff'; c2.font = 'bold 28px sans-serif'; c2.textAlign = 'center'; c2.textBaseline = 'middle'; c2.fillText('관측면', 80, 25);
-    const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(cv), depthTest: false, transparent: true }));
-    const s2 = model.r * 0.07; sp.scale.set(s2 * 160 / 48, s2, 1);
-    sp.position.set(...oa.pos).addScaledVector(new THREE.Vector3(...oa.axis).normalize(), oa.len * 1.25); sp.renderOrder = 6;
-    return sp;
+  // 관측면 표시(글씨 + 빛 방향 화살표) — 화면 px 크기(확대·축소와 무관), obsLayout() 이 render 마다 맞춤
+  const OBS_ARROW_PX = 46, OBS_HEAD_PX = 13, OBS_TEXT_PX = 18;
+  function obsLayout() {
+    const o = obsUi, u = worldPerPx(o.base), L = OBS_ARROW_PX * u, hl = OBS_HEAD_PX * u;
+    const tail = o.incoming ? o.base.clone().addScaledVector(o.a, L) : o.base.clone();
+    const pa = o.shaft.geometry.getAttribute('position'), e = tail.clone().addScaledVector(o.dir, L - hl);
+    pa.setXYZ(0, tail.x, tail.y, tail.z); pa.setXYZ(1, e.x, e.y, e.z); pa.needsUpdate = true;
+    o.head.scale.setScalar(hl); o.head.position.copy(tail).addScaledVector(o.dir, L - hl / 2);
+    o.label.scale.set(OBS_TEXT_PX * u * o.label.userData.aspect, OBS_TEXT_PX * u, 1);
+    o.label.position.copy(o.base).addScaledVector(o.a, L + OBS_TEXT_PX * u);
   }
   function setDim(fn) { dim = fn; meshes.forEach((_, i) => colorize(i)); render(); }
   function setXray(on) { xray = !!on; meshes.forEach((_, i) => colorize(i)); if (lastOver) setOverlay(lastOver); else render(); }
-  // 광경로 화살표(app.drawLightPaths) — paths = [{ pts:[[x,y,z]…], share, label, offset }]: 점 사이 화살표(굵기 ∝ 비중), 끝에 % 글자
-  let pathGroup = null;
+  // 화면 1 px 이 pos 에서 몇 mm 인지 — 광경로 화살표·글씨를 확대·축소와 상관없이 같은 화면 크기로(render 마다)
+  function worldPerPx(pos) {
+    const h = canvas.clientHeight || 400;
+    if (camera.isOrthographicCamera) return (camera.top - camera.bottom) / camera.zoom / h;
+    const d = Math.max(1e-6, pos.clone().sub(camera.position).dot(camera.getWorldDirection(new THREE.Vector3())));
+    return (2 * d * Math.tan((camera.fov * Math.PI) / 360)) / h;
+  }
+  // 광경로 화살표(app.drawLightPaths) — paths = [{ pts:[[x,y,z]…], share, label, offset, names?, axis?, side? }]
+  // 선 = 화면 px 두께(굵기 ∝ 비중), 화살촉·점·이름표·% 글씨 = 화면 px 크기 — pathLayout() 이 render 마다 크기·위치를 맞춤
+  const HEAD_PX = 11, DOT_PX = 4, NAME_PX = 15, PCT_PX = 18, LADDER_PX = 22, SIDE_PX = 70;
+  function spriteText(text, w, h, font, fg, bg) {
+    const cv = document.createElement('canvas'); cv.width = w; cv.height = h; const c = cv.getContext('2d');
+    c.fillStyle = bg; c.fillRect(0, 0, w, h); c.fillStyle = fg; c.font = font; c.textAlign = 'center'; c.textBaseline = 'middle'; c.fillText(text, w / 2, h / 2 + 1);
+    const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(cv), depthTest: false, transparent: true })); sp.renderOrder = 6; sp.userData.aspect = w / h;
+    return sp;
+  }
+  function pathLayout() {
+    for (const it of pathItems) {
+      for (const hd of it.heads) { const u = worldPerPx(hd.tip) * HEAD_PX; hd.mesh.scale.setScalar(u); hd.mesh.position.copy(hd.tip).addScaledVector(hd.dir, -u / 2); }
+      for (const dt of it.dots) dt.mesh.scale.setScalar(worldPerPx(dt.at) * DOT_PX);
+      if (it.names) {
+        const { V, n, ax, sd, labels, leaders } = it.names, u = worldPerPx(V[0]);
+        const base = V[0].clone().addScaledVector(sd, -SIDE_PX * u), span = Math.max(V[0].distanceTo(V[n - 1]), LADDER_PX * u * (n - 1));
+        labels.forEach((sp, j) => {
+          sp.scale.set(NAME_PX * u * sp.userData.aspect, NAME_PX * u, 1);
+          sp.position.copy(base).addScaledVector(ax, n > 1 ? (span * j) / (n - 1) : 0);
+          const e = sp.position.clone().addScaledVector(sd, (NAME_PX * u * sp.userData.aspect) / 2), pa = leaders[j].geometry.getAttribute('position');
+          pa.setXYZ(0, e.x, e.y, e.z); pa.setXYZ(1, V[j].x, V[j].y, V[j].z); pa.needsUpdate = true;
+        });
+      }
+      const u = worldPerPx(it.end), sp = it.pct;
+      sp.scale.set(PCT_PX * u * sp.userData.aspect, PCT_PX * u, 1);
+      const wpx = PCT_PX * sp.userData.aspect;
+      sp.position.copy(it.end).addScaledVector(it.side, u * (wpx / 2 + 10 + it.offset * (wpx + 8)));   // 끝점 옆 · 두 번째 경로 % 는 한 칸 더 옆(겹침 방지)
+    }
+  }
   function setLightPaths(paths) {
     if (pathGroup) { scene.remove(pathGroup); pathGroup.traverse((o) => { o.geometry?.dispose(); o.material?.map?.dispose(); o.material?.dispose(); }); pathGroup = null; }
+    pathItems = [];
     if (paths?.length) {
       pathGroup = new THREE.Group();
-      const COL = [0xff5fa2, 0xb388ff];
+      const COL = [0xff5fa2, 0xb388ff], w = canvas.clientWidth || 800, h = canvas.clientHeight || 400;
+      const coneG = new THREE.ConeGeometry(0.42, 1, 12), dotG = new THREE.SphereGeometry(1, 10, 8);
       for (const p of paths) {
-        const col = COL[p.offset % COL.length], sh = Math.max(0.15, Math.min(1, p.share)), r = model.r * 0.006 * (0.6 + sh), off = new THREE.Vector3();   // 나란히 놓기는 app 이 함
-        const V = p.pts.map((q) => new THREE.Vector3(...q).add(off)), mat = new THREE.MeshBasicMaterial({ color: col, depthTest: false, transparent: true, opacity: 0.85 });
+        const col = COL[p.offset % COL.length], sh = Math.max(0.15, Math.min(1, p.share));
+        const V = p.pts.map((q) => new THREE.Vector3(...q)), mat = new THREE.MeshBasicMaterial({ color: col, depthTest: false, transparent: true, opacity: 0.9 });
+        const it = { heads: [], dots: [], names: null, pct: null, end: V[V.length - 1], side: new THREE.Vector3(...(p.side ?? [1, 0, 0])).normalize(), offset: p.offset };
+        // 줄기: 화면 px 두께 선(비중이 클수록 굵게)
+        const seg = [];
+        for (let i = 0; i + 1 < V.length; i++) if (V[i].distanceTo(V[i + 1]) > 1e-6) seg.push(V[i].x, V[i].y, V[i].z, V[i + 1].x, V[i + 1].y, V[i + 1].z);
+        if (seg.length) {
+          const g = new LineSegmentsGeometry(); g.setPositions(seg);
+          const lm = new LineMaterial({ color: col, linewidth: 2 + 3 * sh, depthTest: false, transparent: true, opacity: 0.9 }); lm.resolution.set(w, h); fatMats.add(lm); lm.addEventListener('dispose', () => fatMats.delete(lm));
+          const ls = new LineSegments2(g, lm); ls.renderOrder = 5; pathGroup.add(ls);
+        }
         for (let i = 0; i + 1 < V.length; i++) {
-          const a = V[i], b = V[i + 1], d = b.clone().sub(a), L = d.length();
-          if (L < 1e-6) continue;
-          const dir = d.clone().normalize(), hl = Math.min(L * 0.4, r * 5);
-          const cyl = new THREE.Mesh(new THREE.CylinderGeometry(r, r, L - hl, 8), mat); cyl.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir); cyl.position.copy(a).addScaledVector(dir, (L - hl) / 2); cyl.renderOrder = 5; pathGroup.add(cyl);
-          const cone = new THREE.Mesh(new THREE.ConeGeometry(r * 2.4, hl, 12), mat); cone.quaternion.copy(cyl.quaternion); cone.position.copy(a).addScaledVector(dir, L - hl / 2); cone.renderOrder = 5; pathGroup.add(cone);
+          const d = V[i + 1].clone().sub(V[i]); if (d.length() < 1e-6) continue;
+          const dir = d.normalize(), cone = new THREE.Mesh(coneG, mat); cone.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir); cone.renderOrder = 5; pathGroup.add(cone);
+          it.heads.push({ mesh: cone, tip: V[i + 1], dir });
         }
-        // 첫 경로: 머무는 곳마다 점 + 이름표. 이름표는 옆(p.side)으로 빼서 축 방향으로 고르게 벌려 세움(얇은 적층에서도 안 겹침) + 가는 지시선
+        // 첫 경로: 머무는 곳마다 점 + 이름표(옆으로 빼서 축 방향으로 고르게 — 얇은 적층에서도 안 겹침) + 가는 지시선
         if (p.names?.length) {
-          const s3 = model.r * 0.05, ax = new THREE.Vector3(...(p.axis ?? [0, 0, 1])).normalize(), sd = new THREE.Vector3(...(p.side ?? [1, 0, 0])).normalize();
-          const n = p.names.length, base = V[0].clone().addScaledVector(sd, -s3 * 5), span = Math.max(V[0].distanceTo(V[n - 1]), s3 * 1.4 * (n - 1));
-          const lmat = new THREE.LineBasicMaterial({ color: 0x9aa7b8, depthTest: false, transparent: true, opacity: 0.8 });
+          const n = p.names.length, lmat = new THREE.LineBasicMaterial({ color: 0x9aa7b8, depthTest: false, transparent: true, opacity: 0.8 }), labels = [], leaders = [];
           p.names.forEach((nm, j) => {
-            const dot = new THREE.Mesh(new THREE.SphereGeometry(r * 1.8, 10, 8), mat); dot.position.copy(V[j]); dot.renderOrder = 5; pathGroup.add(dot);
-            const c3 = document.createElement('canvas'); c3.width = 160; c3.height = 40; const g3 = c3.getContext('2d');
-            g3.fillStyle = 'rgba(20,26,38,.78)'; g3.fillRect(0, 0, 160, 40); g3.fillStyle = '#e6ebf2'; g3.font = '24px sans-serif'; g3.textAlign = 'center'; g3.textBaseline = 'middle'; g3.fillText(nm, 80, 21);
-            const t3 = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(c3), depthTest: false, transparent: true }));
-            t3.scale.set(s3 * 4, s3, 1); t3.position.copy(base).addScaledVector(ax, n > 1 ? (span * j) / (n - 1) : 0); t3.renderOrder = 6; pathGroup.add(t3);
-            const ln = new THREE.Line(new THREE.BufferGeometry().setFromPoints([t3.position.clone().addScaledVector(sd, s3 * 2), V[j]]), lmat); ln.renderOrder = 5; pathGroup.add(ln);
+            const dot = new THREE.Mesh(dotG, mat); dot.position.copy(V[j]); dot.renderOrder = 5; pathGroup.add(dot); it.dots.push({ mesh: dot, at: V[j] });
+            const t3 = spriteText(nm, 128, 32, '20px sans-serif', '#e6ebf2', 'rgba(20,26,38,.78)'); pathGroup.add(t3); labels.push(t3);
+            const ln = new THREE.Line(new THREE.BufferGeometry().setFromPoints([V[j].clone(), V[j].clone()]), lmat); ln.renderOrder = 5; pathGroup.add(ln); leaders.push(ln);
           });
+          it.names = { V, n, ax: new THREE.Vector3(...(p.axis ?? [0, 0, 1])).normalize(), sd: new THREE.Vector3(...(p.side ?? [1, 0, 0])).normalize(), labels, leaders };
         }
-        const cv = document.createElement('canvas'); cv.width = 200; cv.height = 48; const c2 = cv.getContext('2d');
-        c2.fillStyle = 'rgba(20,26,38,.75)'; c2.fillRect(0, 0, 200, 48); c2.fillStyle = '#' + col.toString(16).padStart(6, '0'); c2.font = 'bold 30px sans-serif'; c2.textAlign = 'center'; c2.textBaseline = 'middle'; c2.fillText(p.label, 100, 25);
-        const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(cv), depthTest: false, transparent: true }));
-        const s2 = model.r * 0.07; sp.scale.set(s2 * 200 / 48, s2, 1); sp.position.copy(V[V.length - 1]).addScaledVector(new THREE.Vector3(...(p.side ?? [1, 0, 0])).normalize(), s2 * 3.2 * p.offset); sp.renderOrder = 6; pathGroup.add(sp);   // 두 번째 경로 % 는 옆으로(겹침 방지)
+        it.pct = spriteText(p.label, 120, 36, 'bold 24px sans-serif', '#' + col.toString(16).padStart(6, '0'), 'rgba(20,26,38,.75)'); pathGroup.add(it.pct);
+        pathItems.push(it);
       }
       scene.add(pathGroup);
     }
@@ -309,15 +352,15 @@ export function createMech3dView(canvas, { onPick, gizmo = null }) {
     if (ob) overlay.add(ob);
     const of = obsFill(over.obsFaces ?? [], xray ? 0.4 : obsMesh ? 0.12 : 0.3);
     if (of) overlay.add(of);
-    if (over.obsArrow) overlay.add(obsLabel(over.obsArrow));
     const oa = over.obsArrow;
-    if (oa) {
-      const a = new THREE.Vector3(...oa.axis).normalize(), L = oa.len, hl = 0.28 * L, base = new THREE.Vector3(...oa.pos);
-      const tail = oa.incoming ? base.clone().addScaledVector(a, L) : base.clone(), dirv = oa.incoming ? a.clone().negate() : a.clone();   // 들어오는 빛 = 면을 향해, 나가는 빛 = 면에서 밖으로
-      const g = new THREE.BufferGeometry().setFromPoints([tail, tail.clone().addScaledVector(dirv, L - hl)]);
-      const shaft = new THREE.Line(g, new THREE.LineBasicMaterial({ color: OBS_HI, depthTest: false })); shaft.renderOrder = 4; overlay.add(shaft);
-      const head = new THREE.Mesh(new THREE.ConeGeometry(0.32 * hl, hl, 16), new THREE.MeshBasicMaterial({ color: OBS_HI, depthTest: false }));
-      head.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dirv); head.position.copy(tail).addScaledVector(dirv, L - hl / 2); head.renderOrder = 4; overlay.add(head);
+    obsUi = null;
+    if (oa) {   // 들어오는 빛 = 면을 향해, 나가는 빛 = 면에서 밖으로 — 길이·글씨는 화면 px(obsLayout)
+      const a = new THREE.Vector3(...oa.axis).normalize(), dirv = oa.incoming ? a.clone().negate() : a.clone();
+      const shaft = new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]), new THREE.LineBasicMaterial({ color: OBS_HI, depthTest: false })); shaft.renderOrder = 4; overlay.add(shaft);
+      const head = new THREE.Mesh(new THREE.ConeGeometry(0.34, 1, 16), new THREE.MeshBasicMaterial({ color: OBS_HI, depthTest: false }));
+      head.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dirv); head.renderOrder = 4; overlay.add(head);
+      const label = spriteText('관측면', 112, 34, 'bold 22px sans-serif', '#2ee6ff', 'rgba(10,40,48,.8)'); overlay.add(label);
+      obsUi = { base: new THREE.Vector3(...oa.pos), a, dir: dirv, incoming: !!oa.incoming, shaft, head, label };
     }
     const cs = over.cones ?? [], on = cs.filter((c) => c.n === over.coneSel), off = cs.filter((c) => c.n !== over.coneSel);
     if (off.length) { coneMeshes.push(coneMesh(off, CONE_COLOR, 0)); overlay.add(coneLines(off, CONE_COLOR, 0.45)); }

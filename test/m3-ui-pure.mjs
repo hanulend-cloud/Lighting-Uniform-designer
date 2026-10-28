@@ -339,3 +339,7 @@ done();
   const H = [{ ph: 1e6, t: 0, noise: 0.1 }, { ph: 2e6, t: 5000, noise: 0.07 }, { ph: 3e6, t: 10000, noise: 0.0577 }];
   const e = etaText(H, 0.02);
   console.log(e.includes('필요 광자 ≈ 2,497만') && e.includes('남은 ≈ 2분') && etaText([{ ph: 1, t: 0, noise: 0.01 }], 0.02) === '' ? 'PASS 남은 계산 예상(필요 광자·시간)' : (process.exitCode = 1, `FAIL 남은 계산 예상: ${e}`)); }
+{ const { mapLayout } = await import('../src/ui/m3/results-panel.js');
+  const G = { w0: -2.75, nw: 8, cell: 0.6875, L: 440, ns: 110 }, a = mapLayout(G, 420, 150, 1), b = mapLayout({ w0: -12, nw: 8, cell: 3, L: 116, ns: 100 }, 600, 180, 1);
+  const [x, y] = a.xy(250, 1), back = a.at(x, y);
+  console.log(a.K > 1 && Math.abs(a.segL * a.K - 440) < 1e-9 && a.exag < 3 && Math.abs(back[0] - 250) < 1e-6 && Math.abs(back[1] - 1) < 1e-6 && b.K === 1 ? `PASS 2D 지도: 길고 좁은 면은 ${a.K}줄로 접음(폭 ×${a.exag.toFixed(1)}) · 넓은 면은 1줄 · 좌표 왕복` : (process.exitCode = 1, 'FAIL 2D 지도 접기')); }
