@@ -20,7 +20,7 @@ import { mountCommandBar } from './command-bar.js';
 import { renderFeatureTree, toggleVisibility } from './feature-tree.js';
 import { mountSplitter, mountDockSplitter, mountFacSplitter } from './splitter.js';
 import { createOptDash, createSimDash } from './opt-dash.js';
-import { partClearance, limitXform, axisLimits, TOL } from '../../engine/mech3d/clearance.js';
+import { geomQuery, geomLimit } from './geom-client.js';
 import { renderPropertyPanel } from './property-panel.js';
 import { meshInfo, clearDbHtml, clearAddFormHtml, reflAddFormHtml, wireMaterialDb, dbFormState } from '../mech3d-panel.js';
 import { isAdmin } from '../../model/admin.js';
@@ -375,15 +375,34 @@ function hitName(M, key, line = A.store.session.line) {
   }
   return `LED ${j + 1} 발광점`;
 }
-// 선택 부품의 크기·위치 가능 범위(캐시: 장면·부품·LED 가 같으면 재사용) — 표시·입력 제한용으로 여유 TOL 을 뺀다
-function xformInfoOf(i) {
+// 선택 부품의 기하(간격 표·축별 가능 범위) — 큰 부품은 수 초~수십 초라 Worker(geom-client)에서. 결과 캐시: 장면·부품·변환·LED 가 같으면 재사용.
+// 아직 없으면 요청만 하고 null(화면은 먼저 그림 — 가능 범위·간격 줄은 빈 채로) → 결과가 오면 다시 그림
+const NO_LED = [];
+function selGeom(i) {
   const M = A.store.mspec, S = A.store.session, rt = getMech3d();
+  if (!rt?.parts[i] || !rt.raw?.parts[i]) return null;
+  const stp = M.light.kind === 'step', lp = (stp && L.ledPartsNow(M, S.line)) || NO_LED;   // 같은 '없음' 배열 — 새 [] 면 캐시가 매번 어긋나 결과를 버림
+  let em = []; try { em = L.currentEmitters(M, S.line); } catch { em = []; }
+  const ek = JSON.stringify(em.map((e) => [e.pos, e.axis])), xk = JSON.stringify(M.parts[i].xform ?? null), g = A.geom;
+  if (g && g.rt === rt && g.i === i && g.lp === lp && g.ek === ek && g.xk === xk) return g.r;   // r = null: 계산 중
+  const ask = { rt, i, lp, ek, xk, r: null };
+  A.geom = ask;
+  geomQuery({ cur: rt.parts, raw: rt.raw.parts, led: lp, i, xf: M.parts[i].xform ?? null, emitters: em, limEmitters: stp ? em : [] }).then((r) => {
+    if (!A || A.geom !== ask) return;
+    if (r.stale) { A.geom = null; renderAll('geom'); return; }   // 그사이 장면이 바뀜 — 다시 요청
+    ask.r = r.error ? { error: r.error } : r;
+    renderAll('geom');
+  });
+  return null;
+}
+// 선택 부품의 크기·위치 — 원본 외곽(바로 계산) + 가능 범위(Worker 결과 · 없으면 null = 입력 제한 없이). 표시·입력 제한용으로 여유 TOL 을 뺀다
+function xformInfoOf(i) {
+  const M = A.store.mspec, rt = getMech3d();
   if (!rt?.raw?.parts[i]) return null;
-  const stp = M.light.kind === 'step', lp = (stp && L.ledPartsNow(M, S.line)) || [];
-  let em = []; try { em = stp ? L.currentEmitters(M, S.line) : []; } catch { em = []; }
-  const ek = JSON.stringify(em.map((e) => e.pos));
-  if (A.xli && A.xli.rt === rt && A.xli.i === i && A.xli.lp === lp && A.xli.ek === ek) return A.xli.res;
-  const raw = rt.raw.parts[i], r = axisLimits(raw, M.parts[i].xform ?? null, rt.parts.map((p, j) => (j === i ? null : p)), { ledParts: lp, emitters: em });
+  const b = bounds(rt.raw.parts[i].positions), center0 = [0, 1, 2].map((k) => (b[k] + b[k + 3]) / 2), size0 = [0, 1, 2].map((k) => b[k + 3] - b[k]);
+  const g = selGeom(i), r = g?.lim;
+  if (!r) return { center0, size0, lim: null };
+  if (g.limOut) return g.limOut;
   // 0.01mm 단위로 안쪽 내림 — 맞닿음(간격 ≤ TOL)은 간섭이 아니므로 벽에 딱 맞는 치수(예: 16.00)도 입력 가능
   const cut = (v, sg) => (Number.isFinite(v) ? sg * Math.floor(Math.abs(v) * 100 + 1e-6) / 100 : v);
   const s = M.parts[i].xform?.scale ?? [1, 1, 1];
@@ -392,26 +411,20 @@ function xformInfoOf(i) {
     size: r.size.map((v, k) => (Number.isFinite(v) ? Math.max(r.size0[k] * s[k], cut(v, 1)) : v)),
     uniform: Number.isFinite(r.uniform) ? Math.max(1, Math.floor(r.uniform * 1e4) / 1e4) : r.uniform,
   };
-  const res = { center0: r.center0, size0: r.size0, lim };
-  A.xli = { rt, i, lp, ek, res };
-  return res;
+  g.limOut = { center0: r.center0, size0: r.size0, lim };
+  return g.limOut;
 }
-// 선택 부품의 간격 표(캐시: 장면·부품·LED 가 같으면 재사용)
+// 선택 부품의 간격 표(Worker 결과 · 없으면 null)
 function clearanceOf(i) {
-  const M = A.store.mspec, S = A.store.session, rt = getMech3d();
-  if (!rt?.parts[i]) return null;
-  const lp = (M.light.kind === 'step' && L.ledPartsNow(M, S.line)) || [];
-  let em = []; try { em = L.currentEmitters(M, S.line); } catch { em = []; }
-  const ek = JSON.stringify(em.map((e) => [e.pos, e.axis]));
-  if (A.clr && A.clr.rt === rt && A.clr.i === i && A.clr.lp === lp && A.clr.ek === ek) return A.clr.res;
-  const r = partClearance(rt.parts, i, { ledParts: lp, emitters: em });
-  const res = {
+  const M = A.store.mspec, g = selGeom(i), r = g?.clr;
+  if (!r) return null;
+  if (g.clrOut) return g.clrOut;
+  g.clrOut = {
     i, rows: r.parts.map((x) => ({ ...x, name: M.parts[x.part]?.name ?? `부품 ${x.part + 1}` })),
     leds: r.leds.slice(0, 3).map((x) => ({ ...x, name: hitName(M, `l:${x.part}`) })),
     ledMin: r.ledMin, ledAxial: r.ledAxial,
   };
-  A.clr = { rt, i, lp, ek, res };
-  return res;
+  return g.clrOut;
 }
 
 // ---- 자동설계(P4) ----
@@ -1063,18 +1076,24 @@ function propHandlers() {
     },
     // 크기·위치 조절: 장면을 바꾸고 접촉면을 다시 찾는다(같은 면 쌍은 모드 유지). xf = null → 원래대로
     // 새 간섭이 생기면 간섭 직전까지만 적용(limitXform). 직접 배치 LED 는 라인을 따라 다시 놓이므로 고정 LED(STEP)만 장애물
-    onXform: (i, want, note = '') => st.update('material', (m, x) => {
-      let xf = want;
-      x.xfMsg = note ? { part: i, text: note } : null;
-      if (xf) {
-        const rt = getMech3d(), stp = m.light.kind === 'step';
-        let em = []; try { em = stp ? L.currentEmitters(m, x.line) : []; } catch { em = []; }
-        const r = limitXform(rt.raw.parts[i], m.parts[i].xform ?? null, xf, rt.parts.map((p, j) => (j === i ? null : p)), { ledParts: (stp && L.ledPartsNow(m, x.line)) || [], emitters: em });
-        if (r.limited) { xf = r.xf; x.xfMsg = { part: i, text: `${hitName(m, r.hit, x.line)}과(와) 간섭 — 간섭 직전(입력의 ${Math.round(r.t * 100)}%)까지만 적용` }; }
-      }
-      if (xf) m.parts[i].xform = xf; else delete m.parts[i].xform;
-      if (applyPartMods(m.parts)) m.contacts = redetectContacts(m.contacts);
-    }),
+    // 간섭 확인(limitXform)은 큰 부품에서 수 초~수십 초 — Worker 에서 하고 결과로 적용(그사이 장면이 바뀌면 버림)
+    onXform: (i, want, note = '') => {
+      const apply = (xf, msg) => st.update('material', (m, x) => {
+        x.xfMsg = msg ? { part: i, text: msg } : null;
+        if (xf) m.parts[i].xform = xf; else delete m.parts[i].xform;
+        if (applyPartMods(m.parts)) m.contacts = redetectContacts(m.contacts);
+      });
+      if (!want) { apply(null, note); return; }
+      const m = st.mspec, x = st.session, rt = getMech3d(), stp = m.light.kind === 'step';
+      let em = []; try { em = stp ? L.currentEmitters(m, x.line) : []; } catch { em = []; }
+      setStatus('간섭 확인 중…');
+      geomLimit({ cur: rt.parts, raw: rt.raw.parts, led: (stp && L.ledPartsNow(m, x.line)) || NO_LED, i, oldXf: m.parts[i].xform ?? null, newXf: want, emitters: em }).then((r) => {
+        if (!A || getMech3d() !== rt) return;
+        if (r.error || r.stale) { apply(want, `간섭 확인을 못 함(${r.error ?? '장면이 바뀜'}) — 입력값 그대로 적용`); return; }
+        const q = r.lx;
+        apply(q.xf, q.limited ? `${hitName(st.mspec, q.hit, st.session.line)}과(와) 간섭 — 간섭 직전(입력의 ${Math.round(q.t * 100)}%)까지만 적용` : note);
+      });
+    },
     onContact: (i, mode) => st.update('contacts', (m) => { m.contacts[i] = { ...m.contacts[i], mode }; }),
     // 'mech' = 3D 도면에서 지정: 도면 LED 의 발광면 클릭 대기(pick 'mled'). 다른 방식으로 바꾸면 도면 광원 원본을 기구로 되돌림
     onLightKind: (k) => {
