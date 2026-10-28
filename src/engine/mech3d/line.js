@@ -418,6 +418,43 @@ function recenter(pts, closed, R, dt) {
 }
 
 // 등간격 점열의 국소 2차 회귀(Savitzky–Golay, 대칭 창 ±m 점; 열린 경로 끝은 창을 대칭으로 줄임)
+// 한쪽 가장자리가 곧은 띠는 곧은 중심선으로(순수) — 단면 중점을 이으면 폭이 구간마다 다른 면(예: 가운데 1/3 만 얇고 한쪽 모서리는 곧음)에서
+// 중심선이 그 구간만 옆으로 꺾여, 2D 지도·폭 방향 위치가 그 구간만 밀려 보인다(2026-10-28 보고).
+// 조건: 주축(PCA) 방향 1 mm 칸마다 양쪽 가장자리 위치를 재서, 한쪽은 곧고(직선 회귀 RMS ≤ 0.45 셀) 다른 쪽만 들쑥날쑥(RMS ≥ 3배)할 때만.
+// 양쪽이 함께 휘는 띠(호·혹·흔들림·ㄱ자)는 null(원래대로 휜 중심선). 가로 위치 = 단면 중점의 중앙값(가장 흔한 구간의 중심)
+function straightFit(pts, R, width) {
+  const n = pts.length / 2; if (n < 3) return null;
+  let mx = 0, my = 0; for (let i = 0; i < n; i++) { mx += pts[2 * i]; my += pts[2 * i + 1]; } mx /= n; my /= n;
+  let sxx = 0, sxy = 0, syy = 0; for (let i = 0; i < n; i++) { const dx = pts[2 * i] - mx, dy = pts[2 * i + 1] - my; sxx += dx * dx; sxy += dx * dy; syy += dy * dy; }
+  const th = 0.5 * Math.atan2(2 * sxy, sxx - syy), tx = Math.cos(th), ty = Math.sin(th);
+  const us = [];
+  let t0 = Infinity, t1 = -Infinity;
+  for (let i = 0; i < n; i++) { const dx = pts[2 * i] - mx, dy = pts[2 * i + 1] - my, t = dx * tx + dy * ty; us.push(-dx * ty + dy * tx); t0 = Math.min(t0, t); t1 = Math.max(t1, t); }
+  if (Math.max(...us.map(Math.abs)) > width) return null;   // 크게 휜 띠
+  // 1 mm 칸별 가장자리(끝 2 mm 제외)
+  const bw = 1, nb = Math.floor((t1 - t0) / bw); if (nb < 8) return null;
+  const lo = new Float64Array(nb).fill(Infinity), hi = new Float64Array(nb).fill(-Infinity);
+  for (let k = 0; k < R.mask.length; k++) {
+    if (!R.mask[k]) continue;
+    const x = R.x0 + ((k % R.nx) + 0.5) * R.cell - mx, y = R.y0 + (((k / R.nx) | 0) + 0.5) * R.cell - my, t = x * tx + y * ty, u = -x * ty + y * tx, b = Math.floor((t - t0) / bw);
+    if (b < 2 || b >= nb - 2) continue;
+    if (u < lo[b]) lo[b] = u; if (u > hi[b]) hi[b] = u;
+  }
+  const rms = (e) => {   // 칸 번호에 대한 직선 회귀 잔차 RMS
+    const xs = [], ys = []; e.forEach((v, b) => { if (Number.isFinite(v)) { xs.push(b); ys.push(v); } });
+    const m = xs.length; if (m < 6) return Infinity;
+    const ax = xs.reduce((a, v) => a + v, 0) / m, ay = ys.reduce((a, v) => a + v, 0) / m;
+    let sxy2 = 0, sxx2 = 0; for (let i = 0; i < m; i++) { sxy2 += (xs[i] - ax) * (ys[i] - ay); sxx2 += (xs[i] - ax) ** 2; }
+    const k = sxx2 > 0 ? sxy2 / sxx2 : 0; let r = 0; for (let i = 0; i < m; i++) r += (ys[i] - ay - k * (xs[i] - ax)) ** 2;
+    return Math.sqrt(r / m);
+  };
+  const rL = rms(lo), rH = rms(hi), lim = 0.45 * R.cell, straight = Math.min(rL, rH), other = Math.max(rL, rH);
+  if (!(straight <= lim && other >= 3 * Math.max(straight, 0.1 * R.cell))) return null;
+  const uc = [...us].sort((a, b2) => a - b2)[us.length >> 1], cx = mx - uc * ty, cy = my + uc * tx, out = [], m = Math.max(2, Math.ceil((t1 - t0) / 0.25));
+  for (let i = 0; i <= m; i++) { const t = t0 + ((t1 - t0) * i) / m; out.push(cx + t * tx, cy + t * ty); }
+  if ((pts[2 * n - 2] - pts[0]) * tx + (pts[2 * n - 1] - pts[1]) * ty < 0) { const r = []; for (let i = out.length / 2 - 1; i >= 0; i--) r.push(out[2 * i], out[2 * i + 1]); return Float64Array.from(r); }   // 원래 차례
+  return Float64Array.from(out);
+}
 function quadSmooth(pts, closed, m0) {
   const n = pts.length / 2, out = pts.slice();
   for (let i = 0; i < n; i++) {
@@ -575,6 +612,7 @@ export function recognizeLine(parts, faces, dir) {
   // 마지막은 국소 2차 회귀(±1.5mm): 단면 중점의 ½셀 잡음을 지워 접선(toSW/fromSW 의 w 방향)을 안정시키되, 이동평균과 달리 호 반경을 줄이지 않는다
   for (let pass = 0; pass < 2; pass++) pts = smoothResample(recenter(pts, closed, RC, dtC), closed, pass ? 1 : 3, 0.25);
   pts = quadSmooth(pts, closed, 6);
+  if (!closed) { const st = straightFit(pts, RC, width); if (st) pts = st; }   // 거의 곧은 띠 = 곧은 중심선(폭이 구간마다 달라도 꺾이지 않게)
   const { inside } = rasterOps(RC, dtC);
   let ext0 = [], ext1 = [];
   if (!closed) {

@@ -139,23 +139,19 @@ function wireHover(cv) {
 // 2D 광량 분포(v2 평판 화면 수준) — 색 = 최대 대비 %(오른쪽 색 막대 눈금), s·w mm 눈금, LED 위치(노란 점),
 // 최저점 표시(값·위치), 마우스 위치 읽기. equal = 가로세로 같은 축척(실제 비율, 확대 창에서 선택). 모든 치수는 dpr 배
 // v = { G, map, leds:[{s,w}] } · cv._mapv 에 저장 → 마우스 읽기·확대 창이 다시 그림
-const MAP_PAD = { l: 40, r: 64, t: 8, b: 30 };
-// 지도 배치(순수) — 길고 좁은 관측면(길이 ≥ 폭 × 15, 예: 440 × 5.5 mm)은 상자에 그대로 늘리면 폭이 수십 배 과장된다.
-// 길이를 K 줄로 접어 쌓는다(줄마다 segL mm, K = 1~8).
+const MAP_PAD = { l: 40, r: 64, t: 8, b: 30 }, EXAG_MAX = 8;
+// 지도 배치(순수) — 한 줄(가로 = 길이 s, 1D 프로파일과 같은 가로축). 길고 좁은 관측면(예: 440 × 5.5 mm)은 상자 높이를 다 쓰면
+// 폭이 수십 배 과장되므로 폭 확대를 EXAG_MAX 배까지만(띠 높이 최소 28 px) — 띠는 상자 가운데. (예전엔 여러 줄로 접었지만 1D 프로파일과 맞춰 보기 어려움)
 // equal = 가로세로 같은 축척(확대 창에서 선택) — 줄 안에서 정확히 1:1.
 // 반환 { ox, oy, PW, rowH, pitch, K, segL, w0, w1, L, xy(s, w) → [x, y], at(x, y) → [s, w] | null, exag(폭 과장 배수) }
 export function mapLayout(G, W, H, dpr = 1, equal = false) {
   const w0 = G.w0, w1 = G.w0 + G.nw * G.cell, wd = w1 - w0 || 1, L = G.L;
   let ox = MAP_PAD.l * dpr, oy = MAP_PAD.t * dpr, PW = W - (MAP_PAD.l + MAP_PAD.r) * dpr;
   const PH = H - (MAP_PAD.t + MAP_PAD.b) * dpr, gap = 16 * dpr;
-  // K: 줄 높이 ≥ 14 px 인 것 중 폭 과장(줄 세로 축척 ÷ 가로 축척)이 1.5배에 가장 가까운 것(조금 과장해야 폭 방향 얼룩이 보임)
-  let K = 1;
-  if (L / wd >= 15) {
-    let best = Infinity;
-    for (let k = 1; k <= 8; k++) { const rh = (PH - gap * (k - 1)) / k; if (rh < 14 * dpr) break; const e = Math.abs(Math.log(rh / wd / (PW / (L / k)) / 1.5)); if (e < best) { best = e; K = k; } }
-  }
+  const K = 1;
   const segL = L / K;
-  let rowH = K > 1 ? (PH - gap * (K - 1)) / K : PH;
+  let rowH = Math.min(PH, Math.max(28 * dpr, wd * (PW / L) * EXAG_MAX));
+  if (!equal) oy += (PH - rowH) / 2;
   if (equal) { const sc = Math.min(PW / segL, rowH / wd), pw = segL * sc, rh = wd * sc; ox += (PW - pw) / 2; oy += K > 1 ? 0 : (PH - rh) / 2; PW = pw; rowH = rh; }
   const pitch = rowH + (K > 1 ? gap : 0);
   const rowOf = (s) => Math.max(0, Math.min(K - 1, Math.floor(s / segL - 1e-9)));
@@ -171,7 +167,7 @@ function mapBox(cv, G, dpr, equal) { return mapLayout(G, cv.width, cv.height, dp
 export function drawMap(cv, v, dpr = 1, hover = null, equal = false) {
   cv._mapv = { v, dpr, equal };
   LUT ??= buildLut();
-  const { G, map, leds = [] } = v, x = cv.getContext('2d'), W = cv.width, H = cv.height, B = mapBox(cv, G, dpr, equal), { ox, oy, PW, rowH, pitch, K, segL, w0, w1, L, xy } = B;
+  const { G, map } = v, x = cv.getContext('2d'), W = cv.width, H = cv.height, B = mapBox(cv, G, dpr, equal), { ox, oy, PW, rowH, pitch, K, segL, w0, w1, L, xy } = B;
   x.clearRect(0, 0, W, H);
   let mx = 0; for (let k = 0; k < map.length; k++) if (G.valid[k] && map[k] > mx) mx = map[k];
   // 칸 그림(가로 = s, 세로 위 = +w) → 줄마다 잘라 붙임(전체 띠를 K 배 길이로 그리고 그 줄 영역만 보이게)
@@ -201,28 +197,21 @@ export function drawMap(cv, v, dpr = 1, hover = null, equal = false) {
   }
   const yEnd = oy + (K - 1) * pitch + rowH;
   x.fillStyle = '#8a93a6'; x.textAlign = 'right'; x.textBaseline = 'top';
-  x.fillText(K > 1 ? `s (mm) · 길이를 ${K}줄로 접음(줄마다 ${+segL.toFixed(1)} mm)${B.exag > 1.6 ? ` · 폭 ×${B.exag.toFixed(1)}` : ''}` : 's (mm)', ox + PW, yEnd + 17 * dpr);
+  x.fillText(`s (mm)${B.exag > 1.6 ? ` · 폭 ×${B.exag.toFixed(1)} 확대` : ''}`, ox + PW, yEnd + 17 * dpr);
   // w 눈금(첫 줄 왼쪽)
   const ws = niceStep(w1 - w0, Math.max(2, Math.round(rowH / (28 * dpr)))), WY = (w) => oy + ((w1 - w) / (w1 - w0)) * rowH;
   x.textBaseline = 'middle'; x.strokeStyle = 'rgba(128,140,160,.6)';
   for (let w = Math.ceil(w0 / ws - 1e-9) * ws; w <= w1 + 1e-9; w += ws) { x.beginPath(); x.moveTo(ox - 3 * dpr, WY(w)); x.lineTo(ox, WY(w)); x.stroke(); x.fillText(`${+w.toFixed(1)}`, ox - 5 * dpr, WY(w)); }
   x.save(); x.translate(10 * dpr, oy + rowH / 2); x.rotate(-Math.PI / 2); x.textAlign = 'center'; x.fillText('w (mm)', 0, 0); x.restore();
-  // LED 위치
-  for (const p of leds) {
-    if (p.s < -1e-9 || p.s > L + 1e-9 || p.w < w0 - 1e-9 || p.w > w1 + 1e-9) continue;
-    const [px, py] = xy(p.s, p.w);
-    x.fillStyle = 'rgba(255,214,64,.95)'; x.strokeStyle = 'rgba(20,26,38,.8)'; x.lineWidth = dpr;
-    x.beginPath(); x.arc(px, py, 2.6 * dpr, 0, 2 * Math.PI); x.fill(); x.stroke();
-  }
   // 색 막대(0~100%) + 최저 표시
-  const PH = yEnd - oy, bx = W - (MAP_PAD.r - 12) * dpr, bw = 11 * dpr;
-  for (let i = 0; i < PH; i++) { const l = lutIndex(1 - i / PH) * 3; x.fillStyle = `rgb(${LUT[l]},${LUT[l + 1]},${LUT[l + 2]})`; x.fillRect(bx, oy + i, bw, 1.5); }
-  x.strokeStyle = 'rgba(128,140,160,.7)'; x.strokeRect(bx, oy, bw, PH);
+  const cTop = MAP_PAD.t * dpr, PH = H - (MAP_PAD.t + MAP_PAD.b) * dpr, bx = W - (MAP_PAD.r - 12) * dpr, bw = 11 * dpr;
+  for (let i = 0; i < PH; i++) { const l = lutIndex(1 - i / PH) * 3; x.fillStyle = `rgb(${LUT[l]},${LUT[l + 1]},${LUT[l + 2]})`; x.fillRect(bx, cTop + i, bw, 1.5); }
+  x.strokeStyle = 'rgba(128,140,160,.7)'; x.strokeRect(bx, cTop, bw, PH);
   x.fillStyle = '#8a93a6'; x.textAlign = 'left'; x.textBaseline = 'middle';
-  for (let p = 0; p <= 100; p += 20) x.fillText(`${p}%`, bx + bw + 4 * dpr, oy + (1 - p / 100) * PH);
+  for (let p = 0; p <= 100; p += 20) x.fillText(`${p}%`, bx + bw + 4 * dpr, cTop + (1 - p / 100) * PH);
   if (kMin >= 0) {
     const t = map[kMin] / mx, i = Math.floor(kMin / G.nw), j = kMin % G.nw, cs = (i + 0.5) * G.ds, cw = w0 + (j + 0.5) * G.cell, [px, py] = xy(cs, cw);
-    x.strokeStyle = '#ffffff'; x.lineWidth = 1.5 * dpr; x.beginPath(); x.moveTo(bx - 4 * dpr, oy + (1 - t) * PH); x.lineTo(bx + bw, oy + (1 - t) * PH); x.stroke();
+    x.strokeStyle = '#ffffff'; x.lineWidth = 1.5 * dpr; x.beginPath(); x.moveTo(bx - 4 * dpr, cTop + (1 - t) * PH); x.lineTo(bx + bw, cTop + (1 - t) * PH); x.stroke();
     x.beginPath(); x.arc(px, py, 5 * dpr, 0, 2 * Math.PI); x.stroke();
     const lbl = `최저 ${(t * 100).toFixed(1)}% (s ${cs.toFixed(1)}, w ${cw.toFixed(1)})`, right = px > ox + PW * 0.6;
     x.font = `600 ${10.5 * dpr}px sans-serif`; const tw = x.measureText(lbl).width, lx = right ? px - 8 * dpr - tw : px + 8 * dpr, ly = Math.max(oy + 2 * dpr, Math.min(yEnd - 15 * dpr, py - 7 * dpr));

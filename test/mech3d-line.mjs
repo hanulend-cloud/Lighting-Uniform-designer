@@ -193,4 +193,12 @@ for (const rh of [0.5, 1.5, 3]) {   // N3: 띠 안의 작은 구멍(나사 보�
     ok(e <= 0.2, `V3D-5 넓은 고리 R20 폭 16: (s,w) 최대 오차 ${e.toFixed(3)} (≤0.2)`);
   }
 }
+{ // 가운데 1/3 만 얇은 띠(한쪽 모서리 x=0 은 곧음) — 중심선이 그 구간만 꺾이지 않아야(2D 지도·폭 위치가 밀려 보이던 문제)
+  const P = [], T = [], F = [];
+  const quad = (x0, x1, y0, y1) => { const n = P.length / 3; P.push(x0, y0, 30, x1, y0, 30, x1, y1, 30, x0, y1, 30); T.push(n, n + 1, n + 2, n, n + 2, n + 3); F.push(0, 0); };
+  quad(-5.5, 0, 0, 147); quad(-3.5, 0, 147, 293); quad(-5.5, 0, 293, 440);
+  const ln = recognizeLine([{ positions: new Float32Array(P), triangles: new Uint32Array(T), faceIds: new Uint32Array(F) }], [{ part: 0, face: 0 }], [0, 0, 1]);
+  const wE = [50, 200, 350].map((y) => ln.toSW(...ln.to2D([0, y, 30]))[1]);
+  ok(Math.max(...wE) - Math.min(...wE) < 0.05 && Math.abs(wE[0] - 2.75) < 0.1, `가운데만 얇은 띠: 곧은 모서리 w ${wE.map((v) => v.toFixed(2)).join(' / ')} (같아야)`);
+}
 done();
