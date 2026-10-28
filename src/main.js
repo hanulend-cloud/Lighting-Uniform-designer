@@ -396,8 +396,8 @@ function importMech3d(file, onDone = null) {
           say('불러오기 취소 — 저장된 3D 설정은 그대로 보관됨'); return;
         }
         m3app.unmount();
-        setMech3dMesh(file.name, m.data.parts);
-        let ms = initialMech3dSpec(), restored = same ? restorePending(pend, ms) : null;
+        setMech3dMesh(file.name, m.data.parts, m.data.prep);   // BVH·합친 메쉬·접촉면은 Worker 가 만들어 옴
+        let ms = initialMech3dSpec(m.data.prep?.contacts ?? null), restored = same ? restorePending(pend, ms) : null;
         if (restored) {
           ms = restored;
           if (applyPartMods(ms.parts)) ms.contacts = redetectContacts([...(pend.contacts ?? []), ...ms.contacts]);   // 크기·위치·형상 변경 반영 후 접촉면 재검출(같은 면 키 mode 유지)

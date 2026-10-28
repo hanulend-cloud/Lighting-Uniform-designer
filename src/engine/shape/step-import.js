@@ -61,10 +61,23 @@ export function readStepMesh(oc, text, { linDefl = 0.01, angDefl = 0.1 } = {}) {
   };
 }
 
+// 솔리드 외곽 대각선(mm)
+function diagOf(oc, shape) {
+  const b = new oc.Bnd_Box_1(); oc.BRepBndLib.Add(shape, b, true);
+  const lo = b.CornerMin(), hi = b.CornerMax(), d = Math.hypot(hi.X() - lo.X(), hi.Y() - lo.Y(), hi.Z() - lo.Z()); b.delete();
+  return d;
+}
 // 모든 솔리드 → [{ positions, triangles, faceIds, faceCount, volume }] (부피 내림차순)
-export function readStepParts(oc, text, { linDefl = 0.01, angDefl = 0.1 } = {}) {
+// 작은 부품이 여럿 반복되면(LED 등 — 대각선 ≤ 작은 기준, 8개 이상) 그 부품들은 거칠게(coarse) 나눔: 렌즈·리드·필렛 같은 작은 곡면을
+// 5.7° 각도 오차로 나누면 LED 하나에 수만 삼각형 → 40개면 수백만이 되어 화면이 멈춤. LED 몸체는 광원 모델로 바뀌거나 반사체라 정밀도 영향이 작음.
+export function readStepParts(oc, text, { linDefl = 0.01, angDefl = 0.1, coarse = { linDefl: 0.03, angDefl: 0.35 }, smallDiag = 20, smallMin = 8 } = {}) {
   const { rd, solids } = readSolids(oc, text);
-  const parts = solids.map(({ s, v }) => ({ ...meshSolid(oc, s, linDefl, angDefl), volume: v }));
+  const diag = solids.map(({ s }) => diagOf(oc, s)), big = Math.max(...diag);
+  const small = diag.map((d) => d <= smallDiag && d <= big * 0.2), nSmall = small.filter(Boolean).length, useCoarse = nSmall >= smallMin;
+  const parts = solids.map(({ s, v }, i) => {
+    const q = useCoarse && small[i] ? coarse : { linDefl, angDefl };
+    return { ...meshSolid(oc, s, q.linDefl, q.angDefl), volume: v };
+  });
   rd.delete();
   return parts;
 }

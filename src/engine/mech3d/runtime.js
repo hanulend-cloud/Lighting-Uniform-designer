@@ -11,13 +11,15 @@ let raw = null, xkey = '', pmemo = [];   // raw = 불러온 원본 장면(변환
 let scene = null;   // { name, parts: [{ positions, triangles, faceIds, faceCount, volume, bvh }], combined, bvh }
 
 // 전역을 바꾸지 않는 장면 메쉬 생성(계산 작업용) — 부품별 BVH + 결합 메쉬 + 결합 BVH
-export function buildSceneMesh(name, rawParts) {
+// pre = Worker 가 미리 만든 { parts(BVH 포함), combined, bvh }(scene-prep) — 있으면 그대로 씀(화면 스레드에서 다시 만들지 않음)
+export function buildSceneMesh(name, rawParts, pre = null) {
+  if (pre?.combined && pre?.bvh) return { name, parts: pre.parts, combined: pre.combined, bvh: pre.bvh };
   const parts = rawParts.map((p) => (p.bvh ? p : { ...p, bvh: buildBvh(p.positions, p.triangles) }));
   const combined = combineParts(parts);
   return { name, parts, combined, bvh: buildBvh(combined.positions, combined.triangles) };
 }
-export function setMech3dMesh(name, rawParts) {
-  raw = buildSceneMesh(name, rawParts); raw.raw = raw; xkey = ''; pmemo = [];
+export function setMech3dMesh(name, rawParts, pre = null) {
+  raw = buildSceneMesh(name, rawParts, pre); raw.raw = raw; xkey = ''; pmemo = [];
   scene = raw;
   return scene;
 }
@@ -63,7 +65,8 @@ export function redetectContacts(old = []) {
 }
 
 // 새로 불러온 기구의 사용자 지정 초기값(spec.mech3d)
-export function initialMech3dSpec() {
+// contacts = Worker 가 미리 찾은 접촉면(없으면 여기서 찾음)
+export function initialMech3dSpec(contacts = null) {
   if (!scene) return null;
   return {
     name: scene.name,
@@ -71,7 +74,7 @@ export function initialMech3dSpec() {
       const b = bounds(p.positions);
       return { ...defaultPart(i, `부품 ${i + 1}`, p.volume), size: [b[3] - b[0], b[4] - b[1], b[5] - b[2]] };
     }),
-    contacts: findContacts(scene.parts).map((c) => ({ ...c, mode: 'contact' })),
+    contacts: (contacts ?? findContacts(scene.parts)).map((c) => ({ ...c, mode: 'contact' })),
     light: defaultLight(), observe: defaultObserve(), checks: defaultChecks(),
   };
 }
@@ -95,12 +98,22 @@ export async function saveMech3dIDB() {
     tx.oncomplete = res; tx.onerror = () => rej(tx.error);
   });
 }
+// 복원 때 장면 준비를 Worker 에서(브라우저) — Worker 가 없거나 실패하면 null(화면 스레드에서 만듦)
+function prepInWorker(parts) {
+  if (typeof Worker === 'undefined') return Promise.resolve(null);
+  return new Promise((res) => {
+    let w; try { w = new Worker(new URL('./mech3d-worker.js', import.meta.url), { type: 'module' }); } catch { res(null); return; }
+    w.onmessage = (m) => { if (m.data.stage) return; w.terminate(); res(m.data.prep ?? null); };
+    w.onerror = () => { w.terminate(); res(null); };
+    w.postMessage({ prep: parts.map(({ positions, triangles, faceIds, faceCount, volume }) => ({ positions, triangles, faceIds, faceCount, volume })) });
+  });
+}
 export async function loadMech3dIDB() {
   if (typeof indexedDB === 'undefined') return null;
   try {
     const d = await idb();
     const v = await new Promise((res, rej) => { const r = d.transaction(STORE).objectStore(STORE).get(KEY); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); });
-    return v ? setMech3dMesh(v.name, v.parts) : null;
+    return v ? setMech3dMesh(v.name, v.parts, await prepInWorker(v.parts)) : null;
   } catch { return null; }
 }
 
