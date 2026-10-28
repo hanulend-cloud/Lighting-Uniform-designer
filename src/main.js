@@ -218,7 +218,7 @@ function clearShape() {
 // ---- 상단 메뉴(파일·편집·보기·계산·설정·도움말) ----
 function resetAll() { spec = structuredClone(DEFAULT_SPEC); markSoloReset(); mount(); m3app.unmount(); m3app.resetWorkers(); applyMode(); schedule(); }
 function newProject() {
-  if (!confirm('지금 프로젝트를 닫고 v3 기준 프로젝트로 새로 시작할까요?\n(저장하지 않은 변경은 사라집니다 — 먼저 [파일 › 프로젝트 저장] 권장)')) return;
+  if (!confirm('지금 프로젝트를 닫고 예제 프로젝트로 새로 시작할까요?\n(저장하지 않은 변경은 사라집니다 — 먼저 [파일 › 프로젝트 저장] 권장)')) return;
   m3app.unmount(); spec.mech3d = null; spec.mech3dPending = null; spec.mode = 'mech3d'; persist(); applyMode(); loadSampleProject(false);
 }
 const GUIDE = `사용 순서 (3D 기구 설계)
@@ -248,7 +248,7 @@ function setupMenubar() {
   const m3 = () => m3app.isMounted(), flatMode = () => spec.mode === 'flat';
   const menus = [
     { label: '파일', items: [
-      { id: 'new', label: '새 프로젝트 (v3 기준)' },
+      { id: 'new', label: '새 프로젝트 (예제에서 시작)' },
       { id: 'open-json', label: '프로젝트 열기 (JSON)…' },
       { id: 'save-json', label: '프로젝트 저장 (JSON 내보내기)' },
       '-',
@@ -312,10 +312,9 @@ function setupMenubar() {
     if (id === 'guide') return alert(GUIDE);
     if (id === 'about') return alert(`Uniform Design Simulator ${APP_VERSION} (${APP_DATE})
 3D 기구 설계 — 도광·확산 부품의 균일도 해석과 자동설계
-기준 프로젝트: v3 (평판 구조 + LED STEP 10개 1열)`);
+예제 프로젝트: 평판 구조 + LED STEP 10개 1열`);
     m3app.command(id);
   };
-  $('#app-ver').textContent = APP_VERSION;
   mountMenubar($('#menubar'), menus, run);
 }
 
@@ -363,9 +362,9 @@ function shelveMech3d() { spec.mech3dPending = spec.mech3d; spec.mech3d = null; 
 // 3D 배경 테마는 사용자가 따로 고른 적이 없을 때만 v3 값으로. 프로젝트가 없는 첫 실행이면 자동으로 연다.
 async function loadSampleProject(ask = true) {
   const say = (t) => { $('#m3-start-msg').textContent = t; };
-  if (ask && spec.mech3dPending && !confirm('보관 중인 3D 설정이 있습니다. v3 기준 프로젝트로 바꿀까요?')) return;
+  if (ask && spec.mech3dPending && !confirm('보관 중인 3D 설정이 있습니다. 예제 프로젝트로 바꿀까요?')) return;
   try {
-    say('v3 기준 프로젝트 불러오는 중…');
+    say('예제 프로젝트 불러오는 중…');
     const get = async (url) => { const r = await fetch(url, { cache: 'no-store' }); if (!r.ok) throw new Error(`${url} ${r.status}`); return r; };
     const P = await (await get('data/projects/v3.json')).json();
     try { if (P.theme && !localStorage.getItem('uds.m3.theme')) localStorage.setItem('uds.m3.theme', P.theme); } catch {}
@@ -376,7 +375,7 @@ async function loadSampleProject(ask = true) {
       for (let i = 0; i < 200 && !m3app.isMounted(); i++) await new Promise((r) => setTimeout(r, 100));
       m3app.importLed(led);
     });
-  } catch (e) { say(`v3 기준 프로젝트 불러오기 실패: ${e.message ?? e}`); }
+  } catch (e) { say(`예제 프로젝트 불러오기 실패: ${e.message ?? e}`); }
 }
 // 기구 STEP 불러오기(평판·3D 모드 공통) — spec.mech3d 를 새로 만들고 3D 모드로
 function importMech3d(file, onDone = null) {
@@ -916,7 +915,7 @@ window.addEventListener('beforeunload', () => m3app.flush());
 forceHeatOnNextRun = true;   // 첫 계산에 히트맵 포함
 applyMode();
 document.body.classList.remove('booting');   // 시작 화면 가림 해제 — 모드가 정해지기 전 예전(평판) 화면이 잠깐 보이지 않게
-// 프로젝트 없는 첫 실행, 또는 기구만 불러오고 아무것도 정하지 않은(광원·관측면 없음) 빈 프로젝트 = v3 기준 프로젝트
+// 프로젝트 없는 첫 실행, 또는 기구만 불러오고 아무것도 정하지 않은(광원·관측면 없음) 빈 프로젝트 = 예제 프로젝트(data/projects/v3.json)
 const blankM3 = (m) => !!m && (m.light?.kind ?? 'none') === 'none' && !(m.observe?.faces?.length);
 if (spec.mode === 'mech3d' && ((!spec.mech3d && !spec.mech3dPending) || (blankM3(spec.mech3d) && !spec.mech3dPending))) { if (spec.mech3d) { m3app.unmount(); spec.mech3d = null; } loadSampleProject(false); }
 schedule();
