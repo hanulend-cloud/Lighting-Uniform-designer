@@ -1,5 +1,6 @@
 // UI 배선 + 실시간 재계산 — 프로젝트.md §3 출력6
 import { bundleJson, parseMaterialFile, loadClear, saveClear, clearImport } from './model/material-io.js';
+import { isAdmin, setAdmin } from './model/admin.js';
 import { DEFAULT_SPEC, LEVEL_DEFAULTS } from './model/defaults.js';
 import { buildGeometry, combinedEffect, activeLevels, effectiveEdgeMargin } from './model/geometry.js';
 import { computeField, computeCameraLuminance, evalGrid, l2Describe } from './engine/directLit.js';
@@ -256,8 +257,8 @@ function setupMenubar() {
       { id: 'export-mech', label: '3D 기구 STEP 내보내기 (수정 반영)', enabled: m3 },
       { id: 'export-flat', label: '평판 형상 STEP 내보내기', enabled: () => flatMode() && !!last },
       '-',
-      { id: 'mat-export', label: '소재·표면 DB 내보내기 (JSON)' },
-      { id: 'mat-import', label: '소재·표면 DB 불러오기…' },
+      { id: 'mat-export', label: '소재·표면 DB 내보내기 (JSON)', enabled: isAdmin },
+      { id: 'mat-import', label: '소재·표면 DB 불러오기…', enabled: isAdmin },
       '-',
       { id: 'reset', label: '기본값으로 초기화…' },
     ] },
@@ -265,8 +266,6 @@ function setupMenubar() {
       { id: 'deselect', label: '선택 해제', key: 'Esc', enabled: m3 },
       { id: 'led-pick', label: 'LED 발광면 지정', enabled: m3 },
       { id: 'obs-pick', label: '관측면 지정', enabled: m3 },
-      '-',
-      { id: 'refl-db', label: '반사 소재 DB…', enabled: m3 },
     ] },
     { label: '보기', items: [
       { id: 'view:top', label: '평면 (XY)', enabled: m3 }, { id: 'view:front', label: '정면 (XZ)', enabled: m3 },
@@ -288,6 +287,9 @@ function setupMenubar() {
     { label: '설정', items: [
       { id: 'target', label: '목표 균일도 · 계산 정밀도 · 설계 점검 기준…', enabled: m3 },
       { id: 'auto', label: '자동설계 기본값 (Milky 상한 · 보완 자동 추가)…', enabled: m3 },
+      '-',
+      { id: 'admin', label: '관리자 모드 (소재 DB 관리)', checked: isAdmin },
+      { id: 'mat-db', label: '소재 DB 관리…', enabled: () => m3() && isAdmin() },
     ] },
     { label: '도움말', items: [{ id: 'guide', label: '사용 순서' }, { id: 'about', label: '버전 정보' }] },
   ];
@@ -303,7 +305,8 @@ function setupMenubar() {
     if (id === 'reset') { if (confirm('모든 설정을 기본값으로 되돌릴까요? (불러온 기구·LED 설정도 지워짐)')) resetAll(); return; }
     if (id === 'mode-3d') { spec.mode = 'mech3d'; persist(); applyMode(); return; }
     if (id === 'mode-flat') { spec.mode = 'flat'; persist(); applyMode(); schedule(); return; }
-    if (id === 'refl-db') return m3app.command('target');
+    if (id === 'mat-db') return m3app.openMaterialDb();
+    if (id === 'admin') { setAdmin(!isAdmin()); return m3app.adminChanged(); }
     if (id === 'paths') return m3app.setPathsOn(!m3app.pathsOn());
     if (id === 'xray') return m3app.setXrayOn(!m3app.xrayOn());
     if (id === 'guide') return alert(GUIDE);

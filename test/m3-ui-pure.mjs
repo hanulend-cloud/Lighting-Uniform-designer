@@ -6,7 +6,7 @@ import { checkLabels, statusWord, statusIcon, checkAria, isActivateKey, esc as e
 import { ramp, NO_DATA } from '../src/ui/m3/colormap.js';
 import { defaultLight, defaultObserve, defaultChecks } from '../src/engine/mech3d/defs.js';
 import { defaultPart, setPartMaterial, setPartMaterialParam } from '../src/engine/mech3d/materials.js';
-import { setPartTab, meshInfo, partHeaderText, reflRowHtml, reflAddFormHtml, partToDbMaterial, renderPartProps, kindSegHtml, ledDistHtml, partTitleText, xfSummaryText, sectionOpen, resetSections } from '../src/ui/mech3d-panel.js';
+import { setPartTab, meshInfo, partHeaderText, reflAddFormHtml, renderPartProps, materialPickHtml, ledDistHtml, partTitleText, xfSummaryText, sectionOpen, resetSections } from '../src/ui/mech3d-panel.js';
 import { DEFAULT_FINISH_CATALOG, finishCandidatesFor, catalogOf } from '../src/engine/mech3d/housing-led.js';
 import { reflDbHtml } from '../src/ui/mech3d-light-panel.js';
 import { stepLayoutRowHtml, clampVirtual, virtCountMax, ledRowsHtml, defaultRowGap } from '../src/ui/mech3d-light-panel.js';
@@ -233,9 +233,11 @@ ok(clampCap(12) === 9.9 && clampCap(0.1) === 0.5 && clampCap(3) === 3 && clampCa
   const h0 = card({ avail: a, sel: { housing: true, housingPart: 1 }, running: null, names: ['LGP', '케이스'], housingMat: null });
   ok(h1.includes('백색 PC(일반 착색) · 최대 90%') && /data-ad="housingSpecial" checked/.test(h1) && h1.includes('특수 표면처리 허용'), '카드 ④: 소재·상한 · 특수 허용 체크');
   ok(h0.includes('소재 미지정') && /data-ad="housingSpecial"(?! checked)/.test(h0) && !card({ avail: a, sel: { housing: false }, running: null }).includes('housingSpecial'), '카드 ④: 소재 미지정 안내 · ④ 끄면 없음');
-  const r = reflRowHtml({ material: { kind: 'opaque' }, reflMaterial: 'pc-white' }, C), r0 = reflRowHtml({ material: { kind: 'opaque' } }, C);
-  ok(/<option value="pc-white" selected>/.test(r) && (r.match(/<option/g) ?? []).length === 16 && !r.includes('coat-') && r0.includes('<option value="" selected>— 미지정 —'), '부품 편집기: 반사 소재(미지정 + 일반 15개)');
-  ok(reflRowHtml({ material: { kind: 'milky' } }, C) === '', '불투명 아님 → 반사 소재 없음');
+  { const { materialGroups } = await import('../src/engine/mech3d/material-pick.js');
+    const G = materialGroups({ milky: [{ id: 'm1', name: 'DQ5122', n: 1.586 }], clear: [{ id: 'u:A', name: 'A', n: 1.58, T: 0.9, tRef: 2 }], refl: C });
+    const r = materialPickHtml({ material: { kind: 'opaque' }, reflMaterial: 'pc-white' }, G), r0 = materialPickHtml({ material: { kind: 'milky', dbId: 'm1' } }, G);
+    ok(/<option value="opaque:pc-white" selected>/.test(r) && !r.includes('coat-') && r.includes('<optgroup label="투명">') && r.includes('value="clear:u:A"') && r.includes('value="wt"') && /value="milky:m1" selected/.test(r0), '소재 고르기: DB 전체 · 종류별 묶음 · 지금 소재 선택');
+    ok(materialPickHtml({ material: { kind: 'opaque' }, reflMaterial: 'gone' }, G).includes('<option value="" selected>없는 소재'), '소재 고르기: 지워진 DB 항목 → 없는 소재'); }
   const q = setPartMaterial({ ...defaultPart(0, 'c', 1), reflMaterial: 'pc-white', coating: 'coat-white' }, 'opaque');
   ok(!('reflMaterial' in q) && !('coating' in q), '소재 종류 바꾸면 반사 소재·특수 표시 해제');
   const t = reflDbHtml(catalogOf(null)), U = { ...catalogOf(null)[1], id: 'u1', name: '사내 PC', origin: 'user', status: 'measured', nSamples: 3 }, t1 = reflDbHtml([U]);
@@ -245,23 +247,12 @@ ok(clampCap(12) === 9.9 && clampCap(0.1) === 0.5 && clampCap(3) === 3 && clampCa
   ok(t2.includes('data-lp-addv') && t2.includes('data-lp-addok="u1"') && t2.includes('<option>SCI 8°/d</option>') && t2.includes('data-lp-addn'), '소재 DB: 측정값 추가 인라인(값 %·조건·메모)');
   const sp = reflDbHtml([{ ...catalogOf(null).find((e) => e.special), id: 'u2', origin: 'user' }]);
   ok(!/data-lp-cat="u2" data-lp-catk="R"/.test(sp) && /data-lp-cat="u2" data-lp-catk="max"/.test(sp) && sp.includes('특수'), '소재 DB: 특수 처리 = 상한만');
-  // 부품 속성: 그룹·상태·없는 소재·복사·추가 양식
-  const CU = [...catalogOf(null), U];
-  const g = reflRowHtml({ material: { kind: 'opaque' }, reflMaterial: 'u1' }, CU);
-  ok(g.includes('<optgroup label="기본">') && g.includes('<optgroup label="사용자">') && /<option value="u1" selected>사내 PC · 실측 3회/.test(g) && g.includes('백색 ABS · 예시') && !g.includes('data-m3-reflcopy') && g.includes('data-m3-refladd'), '반사 소재: 기본/사용자 그룹 · 상태 · [＋ 측정값으로 소재 추가]');
-  ok(r.includes('data-m3-reflcopy') && !r0.includes('data-m3-reflcopy'), '반사 소재: 기본 항목 선택 → [복사해서 수정]');
-  const gm = reflRowHtml({ material: { kind: 'opaque' }, reflMaterial: 'gone-1' }, C);
-  ok(/<option value="gone-1" selected>없는 소재\(gone-1\) — 다시 고르세요/.test(gm) && gm.includes('— 미지정 —</option>') && !/value="" selected/.test(gm), '반사 소재: DB 에 없는 id → 없는 소재 표시');
-  const fm = reflRowHtml({ material: { kind: 'opaque' } }, C, { addOpen: true, msg: '이름을 입력하세요' }), f0 = reflAddFormHtml();
-  ok(fm.includes('data-m3-raok') && fm.includes('이름을 입력하세요') && ['name', 'kind', 'values', 'cond', 'note', 'max'].every((k) => f0.includes(`data-m3-ra="${k}"`)) && f0.includes('<option value="metal">경면</option>') && f0.includes('<option>0°/45°</option>') && !r.includes('data-m3-raok'), '추가 양식: 이름·종류·값 %·조건·메모·상한');
-  ok(finishText({ ...W(0.96), coating: 'u-coat' }, [...C, { id: 'u-coat', name: '사내 반사시트', kind: 'whiteDiffuse', R: null, max: 0.96, special: true }]) === '백색 96% (특수: 사내 반사시트)' && finishText({ ...W(0.97), coating: 'coat-white' }, C) === '백색 97% (특수: 고반사 도장)', '면 처리 문구: 사용자 특수 항목');
-  // 투과 부품에 실측 소재 적용 — 투명·백색 투과 → Milky 로
-  const mk = partToDbMaterial({ ...defaultPart(0, 'a', 1), material: { kind: 'milky', dbId: '', milky: 2, resin: 'PC' } }, 'm1'), cl = partToDbMaterial(setPartMaterial(defaultPart(0, 'b', 1), 'clear'), 'm1');
-  ok(mk.material.dbId === 'm1' && mk.material.milky === 2 && cl.material.kind === 'milky' && cl.material.dbId === 'm1', '실측 소재 적용: Milky 유지 · 투명 → Milky'); }
+  const f0 = reflAddFormHtml(), fm = reflAddFormHtml('이름을 입력하세요');
+  ok(fm.includes('data-m3-raok') && fm.includes('이름을 입력하세요') && ['name', 'kind', 'values', 'cond', 'note', 'max'].every((k) => f0.includes(`data-m3-ra="${k}"`)) && f0.includes('<option value="metal">경면</option>') && f0.includes('<option>0°/45°</option>'), '추가 양식: 이름·종류·값 %·조건·메모·상한');
+  ok(finishText({ ...W(0.96), coating: 'u-coat' }, [...C, { id: 'u-coat', name: '사내 반사시트', kind: 'whiteDiffuse', R: null, max: 0.96, special: true }]) === '백색 96% (특수: 사내 반사시트)' && finishText({ ...W(0.97), coating: 'coat-white' }, C) === '백색 97% (특수: 고반사 도장)', '면 처리 문구: 사용자 특수 항목'); }
+
 { // 부품 속성 정리: 제목 · 소재 종류 분할 단추 · 간격 한 줄 · 접는 구역(다시 그려도 열림 유지)
   ok(partTitleText({ name: '부품 2', size: [116, 16, 2] }, null) === '부품 2 · 116×16×2 mm' && partTitleText({ name: 'a', size: [20, 5, 1], xform: { scale: [2, 2, 2] } }, { size: [40.04, 10, 2.25] }) === 'a · 40×10×2.3 mm', '제목: 이름 · 크기 mm(부피 없음)');
-  const seg = kindSegHtml('opaque');
-  ok((seg.match(/<button/g) ?? []).length === 4 && seg.includes('data-m3-kind="opaque" aria-pressed="true"') && seg.includes('data-m3-kind="milky" aria-pressed="false"') && seg.includes('>반투과 백색<') && seg.includes('role="group"'), '소재 종류: 4 단추 · aria-pressed');
   const ld = ledDistHtml({ rows: [], leds: [], ledMin: { led: 2, dist: 3.46 }, ledAxial: { led: 2, dist: 3.1 } });
   ok(ld.includes('LED까지 <b class="led">3.5 mm</b>') && ld.includes('(LED 3)') && ld.includes('축 방향 <b>3.1 mm</b>') && ledDistHtml(null) === '' && ledDistHtml({ rows: [], leds: [], ledMin: null }) === '', 'LED 까지 거리 한 줄 · 없으면 표시 안 함');
   ok(xfSummaryText({ size: [20, 10, 2], xform: { offset: [2, 0, 0], scale: [1, 1, 3] }, shapeMod: {} }, { center0: [10, 5, 1], size0: [20, 10, 2] }) === '위치 12, 5, 1 · 크기 20×10×6 · 형상 변경됨' && xfSummaryText({ size: [20, 10, 2] }, null) === '크기 20×10×2', '크기·위치 요약');
@@ -274,12 +265,14 @@ ok(clampCap(12) === 9.9 && clampCap(0.1) === 0.5 && clampCap(3) === 3 && clampCa
   const sel = { part: 1, face: null, clearance: clr, xfInfo: { center0: [0, 0, 0], size0: [10, 10, 2], lim: null }, catalog: catalogOf(null), meshInfo: null };
   renderPartProps(el, P, sel, [], {});
   // 기본 탭(처음): 소재 종류 · 반사 소재 · 반사율(최대) · 위치·크기 숫자만 · 경고 한 줄 — 접는 구역·가능 범위·비율 고정 없음
-  ok(/data-m3-tab="basic" aria-selected="true"/.test(html) && html.includes('data-m3-refl') && html.includes('data-m3-finishr="part"') && html.includes('상한 ') && html.includes('data-m3-xf="c0"') && html.includes('data-m3-xf="z2"')
-    && !html.includes('data-m3-sec=') && !html.includes('data-m3-xflock') && html.includes('data-m3-refladd') && !html.includes('가장 가까운') && html.includes('LED까지 <b class="led">1.5 mm</b>'), '기본 탭: 소재 고르기·측정값 입력 · 반사율 · 위치·크기 · LED 까지 거리 + 경고');
+  ok(/data-m3-tab="basic" aria-selected="true"/.test(html) && /value="opaque:pc-white" selected/.test(html) && html.includes('확산 반사 85% (최대 90%)') && !html.includes('data-m3-finishr') && html.includes('data-m3-xf="c0"') && html.includes('data-m3-xf="z2"')
+    && !html.includes('data-m3-sec=') && !html.includes('data-m3-xflock') && !html.includes('data-m3-refladd') && !html.includes('data-m3-kind') && !html.includes('가장 가까운') && html.includes('LED까지 <b class="led">1.5 mm</b>'), '기본 탭: 소재 이름 고르기 · 물성 한 줄(읽기 전용) · 위치·크기 · LED 까지 거리 + 경고');
+  renderPartProps(el, P, { ...sel, admin: true }, [], {});
+  ok(html.includes('data-m3-finishr="part"') && html.includes('상한 90%') && html.includes('관리자'), '관리자 모드: 숫자 물성 칸(반사율·상한)');
   setPartTab('detail'); renderPartProps(el, P, sel, [], {});
   ok(['xf', 'finish'].every((k) => html.includes(`data-m3-sec="${k}"`)) && !html.includes('data-m3-sec="gap"') && !/<details[^>]* open/.test(html) && html.includes('<summary>'), '구역: 크기·위치 · 면 처리 = 기본 닫힘 · 간격 상세 없음');
   ok(html.includes('>부품 2 · ') || html.includes(`>${P.parts[1].name} · `), '제목 = 이름 · 크기');
-  ok(!html.includes('data-m3-refl ') && html.includes('＋ 측정값으로 새 소재') && html.includes('면 처리 종류는 반사 소재가 정함') && !html.includes('data-m3-finish="part"'), '불투명 + 반사 소재: 상세 탭엔 소재 고르기 없음 · 종류 선택 숨김');
+  ok(!html.includes('data-m3-pick') && !html.includes('data-m3-refladd') && !html.includes('data-m3-sec="refldb"') && html.includes('면 처리 종류는 반사 소재가 정함') && !html.includes('data-m3-finish="part"'), '상세 탭: 소재 고르기·DB 구역 없음 · 종류 선택 숨김');
   secs.xf.open = true; secs.xf.toggle();
   renderPartProps(el, P, sel, [], {});
   ok(/data-m3-sec="xf" open/.test(html) && !/data-m3-sec="gap" open/.test(html) && sectionOpen('xf'), '열린 구역: 다시 그려도 열림 유지(1)');
@@ -294,13 +287,15 @@ ok(clampCap(12) === 9.9 && clampCap(0.1) === 0.5 && clampCap(3) === 3 && clampCa
   renderPartProps(el, P, { ...sel, part: 0 }, [], {});
   ok(!html.includes('data-m3-mat="dbId"') && !html.includes('data-m3-fitdlg') && !html.includes('data-m3-mat="milky"'), 'Milky 상세: 소재 고르기 없음(기본 탭으로)');
   setPartTab('basic'); renderPartProps(el, P, { ...sel, part: 0 }, [], {});
-  ok(html.includes('data-m3-mat="milky"') && html.includes('확산 (Milky)') && html.includes('data-m3-kind="milky" aria-pressed="true"') && html.includes('data-m3-mat="dbId"') && html.includes('＋ BSDF 측정값') && html.includes('data-m3-mat="resin"'), 'Milky 기본: 확산 값 · 실측 소재 · 수지 · ＋ BSDF 측정값');
+  ok(html.includes('data-m3-mat="milky"') && html.includes('확산 정도') && /value="milky" selected/.test(html) && !html.includes('data-m3-mat="dbId"') && !html.includes('data-m3-fitdlg') && !html.includes('data-m3-mat="resin"'), 'Milky 기본: 소재 이름 + 확산 정도(Milky 값)만');
+  renderPartProps(el, P, { ...sel, part: 0, admin: true }, [], {});
+  ok(html.includes('data-m3-mat="resin"'), 'Milky 관리자: 수지 칸');
   { const Q = { ...P, parts: [{ ...P.parts[0], material: { kind: 'clear', resin: 'PMMA', T: 0.92, tRef: 2 } }, P.parts[1]] };
     renderPartProps(el, Q, { ...sel, part: 0, clearList: [{ id: 'u:사내 PC', name: '사내 PC', base: 'PC', n: 1.585, T: 0.88, tRef: 3, origin: 'user' }] }, [], {});
-    ok(html.includes('data-m3-clear') && html.includes('PMMA (아크릴) · n 1.49') && /value="PMMA" selected/.test(html) && html.includes('label="측정값 (사용자)"') && html.includes('사내 PC · n 1.585') && html.includes('<b>1.49</b>') && html.includes('data-m3-clearadd'), '투명 기본: 굴절률별 기본 DB · 측정 그룹 · 굴절률 · ＋ 측정값');
+    ok(/value="clear:PMMA" selected/.test(html) && html.includes('사내 PC (측정)') && html.includes('굴절률 1.49 · 투과율 92%') && !html.includes('data-m3-clearadd') && !html.includes('data-m3-mat="T"'), '투명 기본: 굴절률별 기본·측정 소재 이름 · 물성 한 줄');
     const Q2 = { ...Q, parts: [{ ...Q.parts[0], material: { kind: 'clear', resin: 'PC', n: 1.585, matId: 'u:사내 PC', T: 0.88, tRef: 3 } }, P.parts[1]] };
     renderPartProps(el, Q2, { ...sel, part: 0, clearList: [{ id: 'u:사내 PC', name: '사내 PC', base: 'PC', n: 1.585, T: 0.88, tRef: 3, origin: 'user' }] }, [], {});
-    ok(/value="u:사내 PC" selected/.test(html) && html.includes('<b>1.585</b> <span class="mut">측정값</span>'), '투명: 측정 소재 선택 · 측정 굴절률 표시'); }
+    ok(/value="clear:u:사내 PC" selected/.test(html) && html.includes('굴절률 1.585 · 투과율 88% (3 mm) · 측정값'), '투명: 측정 소재 선택 · 측정 굴절률 표시'); }
   resetSections(); }
 { // 좌·우 창 폭 조절(splitter): 기본 260/430 · 비율 → px · 최소 폭 · 3D 최소 280px
   const { splitPx } = await import('../src/ui/m3/splitter.js');
@@ -330,3 +325,8 @@ done();
 { const { clearDbHtml } = await import('../src/ui/mech3d-panel.js');
   const h = clearDbHtml([{ id: 'u:A', name: 'A<', base: 'PMMA', n: 1.49, T: 0.9, tRef: 2, note: '' }], { 'u:A': 2 });
   console.log(h.includes('data-m3-cdb="u:A"') && h.includes('부품 2개 사용') && h.includes('value="1.49"') && h.includes('A&lt;') && h.includes('data-m3-cdbdel') && clearDbHtml([]).includes('등록한 측정값 없음') ? 'PASS 투명 측정값 DB 관리 표' : (process.exitCode = 1, 'FAIL 투명 측정값 DB 관리 표')); }
+{ const { materialGroups, pickOf, materialSummary } = await import('../src/engine/mech3d/material-pick.js');
+  const ok4 = (c, m) => { console.log(`${c ? 'PASS' : 'FAIL'} ${m}`); if (!c) process.exitCode = 1; };
+  ok4(pickOf({ material: { kind: 'milky', dbId: '' } }) === 'milky' && pickOf({ material: { kind: 'clear', resin: 'PMMA' } }) === 'clear:PMMA' && pickOf({ material: { kind: 'clear', resin: 'PC', matId: 'u:A' } }) === 'clear:u:A' && pickOf({ material: { kind: 'whiteTrans' } }) === 'wt' && pickOf({ material: { kind: 'opaque' }, reflMaterial: 'x' }) === 'opaque:x', '소재 고르기 id');
+  ok4(materialSummary({ material: { kind: 'clear', resin: 'PMMA', T: 0.92, tRef: 2 } }) === '굴절률 1.49 · 투과율 92% (2 mm)' && materialSummary({ material: { kind: 'opaque' }, reflMaterial: 'gone', finish: { kind: 'whiteDiffuse', R: 0.8 } }, { refl: [] }).includes('없는 소재'), '물성 한 줄');
+  ok4(materialGroups({}).length === 4 && materialGroups({}).every((g) => g.items.length > 0), '목록 묶음 4개'); }

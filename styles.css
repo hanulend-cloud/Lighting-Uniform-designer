@@ -714,3 +714,6 @@ body.booting::after { content: "불러오는 중…"; position: fixed; left: 50%
 .adv-txt { margin-left: 3px; font-size: 10.5px; padding: 0 4px; border: 1px solid #c9cfdb; border-radius: 4px; cursor: pointer; }
 .adv-meas-note { min-height: 1em; font-size: 11.5px; }
 .m3-wgt { flex-wrap: wrap; gap: 4px; font-size: 11.5px; }
+.m3-matsum { font-size: 11.5px; }
+.m3-admin { margin-top: 6px; padding: 4px 6px; border: 1px dashed #d9a400; border-radius: 6px; }
+.m3-matdb .m3-tabs { margin: 4px 10px; }

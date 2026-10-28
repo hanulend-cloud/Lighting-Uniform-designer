@@ -22,9 +22,10 @@ import { mountSplitter, mountDockSplitter, mountFacSplitter } from './splitter.j
 import { createOptDash, createSimDash } from './opt-dash.js';
 import { partClearance, limitXform, axisLimits, TOL } from '../../engine/mech3d/clearance.js';
 import { renderPropertyPanel } from './property-panel.js';
-import { meshInfo, partToDbMaterial } from '../mech3d-panel.js';
+import { meshInfo, clearDbHtml, clearAddFormHtml, reflAddFormHtml, wireMaterialDb, dbFormState } from '../mech3d-panel.js';
+import { isAdmin } from '../../model/admin.js';
 import { renderAdvanced } from '../l2-advanced.js';
-import { defaultRowGap } from '../mech3d-light-panel.js';
+import { defaultRowGap, renderReflDb } from '../mech3d-light-panel.js';
 import { positionsFromLayout, addPosition, alignPositions } from '../../engine/mech3d/led-edit.js';
 import { createResultsPanel } from './results-panel.js';
 import { renderStatusBar } from './status-bar.js';
@@ -69,6 +70,7 @@ export function materialsChanged(msg) {
   const list = loadClear();
   A.store.update('material', (m, x) => { for (const e of list) m.parts = syncClearParts(m.parts, e.id, e); x.status = msg; });
 }
+export function adminChanged() { if (A) A.store.update('session', (_, x) => { x.status = isAdmin() ? '관리자 모드 켬 — 소재 DB 관리·숫자 물성 칸이 보임' : '관리자 모드 끔'; }); }
 export function setStatus(t) { A?.store.update('session', (_, s) => { s.status = t; }); }
 export function flush() { A?.store.flush(); }
 export function importLed(file) { if (!A) return; if (A.store.mspec.light.kind !== 'step') A.store.update('light', (m) => { m.light.kind = 'step'; }); importLedStep(file); }   // 예제 프로젝트 — LED STEP 을 코드에서 불러옴(같은 이름이면 저장된 기준 LED 로 재인식)
@@ -973,29 +975,30 @@ function propHandlers() {
       m.parts[i] = r.part;
       if (r.clamped) x.status = `소재 상한(${Math.round(r.max * 100)}%) 초과 — 특수 표면처리는 자동설계 ④ 에서 허용`;
     }),
-    onReflMaterial: (i, id) => st.update('material', (m) => { m.parts[i] = setReflMaterial(m.parts[i], id, reflCat()); }),
     // 측정값으로 반사 소재 추가(spec P4 §2.3e) — 사용자 항목 등록 후 이 부품에 적용. f = 양식 문자열(% 단위) → 오류 문구 | 없음
     onReflAdd: (i, f) => {
       const db = ctx.reflectDb?.(); if (!db) return '반사 소재 DB 없음';
       const r = entryFromForm(f); if (r.error) return r.error;
       const e = { ...r.entry, id: uniqueReflId(db, r.entry.id) };
       try { db.add(e); } catch (err) { return err.message; }
-      st.update('material', (m, x) => { m.parts[i] = setReflMaterial(m.parts[i], e.id, reflCat()); x.status = `반사 소재 "${e.name}" 등록 · 적용(R ${pct1(e.R)}%, 상한 ${pct1(e.Rmax)}%)`; });
+      st.update(i == null ? 'session' : 'material', (m, x) => { if (i != null) m.parts[i] = setReflMaterial(m.parts[i], e.id, reflCat()); x.status = `반사 소재 "${e.name}" 등록${i != null ? ' · 적용' : ''}(R ${pct1(e.R)}%, 상한 ${pct1(e.Rmax)}%)`; });
       return null;
     },
-    // 공용 항목 → 사용자 사본 만들고 이 부품을 사본으로
-    onReflCopy: (i, id) => {
-      const db = ctx.reflectDb?.(), e = db?.get(id); if (!e) return;
-      const c = copyAsUser(e); c.id = uniqueReflId(db, c.id);
-      try { db.add(c); } catch (err) { setStatus(`복사 실패: ${err.message}`); return; }
-      st.update('material', (m, x) => { m.parts[i] = setReflMaterial(m.parts[i], c.id, reflCat()); x.status = `사용자 사본 "${c.name}" 을 만들어 적용 — 목표 노드의 반사 소재 DB 에서 고칠 수 있습니다`; });
-    },
-    onFitDialog: (i) => openFitDialog(i),
-    // 투명 소재 고르기(굴절률별 기본 DB · 측정값) — 그 항목의 굴절률·투과율·두께로
-    onClear: (i, id) => {
-      const e = CLEAR_BASE.find((x) => x.id === id) ?? clearUser().find((x) => x.id === id);
-      if (e) st.update('material', (m, x) => { m.parts[i] = applyClearEntry(m.parts[i], e); x.status = `투명 소재 "${e.name}" — 굴절률 ${e.n} · 투과율 ${Math.round(e.T * 1000) / 10}%(${e.tRef} mm)`; });
-    },
+
+    // 소재 이름 고르기(소재 DB) — 종류가 바뀌면 그 종류 기본값에서 시작, 물성은 DB 항목 값
+    onMatPick: (i, id) => st.update('material', (m, x) => {
+      const [k, ...rest] = id.split(':'), ref = rest.join(':'), kind = { milky: 'milky', clear: 'clear', wt: 'whiteTrans', opaque: 'opaque' }[k];
+      if (!kind) return;
+      let p = m.parts[i].material.kind === kind ? m.parts[i] : setPartMaterial(m.parts[i], kind);
+      if (kind === 'milky') {
+        p = setPartMaterialParam(p, 'dbId', ref);
+        const ent = ref ? ctx.materialDb()?.get(ref) : null, tbl = ctx.l2Table();
+        if (ent && tbl) p = setPartMaterialParam(p, 'milky', Math.round(ctx.milkyFromMusR(tbl, ent.fitted.musR) * 100) / 100);   // 그 소재의 측정 확산 정도에서 시작
+      } else if (kind === 'clear') p = applyClearEntry(p, CLEAR_BASE.find((e) => e.id === ref) ?? clearUser().find((e) => e.id === ref));
+      else if (kind === 'opaque') p = setReflMaterial(p, ref || null, reflCat());
+      m.parts[i] = p; x.status = `${p.name}: 소재 바꿈`;
+    }),
+
     // 투명 소재 측정값 DB 관리(상세 탭) — edit: arg = { key, value } · delete. 쓰던 부품 소재도 맞춤. 오류 문구 | null
     onClearDb: (op, id, arg) => {
       const list = clearUser(), k = list.findIndex((e) => e.id === id);
@@ -1027,7 +1030,7 @@ function propHandlers() {
       const r = clearEntryFromForm(f); if (r.error) return r.error;
       saveClearUser([...clearUser().filter((e) => e.id !== r.entry.id), r.entry]);
       const e = r.entry;
-      st.update('material', (m, x) => { m.parts[i] = applyClearEntry(m.parts[i], e); x.status = `측정 소재 "${e.name}" 등록 · 적용(n ${e.n}, 투과율 ${Math.round(e.T * 1000) / 10}% @ ${e.tRef} mm)`; });
+      st.update('material', (m, x) => { if (i != null) m.parts[i] = applyClearEntry(m.parts[i], e); else m.parts = syncClearParts(m.parts, e.id, e); x.status = `측정 소재 "${e.name}" 등록${i != null ? ' · 적용' : ''}(n ${e.n}, 투과율 ${Math.round(e.T * 1000) / 10}% @ ${e.tRef} mm)`; });
       return null;
     },
     // 반사 소재 DB 관리(목표 노드) — 바뀐 뒤 다시 그림(부품 속성·자동설계 ④ 후보·카드). 오류 문구 | null
@@ -1125,48 +1128,57 @@ function downloadText(name, text, type) {
   const a = document.createElement('a');
   a.href = URL.createObjectURL(new Blob([text], { type })); a.download = name; a.click(); URL.revokeObjectURL(a.href);
 }
-// 투과 부품 실측 맞춤 대화상자(spec P4 §2.3e) — 평판 모드 l2-advanced 화면을 그대로 띄움(같은 실측소재 DB).
-// 저장되면 실측소재 목록 갱신(Worker 포함) · 이 부품에 그 소재 적용(투명·백색 투과 → Milky) · 닫음
-function openFitDialog(i) {
-  const ctx = A.ctx, db = ctx.materialDb?.(), table = ctx.l2Table?.();
-  if (!db || !table) { setStatus('실측소재 DB·L2 응답표가 아직 준비되지 않았습니다'); return; }
-  document.querySelector('.m3-fitdlg')?.remove();
-  const name = String(A.store.mspec.parts[i]?.name ?? '').replace(/[<>&"]/g, ''), dlg = document.createElement('div');
-  dlg.className = 'zoom-modal m3-fitdlg';
-  dlg.innerHTML = `<div class="zoom-modal-inner" role="dialog" aria-modal="true" aria-label="실측 데이터로 소재 추가">
-    <div class="zoom-modal-hd"><span>실측 데이터로 소재 추가 · ${name}</span><button data-fit-close>닫기</button></div>
-    <div class="m3-fitdlg-body"><div class="mut">측정값을 넣고 [피팅] → [DB 저장] 하면 이 부품에 그 실측 소재가 적용됩니다.</div><div data-fit-adv></div></div></div>`;
+// 소재 DB 관리 창(관리자 모드) — 확산(실측 Milky: BSDF·투과율·Haze 측정 → 피팅 → 저장) · 투명(측정 굴절률·투과율) · 반사(측정 반사율).
+// 여기서 넣은 항목은 부품의 소재 고르기 목록에 이름으로 나타남. 각 탭: 측정 txt · 파장 가중 · 편집 · 내보내기/불러오기
+const MDB_TABS = [['milky', '확산 (Milky · BSDF)'], ['clear', '투명 (굴절률·투과율)'], ['refl', '반사 (반사율)']];
+export function openMaterialDb(tab = 'milky') {
+  if (!A) return;
+  if (!isAdmin()) { setStatus('소재 DB 관리는 관리자 모드에서 — 설정 > 관리자 모드'); return; }
+  const ctx = A.ctx, h = propHandlers();
+  document.querySelector('.m3-matdb')?.remove();
+  const dlg = document.createElement('div');
+  dlg.className = 'zoom-modal m3-fitdlg m3-matdb';
+  dlg.innerHTML = `<div class="zoom-modal-inner" role="dialog" aria-modal="true" aria-label="소재 DB 관리">
+    <div class="zoom-modal-hd"><span>소재 DB 관리 <span class="mut">관리자 · 여기서 넣은 소재는 부품의 소재 목록에 이름으로 나타남</span></span><button data-md-close>닫기</button></div>
+    <div class="m3-tabs" role="tablist">${MDB_TABS.map(([k, t]) => `<button type="button" role="tab" data-md-tab="${k}">${t}</button>`).join('')}</div>
+    <div class="m3-fitdlg-body" data-md-body></div></div>`;
   document.body.appendChild(dlg);
   const onKey = (ev) => { if (ev.key === 'Escape') close(); };
   const close = () => { dlg.remove(); document.removeEventListener('keydown', onKey); };
   document.addEventListener('keydown', onKey);
-  dlg.querySelector('[data-fit-close]').onclick = close;
-  let saved = null;
-  const wdb = Object.create(db);   // add 만 가로채 저장된 id 를 앎
-  wdb.add = (e) => { db.add(e); saved = e.id; };
-  const host = dlg.querySelector('[data-fit-adv]');
-  const actx = {
-    table, db: wdb, viewNote: '현재 소재 보기는 평판 모드에서 — 여기서는 측정 → 피팅 → 저장',
-    onDbChanged: () => {
-      pool?.setDb(ctx.dbLists()); ctx.onMaterialDbChanged?.();
-      if (saved) {
-        const id = saved; saved = null; close();
-        A.store.update('material', (m, x) => {
-          const ent = db.get(id);
-          let q = partToDbMaterial(m.parts[i], id);
-          if (ent) q = setPartMaterialParam(q, 'milky', Math.round(ctx.milkyFromMusR(table, ent.fitted.musR) * 100) / 100);
-          m.parts[i] = q; x.status = `실측 소재 "${ent?.name ?? id}" 저장 · ${q.name} 에 적용`;
-        });
-        return;
-      }
-      // 삭제·불러오기 — 지워진 소재를 쓰던 부품은 추상 Milky 로
-      const gone = A.store.mspec.parts.some((p) => p.material?.dbId && !db.get(p.material.dbId));
-      A.store.update(gone ? 'material' : 'session', (m) => { for (const p of m.parts) if (p.material?.dbId && !db.get(p.material.dbId)) p.material = { ...p.material, dbId: '' }; });
+  dlg.querySelector('[data-md-close]').onclick = close;
+  const body = dlg.querySelector('[data-md-body]'), used = (f) => A.store.mspec.parts.reduce((o, p) => { const id = f(p); if (id) o[id] = (o[id] ?? 0) + 1; return o; }, {});
+  const draw = () => {
+    dlg.querySelectorAll('[data-md-tab]').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.mdTab === tab)));
+    if (tab === 'milky') {
+      const db = ctx.materialDb?.(), table = ctx.l2Table?.();
+      if (!db || !table) { body.innerHTML = '<div class="mut">실측소재 DB·L2 응답표가 아직 준비되지 않았습니다</div>'; return; }
+      body.innerHTML = '<div class="mut">측정값(파장별·각도별 BSDF txt, 투과율·반사율·Haze)을 넣고 [피팅] → [DB 저장]. 저장한 소재는 부품 소재 목록의 "확산 (Milky)" 묶음에 나타남.</div><div data-fit-adv></div>';
+      const host = body.querySelector('[data-fit-adv]');
+      const actx = { table, db, viewNote: '측정 → 피팅 → 저장',
+        onDbChanged: () => {
+          pool?.setDb(ctx.dbLists()); ctx.onMaterialDbChanged?.();
+          const gone = A.store.mspec.parts.some((p) => p.material?.dbId && !db.get(p.material.dbId));   // 지워진 소재를 쓰던 부품은 일반 Milky 로
+          A.store.update(gone ? 'material' : 'session', (m, x) => { for (const p of m.parts) if (p.material?.dbId && !db.get(p.material.dbId)) p.material = { ...p.material, dbId: '' }; x.status = '실측 Milky 소재 DB 바뀜'; });
+          renderAdvanced(host, actx, null);
+        } };
       renderAdvanced(host, actx, null);
-    },
+      return;
+    }
+    if (tab === 'clear') {
+      const list = clearUser(), f = dbFormState(body, 'clear');
+      body.innerHTML = `<div class="m3-links"><button type="button" class="m3-link" data-m3-clearadd aria-expanded="${f.addOpen ? 'true' : 'false'}">＋ 측정값으로 새 소재</button> <span class="mut">기본 소재(PC·PMMA 등 일반값)는 목록에 늘 있음</span></div>${f.addOpen ? clearAddFormHtml(f.msg) : ''}
+        <div class="m3-sub">측정 소재 ${list.length}개</div>${clearDbHtml(list, used((p) => p.material?.matId))}`;
+      wireMaterialDb(body, h, draw, list);
+      return;
+    }
+    const f = dbFormState(body, 'refl');
+    body.innerHTML = `<div class="m3-links"><button type="button" class="m3-link" data-m3-refladd aria-expanded="${f.addOpen ? 'true' : 'false'}">＋ 측정값으로 새 소재</button> <span class="mut">기본 소재 값을 고치려면 표에서 [복사] 후 [＋측정]</span></div>${f.addOpen ? reflAddFormHtml(f.msg) : ''}<div data-md-refl></div>`;
+    renderReflDb(body.querySelector('[data-md-refl]'), reflCat(), h, draw);
+    wireMaterialDb(body, h, draw);
   };
-  renderAdvanced(host, actx, null);
-  const add = host.querySelector('details.adv-add'); if (add) add.open = true;
+  dlg.querySelectorAll('[data-md-tab]').forEach((b) => { b.onclick = () => { tab = b.dataset.mdTab; draw(); }; });
+  draw();
 }
 // LED STEP 불러오기 (main.js:452-469)
 function importLedStep(file) {
@@ -1302,7 +1314,7 @@ function renderAll(tag = 'all') {
   }, lay);
   const pi = S.node?.startsWith('part:') ? +S.node.slice(5) : -1, clr = pi >= 0 ? clearanceOf(pi) : null;
   if (clr !== A.clrShown) { A.clrShown = clr; renderMarkers(); }
-  if (tag !== 'view') renderPropertyPanel($('#m3-props'), M, S, { dbList: A.ctx.materialDb()?.list() ?? [], catalog: reflCat(), clearList: clearUser(), clearUsed: M.parts.reduce((o, p) => { const id = p.material?.matId; if (id) o[id] = (o[id] ?? 0) + 1; return o; }, {}), milkyUsed: M.parts.reduce((o, p) => { const id = p.material?.kind === 'milky' && p.material.dbId; if (id) o[id] = (o[id] ?? 0) + 1; return o; }, {}), auto: autoGrid(), dir: M.observe.dir ?? S.line?.frame.d, lineInfo: lineInfo(), clearance: clr, xfInfo: pi >= 0 ? xformInfoOf(pi) : null, meshInfo: pi >= 0 ? partMeshInfo(pi) : null, xfMsg: S.xfMsg?.part === pi ? S.xfMsg.text : '', lay: lay ?? null, led: S.node === 'leds' && S.ledSel != null ? ledUi(LS, S.ledSel) : null, ledTotal: LS.list.length }, propHandlers());
+  if (tag !== 'view') renderPropertyPanel($('#m3-props'), M, S, { admin: isAdmin(), dbList: A.ctx.materialDb()?.list() ?? [], catalog: reflCat(), clearList: clearUser(), clearUsed: M.parts.reduce((o, p) => { const id = p.material?.matId; if (id) o[id] = (o[id] ?? 0) + 1; return o; }, {}), milkyUsed: M.parts.reduce((o, p) => { const id = p.material?.kind === 'milky' && p.material.dbId; if (id) o[id] = (o[id] ?? 0) + 1; return o; }, {}), auto: autoGrid(), dir: M.observe.dir ?? S.line?.frame.d, lineInfo: lineInfo(), clearance: clr, xfInfo: pi >= 0 ? xformInfoOf(pi) : null, meshInfo: pi >= 0 ? partMeshInfo(pi) : null, xfMsg: S.xfMsg?.part === pi ? S.xfMsg.text : '', lay: lay ?? null, led: S.node === 'leds' && S.ledSel != null ? ledUi(LS, S.ledSel) : null, ledTotal: LS.list.length }, propHandlers());
   if (tag === 'session' || tag === 'all') renderMarkers();
   A.cmd.update(S, M);
   renderStatus();
