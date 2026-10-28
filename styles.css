@@ -713,3 +713,4 @@ body.booting::after { content: "불러오는 중…"; position: fixed; left: 50%
 .m3-dbio button { font: inherit; font-size: 12px; }
 .adv-txt { margin-left: 3px; font-size: 10.5px; padding: 0 4px; border: 1px solid #c9cfdb; border-radius: 4px; cursor: pointer; }
 .adv-meas-note { min-height: 1em; font-size: 11.5px; }
+.m3-wgt { flex-wrap: wrap; gap: 4px; font-size: 11.5px; }

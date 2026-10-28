@@ -5,6 +5,7 @@ import { bounds, meshVolume } from '../engine/mech3d/mesh.js';
 import { DEFAULT_FINISH_CATALOG, finishLimit } from '../engine/mech3d/housing-led.js';
 import { MEAS_CONDS, reflStatusText, REFLECT_KINDS } from '../model/reflect-db.js';
 import { readMeasTxt, measTxtSummary } from '../engine/meas-txt.js';
+import { weightHtml, wireWeight, weightSpd } from '../model/led-spectrum.js';
 
 const esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
 const XF_LOCK = new WeakMap();   // 패널 요소 → 비율 고정 체크(세션 동안)
@@ -50,6 +51,7 @@ export function clearAddFormHtml(msg = '') {
     <div class="m3-row"><label>굴절률</label><input type="number" min="1.2" max="2.5" step="0.001" data-m3-ca="n" placeholder="빈칸 = 수지 값" aria-label="측정 굴절률"></div>
     <div class="m3-row"><label>투과율</label><input type="number" min="1" max="100" step="0.1" data-m3-ca="T" aria-label="측정 전광선 투과율 %"> % <label class="m3-file" title="파장별 투과율 txt(파장 nm, 값) → V(λ) 가중 평균">파장별 txt<input type="file" accept=".txt,.csv,.dat" data-m3-spec="ca:T" hidden></label> <label class="mut">두께</label><input type="number" min="0.1" step="0.1" value="2" data-m3-ca="t" aria-label="측정 두께 mm"> mm</div>
     <div class="m3-row"><label>메모</label><input data-m3-ca="note" placeholder="측정 장비·파장 등"></div>
+    ${weightHtml()}
     ${msg ? `<div class="m3-warn" role="status">${esc(msg)}</div>` : ''}
     <div class="m3-row"><button data-m3-caok>등록하고 적용</button><button data-m3-cacancel>취소</button></div></div>`;
 }
@@ -122,6 +124,7 @@ export function reflAddFormHtml(msg = '') {
     <div class="m3-row"><label>측정 반사율</label><input data-m3-ra="values" placeholder="85.5, 86.1, 85.8" aria-label="측정 반사율 %(쉼표로 여러 값)"> % <label class="m3-file" title="파장별 반사율 txt(파장 nm, 값) → V(λ) 가중 평균. 여러 파일 = 여러 측정값">파장별 txt<input type="file" accept=".txt,.csv,.dat" data-m3-spec="ra:values" hidden></label></div>
     <div class="m3-row"><label>측정 조건</label><select data-m3-ra="cond">${MEAS_CONDS.map((c) => `<option>${c}</option>`).join('')}</select></div>
     <div class="m3-row"><label>메모</label><input data-m3-ra="note"></div>
+    ${weightHtml()}
     <div class="m3-row"><label>상한</label><input type="number" min="0" max="100" step="0.1" data-m3-ra="max" placeholder="측정 최대" aria-label="상한 %(빈칸 = 측정 최대)"> %</div>
     ${msg ? `<div class="m3-warn" role="status">${esc(msg)}</div>` : ''}
     <div class="m3-row"><button data-m3-raok>등록하고 적용</button><button data-m3-racancel>취소</button></div></div>`;
@@ -324,11 +327,12 @@ export function renderPartProps(el, m, sel0, dbList, h) {
   el.querySelectorAll('button[data-m3-io]').forEach((b) => { const [db, op] = b.dataset.m3Io.split(':'); b.onclick = () => h.onDbIo?.(db, op); });
   el.querySelectorAll('input[data-m3-io]').forEach((x) => { const [db] = x.dataset.m3Io.split(':'); x.onchange = async () => { const f = x.files?.[0]; if (!f) return; const t = await f.text(); x.value = ''; h.onDbIo?.(db, 'import', t); }; });
   // 파장별 측정 txt → 양식 칸에 V(λ) 가중 % (반사율은 여러 파일 = 쉼표로 이어 붙임) · 메모에 요약
+  el.querySelectorAll('.m3-refladd').forEach((box) => wireWeight(box, (t) => { const m = box.querySelector('[data-m3-ra="note"], [data-m3-ca="note"]'); if (m) m.placeholder = t; }));
   el.querySelectorAll('input[data-m3-spec]').forEach((x) => { x.onchange = async () => {
     const f = x.files?.[0]; x.value = ''; if (!f) return;
     const [form, key] = x.dataset.m3Spec.split(':'), box = x.closest('.m3-refladd'), inp = box?.querySelector(`[data-m3-${form}="${key}"]`), memo = box?.querySelector(`[data-m3-${form}="note"]`);
     try {
-      const r = readMeasTxt(await f.text());
+      const r = readMeasTxt(await f.text(), { spd: weightSpd() });
       if (r.kind !== 'spectral') throw new Error('파장별 값(파장 nm, 값 두 열) 파일이 아님');
       const v = (Math.round(r.value * 1000) / 10).toFixed(1);
       inp.value = key === 'values' && inp.value.trim() ? `${inp.value.trim()}, ${v}` : v;

@@ -26,4 +26,15 @@ ok(m2.kind === 'spectralBsdf' && near(m2.curve[1].v, m.curve[1].v), '표 형식(
 let e1 = ''; try { readMeasTxt('hello'); } catch (e) { e1 = e.message; }
 ok(e1.includes('숫자'), '숫자 없음 → 오류');
 ok(near(photopicAverage([{ nm: 380, v: 1 }, { nm: 780, v: 1 }]).value, 1), '상수 → 그대로');
+// LED 스펙트럼 가중: 파란 쪽만 높은 투과율 → 백색 LED(청색 피크) 가중이면 V 만보다 높게
+{ const { DEFAULT_LED_SPD, spdFromTxt } = await import('../src/model/led-spectrum.js');
+  const txt = Array.from({ length: 41 }, (_, i) => { const nm = 380 + i * 10; return `${nm} ${nm < 480 ? 95 : 80}`; }).join('\n');
+  const v = readMeasTxt(txt), l = readMeasTxt(txt, { spd: DEFAULT_LED_SPD });
+  ok(l.led && !v.led && l.value > v.value && measTxtSummary(l).includes('V(λ)×LED'), `LED 가중: V ${v.value.toFixed(4)} < V×LED ${l.value.toFixed(4)}`);
+  const flatL = readMeasTxt(Array.from({ length: 41 }, (_, i) => `${380 + i * 10} 0.9`).join('\n'), { spd: DEFAULT_LED_SPD });
+  ok(near(flatL.value, 0.9), '상수 → LED 가중도 그대로');
+  const s = spdFromTxt('nm W\n400 1\n450 10\n500 3\n550 6\n600 5\n650 2', 'a.txt');
+  ok(s.spd.length === 6 && s.spd[1].v === 1 && s.name === 'a.txt', 'LED 스펙트럼 txt → 최대 1 정규화');
+  let e = ''; try { spdFromTxt('1 2'); } catch (x) { e = x.message; } ok(e.includes('5줄'), 'LED 스펙트럼: 점 부족 → 오류');
+  ok(Math.max(...DEFAULT_LED_SPD.map((p) => p.v)) === 1 && DEFAULT_LED_SPD.find((p) => p.nm === 450).v === 1, '기본 백색 LED: 450 nm 피크'); }
 console.log(fail ? `${fail} FAIL` : 'all PASS'); process.exit(fail ? 1 : 0);
