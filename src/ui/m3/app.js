@@ -5,6 +5,7 @@
 // 점진 계산 갱신(1초마다)은 store 알림 없이 결과 패널·상태 띠·색지도만 다시 그린다(입력 중 속성 패널이 다시 그려지지 않게).
 import { getMech3d, getLedMesh, setLedMesh, saveLedIDB, applyPartMods, redetectContacts } from '../../engine/mech3d/runtime.js';
 import { findLeds } from '../../engine/mech3d/led-detect.js';
+import { loadClear, saveClear, clearExportJson, clearImport, parseMaterialFile } from '../../model/material-io.js';
 import { setPartMaterial, setPartMaterialParam, CLEAR_BASE, applyClearEntry, clearEntryFromForm, editClearEntry, syncClearParts } from '../../engine/mech3d/materials.js';
 import { lineFromData, lightData, obsDirection } from '../../engine/mech3d/line.js';
 import { tallyGeometry, tallyStats } from '../../engine/mech3d/tally.js';
@@ -61,6 +62,13 @@ export function resetWorkers() { pool?.killAll('계산 Worker 초기화'); }
 export function warmWorkers(ctx) { getPool(ctx).warm(); }
 
 export const isMounted = () => !!A;
+// 소재 DB 가 밖(파일 메뉴)에서 바뀜 — 계산 Worker 의 실측 DB 갱신 · 부품 측정 투명 소재 맞춤 · 다시 그림
+export function materialsChanged(msg) {
+  if (!A) return;
+  pool?.setDb(A.ctx.dbLists());
+  const list = loadClear();
+  A.store.update('material', (m, x) => { for (const e of list) m.parts = syncClearParts(m.parts, e.id, e); x.status = msg; });
+}
 export function setStatus(t) { A?.store.update('session', (_, s) => { s.status = t; }); }
 export function flush() { A?.store.flush(); }
 export function importLed(file) { if (!A) return; if (A.store.mspec.light.kind !== 'step') A.store.update('light', (m) => { m.light.kind = 'step'; }); importLedStep(file); }   // 예제 프로젝트 — LED STEP 을 코드에서 불러옴(같은 이름이면 저장된 기준 LED 로 재인식)
@@ -943,9 +951,8 @@ function onPick(s) {
 }
 
 // 투명 소재 측정값(사용자 항목) — 브라우저 저장(uds.clear.v1), 모든 프로젝트 공용
-const CLEAR_KEY = 'uds.clear.v1';
-function clearUser() { try { const v = JSON.parse(localStorage.getItem(CLEAR_KEY) || '[]'); return Array.isArray(v) ? v.filter((e) => e && e.id && Number.isFinite(e.n)) : []; } catch { return []; } }
-function saveClearUser(list) { if (A?.ctx?.canSave && !A.ctx.canSave()) return; try { localStorage.setItem(CLEAR_KEY, JSON.stringify(list)); } catch {} }
+const clearUser = () => loadClear();
+function saveClearUser(list) { if (A?.ctx?.canSave && !A.ctx.canSave()) return; saveClear(list); }
 // ---- 속성 편집 처리기 (main.js:348-361, 426-451) — 태그가 계산·점검 범위를 정한다 ----
 function propHandlers() {
   const st = A.store, ctx = A.ctx;
@@ -998,6 +1005,22 @@ function propHandlers() {
       saveClearUser(list);
       st.update('material', (m, x) => { m.parts = syncClearParts(m.parts, id, e); x.status = e ? `측정 소재 "${e.name}" 수정 — 쓰는 부품에 반영` : '측정 소재 삭제 — 쓰던 부품은 바탕 수지 기본값으로'; });
       return null;
+    },
+    // 소재 DB 내보내기·불러오기(상세 탭 구역) — db = clear | milky, op = export | import(text)
+    onDbIo: (db, op, text) => {
+      try {
+        if (db === 'clear') {
+          if (op === 'export') { downloadText('uds-clear.json', clearExportJson(clearUser()), 'application/json'); setStatus('투명 소재 측정값을 uds-clear.json 으로 내보냄'); return; }
+          const r = clearImport(parseMaterialFile(text).clear, clearUser()); saveClearUser(r.list);
+          st.update('material', (m, x) => { for (const e of r.list) if (r.added.includes(e.id)) m.parts = syncClearParts(m.parts, e.id, e); x.status = `투명 소재 불러옴 ${r.added.length}건${r.rejected.length ? ` · 거부 ${r.rejected.length}건: ${r.rejected.join('; ')}` : ''}`; });
+          return;
+        }
+        const mdb = ctx.materialDb?.(); if (!mdb) { setStatus('실측소재 DB 없음'); return; }
+        if (op === 'export') { downloadText('uds-materials.json', mdb.exportJson('user'), 'application/json'); setStatus('실측 Milky 소재(사용자)를 uds-materials.json 으로 내보냄'); return; }
+        const r = mdb.importJson(JSON.stringify({ entries: parseMaterialFile(text).milky }));
+        pool?.setDb(ctx.dbLists()); ctx.onMaterialDbChanged?.();
+        st.update('material', (_, x) => { x.status = `실측 Milky 소재 불러옴 ${r.added.length}건${r.rejected.length ? ` · 거부 ${r.rejected.length}건: ${r.rejected.join('; ')}` : ''}`; });
+      } catch (e) { setStatus(`불러오기 실패: ${e.message}`); }
     },
     // 측정값으로 투명 소재 등록(같은 이름 = 덮어씀) 후 이 부품에 적용. f = 양식 문자열 → 오류 문구 | null
     onClearAdd: (i, f) => {
@@ -1279,7 +1302,7 @@ function renderAll(tag = 'all') {
   }, lay);
   const pi = S.node?.startsWith('part:') ? +S.node.slice(5) : -1, clr = pi >= 0 ? clearanceOf(pi) : null;
   if (clr !== A.clrShown) { A.clrShown = clr; renderMarkers(); }
-  if (tag !== 'view') renderPropertyPanel($('#m3-props'), M, S, { dbList: A.ctx.materialDb()?.list() ?? [], catalog: reflCat(), clearList: clearUser(), clearUsed: M.parts.reduce((o, p) => { const id = p.material?.matId; if (id) o[id] = (o[id] ?? 0) + 1; return o; }, {}), auto: autoGrid(), dir: M.observe.dir ?? S.line?.frame.d, lineInfo: lineInfo(), clearance: clr, xfInfo: pi >= 0 ? xformInfoOf(pi) : null, meshInfo: pi >= 0 ? partMeshInfo(pi) : null, xfMsg: S.xfMsg?.part === pi ? S.xfMsg.text : '', lay: lay ?? null, led: S.node === 'leds' && S.ledSel != null ? ledUi(LS, S.ledSel) : null, ledTotal: LS.list.length }, propHandlers());
+  if (tag !== 'view') renderPropertyPanel($('#m3-props'), M, S, { dbList: A.ctx.materialDb()?.list() ?? [], catalog: reflCat(), clearList: clearUser(), clearUsed: M.parts.reduce((o, p) => { const id = p.material?.matId; if (id) o[id] = (o[id] ?? 0) + 1; return o; }, {}), milkyUsed: M.parts.reduce((o, p) => { const id = p.material?.kind === 'milky' && p.material.dbId; if (id) o[id] = (o[id] ?? 0) + 1; return o; }, {}), auto: autoGrid(), dir: M.observe.dir ?? S.line?.frame.d, lineInfo: lineInfo(), clearance: clr, xfInfo: pi >= 0 ? xformInfoOf(pi) : null, meshInfo: pi >= 0 ? partMeshInfo(pi) : null, xfMsg: S.xfMsg?.part === pi ? S.xfMsg.text : '', lay: lay ?? null, led: S.node === 'leds' && S.ledSel != null ? ledUi(LS, S.ledSel) : null, ledTotal: LS.list.length }, propHandlers());
   if (tag === 'session' || tag === 'all') renderMarkers();
   A.cmd.update(S, M);
   renderStatus();

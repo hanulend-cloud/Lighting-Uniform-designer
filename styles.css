@@ -709,3 +709,5 @@ body.booting main, body.booting #inputbar { visibility: hidden; }
 body.booting::after { content: "불러오는 중…"; position: fixed; left: 50%; top: 45%; transform: translateX(-50%); color: #8a96a8; font-size: 14px; }
 .m3-cdb { border-top: 1px dashed var(--m3-line); padding: 4px 0; }
 .m3-cdb input[data-m3-cdbk="name"] { flex: 1; min-width: 0; font-weight: 600; }
+.m3-dbio { margin-top: 6px; gap: 6px; }
+.m3-dbio button { font: inherit; font-size: 12px; }

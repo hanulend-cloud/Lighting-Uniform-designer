@@ -8,7 +8,7 @@ export function renderPropertyPanel(el, M, S, ui, h) {
   const id = S.node ?? 'parts';
   if (id.startsWith('part:')) {
     const i = +id.slice(5);
-    renderPartProps(el, M, { part: i, face: S.sel?.part === i ? S.sel.face : null, contacts: M.contacts, names: M.parts.map((p) => p.name), clearance: ui.clearance, xfMsg: ui.xfMsg, xfInfo: ui.xfInfo, meshInfo: ui.meshInfo ?? null, catalog: ui.catalog ?? catalogOf(null), clearList: ui.clearList ?? [], clearUsed: ui.clearUsed ?? {},
+    renderPartProps(el, M, { part: i, face: S.sel?.part === i ? S.sel.face : null, contacts: M.contacts, names: M.parts.map((p) => p.name), clearance: ui.clearance, xfMsg: ui.xfMsg, xfInfo: ui.xfInfo, meshInfo: ui.meshInfo ?? null, catalog: ui.catalog ?? catalogOf(null), clearList: ui.clearList ?? [], clearUsed: ui.clearUsed ?? {}, milkyUsed: ui.milkyUsed ?? {},
       afterRender: (pe) => { const db = pe.querySelector('[data-m3-refldb]'); if (db) renderReflDb(db, ui.catalog ?? catalogOf(null), h, () => renderPropertyPanel(el, M, S, ui, h)); } }, ui.dbList, h);   // 불투명 부품 상세 탭 — 반사 소재 DB(탭을 바꿔 다시 그려도)
     return;
   }

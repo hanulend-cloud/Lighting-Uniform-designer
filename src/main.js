@@ -1,4 +1,5 @@
 // UI 배선 + 실시간 재계산 — 프로젝트.md §3 출력6
+import { bundleJson, parseMaterialFile, loadClear, saveClear, clearImport } from './model/material-io.js';
 import { DEFAULT_SPEC, LEVEL_DEFAULTS } from './model/defaults.js';
 import { buildGeometry, combinedEffect, activeLevels, effectiveEdgeMargin } from './model/geometry.js';
 import { computeField, computeCameraLuminance, evalGrid, l2Describe } from './engine/directLit.js';
@@ -127,6 +128,7 @@ function buildForm() {
   $('#btn-flat-mode').onclick = () => { spec.mode = 'flat'; persist(); applyMode(); schedule(); };   // 평판(초기 검토) — 이번 실행에서만(다음 실행은 3D)
   $('#btn-sample-project').onclick = () => loadSampleProject();
   $('#file-mech3d-start').onchange = (e) => { const f = e.target.files?.[0]; if (f) importMech3d(f); e.target.value = ''; };
+  $('#file-materials').onchange = (e) => { const f = e.target.files?.[0]; if (f) importMaterials(f); e.target.value = ''; };
   $('#file-mech3d').onchange = (e) => { const f = e.target.files?.[0]; if (f) importMech3d(f); e.target.value = ''; };
   $('#file-led').onchange = (e) => { const f = e.target.files?.[0]; if (f) m3app.importLed(f); e.target.value = ''; };
   $('#file-import').onchange = importJson;
@@ -225,6 +227,22 @@ const GUIDE = `사용 순서 (3D 기구 설계)
 4. 편집 › 관측면 지정 → 빛을 보는 면 클릭 — 계산이 시작됨
 5. 계산 › 자동설계 — 바꿀 항목을 체크하고 실행 → 결과 비교 후 [적용]
 6. 파일 › 프로젝트 저장(JSON)으로 작업을 보관`;
+// 소재·표면 DB 꾸러미(실측 Milky · 반사 소재 · 투명 측정값의 사용자 항목) — 다른 PC 로 옮기기
+function exportMaterials() {
+  const text = bundleJson({ milky: materialDb()?.exportJson('user'), reflect: reflectDb?.exportJson('user'), clear: loadClear() });
+  const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([text], { type: 'application/json' })); a.download = 'uds-material-db.json'; a.click(); URL.revokeObjectURL(a.href);
+}
+async function importMaterials(file) {
+  try {
+    const d = parseMaterialFile(await file.text()), msg = [], rej = [];
+    if (d.milky.length && materialDb()) { const r = materialDb().importJson(JSON.stringify({ entries: d.milky })); msg.push(`실측 Milky ${r.added.length}`); rej.push(...r.rejected); }
+    if (d.reflect.length && reflectDb) { const r = reflectDb.importJson(JSON.stringify({ entries: d.reflect })); msg.push(`반사 소재 ${r.added.length}`); rej.push(...r.rejected); }
+    if (d.clear.length) { const r = clearImport(d.clear, loadClear()); if (tabLock.canWrite()) saveClear(r.list); msg.push(`투명 ${r.added.length}`); rej.push(...r.rejected); }
+    solver?.postMessage({ type: 'db', db: dbLists() }); markSoloReset();
+    const text = `소재·표면 DB 불러옴: ${msg.join(' · ') || '없음'}${rej.length ? ` · 거부 ${rej.length}건` : ''}`;
+    if (m3app.isMounted()) m3app.materialsChanged(text); else alert(text + (rej.length ? `\n${rej.join('\n')}` : ''));
+  } catch (e) { alert(`소재 DB 불러오기 실패: ${e.message}`); }
+}
 function setupMenubar() {
   const m3 = () => m3app.isMounted(), flatMode = () => spec.mode === 'flat';
   const menus = [
@@ -237,6 +255,9 @@ function setupMenubar() {
       { id: 'import-led', label: 'LED STEP 불러오기…', enabled: m3 },
       { id: 'export-mech', label: '3D 기구 STEP 내보내기 (수정 반영)', enabled: m3 },
       { id: 'export-flat', label: '평판 형상 STEP 내보내기', enabled: () => flatMode() && !!last },
+      '-',
+      { id: 'mat-export', label: '소재·표면 DB 내보내기 (JSON)' },
+      { id: 'mat-import', label: '소재·표면 DB 불러오기…' },
       '-',
       { id: 'reset', label: '기본값으로 초기화…' },
     ] },
@@ -274,6 +295,8 @@ function setupMenubar() {
     if (id === 'new') return newProject();
     if (id === 'open-json') return $('#file-import').click();
     if (id === 'save-json') return exportJson();
+    if (id === 'mat-export') return exportMaterials();
+    if (id === 'mat-import') return $('#file-materials').click();
     if (id === 'import-mech') return $('#file-mech3d').click();
     if (id === 'import-led') return $('#file-led').click();
     if (id === 'export-flat') { if (last) exportStep(spec, last.combo, last.geom, last.active); return; }

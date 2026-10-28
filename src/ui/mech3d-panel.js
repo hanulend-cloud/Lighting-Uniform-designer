@@ -52,16 +52,24 @@ export function clearAddFormHtml(msg = '') {
     ${msg ? `<div class="m3-warn" role="status">${esc(msg)}</div>` : ''}
     <div class="m3-row"><button data-m3-caok>등록하고 적용</button><button data-m3-cacancel>취소</button></div></div>`;
 }
+// 실측 Milky 소재 DB(순수, 상세 탭 · Milky 부품) — 목록(이름 · 굴절률 · 기본/사용자) · 쓰는 부품 수 · 내보내기·불러오기. 등록·피팅은 기본 탭 [＋ BSDF 측정값]
+export function milkyDbHtml(list, used = {}) {
+  const row = (e) => `<tr><th>${esc(e.name)}</th><td>n ${esc(e.n)}</td><td>${e.origin === 'base' ? '기본' : '사용자'}</td><td>${used[e.id] ? `부품 ${used[e.id]}` : ''}</td></tr>`;
+  return `<div class="mut m3-note">BSDF·투과율·Haze 측정값을 피팅한 소재 — 등록은 기본 탭 [＋ BSDF 측정값], 삭제는 그 창의 DB 목록에서</div>
+    ${list.length ? `<div class="m3-cat-wrap"><table class="m3-cmp m3-cat">${list.map(row).join('')}</table></div>` : '<div class="mut">실측 소재 없음</div>'}
+    <div class="m3-row m3-dbio"><button type="button" data-m3-io="milky:export">내보내기</button><label class="m3-file"><span>불러오기</span><input type="file" accept=".json,application/json" data-m3-io="milky:import" hidden></label><span class="mut">사용자 항목 · 같은 id 는 덮어씀</span></div>`;
+}
 // 투명 소재 측정값 DB 관리(순수, 상세 탭) — 칸을 바로 고침(바뀌면 그 소재를 쓰는 부품에 반영) · 삭제(쓰던 부품은 바탕 수지 기본값으로)
 // used = { id: 쓰는 부품 수 }
 export function clearDbHtml(list, used = {}) {
-  if (!list.length) return '<div class="mut">등록한 측정값 없음 — 기본 탭의 [＋ 측정값 (굴절률·투과율)] 로 등록</div>';
+  const io = '<div class="m3-row m3-dbio"><button type="button" data-m3-io="clear:export">내보내기</button><label class="m3-file"><span>불러오기</span><input type="file" accept=".json,application/json" data-m3-io="clear:import" hidden></label><span class="mut">JSON · 같은 이름은 덮어씀</span></div>';
+  if (!list.length) return `<div class="mut">등록한 측정값 없음 — 기본 탭의 [＋ 측정값 (굴절률·투과율)] 로 등록</div>${io}`;
   const row = (e) => `<div class="m3-cdb" data-m3-cdb="${esc(e.id)}">
     <div class="m3-row"><input data-m3-cdbk="name" value="${esc(e.name)}" aria-label="이름"><span class="mut">${used[e.id] ? `부품 ${used[e.id]}개 사용` : '미사용'}</span><button type="button" class="m3-link" data-m3-cdbdel="${esc(e.id)}">삭제</button></div>
     <div class="m3-row"><label>굴절률</label><input type="number" min="1.2" max="2.5" step="0.001" value="${esc(e.n)}" data-m3-cdbk="n" aria-label="굴절률"> <label class="mut">바탕</label><select data-m3-cdbk="base" aria-label="바탕 수지">${CLEAR_BASE.map((b) => `<option value="${b.id}"${b.id === e.base ? ' selected' : ''}>${esc(b.id)}</option>`).join('')}</select></div>
     <div class="m3-row"><label>투과율</label><input type="number" min="1" max="100" step="0.1" value="${esc(pct(e.T))}" data-m3-cdbk="T" aria-label="투과율 %">% <label class="mut">두께</label><input type="number" min="0.1" step="0.1" value="${esc(e.tRef)}" data-m3-cdbk="tRef" aria-label="측정 두께 mm"> mm</div>
     <div class="m3-row"><label>메모</label><input data-m3-cdbk="note" value="${esc(e.note ?? '')}" aria-label="메모"></div></div>`;
-  return `<div class="mut m3-note">고치면 그 소재를 쓰는 부품에 바로 반영 · 모든 프로젝트 공용(이 브라우저)</div>${list.map(row).join('')}`;
+  return `<div class="mut m3-note">고치면 그 소재를 쓰는 부품에 바로 반영 · 모든 프로젝트 공용(이 브라우저)</div>${list.map(row).join('')}${io}`;
 }
 // 투명 소재 고르기(순수) — 기본(일반값: 굴절률·투과율) / 측정(사용자) 그룹. 값 = 기본 수지 id | 사용자 id(u:…)
 function clearSelHtml(mat, user) {
@@ -174,6 +182,7 @@ function partEditor(p, sel, dbList) {
       ${secHtml('xf', '크기·위치 상세 (가능 범위 · 비율 고정)', esc(xfSummaryText(p, sel.xfInfo)), xformEditor(p, sel.xfInfo, sel.lock))}
       ${secHtml('contact', '접촉면 (이 부품)', '', contactsForPartHtml(sel.contacts ?? [], sel.part, sel.names ?? []))}
       ${opaque ? secHtml('refldb', '반사 소재 DB (측정값 등록·관리)', '', `<div class="m3-links"><button type="button" class="m3-link" data-m3-refladd aria-expanded="${sel.reflForm?.addOpen ? 'true' : 'false'}" title="측정한 반사율로 사용자 소재를 만들고 이 부품에 적용">＋ 측정값으로 새 소재</button> <span class="mut">기본 소재 값을 고치려면 [복사] 후 [＋측정]</span></div>${sel.reflForm?.addOpen ? reflAddFormHtml(sel.reflForm.msg) : ''}<div data-m3-refldb></div>`) : ''}
+      ${p.material.kind === 'milky' ? secHtml('milkydb', '실측 Milky 소재 DB (내보내기·불러오기)', `${dbList.length}개`, milkyDbHtml(dbList, sel.milkyUsed ?? {})) : ''}
       ${p.material.kind === 'clear' ? secHtml('cleardb', '투명 소재 측정값 DB (편집·삭제)', (sel.clearList ?? []).length ? `${sel.clearList.length}개` : '', clearDbHtml(sel.clearList ?? [], sel.clearUsed ?? {})) : ''}`;
   return `${warn}${tabs}<div class="m3-edit" role="tabpanel">${body}</div>`;
 }
@@ -311,6 +320,8 @@ export function renderPartProps(el, m, sel0, dbList, h) {
   el.querySelectorAll('[data-m3-fitdlg]').forEach((b) => { b.onclick = () => h.onFitDialog?.(i); });
   el.querySelectorAll('[data-m3-cdbk]').forEach((x) => { x.onchange = () => { const id = x.closest('[data-m3-cdb]').dataset.m3Cdb, err = h.onClearDb?.('edit', id, { key: x.dataset.m3Cdbk, value: x.value }); if (err) { x.setCustomValidity?.(err); x.reportValidity?.(); } }; });
   el.querySelectorAll('[data-m3-cdbdel]').forEach((b) => { b.onclick = () => { const e = (sel.clearList ?? []).find((x) => x.id === b.dataset.m3Cdbdel); if (globalThis.confirm?.(`"${e?.name ?? ''}" 측정값을 지울까요? 이 소재를 쓰는 부품은 바탕 수지의 기본값으로 돌아갑니다.`)) h.onClearDb?.('delete', b.dataset.m3Cdbdel); }; });
+  el.querySelectorAll('button[data-m3-io]').forEach((b) => { const [db, op] = b.dataset.m3Io.split(':'); b.onclick = () => h.onDbIo?.(db, op); });
+  el.querySelectorAll('input[data-m3-io]').forEach((x) => { const [db] = x.dataset.m3Io.split(':'); x.onchange = async () => { const f = x.files?.[0]; if (!f) return; const t = await f.text(); x.value = ''; h.onDbIo?.(db, 'import', t); }; });
   const csel = el.querySelector('[data-m3-clear]');
   if (csel) csel.onchange = () => { if (csel.value) h.onClear?.(i, csel.value); };
   const cform = (f) => { CLEAR_FORM.set(el, { ...f, part: i }); renderPartProps(el, m, sel0, dbList, h); };
