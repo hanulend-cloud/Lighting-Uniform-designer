@@ -1,6 +1,6 @@
 // 3D 기구 — 부품 속성(소재·면 처리·선택 면 덮어쓰기) · 접촉면 편집기 (spec 2026-10-14 §3, 2026-10-15 m3-cad-ui: 피처 트리 노드별).
 // 상태는 갖지 않는다: m = spec.mech3d, sel = { part, face|null }, dbList = 실측소재 DB 목록, h = 이벤트 처리기.
-import { PART_KINDS, FINISH_KINDS, RESIN_N, resolveFinish, setPartMaterial, setPartMaterialParam } from '../engine/mech3d/materials.js';
+import { PART_KINDS, FINISH_KINDS, RESIN_N, CLEAR_BASE, materialN, resolveFinish, setPartMaterial, setPartMaterialParam } from '../engine/mech3d/materials.js';
 import { bounds, meshVolume } from '../engine/mech3d/mesh.js';
 import { DEFAULT_FINISH_CATALOG, finishLimit } from '../engine/mech3d/housing-led.js';
 import { MEAS_CONDS, reflStatusText, REFLECT_KINDS } from '../model/reflect-db.js';
@@ -8,6 +8,7 @@ import { MEAS_CONDS, reflStatusText, REFLECT_KINDS } from '../model/reflect-db.j
 const esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
 const XF_LOCK = new WeakMap();   // 패널 요소 → 비율 고정 체크(세션 동안)
 const REFL_FORM = new WeakMap();   // 패널 요소 → 반사 소재 추가 양식 { open, msg }
+const CLEAR_FORM = new WeakMap();   // 패널 요소 → 투명 소재 측정값 양식 { addOpen, msg, part }
 // 접는 구역(<details>) 열림 상태 — 세션 동안 구역 id 별로 기억(패널은 innerHTML 로 자주 다시 그려짐)
 const SEC_OPEN = new Map();
 let SEC_FACE = null;   // 마지막으로 본 선택 면('부품:면') — 새 면이 선택되면 '면 처리' 구역을 자동으로 연다
@@ -16,7 +17,7 @@ export function resetSections() { SEC_OPEN.clear(); SEC_FACE = null; PART_TAB = 
 // 접는 구역 열림 기억 연결(다른 패널에서도 같은 모양·기억 — LED 속성 창)
 export const wireSections = (el) => el.querySelectorAll('details[data-m3-sec]').forEach((d) => d.addEventListener('toggle', () => SEC_OPEN.set(d.dataset.m3Sec, d.open)));
 export const secHtml = (id, title, summary, body) => `<details class="m3-sec" data-m3-sec="${id}"${sectionOpen(id) ? ' open' : ''}><summary><span class="m3-sec-t">${title}</span>${summary ? ` <span class="m3-sec-s">${summary}</span>` : ''}</summary><div class="m3-sec-b">${body}</div></details>`;
-// 부품 속성 탭 — 'basic'(기본: 소재 종류·값 하나·위치·크기) | 'detail'(상세: 실측 소재·수지·반사 소재 DB·면별 처리·가능 범위). 세션 동안 기억
+// 부품 속성 탭 — 'basic'(기본: 소재 고르기·측정값 입력·위치·크기) | 'detail'(상세: 면별 처리·가능 범위·접촉면·반사 소재 DB 관리). 세션 동안 기억
 let PART_TAB = 'basic';
 export const partTab = () => PART_TAB;
 export function setPartTab(t) { PART_TAB = t === 'detail' ? 'detail' : 'basic'; }
@@ -33,44 +34,56 @@ function finishRow(f, scope, allowInherit, lim = null) {
 }
 
 // 투과 부품: 실측 맞춤 대화상자(평판 모드 l2-advanced) 열기 — spec P4 §2.3e
-const FIT_BTN = '<button type="button" class="m3-link" data-m3-fitdlg title="측정 → 피팅 → 실측소재 DB 저장 → 이 부품을 그 실측 Milky 소재로">＋ 실측 데이터</button>';
+const FIT_BTN = '<button type="button" class="m3-link" data-m3-fitdlg title="BSDF(BTDF 각분포)·투과율·Haze 측정값 → 피팅 → 실측소재 DB 저장 → 이 부품에 적용">＋ BSDF 측정값</button>';
 // 소재 종류 = 4 단추 분할 컨트롤(aria-pressed)
 export function kindSegHtml(kind) {
   return `<div class="m3-seg" role="group" aria-label="부품 소재 종류">${Object.entries(PART_KINDS).map(([k, v]) => `<button type="button" data-m3-kind="${k}" aria-pressed="${k === kind ? 'true' : 'false'}">${esc(v.label)}</button>`).join('')}</div>`;
 }
-// 기본 탭 소재 값(순수) — 종류마다 값 하나만, 쉬운 말로. 실측 소재·수지·기준 두께·DB 편집은 상세 탭
-function basicMaterialHtml(p, dbList, catalog) {
+// 수지(바탕 소재) 고르기 — 굴절률을 함께 보임
+const resinSel = (cur) => `<select data-m3-mat="resin" aria-label="수지">${CLEAR_BASE.map((e) => `<option value="${e.id}"${e.id === cur ? ' selected' : ''}>${esc(e.id)} · n ${e.n}</option>`).join('')}</select>`;
+// 투명 소재 측정값 등록 양식(순수) — 굴절률·투과율(측정 두께) → 사용자 항목 등록하고 적용
+export function clearAddFormHtml(msg = '') {
+  return `<div class="m3-edit m3-refladd">
+    <div class="m3-row"><label>이름</label><input data-m3-ca="name" placeholder="예: 사내 PC 2405"></div>
+    <div class="m3-row"><label>바탕 수지</label><select data-m3-ca="base">${CLEAR_BASE.map((e) => `<option value="${e.id}">${esc(e.name)}</option>`).join('')}</select></div>
+    <div class="m3-row"><label>굴절률</label><input type="number" min="1.2" max="2.5" step="0.001" data-m3-ca="n" placeholder="빈칸 = 수지 값" aria-label="측정 굴절률"></div>
+    <div class="m3-row"><label>투과율</label><input type="number" min="1" max="100" step="0.1" data-m3-ca="T" aria-label="측정 전광선 투과율 %"> % <label class="mut">두께</label><input type="number" min="0.1" step="0.1" value="2" data-m3-ca="t" aria-label="측정 두께 mm"> mm</div>
+    <div class="m3-row"><label>메모</label><input data-m3-ca="note" placeholder="측정 장비·파장 등"></div>
+    ${msg ? `<div class="m3-warn" role="status">${esc(msg)}</div>` : ''}
+    <div class="m3-row"><button data-m3-caok>등록하고 적용</button><button data-m3-cacancel>취소</button></div></div>`;
+}
+// 투명 소재 고르기(순수) — 기본(일반값: 굴절률·투과율) / 측정(사용자) 그룹. 값 = 기본 수지 id | 사용자 id(u:…)
+function clearSelHtml(mat, user) {
+  const cur = mat.matId && user.some((e) => e.id === mat.matId) ? mat.matId : mat.resin;
+  const opt = (e) => `<option value="${esc(e.id)}"${e.id === cur ? ' selected' : ''}>${esc(e.name)} · n ${e.n} · ${pct(e.T)}%</option>`;
+  return `<select data-m3-clear aria-label="투명 소재"><optgroup label="기본 (일반값)">${CLEAR_BASE.map(opt).join('')}</optgroup>${user.length ? `<optgroup label="측정값 (사용자)">${user.map(opt).join('')}</optgroup>` : ''}${mat.matId && !user.some((e) => e.id === mat.matId) ? `<option value="" selected>없는 측정 소재 — 다시 고르세요</option>` : ''}</select>`;
+}
+// 기본 탭 소재(순수) — 소재 고르기와 측정값 입력은 모두 여기서(상세 탭에는 면별 처리·DB 관리만)
+// Milky: 확산 값 · 실측 소재(BSDF 피팅) · 수지 · ＋ BSDF 측정값 / 투명: 소재(굴절률별 기본 DB·측정값) · 투과율 · ＋ 측정값 / 반투과 백색: 투과율 · 수지 / 불투명: 반사 소재 · 반사율 · ＋ 측정값
+function basicMaterialHtml(p, dbList, catalog, sel = {}) {
   const mat = p.material;
   switch (mat.kind) {
     case 'milky': {
       const db = mat.dbId ? dbList.find((e) => e.id === mat.dbId) : null;
-      return `<div class="m3-row"><label>확산 (Milky)</label><input type="number" min="0" max="10" step="0.1" value="${esc(mat.milky)}" data-m3-mat="milky" aria-label="Milky 값"> <span class="mut">높을수록 고르게 · 어두워짐</span></div>${db ? `<div class="mut m3-note">실측 소재: ${esc(db.name)}</div>` : ''}`;
+      return `<div class="m3-row"><label>확산 (Milky)</label><input type="number" min="0" max="10" step="0.1" value="${esc(mat.milky)}" data-m3-mat="milky" aria-label="Milky 값"> <span class="mut">높을수록 고르게 · 어두워짐</span></div>
+        <div class="m3-row"><label>실측 소재</label><select data-m3-mat="dbId" aria-label="실측 소재(BSDF 피팅)"><option value="">없음 (추상 Milky)</option>${dbList.map((e) => `<option value="${esc(e.id)}" ${e.id === mat.dbId ? 'selected' : ''}>${esc(e.name)}</option>`).join('')}</select></div>
+        ${db ? `<div class="mut m3-note">굴절률 n ${esc(db.n)} · 산란 각분포는 측정값 피팅 — 확산 값은 농도처럼 조절</div>` : `<div class="m3-row"><label>수지</label>${resinSel(mat.resin)}</div>`}
+        <div class="m3-links">${FIT_BTN}</div>`;
     }
-    case 'clear':
-    case 'whiteTrans':
-      return `<div class="m3-row"><label>투과율</label><input type="number" min="1" max="100" step="1" value="${esc(pct(mat.T))}" data-m3-mat="T" aria-label="투과율 %">% <span class="mut">두께 ${esc(mat.tRef)} mm 기준</span></div>`;
-    case 'opaque': {
-      const plain = catalog.filter((e) => !e.special), f = p.finish, fk = f ? FINISH_KINDS[f.kind] : null, lim = finishLimit(p, catalog);
-      const sel = `<select data-m3-refl aria-label="반사 소재"><option value=""${p.reflMaterial ? '' : ' selected'}>— 고르기 —</option>${plain.map((e) => `<option value="${esc(e.id)}"${e.id === p.reflMaterial ? ' selected' : ''}>${esc(e.name)}</option>`).join('')}${p.reflMaterial && !plain.some((e) => e.id === p.reflMaterial) ? `<option value="${esc(p.reflMaterial)}" selected>없는 소재 — 다시 고르세요</option>` : ''}</select>`;
-      const r = fk?.hasR ? `<div class="m3-row"><label>반사율</label><input type="number" min="0" max="100" step="1" value="${esc(pct(f.R))}" data-m3-finishr="part" aria-label="반사율 %">%${lim && f.kind === lim.kind ? ` <span class="mut">이 소재 최대 ${pct(lim.max)}%</span>` : ''}</div>` : `<div class="m3-row mut">${esc(fk?.label ?? '')} — 반사율 없음</div>`;
-      return `<div class="m3-row"><label>반사 소재</label>${sel}</div>${r}`;
+    case 'clear': {
+      const user = sel.clearList ?? [], f = CLEAR_FORM.get(sel.formEl ?? CLEAR_FORM);
+      const open = f?.addOpen && f.part === sel.part;
+      return `<div class="m3-row"><label>소재</label>${clearSelHtml(mat, user)}</div>
+        <div class="m3-row"><label>굴절률</label><b>${materialN(mat)}</b>${Number.isFinite(mat.n) ? ' <span class="mut">측정값</span>' : ''}</div>
+        <div class="m3-row"><label>투과율</label><input type="number" min="1" max="100" step="0.1" value="${esc(pct(mat.T))}" data-m3-mat="T" aria-label="투과율 %">% <span class="mut">두께</span><input type="number" min="0.1" step="0.1" value="${esc(mat.tRef)}" data-m3-mat="tRef" aria-label="투과율을 잰 두께 mm"> mm</div>
+        <div class="m3-links"><button type="button" class="m3-link" data-m3-clearadd aria-expanded="${open ? 'true' : 'false'}" title="측정한 굴절률·투과율로 사용자 소재를 만들고 이 부품에 적용">＋ 측정값 (굴절률·투과율)</button></div>
+        ${open ? clearAddFormHtml(f.msg) : ''}`;
     }
-    default: return '';
-  }
-}
-// 상세 탭 소재(순수) — 실측 소재 DB·수지·기준 두께·실측 맞춤 · 반사 소재 복사/측정값 추가
-function detailMaterialHtml(p, dbList, catalog, form) {
-  const mat = p.material, resin = `<select data-m3-mat="resin" aria-label="수지">${Object.keys(RESIN_N).map((r) => `<option ${r === mat.resin ? 'selected' : ''}>${r}</option>`).join('')}</select>`;
-  switch (mat.kind) {
-    case 'milky':
-      return `<div class="m3-row"><label>실측 소재</label><select data-m3-mat="dbId" aria-label="실측 소재"><option value="">추상 Milky</option>${dbList.map((e) => `<option value="${esc(e.id)}" ${e.id === mat.dbId ? 'selected' : ''}>${esc(e.name)}</option>`).join('')}</select></div>
-        <div class="m3-row"><label>수지</label>${resin}</div><div class="m3-links">${FIT_BTN}</div>`;
-    case 'clear':
     case 'whiteTrans':
-      return `<div class="m3-row"><label>기준 두께</label><input type="number" min="0.1" step="0.1" value="${esc(mat.tRef)}" data-m3-mat="tRef" aria-label="기준 두께 mm"> mm <span class="mut">투과율을 잰 두께</span></div>
-        <div class="m3-row"><label>수지</label>${resin}</div><div class="m3-links">${FIT_BTN}</div>`;
+      return `<div class="m3-row"><label>투과율</label><input type="number" min="1" max="100" step="1" value="${esc(pct(mat.T))}" data-m3-mat="T" aria-label="투과율 %">% <span class="mut">두께</span><input type="number" min="0.1" step="0.1" value="${esc(mat.tRef)}" data-m3-mat="tRef" aria-label="투과율을 잰 두께 mm"> mm</div>
+        <div class="m3-row"><label>수지</label>${resinSel(mat.resin)}</div>`;
     case 'opaque':
-      return reflRowHtml(p, catalog, form);
+      return reflRowHtml(p, catalog, sel.reflForm ?? {});
     default: return '';
   }
 }
@@ -102,7 +115,7 @@ export function reflRowHtml(p, catalog = DEFAULT_FINISH_CATALOG, form = {}) {
   const base = plain.filter((e) => e.origin !== 'user'), user = plain.filter((e) => e.origin === 'user');
   const f = p.finish, fk = f ? FINISH_KINDS[f.kind] : null, lim = finishLimit(p, catalog);
   const rIn = fk?.hasR ? ` 반사율 <input type="number" min="0" max="100" step="1" value="${esc(pct(f.R))}" data-m3-finishr="part" aria-label="반사율 %">%${lim && f.kind === lim.kind ? ` <span class="mut">${lim.entry.special ? '특수 ' : ''}상한 ${pct(lim.max)}%</span>` : ''}` : '';
-  return `<div class="m3-row">반사 소재 <select data-m3-refl aria-label="반사 소재"><option value=""${p.reflMaterial ? '' : ' selected'}>— 미지정 —</option>${missing ? `<option value="${esc(p.reflMaterial)}" selected>없는 소재(${esc(p.reflMaterial)}) — 다시 고르세요</option>` : ''}${grp('기본', base)}${grp('사용자', user)}</select>${rIn}${coat ? ` <span class="mut">특수: ${esc(coat.name)}</span>` : ''}</div>
+  return `<div class="m3-row"><label>반사 소재</label><select data-m3-refl aria-label="반사 소재"><option value=""${p.reflMaterial ? '' : ' selected'}>— 미지정 —</option>${missing ? `<option value="${esc(p.reflMaterial)}" selected>없는 소재(${esc(p.reflMaterial)}) — 다시 고르세요</option>` : ''}${grp('기본', base)}${grp('사용자', user)}</select>${rIn}${coat ? ` <span class="mut">특수: ${esc(coat.name)}</span>` : ''}</div>
     <div class="m3-links">${cur && cur.origin !== 'user' ? '<button type="button" class="m3-link" data-m3-reflcopy title="공용 항목은 고칠 수 없어 사용자 사본을 만들고 이 부품을 그 사본으로">복사해서 수정</button>' : ''}<button type="button" class="m3-link" data-m3-refladd aria-expanded="${form.addOpen ? 'true' : 'false'}" title="측정한 반사율로 사용자 소재를 만들고 이 부품에 적용">＋ 측정값</button></div>
     ${form.addOpen ? reflAddFormHtml(form.msg) : ''}`;
 }
@@ -144,10 +157,9 @@ function partEditor(p, sel, dbList) {
     <button type="button" role="tab" data-m3-tab="detail" aria-selected="${tab === 'detail'}">상세${dSum ? ` <span class="m3-tab-s">${esc(dSum)}</span>` : ''}</button></div>`;
   const warn = `${overlapWarnHtml(sel.clearance)}${sel.xfMsg ? `<div class="m3-warn" role="status">${esc(sel.xfMsg)}</div>` : ''}`;
   const body = tab === 'basic'
-    ? `${untraceHtml(p)}<div class="m3-card">${kindSegHtml(p.material.kind)}${basicMaterialHtml(p, dbList, cat)}</div>
+    ? `${untraceHtml(p)}<div class="m3-card">${kindSegHtml(p.material.kind)}${basicMaterialHtml(p, dbList, cat, sel)}</div>
       <div class="m3-card"><div class="m3-sub">위치 · 크기 <span class="mut">mm</span></div>${xformEditor(p, sel.xfInfo, false, true)}${ledDistHtml(sel.clearance)}</div>`
-    : `<div class="m3-card"><div class="m3-sub">소재 상세</div>${detailMaterialHtml(p, dbList, cat, sel.reflForm ?? {})}</div>
-      ${secHtml('finish', '면 처리 (면별)', face != null ? `면 #${face} 선택` : nOver ? `면 ${nOver}개 덮어씀` : '', `${partFin}${faceRow}<div class="mut m3-note">3D 뷰에서 면을 클릭하면 그 면만 다르게 지정할 수 있습니다</div>`)}
+    : `${secHtml('finish', '면 처리 (면별)', face != null ? `면 #${face} 선택` : nOver ? `면 ${nOver}개 덮어씀` : '', `${partFin}${faceRow}<div class="mut m3-note">3D 뷰에서 면을 클릭하면 그 면만 다르게 지정할 수 있습니다</div>`)}
       ${secHtml('xf', '크기·위치 상세 (가능 범위 · 비율 고정)', esc(xfSummaryText(p, sel.xfInfo)), xformEditor(p, sel.xfInfo, sel.lock))}
       ${secHtml('contact', '접촉면 (이 부품)', '', contactsForPartHtml(sel.contacts ?? [], sel.part, sel.names ?? []))}
       ${opaque ? secHtml('refldb', '반사 소재 DB (측정값 등록·관리)', '', '<div data-m3-refldb></div>') : ''}`;
@@ -233,7 +245,7 @@ export function partHeaderText(p, info) {
 // 부품 노드 — sel = { part, face|null, catalog? }, h = { onKind(part, kind), onMat(part, key, value), onFinish(part, face|null, finish|null), onReflMaterial(part, id|null) }
 // 반사율 상한 자르기는 onFinish 쪽(partFinishEdit)
 export function renderPartProps(el, m, sel0, dbList, h) {
-  const sel = { ...sel0, lock: XF_LOCK.get(el.ownerDocument ?? XF_LOCK) ?? false, reflForm: REFL_FORM.get(el)?.part === sel0.part ? REFL_FORM.get(el) : {} };   // 비율 고정: 기본 꺼짐(한 치수만 바꾸는 경우가 대부분), 켜면 다시 그려도 유지
+  const sel = { ...sel0, formEl: el, lock: XF_LOCK.get(el.ownerDocument ?? XF_LOCK) ?? false, reflForm: REFL_FORM.get(el)?.part === sel0.part ? REFL_FORM.get(el) : {} };   // 비율 고정: 기본 꺼짐(한 치수만 바꾸는 경우가 대부분), 켜면 다시 그려도 유지
   const p = m.parts[sel.part];
   if (!p) { el.innerHTML = '<div class="mut">부품을 찾을 수 없음</div>'; return; }
   const fk = sel.face != null ? `${sel.part}:${sel.face}` : null;
@@ -285,6 +297,20 @@ export function renderPartProps(el, m, sel0, dbList, h) {
   const rcp = el.querySelector('[data-m3-reflcopy]');
   if (rcp) rcp.onclick = () => h.onReflCopy?.(i, p.reflMaterial);
   el.querySelectorAll('[data-m3-fitdlg]').forEach((b) => { b.onclick = () => h.onFitDialog?.(i); });
+  const csel = el.querySelector('[data-m3-clear]');
+  if (csel) csel.onchange = () => { if (csel.value) h.onClear?.(i, csel.value); };
+  const cform = (f) => { CLEAR_FORM.set(el, { ...f, part: i }); renderPartProps(el, m, sel0, dbList, h); };
+  const cadd = el.querySelector('[data-m3-clearadd]');
+  if (cadd) cadd.onclick = () => cform({ addOpen: !(CLEAR_FORM.get(el)?.addOpen && CLEAR_FORM.get(el)?.part === i) });
+  const ccan = el.querySelector('[data-m3-cacancel]');
+  if (ccan) ccan.onclick = () => cform({});
+  const cok = el.querySelector('[data-m3-caok]');
+  if (cok) cok.onclick = () => {
+    const f = {}; el.querySelectorAll('[data-m3-ca]').forEach((x) => { f[x.dataset.m3Ca] = x.value; });
+    CLEAR_FORM.set(el, {});
+    const err = h.onClearAdd?.(i, f);
+    if (err) { CLEAR_FORM.set(el, { addOpen: true, msg: err, part: i }); renderPartProps(el, m, sel0, dbList, h); el.querySelectorAll('[data-m3-ca]').forEach((x) => { x.value = f[x.dataset.m3Ca] ?? ''; }); }
+  };
   el.querySelectorAll('[data-m3-contact]').forEach((c) => { c.onchange = () => h.onContact?.(+c.dataset.m3Contact, c.checked ? 'contact' : 'air'); });
   sel0.afterRender?.(el);   // 붙여 그릴 것(반사 소재 DB 등)
   el.querySelectorAll('[data-m3-finish]').forEach((x) => {

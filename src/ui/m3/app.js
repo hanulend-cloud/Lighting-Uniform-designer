@@ -5,7 +5,7 @@
 // 점진 계산 갱신(1초마다)은 store 알림 없이 결과 패널·상태 띠·색지도만 다시 그린다(입력 중 속성 패널이 다시 그려지지 않게).
 import { getMech3d, getLedMesh, setLedMesh, saveLedIDB, applyPartMods, redetectContacts } from '../../engine/mech3d/runtime.js';
 import { findLeds } from '../../engine/mech3d/led-detect.js';
-import { setPartMaterial, setPartMaterialParam } from '../../engine/mech3d/materials.js';
+import { setPartMaterial, setPartMaterialParam, CLEAR_BASE, applyClearEntry, clearEntryFromForm } from '../../engine/mech3d/materials.js';
 import { lineFromData, lightData, obsDirection } from '../../engine/mech3d/line.js';
 import { tallyGeometry, tallyStats } from '../../engine/mech3d/tally.js';
 import { bounds } from '../../engine/mech3d/mesh.js';
@@ -942,6 +942,10 @@ function onPick(s) {
   st.update('session', (_, x) => { x.sel = s && s.part < nMech ? s : null; x.ledSel = null; if (x.sel) x.node = `part:${x.sel.part}`; });   // LED STEP 부품은 소재 편집 대상이 아님
 }
 
+// 투명 소재 측정값(사용자 항목) — 브라우저 저장(uds.clear.v1), 모든 프로젝트 공용
+const CLEAR_KEY = 'uds.clear.v1';
+function clearUser() { try { const v = JSON.parse(localStorage.getItem(CLEAR_KEY) || '[]'); return Array.isArray(v) ? v.filter((e) => e && e.id && Number.isFinite(e.n)) : []; } catch { return []; } }
+function saveClearUser(list) { if (A?.ctx?.canSave && !A.ctx.canSave()) return; try { localStorage.setItem(CLEAR_KEY, JSON.stringify(list)); } catch {} }
 // ---- 속성 편집 처리기 (main.js:348-361, 426-451) — 태그가 계산·점검 범위를 정한다 ----
 function propHandlers() {
   const st = A.store, ctx = A.ctx;
@@ -980,6 +984,19 @@ function propHandlers() {
       st.update('material', (m, x) => { m.parts[i] = setReflMaterial(m.parts[i], c.id, reflCat()); x.status = `사용자 사본 "${c.name}" 을 만들어 적용 — 목표 노드의 반사 소재 DB 에서 고칠 수 있습니다`; });
     },
     onFitDialog: (i) => openFitDialog(i),
+    // 투명 소재 고르기(굴절률별 기본 DB · 측정값) — 그 항목의 굴절률·투과율·두께로
+    onClear: (i, id) => {
+      const e = CLEAR_BASE.find((x) => x.id === id) ?? clearUser().find((x) => x.id === id);
+      if (e) st.update('material', (m, x) => { m.parts[i] = applyClearEntry(m.parts[i], e); x.status = `투명 소재 "${e.name}" — 굴절률 ${e.n} · 투과율 ${Math.round(e.T * 1000) / 10}%(${e.tRef} mm)`; });
+    },
+    // 측정값으로 투명 소재 등록(같은 이름 = 덮어씀) 후 이 부품에 적용. f = 양식 문자열 → 오류 문구 | null
+    onClearAdd: (i, f) => {
+      const r = clearEntryFromForm(f); if (r.error) return r.error;
+      saveClearUser([...clearUser().filter((e) => e.id !== r.entry.id), r.entry]);
+      const e = r.entry;
+      st.update('material', (m, x) => { m.parts[i] = applyClearEntry(m.parts[i], e); x.status = `측정 소재 "${e.name}" 등록 · 적용(n ${e.n}, 투과율 ${Math.round(e.T * 1000) / 10}% @ ${e.tRef} mm)`; });
+      return null;
+    },
     // 반사 소재 DB 관리(목표 노드) — 바뀐 뒤 다시 그림(부품 속성·자동설계 ④ 후보·카드). 오류 문구 | null
     onReflDb: (op, id, arg) => {
       const db = ctx.reflectDb?.(); if (!db) { setStatus('반사 소재 DB 없음'); return '반사 소재 DB 없음'; }
@@ -1252,7 +1269,7 @@ function renderAll(tag = 'all') {
   }, lay);
   const pi = S.node?.startsWith('part:') ? +S.node.slice(5) : -1, clr = pi >= 0 ? clearanceOf(pi) : null;
   if (clr !== A.clrShown) { A.clrShown = clr; renderMarkers(); }
-  if (tag !== 'view') renderPropertyPanel($('#m3-props'), M, S, { dbList: A.ctx.materialDb()?.list() ?? [], catalog: reflCat(), auto: autoGrid(), dir: M.observe.dir ?? S.line?.frame.d, lineInfo: lineInfo(), clearance: clr, xfInfo: pi >= 0 ? xformInfoOf(pi) : null, meshInfo: pi >= 0 ? partMeshInfo(pi) : null, xfMsg: S.xfMsg?.part === pi ? S.xfMsg.text : '', lay: lay ?? null, led: S.node === 'leds' && S.ledSel != null ? ledUi(LS, S.ledSel) : null, ledTotal: LS.list.length }, propHandlers());
+  if (tag !== 'view') renderPropertyPanel($('#m3-props'), M, S, { dbList: A.ctx.materialDb()?.list() ?? [], catalog: reflCat(), clearList: clearUser(), auto: autoGrid(), dir: M.observe.dir ?? S.line?.frame.d, lineInfo: lineInfo(), clearance: clr, xfInfo: pi >= 0 ? xformInfoOf(pi) : null, meshInfo: pi >= 0 ? partMeshInfo(pi) : null, xfMsg: S.xfMsg?.part === pi ? S.xfMsg.text : '', lay: lay ?? null, led: S.node === 'leds' && S.ledSel != null ? ledUi(LS, S.ledSel) : null, ledTotal: LS.list.length }, propHandlers());
   if (tag === 'session' || tag === 'all') renderMarkers();
   A.cmd.update(S, M);
   renderStatus();

@@ -274,12 +274,12 @@ ok(clampCap(12) === 9.9 && clampCap(0.1) === 0.5 && clampCap(3) === 3 && clampCa
   const sel = { part: 1, face: null, clearance: clr, xfInfo: { center0: [0, 0, 0], size0: [10, 10, 2], lim: null }, catalog: catalogOf(null), meshInfo: null };
   renderPartProps(el, P, sel, [], {});
   // 기본 탭(처음): 소재 종류 · 반사 소재 · 반사율(최대) · 위치·크기 숫자만 · 경고 한 줄 — 접는 구역·가능 범위·비율 고정 없음
-  ok(/data-m3-tab="basic" aria-selected="true"/.test(html) && html.includes('data-m3-refl') && html.includes('data-m3-finishr="part"') && html.includes('이 소재 최대') && html.includes('data-m3-xf="c0"') && html.includes('data-m3-xf="z2"')
-    && !html.includes('data-m3-sec=') && !html.includes('data-m3-xflock') && !html.includes('data-m3-refladd') && !html.includes('가장 가까운') && html.includes('LED까지 <b class="led">1.5 mm</b>'), '기본 탭: 쉬운 항목만(소재 · 반사율 · 위치·크기 · LED 까지 거리) + 경고');
+  ok(/data-m3-tab="basic" aria-selected="true"/.test(html) && html.includes('data-m3-refl') && html.includes('data-m3-finishr="part"') && html.includes('상한 ') && html.includes('data-m3-xf="c0"') && html.includes('data-m3-xf="z2"')
+    && !html.includes('data-m3-sec=') && !html.includes('data-m3-xflock') && html.includes('data-m3-refladd') && !html.includes('가장 가까운') && html.includes('LED까지 <b class="led">1.5 mm</b>'), '기본 탭: 소재 고르기·측정값 입력 · 반사율 · 위치·크기 · LED 까지 거리 + 경고');
   setPartTab('detail'); renderPartProps(el, P, sel, [], {});
   ok(['xf', 'finish'].every((k) => html.includes(`data-m3-sec="${k}"`)) && !html.includes('data-m3-sec="gap"') && !/<details[^>]* open/.test(html) && html.includes('<summary>'), '구역: 크기·위치 · 면 처리 = 기본 닫힘 · 간격 상세 없음');
   ok(html.includes('>부품 2 · ') || html.includes(`>${P.parts[1].name} · `), '제목 = 이름 · 크기');
-  ok(html.includes('data-m3-refl') && html.includes('data-m3-finishr="part"') && html.includes('상한 ') && !html.includes('data-m3-finish="part"') && !html.includes('가장 가까운'), '불투명 + 반사 소재: 본 줄 = 소재 · 반사율 · 상한, 종류 선택 숨김');
+  ok(!html.includes('data-m3-refl ') && !html.includes('data-m3-refladd') && html.includes('면 처리 종류는 반사 소재가 정함') && !html.includes('data-m3-finish="part"'), '불투명 + 반사 소재: 상세 탭엔 소재 고르기 없음 · 종류 선택 숨김');
   secs.xf.open = true; secs.xf.toggle();
   renderPartProps(el, P, sel, [], {});
   ok(/data-m3-sec="xf" open/.test(html) && !/data-m3-sec="gap" open/.test(html) && sectionOpen('xf'), '열린 구역: 다시 그려도 열림 유지(1)');
@@ -290,11 +290,17 @@ ok(clampCap(12) === 9.9 && clampCap(0.1) === 0.5 && clampCap(3) === 3 && clampCa
   renderPartProps(el, P, { ...sel, face: 3 }, [], {});
   ok(/data-m3-sec="finish" open/.test(html) && html.includes('선택한 면 #3') && html.includes('data-m3-finish="face"'), '면 선택 → 면 처리 구역 자동 열기');
   const P0 = { ...P, parts: [P.parts[0], { ...P.parts[1], reflMaterial: undefined }] }; renderPartProps(el, P0, sel, [], {});
-  ok(html.includes('data-m3-finish="part"') && html.includes('— 미지정 —'), '반사 소재 미지정 → 면 처리 구역에 종류 선택');
+  ok(html.includes('data-m3-finish="part"'), '반사 소재 미지정 → 면 처리 구역에 종류 선택');
   renderPartProps(el, P, { ...sel, part: 0 }, [], {});
-  ok(html.includes('data-m3-mat="dbId"') && html.includes('data-m3-fitdlg') && html.includes('＋ 실측 데이터') && !html.includes('data-m3-mat="milky"'), 'Milky 상세: 실측 소재 · 수지 · 실측 링크');
+  ok(!html.includes('data-m3-mat="dbId"') && !html.includes('data-m3-fitdlg') && !html.includes('data-m3-mat="milky"'), 'Milky 상세: 소재 고르기 없음(기본 탭으로)');
   setPartTab('basic'); renderPartProps(el, P, { ...sel, part: 0 }, [], {});
-  ok(html.includes('data-m3-mat="milky"') && html.includes('확산 (Milky)') && html.includes('data-m3-kind="milky" aria-pressed="true"') && !html.includes('data-m3-fitdlg'), 'Milky 기본: 확산 값 하나');
+  ok(html.includes('data-m3-mat="milky"') && html.includes('확산 (Milky)') && html.includes('data-m3-kind="milky" aria-pressed="true"') && html.includes('data-m3-mat="dbId"') && html.includes('＋ BSDF 측정값') && html.includes('data-m3-mat="resin"'), 'Milky 기본: 확산 값 · 실측 소재 · 수지 · ＋ BSDF 측정값');
+  { const Q = { ...P, parts: [{ ...P.parts[0], material: { kind: 'clear', resin: 'PMMA', T: 0.92, tRef: 2 } }, P.parts[1]] };
+    renderPartProps(el, Q, { ...sel, part: 0, clearList: [{ id: 'u:사내 PC', name: '사내 PC', base: 'PC', n: 1.585, T: 0.88, tRef: 3, origin: 'user' }] }, [], {});
+    ok(html.includes('data-m3-clear') && html.includes('PMMA (아크릴) · n 1.49') && /value="PMMA" selected/.test(html) && html.includes('label="측정값 (사용자)"') && html.includes('사내 PC · n 1.585') && html.includes('<b>1.49</b>') && html.includes('data-m3-clearadd'), '투명 기본: 굴절률별 기본 DB · 측정 그룹 · 굴절률 · ＋ 측정값');
+    const Q2 = { ...Q, parts: [{ ...Q.parts[0], material: { kind: 'clear', resin: 'PC', n: 1.585, matId: 'u:사내 PC', T: 0.88, tRef: 3 } }, P.parts[1]] };
+    renderPartProps(el, Q2, { ...sel, part: 0, clearList: [{ id: 'u:사내 PC', name: '사내 PC', base: 'PC', n: 1.585, T: 0.88, tRef: 3, origin: 'user' }] }, [], {});
+    ok(/value="u:사내 PC" selected/.test(html) && html.includes('<b>1.585</b> <span class="mut">측정값</span>'), '투명: 측정 소재 선택 · 측정 굴절률 표시'); }
   resetSections(); }
 { // 좌·우 창 폭 조절(splitter): 기본 260/430 · 비율 → px · 최소 폭 · 3D 최소 280px
   const { splitPx } = await import('../src/ui/m3/splitter.js');

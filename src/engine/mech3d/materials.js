@@ -1,6 +1,38 @@
 // 3D 기구 모드 소재 카탈로그 — spec 2026-10-14 §3.2(부품 소재)·§3.3(면 처리). 화면 라벨·기본값·검증(순수 JS, 불변 갱신).
 // 물리 해석(μs·g·μa 등)은 P2 추적기에서 이 값을 읽어 수행한다.
-export const RESIN_N = { PC: 1.586, PMMA: 1.49 };
+// 투명 소재 기본 DB(일반값, d선 589 nm 굴절률 · 2 mm 전광선 투과율(표면 반사 포함)) — 수지 id = RESIN_N 키
+// 실제 부품은 등급·첨가제에 따라 다르므로 측정값이 있으면 사용자 항목(clearEntryFromForm)으로 등록해 씀
+export const CLEAR_BASE = [
+  { id: 'PC', name: 'PC (폴리카보네이트)', n: 1.586, T: 0.89, tRef: 2 },
+  { id: 'PMMA', name: 'PMMA (아크릴)', n: 1.49, T: 0.92, tRef: 2 },
+  { id: 'PS', name: 'PS (폴리스티렌)', n: 1.59, T: 0.88, tRef: 2 },
+  { id: 'MS', name: 'MS (MMA-스티렌)', n: 1.564, T: 0.9, tRef: 2 },
+  { id: 'COP', name: 'COP/COC (사이클로올레핀)', n: 1.53, T: 0.91, tRef: 2 },
+  { id: 'PET', name: 'PET', n: 1.575, T: 0.88, tRef: 2 },
+  { id: 'Glass', name: '유리 (BK7)', n: 1.517, T: 0.915, tRef: 2 },
+  { id: 'Silicone', name: '실리콘 (광학용)', n: 1.41, T: 0.93, tRef: 2 },
+];
+export const RESIN_N = Object.fromEntries(CLEAR_BASE.map((e) => [e.id, e.n]));
+// 부품 소재의 굴절률 — 측정값(material.n)이 있으면 그것, 없으면 수지 기본값
+export const materialN = (m) => (Number.isFinite(m?.n) && m.n > 1 ? m.n : RESIN_N[m?.resin] ?? RESIN_N.PC);
+// 투명 소재 고르기(불변) — 기본 항목: 수지 = id, 측정 굴절률 해제 · 사용자 항목: 수지 = 바탕 수지, n = 측정값. 둘 다 그 항목의 투과율·두께를 따름
+export function applyClearEntry(part, e) {
+  if (!e) return part;
+  const { n, matId, ...m } = part.material, user = e.origin === 'user';
+  const material = { ...m, resin: user ? (RESIN_N[e.base] ? e.base : 'PC') : e.id, ...(user ? { n: e.n, matId: e.id } : {}) };
+  if (part.material.kind === 'clear') { material.T = e.T; material.tRef = e.tRef; }
+  return { ...part, material };
+}
+// 측정값 양식 → 사용자 투명 소재 항목(순수). f = { name, base, n, T(%), t(mm), note } — 굴절률 빈칸 = 바탕 수지 값
+export function clearEntryFromForm(f) {
+  const name = String(f.name ?? '').trim(), base = RESIN_N[f.base] ? f.base : 'PC';
+  if (!name) return { error: '이름을 넣으세요' };
+  const n = String(f.n ?? '').trim() === '' ? RESIN_N[base] : +f.n, T = +f.T / 100, t = +f.t;
+  if (!(n >= 1.2 && n <= 2.5)) return { error: '굴절률은 1.2 ~ 2.5' };
+  if (!(T > 0 && T <= 1)) return { error: '투과율은 0 초과 100% 이하' };
+  if (!(t > 0)) return { error: '측정 두께(mm)를 넣으세요' };
+  return { entry: { id: `u:${name}`, name, base, n: Math.round(n * 10000) / 10000, T: Math.round(T * 10000) / 10000, tRef: t, note: String(f.note ?? '').trim(), origin: 'user' } };
+}
 
 export const PART_KINDS = {
   milky: { label: 'Milky' },
@@ -65,7 +97,7 @@ export function resolveFinish(part, face) { return part.faceFinish?.[face] ?? pa
 
 // 빛이 내부로 들어가는 소재의 굴절률(불투명이면 null)
 export function partIndex(material) {
-  return material.kind === 'opaque' ? null : (RESIN_N[material.resin] ?? RESIN_N.PC);
+  return material.kind === 'opaque' ? null : materialN(material);
 }
 
 export function validatePart(part) {
@@ -77,6 +109,7 @@ export function validatePart(part) {
     if (!(m.tRef > 0)) e.push('기준 두께는 0 초과');
   }
   if (m.resin != null && !RESIN_N[m.resin]) e.push(`수지 오류: ${m.resin}`);
+  if (m.n != null && !(m.n >= 1.2 && m.n <= 2.5)) e.push('굴절률은 1.2 ~ 2.5');
   for (const f of [part.finish, ...Object.values(part.faceFinish ?? {})]) {
     const k = FINISH_KINDS[f?.kind];
     if (!k) e.push(`면 처리 오류: ${f?.kind}`);
