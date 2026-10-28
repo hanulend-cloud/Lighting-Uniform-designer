@@ -30,9 +30,9 @@ ok(refineEmitterFace(parts[2], 1) === 7 && Math.abs(faceInfo(parts[2], 7).c[2] -
 ok(refineEmitterFace(side[1], 1) === 7, `측면 패키지 몸체 −x 면 → 렌즈 −x 면 ${refineEmitterFace(side[1], 1)}`);
 const plain = boxMesh(0, 0, 0, 3, 2, 1);
 ok(refineEmitterFace(plain, 1) === 1, '단순 상자 LED → 같은 면');
-// 안쪽 발광 방지: 몸체 윗면(렌즈 속)을 발광면으로 주면 needsCheck
+// 안쪽 발광 방지: 몸체 윗면(렌즈 속)을 발광면으로 주면 법선 방향 첫 표면(렌즈 윗면 z 1.1)으로 밀어 냄
 const emIn = findEmitters(parts, cands, 1, 1, 0);
-ok(emIn.every((e) => e.needsCheck), `발광 위치가 LED 솔리드 안 → 확인 필요(${emIn.filter((e) => e.needsCheck).length}/${emIn.length})`);
+ok(emIn.every((e) => !e.needsCheck && Math.abs(e.pos[2] - 1.1) < 1e-3), `발광 위치가 LED 솔리드 안 → 렌즈 표면으로(${emIn.map((e) => e.pos?.[2]?.toFixed(3)).join(',')})`);
 const emOk = findEmitters(parts, cands, 1, 7, 0);
 ok(emOk.every((e) => !e.needsCheck), '렌즈 윗면 → 정상');
 // 화면 기준 맞춤 반경: max(5mm, 14px × 화소당 mm). 값이 없으면 5mm

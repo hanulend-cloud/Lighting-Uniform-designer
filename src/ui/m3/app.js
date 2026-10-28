@@ -4,7 +4,7 @@
 //   observe → 관측 라인 다시 인식 · 물리 태그 → 점진 계산 재시작 · 기하 점검 태그 → 점검 ①②③ · target → 판정만 다시. 모두 다시 그림.
 // 점진 계산 갱신(1초마다)은 store 알림 없이 결과 패널·상태 띠·색지도만 다시 그린다(입력 중 속성 패널이 다시 그려지지 않게).
 import { getMech3d, getLedMesh, setLedMesh, saveLedIDB, applyPartMods, redetectContacts } from '../../engine/mech3d/runtime.js';
-import { findLeds } from '../../engine/mech3d/led-detect.js';
+import { findLeds, supportPart, emitterFaceAway } from '../../engine/mech3d/led-detect.js';
 import { loadClear, saveClear, clearExportJson, clearImport, parseMaterialFile } from '../../model/material-io.js';
 import { setPartMaterial, setPartMaterialParam, CLEAR_BASE, applyClearEntry, clearEntryFromForm, editClearEntry, syncClearParts } from '../../engine/mech3d/materials.js';
 import { lineFromData, lightData, obsDirection } from '../../engine/mech3d/line.js';
@@ -903,6 +903,8 @@ function mechLightFromPick(s) {
   const leds = findLeds(cand, s.part).filter((i) => !obsP.has(i));
   if (!leds.includes(s.part)) { st.update('session', (_, x) => { x.status = '관측면 부품은 광원으로 지정할 수 없음'; }); return; }
   const parts = leds.map((i) => { const p = rt.parts[i], r = rt.raw.parts[i] ?? {}; return { positions: p.positions.slice(), triangles: p.triangles.slice(), faceIds: p.faceIds.slice(), faceCount: r.faceCount, volume: r.volume }; });
+  // 발광면 = 받침 부품(PCB) 반대쪽 — 옆면·아랫면을 눌러도 부품(확산판) 쪽으로 빛이 나가게. 받침 = 클릭 LED 에 가장 가까운 기구 부품
+  const sup = supportPart(rt.parts, rt.parts[s.part], new Set(leds)), face = emitterFaceAway(parts[leds.indexOf(s.part)], s.face, sup >= 0 ? rt.parts[sup] : null);
   const name = `${String(M.name ?? '3D 도면').replace(/\.(stp|step)$/i, '')} · 도면 광원 ${leds.length}개`;
   if (!M.light.step?.fromMech) A.prevLight = { light: JSON.parse(JSON.stringify({ kind: M.light.kind, step: M.light.step ?? null })), mesh: getLedMesh() };   // 해제 때 되돌릴 이전 광원(LED STEP 메쉬 포함 — 이번 세션)
   setLedMesh(name, parts); L.resetLedCaches(); if (A.ctx.canSave?.() !== false) saveLedIDB().catch(() => {});
@@ -910,7 +912,7 @@ function mechLightFromPick(s) {
     m.parts = m.parts.map((p, i) => { const q = { ...p }; delete q.role; if (leds.includes(i)) q.role = 'light'; return q; });
     m.light.kind = 'step';
     m.light.step = { name, offset: [0, 0, 0], rot: [0, 0, 0], ref: null, leds: [], excluded: [], pcb: -1, emitters: [], fromMech: leds };
-    try { L.applyStepRecognition(m, x, m.light.step, { part: leds.indexOf(s.part), face: s.face }); x.ledInfo = `도면 부품 ${leds.length}개를 광원으로 — ${x.ledInfo}`; }
+    try { L.applyStepRecognition(m, x, m.light.step, { part: leds.indexOf(s.part), face }); x.ledInfo = `도면 부품 ${leds.length}개를 광원으로 — ${x.ledInfo}${face !== s.face ? ' (받침 부품 반대쪽 면에서 발광)' : ''}`; }
     catch (e) { x.ledInfo = `발광면 인식 실패: ${e.message} — LED 노드에서 발광면을 다시 클릭하세요`; }
     x.pick = null; x.node = 'light'; x.hideLeds = false;
   });

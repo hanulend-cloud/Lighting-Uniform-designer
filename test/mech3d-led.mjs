@@ -1,5 +1,5 @@
 // LED STEP 인식: node test/mech3d-led.mjs
-import { findLeds, findEmitters, pcbIndex, faceInfo } from '../src/engine/mech3d/led-detect.js';
+import { findLeds, findEmitters, pcbIndex, faceInfo, refineEmitterFace, emitterFaceAway } from '../src/engine/mech3d/led-detect.js';
 import { transformMesh, eulerMatrix, applyPoint } from '../src/engine/mech3d/xform.js';
 import { boxMesh, mergeMeshes, ok, done } from './mech3d-util.mjs';
 
@@ -79,4 +79,26 @@ const sbox = boxMesh(-1.5, -1, 0, 3, 2, 0.8);
 const sb = [pcb100, ...[-40, 0, 40].map((x) => transformMesh(sbox, [x, 0, 0.1], [0, 0, 0]))];
 const emP = findEmitters(sb, [1, 2, 3], 2, 5, 0);
 ok(emP.every((e) => e.face === 5 && !e.needsCheck && e.axis[0] > 0.99), '평범한 옆발광 상자 LED x=−40/0/40 → 면 순서 일치 신뢰');
+
+// 반구 돔 렌즈 LED(STEP 렌즈 돔): 곡면 면 중심은 렌즈 솔리드 안 → 법선 방향 표면(돔 꼭대기)에서 발광, needsCheck 없음
+function domeMesh(cx, cy, z0, r, n = 24) {   // 닫힌 반구: 면 0 = 돔(바깥 법선), 면 1 = 바닥 원판(−z)
+  const P = [], T = [], F = [], pt = (th, ph) => [cx + r * Math.sin(th) * Math.cos(ph), cy + r * Math.sin(th) * Math.sin(ph), z0 + r * Math.cos(th)];
+  const add = (a, b, c, f) => { const i = P.length / 3; P.push(...a, ...b, ...c); T.push(i, i + 1, i + 2); F.push(f); };
+  for (let i = 0; i < n; i++) for (let j = 0; j < 2 * n; j++) {
+    const t0 = (i / n) * Math.PI / 2, t1 = ((i + 1) / n) * Math.PI / 2, p0 = (j / (2 * n)) * 2 * Math.PI, p1 = ((j + 1) / (2 * n)) * 2 * Math.PI;
+    if (i > 0) add(pt(t0, p0), pt(t1, p0), pt(t0, p1), 0);
+    add(pt(t0, p1), pt(t1, p0), pt(t1, p1), 0);
+    if (i === n - 1) add([cx, cy, z0], pt(t1, p1), pt(t1, p0), 1);
+  }
+  return { positions: Float32Array.from(P), triangles: Uint32Array.from(T), faceIds: Uint32Array.from(F), faceCount: 2 };
+}
+const domeLed = mergeMeshes([boxMesh(-1.75, -1.75, 0, 3.5, 3.5, 1.4), domeMesh(0, 0, 1.4, 1.4)]);   // 돔 = 면 6
+const dp = [pcb100, ...[-20, 0, 20].map((x) => transformMesh(domeLed, [x, 0, 0], [0, 0, 0]))];
+const emD = findEmitters(dp, [1, 2, 3], 1, 6);
+ok(emD.every((e) => !e.needsCheck && e.axis[2] > 0.99 && Math.abs(e.pos[2] - 2.8) < 0.02), `돔 렌즈 LED → 돔 꼭대기에서 +z 발광(z ${emD[0].pos?.[2]?.toFixed(3)}), needsCheck 없음`);
+ok(refineEmitterFace(domeLed, 1) === 6, '몸체 윗면 클릭 → 돔(가장 바깥 평행 면)');
+// 도면 광원(PCB 가 기구 부품): 받치는 부품 반대쪽 면으로 — 옆면·아랫면을 눌러도 윗면(렌즈) 발광
+const sup = boxMesh(-5, -5, -1, 10, 10, 1);
+ok(emitterFaceAway(led0, 0, sup) === 7 && emitterFaceAway(led0, 4, sup) === 7 && emitterFaceAway(led0, 7, sup) === 7, '받침 부품 반대쪽: 아랫면·옆면·렌즈 클릭 → 렌즈 윗면(7)');
+ok(emitterFaceAway(domeLed, 2, sup) === 6, '돔 LED 옆면 클릭 → 돔(6)');
 done();

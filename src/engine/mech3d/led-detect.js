@@ -113,7 +113,9 @@ function closestOnTri(p, a, b, c) {
 }
 // LED 중심에서 PCB 메쉬 최근접점으로의 단위벡터 v (PCB 가 LED 를 어느 쪽에서 받치는가). 중심이 PCB 위면 null.
 const triBoxCache = new WeakMap();   // PCB 메쉬(불변 가정) → 삼각형별 AABB [minx,miny,minz,maxx,maxy,maxz]
-function towardLed(pcbMesh, p) {
+function towardLed(pcbMesh, p) { const { d2, q } = closestOnMesh(pcbMesh, p); return d2 > 1e-18 ? unit(sub(p, q)) : null; }
+// 메쉬 위 최근접점 q 와 거리² d2
+function closestOnMesh(pcbMesh, p) {
   const P = pcbMesh.positions, T = pcbMesh.triangles, nT = T.length / 3;
   let B = triBoxCache.get(pcbMesh);
   if (!B) {
@@ -133,7 +135,14 @@ function towardLed(pcbMesh, p) {
     const c = closestOnTri(p, [P[i0], P[i0 + 1], P[i0 + 2]], [P[i1], P[i1 + 1], P[i1 + 2]], [P[i2], P[i2 + 1], P[i2 + 2]]), d = sub(p, c), d2 = dot(d, d);
     if (d2 < best2) { best2 = d2; q = c; }
   }
-  return best2 > 1e-18 ? unit(sub(p, q)) : null;
+  return { d2: best2, q };
+}
+// 도면 광원의 받침 부품: LED 몸체 중심에서 가장 가까운 부품 번호(skip 제외) — 보통 LED 가 올라앉은 PCB. 없으면 −1
+export function supportPart(parts, led, skip = new Set()) {
+  const c = meshStats(led).center;
+  let best = Infinity, k = -1;
+  parts.forEach((m, i) => { if (!m || skip.has(i)) return; const { d2 } = closestOnMesh(m, c); if (d2 < best) { best = d2; k = i; } });
+  return k;
 }
 const INTO = -0.3, TIE = 0.1;
 
@@ -150,7 +159,7 @@ export function findEmitters(parts, leds, ref, face, pcb = -1) {
     const st = meshStats(parts[i]), v = pcb >= 0 ? towardLed(parts[pcb], st.center) : null;
     const fi0 = faceInfo(parts[i], face), ok0 = match(st, fi0);
     const bad = { part: i, face: -1, needsCheck: true };
-    const good = (f, fi) => (insideOwn(parts[i], fi.c, fi.n) ? bad : { part: i, face: f, pos: fi.c, axis: fi.n, xAxis: fi.xAxis, needsCheck: false });   // 발광점이 자기 솔리드 안이면 확인 필요
+    const good = (f, fi) => { const pos = emitPoint(parts[i], fi); return pos ? { part: i, face: f, pos, axis: fi.n, xAxis: fi.xAxis, needsCheck: false } : bad; };   // 발광점이 자기 솔리드 안에서 못 나오면 확인 필요
     if (!v) {   // PCB 정보 없음: 면 순서 일치 우선, 아니면 첫 기술자 일치 면
       if (ok0) return good(face, fi0);
       for (let k = 0; k < parts[i].faceCount; k++) { const c = faceInfo(parts[i], k); if (match(st, c)) return good(k, c); }
@@ -206,10 +215,19 @@ export function refineEmitterFace(mesh, face) {
   return best;
 }
 
-// 점 p 가 메쉬 안인지: p + 1e-4·dir(+미세 흔들기) 에서 dir 방향 광선이 메쉬 삼각형과 만나는 횟수가 홀수면 안(Möller–Trumbore)
-function insideOwn(m, p, dir) {
+// 발광점: 면 중심이 솔리드 밖이면 그대로. 곡면(돔 렌즈)은 면적 중심이 렌즈 안이라 → 법선 방향 첫 표면(돔 꼭대기). 못 나오면 null
+function emitPoint(m, fi) {
+  if (!insideOwn(m, fi.c, fi.n)) return fi.c;
+  const t = rayHits(m, fi.c, fi.n)[0];
+  if (t == null) return null;
+  const q = [fi.c[0] + t * fi.n[0], fi.c[1] + t * fi.n[1], fi.c[2] + t * fi.n[2]];
+  return insideOwn(m, q, fi.n) ? null : q;
+}
+function insideOwn(m, p, dir) { return rayHits(m, p, dir).length % 2 === 1; }
+// p + 1e-4·dir(+미세 흔들기) 에서 dir 방향 광선이 메쉬 삼각형과 만나는 거리들(오름차순, Möller–Trumbore) — 홀수 개면 p 는 안
+function rayHits(m, p, dir) {
   const P = m.positions, T = m.triangles, o = [p[0] + 1e-4 * dir[0] + 1.3e-5, p[1] + 1e-4 * dir[1] + 0.7e-5, p[2] + 1e-4 * dir[2] + 0.9e-5];   // 미세 흔들기: 면 중심이 삼각형 모서리 위면 두 번 세는 것 방지
-  let hits = 0;
+  const hits = [];
   for (let t = 0; t < T.length / 3; t++) {
     const a = T[t * 3] * 3, b = T[t * 3 + 1] * 3, c = T[t * 3 + 2] * 3;
     const e1 = [P[b] - P[a], P[b + 1] - P[a + 1], P[b + 2] - P[a + 2]], e2 = [P[c] - P[a], P[c + 1] - P[a + 1], P[c + 2] - P[a + 2]];
@@ -219,9 +237,10 @@ function insideOwn(m, p, dir) {
     if (u < 0 || u > 1) continue;
     const q = [sv[1] * e1[2] - sv[2] * e1[1], sv[2] * e1[0] - sv[0] * e1[2], sv[0] * e1[1] - sv[1] * e1[0]], v = dot(dir, q) / det;
     if (v < 0 || u + v > 1) continue;
-    if (dot(e2, q) / det > 0) hits++;
+    const th = dot(e2, q) / det;
+    if (th > 0) hits.push(th + 1e-4);
   }
-  return hits % 2 === 1;
+  return hits.sort((a, b) => a - b);
 }
 
 // 화면 기준 LED 맞춤 반경(mm): 클릭 지점 깊이의 화소당 mm × px, 최소 minMm. 값이 없으면 minMm
@@ -232,7 +251,18 @@ export function snapRadius(worldPerPixel, minMm = 5, px = 14) {
 // 윗면 발광 가정의 발광면: v = unit(LED 중심 − PCB 최근접점) 과 법선 내적이 가장 큰 면(> 0.7) → 가장 바깥 평행 면. 없으면 −1
 export function topEmitterFace(parts, part, pcb) {
   const m = parts[part], v = towardLed(parts[pcb], meshStats(m).center);
-  if (!v) return -1;
+  return v ? faceAlong(m, v) : -1;
+}
+// 도면 광원(PCB = 기구 부품): 클릭한 면이 받침 부품 반대쪽(법선 · v > 0.7)이면 그 면, 아니면(옆면·아랫면) 받침 반대쪽 면 → 가장 바깥 평행 면.
+// 받침 판단 불가면 클릭 면 그대로(보정만)
+export function emitterFaceAway(mesh, face, support) {
+  const v = support ? towardLed(support, meshStats(mesh).center) : null, fi = faceInfo(mesh, face);
+  if (!v || (fi && !fi.degenerate && dot(fi.n, v) > 0.7)) return refineEmitterFace(mesh, face);
+  const f = faceAlong(mesh, v);
+  return f >= 0 ? f : refineEmitterFace(mesh, face);
+}
+// 받침에서 LED 쪽 방향 v 와 법선 내적이 가장 큰 면(> 0.7) → 가장 바깥 평행 면. 없으면 −1
+function faceAlong(m, v) {
   let face = -1, bd = 0.7;
   for (let k = 0; k < m.faceCount; k++) {
     const fi = faceInfo(m, k);
