@@ -151,14 +151,30 @@ export function etaText(H, tgt) {
   const sec = (need - last.ph) / rate, tm = sec < 90 ? `${Math.max(1, Math.round(sec))}초` : sec < 5400 ? `${Math.round(sec / 60)}분` : `${(sec / 3600).toFixed(1)}시간`;
   return ` · 필요 광자 ≈ ${human(need)} · 남은 ≈ ${tm}`;
 }
+// 빛 도달 진단(순수) — 관측면으로 나온 빛이 아주 적으면(< 1%) 빛이 실제로 어디로 갔는지 알려 줌: 많이 나간 곳(부품·면) · 흡수.
+// ledger = 원장(emitted·escaped·absSurf·absVol), leak = { 'part|face': 관측면이 아닌 곳으로 나간 양 }('-1|-1' = 투과 부품을 거치지 않고 공기로)
+export function reachDiag(ledger, leak, names = []) {
+  const E = ledger?.emitted ?? 0;
+  if (!(E > 0)) return null;
+  const leakSum = Object.values(leak ?? {}).reduce((a, b) => a + b, 0), reach = Math.max(0, (ledger.escaped - leakSum) / E);
+  if (reach >= 0.01) return null;
+  const nm = (k) => { const [p, f] = k.split('|').map(Number); return p < 0 ? 'LED에서 바로 공기로(투과 부품을 거치지 않음)' : `${names[p] ?? `부품 ${p + 1}`} 면 #${f}`; };
+  const top = Object.entries(leak ?? {}).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([k, v]) => `${nm(k)} ${((v / E) * 100).toFixed(0)}%`);
+  const abs = ((ledger.absSurf ?? 0) + (ledger.absVol ?? 0)) / E;
+  const few = reach < 0.001;   // 0.1% 미만 = 설정 문제일 가능성 큼, 1% 미만 = 구조상 적음(계산이 오래 걸림)
+  return { reach, html: `<b>관측면에 도착한 빛 ${(reach * 100).toFixed(few ? 3 : 2)}%</b> — ${few ? '거의 없음(설정 확인 필요)' : '매우 적음(계산이 오래 걸림)'}. 빛이 간 곳: ${top.join(' · ') || '–'}${abs > 0.05 ? ` · 흡수 ${(abs * 100).toFixed(0)}%` : ''}
+    ${few ? '' : '<div class="mut">관측면 쪽을 뺀 바깥면을 반사 처리(불투명 백색)하면 도착 빛이 늘어 빨라집니다</div>'}<div class="mut">확인: ① 관측면 화살표가 빛이 나오는 바깥쪽을 향하는지 ② LED 노란 원뿔(발광 방향)이 부품 쪽을 향하는지 ③ 관측면이 다른 부품에 덮여 있지 않은지 — 3D 의 주황 면 = 가장 많이 새는 곳</div>` };
+}
 // 오른쪽 맨 위 카드(항상 보임) — onCtl = 계산 제어 단추(일시정지·재개·다시 계산). 광경로 목록은 접는 칸
 export function createSimDash(el, { onCtl = null } = {}) {
   let H = [], tgt = 0.02, raf = 0, state = '', obs = null, P = [], names = [], reason = '';
   // names = 부품 이름, nMech = 기구 부품 수(LED STEP 부품 번호는 그 뒤 — 경로에서 뺌)
   let busy = false;   // 자동설계 중(점진 계산 일시정지)
+  let diag = null;   // 빛 도달 진단(관측면 도달 < 1%)
   function sample(snap, targetNoise, observe, nm = names, nMech = nm.length, adBusy = false) {
     busy = adBusy; tgt = targetNoise ?? tgt; obs = observe ?? obs; state = snap?.state ?? ''; reason = snap?.reason ?? ''; names = nm; P = topPaths(snap?.paths, nMech);
     const ph = snap?.photons ?? 0, st = snap?.stats;
+    diag = ph >= 50000 ? reachDiag(snap?.ledger, snap?.leak, nm) : null;
     if (!st || st.empty || !ph) { if (!ph) H = []; draw(); return; }
     if (H.length && ph < H[H.length - 1].ph) H = [];   // 장면이 바뀌어 다시 시작
     if (!H.length || ph > H[H.length - 1].ph) H.push({ ph, t: performance.now(), noise: st.relNoise, Ulen: st.Ulen, Uwid: st.Uwid });
@@ -188,7 +204,7 @@ export function createSimDash(el, { onCtl = null } = {}) {
     if (!el.querySelector('.od-simh')) {
       el.innerHTML = `<div class="od-h od-simh">현재 설계 계산 <span class="mut" data-s="st"></span><span class="m3-ad-sp"></span>${onCtl ? '<button type="button" data-sim-ctl></button>' : ''}</div>
         <div class="od-pct"><b data-s="pct"></b><div class="od-bar od-bar-big" title="계산 오차가 목표에 닿으면 100%"><i data-s="bar"></i></div></div>
-        <div class="od-row mut" data-s="row"></div>
+        <div class="od-row mut" data-s="row"></div><div class="od-diag" data-s="diag" hidden></div>
         <details class="od-more"><summary><span data-s="sum">정확도 그래프 · 광경로</span></summary><div data-s="svg"></div><div data-s="paths"></div></details>`;
       el.querySelector('[data-sim-ctl]')?.addEventListener('click', () => onCtl?.());
     }
@@ -197,6 +213,7 @@ export function createSimDash(el, { onCtl = null } = {}) {
     const btn = el.querySelector('[data-sim-ctl]'); if (btn) { if (btn.textContent !== ctl) btn.textContent = ctl; btn.disabled = busy; }
     set('pct', `${pct.toFixed(0)}%`); el.querySelector('[data-s="bar"]').style.width = `${pct.toFixed(0)}%`;
     set('row', `오차 ${last && Number.isFinite(last.noise) ? `±${(last.noise * 100).toFixed(1)}%` : '–'} → 목표 ±${(tgt * 100).toFixed(1)}% · 광자 ${last ? last.ph.toLocaleString() : 0}${last ? ` · 길이 U ${f2(last.Ulen)} · 폭 U ${f2(last.Uwid)}` : ''}${state === 'running' ? etaText(H, tgt) : ''}`);
+    const dg = el.querySelector('[data-s="diag"]'); if (dg) { dg.hidden = !diag; set('diag', diag?.html ?? ''); }
     set('svg', svg);
     // 접힌 줄에는 주 광경로 한 줄 요약, 펼치면 정확도(오차) 그래프 + 광경로 목록
     set('sum', P.length ? `정확도 그래프 · 광경로 <span class="mut">${(P[0].share * 100).toFixed(0)}% ${esc(pathText(P[0], names))}</span>` : '정확도 그래프 · 광경로');

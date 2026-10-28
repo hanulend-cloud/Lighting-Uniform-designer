@@ -716,3 +716,5 @@ body.booting::after { content: "불러오는 중…"; position: fixed; left: 50%
 .m3-matsum { font-size: 11.5px; }
 .m3-admin { margin-top: 6px; padding: 4px 6px; border: 1px dashed #d9a400; border-radius: 6px; }
 .m3-matdb .m3-tabs { margin: 4px 10px; }
+.m3-simcard .od-diag { margin: 3px 0; padding: 4px 6px; border-radius: 6px; background: #fff4e5; color: #8a4b00; font-size: 11.5px; line-height: 1.45; }
+#mech3d-wrap[data-theme="dark"] .m3-simcard .od-diag { background: #3a2a12; color: #ffc37a; }
