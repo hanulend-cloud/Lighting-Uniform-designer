@@ -182,14 +182,13 @@ export function createMech3dView(canvas, { onPick, gizmo = null }) {
     m.renderOrder = 2; m.userData.nums = list.map((c) => c.n);
     return m;
   }
-  // 원뿔 윤곽 점선: 테두리 원 + 꼭짓점→테두리 선 CONE_RAYS 개
+  // 원뿔 윤곽 점선: 꼭짓점→테두리 선 CONE_RAYS 개(테두리 원은 그리지 않음 — LED 마다 노란 원이 화면을 가림)
   function coneLines(list, color, opacity) {
     const pts = [];
     list.forEach((c) => {
       const a = new THREE.Vector3(...c.axis).normalize(), u = new THREE.Vector3(Math.abs(a.x) < 0.9 ? 1 : 0, Math.abs(a.x) < 0.9 ? 0 : 1, 0).cross(a).normalize(), w = a.clone().cross(u);
       const len = c.len > 0 ? c.len : 4, r = len * Math.tan((Math.min(80, Math.max(1, c.half)) * Math.PI) / 180), o = new THREE.Vector3(...c.pos);
       const rim = (t) => o.clone().addScaledVector(a, len).addScaledVector(u, r * Math.cos(t)).addScaledVector(w, r * Math.sin(t));
-      for (let i = 0; i < CONE_SEG; i++) pts.push(rim((2 * Math.PI * i) / CONE_SEG), rim((2 * Math.PI * (i + 1)) / CONE_SEG));
       for (let i = 0; i < CONE_RAYS; i++) pts.push(o.clone(), rim((2 * Math.PI * i) / CONE_RAYS));
     });
     const g = new THREE.BufferGeometry().setFromPoints(pts);
