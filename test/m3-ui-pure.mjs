@@ -31,8 +31,8 @@ const card = (o) => autoCardHtml(o) + ['milky', 'leds', 'shape', 'housing', 'hei
   const N2 = treeNodes({ ...M, observe: defaultObserve() }, { node: null, line: null });
   ok(N2.find((n) => n.id === 'obs').badge === '미지정', '관측면 없음 → 미지정'); }
 ok(partBadge(setPartMaterial(defaultPart(0, 'p', 1), 'clear')).startsWith('투명 '), '투명 부품 배지 = 투명 + 투과율');
-ok(calcLabel({ state: 'running' }) === '⏸ 계산 중' && calcLabel({ state: 'paused' }) === '▶ 계산 재개' && calcLabel({ state: 'done', reason: 'converged' }).includes('수렴')
-  && calcLabel({ state: 'done', reason: 'max' }).includes('최대') && calcLabel(null) === '▶ 계산' && calcLabel({ state: 'error' }).includes('다시'), '계산 버튼 문구');
+ok(calcLabel({ state: 'running' }) === '⏸ 계산 중' && calcLabel({ state: 'paused' }) === '▶ 계산 재개' && calcLabel({ state: 'done', reason: 'converged' }).includes('완료')
+  && calcLabel({ state: 'done', reason: 'max' }).includes('한도') && calcLabel(null) === '▶ 계산' && calcLabel({ state: 'error' }).includes('다시'), '계산 버튼 문구');
 { const N = treeNodes({ ...M, light: { ...defaultLight(), kind: 'manual', manual: { ...defaultLight().manual, pitch: 11.6000001 } } }, { node: null, line: { kind: 'zigzag', closed: false, length: 99.6, width: 7.4 } });
   ok(N.find((n) => n.id === 'leds').badge === '피치 11.6' && N.find((n) => n.id === 'obs').badge === 'zigzag 100×7', `피치 반올림 · 모르는 라인 종류: ${N.find((n) => n.id === 'leds').badge} / ${N.find((n) => n.id === 'obs').badge}`); }
 { const el = { innerHTML: '', addEventListener() {}, contains: () => false, ownerDocument: null, querySelectorAll: () => [] };

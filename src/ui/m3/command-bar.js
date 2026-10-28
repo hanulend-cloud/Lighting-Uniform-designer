@@ -5,7 +5,7 @@ export function calcLabel(calc) {
     case 'starting': return '⏸ 장면 준비';
     case 'running': case 'pending': return '⏸ 계산 중';
     case 'paused': return '▶ 계산 재개';
-    case 'done': return calc.reason === 'converged' ? '✓ 수렴 — 다시 계산' : '✓ 최대 광자 — 다시 계산';
+    case 'done': return calc.reason === 'converged' ? '✓ 계산 완료 — 다시 계산' : '⚠ 계산 한도 — 다시 계산';   // 완료 = 목표 정확도 도달 · 한도 = 광자 상한까지 쏘았지만 정확도 미달
     case 'error': return '⟳ 다시 계산';
     default: return '▶ 계산';
   }

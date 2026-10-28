@@ -50,7 +50,7 @@ export function renderStatusBar(el, d, h) {
   S.h = h;
   const c = d.calc, rn = c?.stats?.relNoise, st = c?.state ?? 'idle';
   const prog = Number.isFinite(rn) && rn > 0 ? Math.min(1, d.targetNoise / rn) : 0;
-  const stTxt = st === 'done' ? (c.reason === 'converged' ? '수렴 — 멈춤' : '최대 광자 — 멈춤') : STATE[st] ?? st;
+  const stTxt = st === 'done' ? (c.reason === 'converged' ? '계산 완료' : '계산 한도 도달 — 정확도 미달') : STATE[st] ?? st;
   const w = `${(prog * 100).toFixed(0)}%`;
   if (S.bar.style.width !== w) S.bar.style.width = w;
   setText(S.rn, Number.isFinite(rn) ? `±${(rn * 100).toFixed(1)}%` : '–');

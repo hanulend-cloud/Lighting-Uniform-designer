@@ -182,14 +182,14 @@ export function createSimDash(el, { onCtl = null } = {}) {
         <text class="od-ax" x="${x1 + 2}" y="${y0 + 8}">${uhi.toFixed(2)}</text><text class="od-ax" x="${x1 + 2}" y="${y1}">${ulo.toFixed(2)}</text>
         <text class="od-ax" x="${x0}" y="${h - 4}">광자 ${H[0].ph.toLocaleString()}</text><text class="od-ax" x="${x1}" y="${h - 4}" text-anchor="end">${last.ph.toLocaleString()} (로그)</text></svg>`;
     }
-    const sTxt = { running: '계산 중', paused: '일시정지', done: '수렴 — 멈춤', pending: '대기', starting: '장면 준비' }[state] ?? state ?? '';
+    const sTxt = { running: '계산 중', paused: '일시정지', done: reason === 'converged' ? '완료 — 목표 정확도 도달' : '계산 한도 도달 — 정확도 미달', pending: '대기', starting: '장면 준비' }[state] ?? state ?? '';
     const ctl = busy ? '자동설계 중' : calcLabel({ state, reason });
     // 틀은 한 번만 만들고 칸마다 바뀐 것만 고침 — 계산 중 갱신이 잦아도 단추 클릭·접는 칸이 끊기지 않게
     if (!el.querySelector('.od-simh')) {
       el.innerHTML = `<div class="od-h od-simh">현재 설계 계산 <span class="mut" data-s="st"></span><span class="m3-ad-sp"></span>${onCtl ? '<button type="button" data-sim-ctl></button>' : ''}</div>
         <div class="od-pct"><b data-s="pct"></b><div class="od-bar od-bar-big" title="계산 오차가 목표에 닿으면 100%"><i data-s="bar"></i></div></div>
         <div class="od-row mut" data-s="row"></div>
-        <details class="od-more"><summary><span data-s="sum">수렴 그래프 · 광경로</span></summary><div data-s="svg"></div><div data-s="paths"></div></details>`;
+        <details class="od-more"><summary><span data-s="sum">정확도 그래프 · 광경로</span></summary><div data-s="svg"></div><div data-s="paths"></div></details>`;
       el.querySelector('[data-sim-ctl]')?.addEventListener('click', () => onCtl?.());
     }
     const set = (k, html) => { const n = el.querySelector(`[data-s="${k}"]`); if (n && n.innerHTML !== html) n.innerHTML = html; };
@@ -198,8 +198,8 @@ export function createSimDash(el, { onCtl = null } = {}) {
     set('pct', `${pct.toFixed(0)}%`); el.querySelector('[data-s="bar"]').style.width = `${pct.toFixed(0)}%`;
     set('row', `오차 ${last && Number.isFinite(last.noise) ? `±${(last.noise * 100).toFixed(1)}%` : '–'} → 목표 ±${(tgt * 100).toFixed(1)}% · 광자 ${last ? last.ph.toLocaleString() : 0}${last ? ` · 길이 U ${f2(last.Ulen)} · 폭 U ${f2(last.Uwid)}` : ''}${state === 'running' ? etaText(H, tgt) : ''}`);
     set('svg', svg);
-    // 접힌 줄에는 주 광경로 한 줄 요약, 펼치면 수렴 그래프 + 광경로 목록
-    set('sum', P.length ? `수렴 그래프 · 광경로 <span class="mut">${(P[0].share * 100).toFixed(0)}% ${esc(pathText(P[0], names))}</span>` : '수렴 그래프 · 광경로');
+    // 접힌 줄에는 주 광경로 한 줄 요약, 펼치면 정확도(오차) 그래프 + 광경로 목록
+    set('sum', P.length ? `정확도 그래프 · 광경로 <span class="mut">${(P[0].share * 100).toFixed(0)}% ${esc(pathText(P[0], names))}</span>` : '정확도 그래프 · 광경로');
     set('paths', P.length ? `<div class="od-paths">${P.map((p) => `<div class="od-path"><span class="od-pbar"><i style="width:${(p.share * 100).toFixed(0)}%"></i></span><b>${(p.share * 100).toFixed(0)}%</b> ${esc(pathText(p, names))}</div>`).join('')}</div>` : '');
   }
   render();
