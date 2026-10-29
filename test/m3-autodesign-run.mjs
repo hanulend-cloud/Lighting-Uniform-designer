@@ -65,4 +65,14 @@ const fakePorts = (log, delay = 0) => Array.from({ length: 3 }, (_, w) => ({ sen
   await new Promise((res) => setTimeout(res, 10)); const t = Date.now(); R.cancel();
   const msg = await p;
   ok(/중지/.test(msg) && Date.now() - t < 200, `대기 중 cancel → 즉시 중지: ${msg}`); }
+{ // 같은 난수 비교(crn): 청크 시드·크기·포트·배치가 후보마다 같음 — 두 번 불러도 (포트, 시드, N) 목록이 같고, 시드는 crn 기준부터 차례
+  const log = [], ports = Array.from({ length: 3 }, (_, w) => ({ send: async (m) => { if (m.type === 'scene') return { sceneKey: m.sceneKey, ready: true }; log.push(`${w}:${m.seed}:${m.N}`);
+    await new Promise((r) => setTimeout(r, (w + 1) * 3));   // 포트 속도가 달라도 분배는 고정
+    return { sceneKey: m.sceneKey, acc: new Float64Array(4).fill(m.seed), cnt: new Uint32Array(4), ledger: { emitted: m.N, escaped: 0, absSurf: 0, absVol: 0, lost: 0, rrLoss: 0, rrGain: 0 }, leak: {}, escObs: 0, ms: 1 }; } }));
+  const R = createAdRunner({ ports }), job = { sceneKey: 'kc', scene: { G: { ns: 2, nw: 2 } } };
+  const a = await R.trace(job, { N: 30000, chunkN: 5000, batches: 4, crn: 5000 }); const l1 = [...log].sort(); log.length = 0;
+  const b = await R.trace({ ...job, sceneKey: 'kd' }, { N: 30000, chunkN: 5000, batches: 4, crn: 5000 }); const l2 = [...log].sort();
+  ok(l1.join() === l2.join() && l1.length === 6 && l1.every((x) => +x.split(':')[1] >= 5000 && +x.split(':')[1] < 5006) && a.batches.map((x) => x[0]).join() === b.batches.map((x) => x[0]).join() && a.photons === 30000,
+    `crn: 청크 (포트:시드:N) 같음 — ${l1.join(' ')}`);
+}
 done();

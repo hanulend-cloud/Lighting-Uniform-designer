@@ -1,5 +1,5 @@
 // ③ LGP 형상: node test/mech3d-shape-opt.mjs
-import { frameHeights, deformPart, refineForBumps, bump, minThickness, shapeCandidates, isWatertight, refinedFor, heightsFor, memoStats, pathFromLine, swOnPath, endW, lineVarH, shapeVarRanges, gridCandidates, ledEll, partFrame, curveAt, bottomAt, hasCurve } from '../src/engine/mech3d/shape-opt.js';
+import { frameHeights, deformPart, refineForBumps, bump, minThickness, shapeCandidates, isWatertight, refinedFor, heightsFor, memoStats, pathFromLine, swOnPath, endW, lineVarH, shapeVarRanges, gridCandidates, ledEll, partFrame, curveAt, bottomAt, hasCurve, bumpCenters } from '../src/engine/mech3d/shape-opt.js';
 import { meshVolume } from '../src/engine/mech3d/mesh.js';
 import { boxMesh, ok, done } from './mech3d-util.mjs';
 
@@ -135,5 +135,10 @@ ok(ledEll({ pitch: 7, count: 5, L: 100 }) === 7 && ledEll({ count: 5, L: 100 }) 
   const B = bottomAt(H, prm);
   ok(Math.abs(B(0, 0) - (0 - 1)) < 1e-9 && Math.abs(B(50, 0) - 0) < 1e-9 && Math.abs(B(50, 1.999) - 0.5) < 1e-3 && hasCurve(prm) && !hasCurve({ kL: [0, 0], kW: null }), `아랫면: 끝 ${B(0, 0)} · 가운데 ${B(50, 0)} · 폭 가장자리 ${B(50, 1.999).toFixed(3)}`);
   ok(lineVarH({ R: 3, kL: [0, 0.2] }) === 2 && lineVarH({ R: 3 }) === 0, '곡선이 있으면 아랫면 세분(2 mm)');
+}
+{ // 포켓(h)이 없으면 LED 둘레 세분 안 함 — 장면 삼각형 수
+  const box = boxMesh(0, -2, 0, 100, 4, 3), F = { u: [1, 0, 0], v: [0, 1, 0], d: [0, 0, 1] }, cs = [[10, 0], [30, 0], [50, 0], [70, 0], [90, 0]];
+  const n = (prm) => refinedFor(box, F, bumpCenters(prm), 4, 0.5, 0).triangles.length / 3;
+  ok(bumpCenters({ h: 0, centers: cs }).length === 0 && n({ h: 0, centers: cs }) === box.triangles.length / 3 && n({ h: 0.5, centers: cs }) > 10 * box.triangles.length / 3, `h 0 → 세분 없음(${n({ h: 0, centers: cs })}) · h 0.5 → ${n({ h: 0.5, centers: cs })}`);
 }
 done();

@@ -350,10 +350,10 @@ export async function runAutoDesign(cfg, io) {
       io.shapePlan?.({ screen: nScreen, grid: shapeCands.length, total: shapeTotal(nScreen, shapeCands.length, cfg.schedule) + nCurve });
     }
   }
-  // ③ 곡선 다듬기(길이·폭 두께 곡선) — 출발 = 격자 최선(없으면 선별의 '변경 없음'). 예산 = 압축 2단계(광자·시간). undefined = 중지
+  // ③ 곡선 다듬기(길이·폭 두께 곡선) — 출발 = 격자 최선(없으면 선별의 '변경 없음'). 예산 = 압축 1단계(광자·시간). undefined = 중지
   async function curveStage(start) {
     if (!start || nCurve === 0) return start;
-    const sch = cfg.schedule ?? SHAPE_SCHEDULE, [, N, ms] = sch[Math.min(1, sch.length - 1)];
+    const sch = cfg.schedule ?? SHAPE_SCHEDULE, [, N, ms] = sch[0];   // 압축 1단계 예산 — 후보끼리 같은 난수(crn)로 비교하므로 적어도 됨(시간 ↓)
     io.progress?.('shape', 0.9, '형상 곡선 다듬기');
     const r = await refineShapeCurve(start, (cands, n, t) => io.evalShapes(d, cands, n, t), obs, { nL: cfg.curve?.nL ?? 7, nW: cfg.curve?.nW ?? 3, iters: cfg.curve?.iters ?? 3, A0: cfg.shapeRanges?.e?.[1] ?? 1, N, maxMs: ms, closed: !!cfg.line?.closed, cancelled: stop });
     if (stop()) return undefined;

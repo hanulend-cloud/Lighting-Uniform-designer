@@ -355,6 +355,8 @@ export const memoStats = () => ({ ...stats });
 export function heightsFor(mesh, F, cell = 0.5) {
   return lru(memoH, mesh, JSON.stringify([F.u, F.v, F.d, cell]), () => { stats.heights++; return frameHeights(mesh, F, cell); });
 }
+// 세분할 포켓·돌출 중심 — h = 0 이면 없음(포켓을 안 쓰는 후보까지 LED 둘레를 잘게 쪼개 장면이 1.7만 → 25만 삼각형, Worker 장면 재구성 ~4초였음)
+export const bumpCenters = (prm) => (prm?.h ? prm.centers ?? [] : []);
 export function refinedFor(mesh, F, centers, R, hMax, hBottom = 0) {
   return lru(memoR, mesh, JSON.stringify([F.u, F.v, F.d, centers, R, hMax, hBottom]), () => { stats.refine++; return refineForBumps(mesh, F, centers, R, hMax, { H: heightsFor(mesh, F, 0.5), hBottom }); });
 }

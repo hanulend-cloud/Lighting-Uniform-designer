@@ -25,13 +25,16 @@ export function createAdRunner({ ports, now = () => globalThis.performance?.now?
     await Promise.all(ports.map(guard(ctl, (p) => withTimeout(p.send({ type: 'scene', sceneKey: job.sceneKey, ...job.scene }), 'scene', sceneTimeoutMs))));
   }
   const send = async (job, msg) => {
-    const r = await withTimeout(msg.p.send({ type: 'chunk', sceneKey: job.sceneKey, seed: seed++, ...msg.body }), 'chunk', chunkTimeoutMs);
+    const r = await withTimeout(msg.p.send({ type: 'chunk', sceneKey: job.sceneKey, seed: msg.seed ?? seed++, ...msg.body }), 'chunk', chunkTimeoutMs);
     if (r.stale) throw new Error('장면이 바뀜 — 다시 실행하세요');
     return r;
   };
   // chunkN 기본 = Worker 마다 청크 2개쯤(후보당 광자가 적어도 모든 Worker 가 일하게)
-  async function trace(job, { N, maxMs = Infinity, minN = 0, chunkN = Math.max(2000, Math.ceil(N / (2 * ports.length))), chunkMs = Math.min(500, maxMs / 5), batches = 8, rw = null }) {
+  // crn(같은 난수 비교, 형상 후보용) = 시드 기준 — 청크 i 의 시드 crn+i · 크기 chunkN · 포트(쓰는 포트 i % 수) · 배치 i % batches 를 고정해
+  // 후보마다 같은 광자 난수로 추적(후보 차이만 남음). 시간 제한·적응 청크 없음(N 전부)
+  async function trace(job, { N, maxMs = Infinity, minN = 0, chunkN = Math.max(2000, Math.ceil(N / (2 * ports.length))), chunkMs = Math.min(500, maxMs / 5), batches = 8, rw = null, crn = null }) {
     await prepare(job);
+    if (crn != null) return traceCrn(job, { N, chunkN, batches, rw, crn });
     const nCell = job.scene.G.ns * job.scene.G.nw, timed = Number.isFinite(maxMs);
     const B = Array.from({ length: batches }, () => new Float64Array(nCell)), RB = rw ? Array.from({ length: batches }, () => new Float64Array(rw.milkies.length * nCell)) : null;
     const ledger = { emitted: 0, escaped: 0, absSurf: 0, absVol: 0, lost: 0, rrLoss: 0, rrGain: 0 }, sf = rw ? new Float64Array(rw.milkies.length) : null, sf2 = rw ? new Float64Array(rw.milkies.length) : null;
@@ -61,6 +64,27 @@ export function createAdRunner({ ports, now = () => globalThis.performance?.now?
     const keep = [...bDone.keys()].filter((b) => bDone[b] > 0), ref = issued / keep.length;
     const norm = (A) => keep.map((b) => { if (bDone[b] !== ref) { const s = ref / bDone[b]; for (let i = 0; i < A[b].length; i++) A[b][i] *= s; } return A[b]; });
     return { batches: norm(B), rwBatches: RB ? norm(RB) : null, ledger, ess: rw ? essRatio(sf, sf2, n) : null, photons: issued, ms: now() - t0 };
+  }
+  async function traceCrn(job, { N, chunkN, batches, rw, crn }) {
+    const nCell = job.scene.G.ns * job.scene.G.nw, act = ports.filter((p) => !p.off?.()), P = act.length ? act : ports, nC = Math.ceil(N / chunkN);
+    const B = Array.from({ length: batches }, () => new Float64Array(nCell)), RB = rw ? Array.from({ length: batches }, () => new Float64Array(rw.milkies.length * nCell)) : null;
+    const ledger = { emitted: 0, escaped: 0, absSurf: 0, absVol: 0, lost: 0, rrLoss: 0, rrGain: 0 }, sf = rw ? new Float64Array(rw.milkies.length) : null, sf2 = rw ? new Float64Array(rw.milkies.length) : null;
+    const bDone = new Float64Array(batches), t0 = now(), ctl = { err: null };
+    let n = 0;
+    await Promise.all(P.map(guard(ctl, async (p) => {
+      const k = P.indexOf(p);
+      for (let i = k; i < nC; i += P.length) {
+        check(ctl);
+        const m = Math.min(chunkN, N - i * chunkN), b = i % batches, r = await send(job, { p, seed: crn + i, body: { N: m, ...(rw ? { rw } : {}) } }), f = m / chunkN;
+        bDone[b] += m;
+        for (let c = 0; c < nCell; c++) B[b][c] += r.acc[c] * f;
+        for (const key in ledger) ledger[key] += r.ledger[key] * f;
+        if (rw) { for (let c = 0; c < RB[b].length; c++) RB[b][c] += r.rw.acc[c] * f; for (let j = 0; j < sf.length; j++) { sf[j] += r.rw.sf[j]; sf2[j] += r.rw.sf2[j]; } n += r.rw.n; }
+      }
+    })));
+    const keep = [...bDone.keys()].filter((b) => bDone[b] > 0), ref = N / keep.length;
+    const norm = (A) => keep.map((b) => { if (bDone[b] !== ref) { const s = ref / bDone[b]; for (let i = 0; i < A[b].length; i++) A[b][i] *= s; } return A[b]; });
+    return { batches: norm(B), rwBatches: RB ? norm(RB) : null, ledger, ess: rw ? essRatio(sf, sf2, n) : null, photons: N, ms: now() - t0 };
   }
   // 후보마다 발광점 묶음 하나 → 지도(Float32, 격자면 격자 수 × 셀) — 후보 자신의 방출로 나눈 방출 1 기준 지도(후보마다 광자 수가 달라도 됨) → emitted = 1
   // 시간 예산(spec §2.2c): 후보 광자 = min(N, 지금까지 잰 처리량 × 남은 시간 / 남은 후보, ≥ minN) — 첫 후보들(아직 잰 값 없음)은 N. onProgress(끝난 수, 후보 수)

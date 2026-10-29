@@ -40,7 +40,7 @@ import { milkyRows } from '../../engine/mech3d/milky-search.js';
 import { candidateGrid } from '../../engine/mech3d/basis.js';
 import { ledAtS, clampRowGap, rowGapOptions } from '../../engine/mech3d/placement.js';
 import { virtualEmittersAt, stepRefEmitter } from '../../engine/mech3d/virtual-leds.js';
-import { heightsFor, deformPart, refinedFor, minThickness, shapeVarRanges, pathFromLine, swOnPath, ledEll, lineVarH, splineInput, partFrame } from '../../engine/mech3d/shape-opt.js';
+import { heightsFor, deformPart, refinedFor, minThickness, shapeVarRanges, pathFromLine, swOnPath, ledEll, lineVarH, splineInput, partFrame, bumpCenters } from '../../engine/mech3d/shape-opt.js';
 import { interferenceKeys, newInterference, travelDistance } from '../../engine/mech3d/clearance.js';
 import { scaleMoveMesh, isIdentityXform } from '../../engine/mech3d/xform.js';
 import { defaultChecks } from '../../engine/mech3d/defs.js';
@@ -500,7 +500,8 @@ function adBaseMesh(i, ctx) {
 }
 // 형상 후보 메쉬 — 세분은 메모(refinedFor: 후보 27개도 R 3개 → 세분 3번). hDiv = R/hMax(STEP 은 거칠게 3)
 // hBottom = lineVarH(mod) — runtime.applyPartMods 와 같게(평가 형상 = 적용 형상)
-const adShapeMesh = (base, mod, hDiv = 8) => deformPart(refinedFor(base, mod.frame, mod.centers, mod.R, Math.max(0.1, mod.R / hDiv), lineVarH(mod)), mod.frame, heightsFor(base, mod.frame, mod.cell), mod);
+const SHAPE_CRN = 424242;   // 형상 후보 공통 시드 기준(같은 난수 비교)
+const adShapeMesh = (base, mod, hDiv = 8) => deformPart(refinedFor(base, mod.frame, bumpCenters(mod), mod.R, Math.max(0.1, mod.R / hDiv), lineVarH(mod)), mod.frame, heightsFor(base, mod.frame, mod.cell), mod);
 // ② 설계 → LED STEP 배치(step.virtual): Solver 위치 목록이면 { positions }(STEP 편집 배치), 아니면 균등 { count, pitch, rows, rowGap }
 const stepVirtOf = (d, rw) => (d.positions ? { positions: d.positions.map((q) => ({ s: q.s, w: q.w ?? 0, dz: 0 })) } : { count: d.count, pitch: d.pitch, ...rw });
 const samePos = (a, b) => JSON.stringify((a ?? null) && a.map((q) => [q.s, q.w ?? 0])) === JSON.stringify((b ?? null) && b.map((q) => [q.s, q.w ?? 0]));
@@ -788,7 +789,8 @@ async function adRun(opt = {}) {
         const thin = minThickness(H, mod) < minWall;   // 칸 중심 + LED 중심
         const clash = !thin && newInterference(parts[sp], others, lp, before, 0.05) != null;   // 새 겹침 또는 기존보다 0.05 mm 넘게 깊어짐 — 찾는 즉시 멈춤(깊은 겹침도 빠르게)
         if (thin || clash) { out.push({ cand: c, ok: false, why: thin ? '살두께' : '간섭' }); A.optDash?.evals('shape', [{ label: shapeText(c), ok: false, why: thin ? '살두께' : '간섭' }]); continue; }
-        const r = await R.trace(adJob(Md, parts, ctx), { N, maxMs, minN: Math.min(N, 3e4), batches: 4 }), stt = tallyStats(G, r.batches, obs);
+        // 같은 난수 비교(crn) — 형상 후보마다 같은 광자 난수(시드·청크·포트 고정)로 추적해 후보 차이만 남김(잡음 ↓). N 전부(시간 제한 없음)
+        const r = await R.trace(adJob(Md, parts, ctx), { N, batches: 4, crn: SHAPE_CRN }), stt = tallyStats(G, r.batches, obs);
         out.push({ cand: c, ok: !stt.empty, stats: stt, eff: adEff(r) });
         A.optDash?.evals('shape', [{ label: shapeText(c), Ulen: stt.Ulen, Uwid: stt.Uwid, ok: !stt.empty }]);
       }
