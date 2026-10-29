@@ -1,5 +1,5 @@
 // ③ LGP 형상: node test/mech3d-shape-opt.mjs
-import { frameHeights, deformPart, refineForBumps, bump, minThickness, shapeCandidates, isWatertight, refinedFor, heightsFor, memoStats, pathFromLine, swOnPath, endW, lineVarH, shapeVarRanges, gridCandidates, ledEll, partFrame } from '../src/engine/mech3d/shape-opt.js';
+import { frameHeights, deformPart, refineForBumps, bump, minThickness, shapeCandidates, isWatertight, refinedFor, heightsFor, memoStats, pathFromLine, swOnPath, endW, lineVarH, shapeVarRanges, gridCandidates, ledEll, partFrame, curveAt, bottomAt, hasCurve } from '../src/engine/mech3d/shape-opt.js';
 import { meshVolume } from '../src/engine/mech3d/mesh.js';
 import { boxMesh, ok, done } from './mech3d-util.mjs';
 
@@ -125,4 +125,15 @@ ok(ledEll({ pitch: 7, count: 5, L: 100 }) === 7 && ledEll({ count: 5, L: 100 }) 
   const a = shapeBudget(0.107), b = shapeBudget(0.6), c = shapeBudget(0.01), d = shapeBudget(NaN);
   ok(Math.abs(a.k - 4.673) < 1e-3 && a.screen.N === 280374 && a.schedule[2][1] === Math.round(6e5 * a.k) && a.schedule[0][2] === 10000 && b.k === 1 && b.screen.N === 6e4 && c.k === 10 && d.k === 1 && d.schedule[1][1] === SHAPE_SCHEDULE[1][1],
     `③ 평가 광자 = 효율 반비례(효율 10.7% → ×${a.k.toFixed(2)}, 최대 ×10, 시간 ×4 까지)`); }
+{ // 길이·폭 제어점 곡선(2026-10-29 형상 자유도) — Catmull-Rom: 제어점 통과 · 끝 밖은 끝값 · 닫힌 곡선은 주기
+  const k = [0, 1, 0, -1, 0];
+  ok(curveAt(k, 0) === 0 && Math.abs(curveAt(k, 0.25) - 1) < 1e-12 && Math.abs(curveAt(k, 0.75) + 1) < 1e-12 && curveAt(k, -1) === 0 && curveAt(k, 2) === 0 && curveAt([], 0.3) === 0 && curveAt([2], 0.7) === 2, '곡선: 제어점 통과 · 범위 밖 = 끝값');
+  ok(Math.abs(curveAt([1, 2, 3, 4], 0, true) - 1) < 1e-12 && Math.abs(curveAt([1, 2, 3, 4], 1 / 4, true) - 2) < 1e-12 && Math.abs(curveAt([1, 2, 3, 4], 1, true) - 1) < 1e-12, '닫힌 곡선: t = i/n 에서 제어점, t = 1 → 처음');
+  // 상자(라인 0~100 mm, 반폭 2) 아랫면: 길이 곡선 끝 +1(두꺼움) · 가운데 0, 폭 곡선 가장자리 −0.5 → 이동량 = 합
+  const box = boxMesh(0, -2, 0, 100, 4, 3), F = { u: [1, 0, 0], v: [0, 1, 0], d: [0, 0, 1] }, H = heightsFor(box, F, 0.5);
+  const P = { path: [[0, 0], [100, 0]], halfW: 2, closed: false, L: 100 }, prm = { dt: 0, h: 0, R: 1, centers: [], e: 0, c: 0, ...P, kL: [1, 0, 0, 0, 1], kW: [0, 0, -0.5] };
+  const B = bottomAt(H, prm);
+  ok(Math.abs(B(0, 0) - (0 - 1)) < 1e-9 && Math.abs(B(50, 0) - 0) < 1e-9 && Math.abs(B(50, 1.999) - 0.5) < 1e-3 && hasCurve(prm) && !hasCurve({ kL: [0, 0], kW: null }), `아랫면: 끝 ${B(0, 0)} · 가운데 ${B(50, 0)} · 폭 가장자리 ${B(50, 1.999).toFixed(3)}`);
+  ok(lineVarH({ R: 3, kL: [0, 0.2] }) === 2 && lineVarH({ R: 3 }) === 0, '곡선이 있으면 아랫면 세분(2 mm)');
+}
 done();

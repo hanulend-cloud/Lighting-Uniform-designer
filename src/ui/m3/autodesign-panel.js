@@ -148,6 +148,9 @@ export function shapeText(s) {
   if (nz(s.h)) t.push(`${s.h > 0 ? '포켓' : '돌출'} ${f2(Math.abs(s.h))} R ${Number.isFinite(s.R) ? s.R.toFixed(1) : '–'}`);
   if (nz(s.e)) t.push(`끝단 두께 ${sg(s.e)}`);
   if (nz(s.c)) t.push(`폭 가장자리 두께 ${sg(s.c)}`);
+  const cv = (k) => { const v = (k ?? []).filter(nz); return v.length ? `${sg(Math.min(...k))}~${sg(Math.max(...k))}` : ''; };   // 곡선 = 제어점 최소~최대
+  if (cv(s.kL)) t.push(`길이 두께 곡선 ${cv(s.kL)}`);
+  if (cv(s.kW)) t.push(`폭 두께 곡선 ${cv(s.kW)}`);
   return t.length ? `${t.join(' · ')} mm` : '변경 없음';
 }
 // ③ 선별 요약 — 이득 ≥ 0.005 만 큰 순, 나머지는 '효과 없음' 으로 이름만

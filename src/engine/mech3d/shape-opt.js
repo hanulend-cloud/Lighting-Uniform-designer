@@ -123,16 +123,28 @@ export function endW(s, L, ell, closed = false) {
   const t = Math.max(0, Math.min(s, L - s));
   return t < ell ? 0.5 * (1 + Math.cos((Math.PI * t) / ell)) : 0;
 }
-// 아랫면 이동량 D = Δt − h·Σbump + e·endW(s) + c·min(1, (w/W½)²). e·c 가 0 이거나 경로가 없으면 (s,w) 생략(기존과 비트 동일)
+// 제어점 곡선(Catmull-Rom, 제어점을 지남) — 열린 곡선: 제어점 k[i] 가 t = i/(n−1), 범위 밖은 끝값. 닫힌 곡선(closed): t = i/n, 주기 — 순수
+export function curveAt(k, t, closed = false) {
+  const n = k?.length ?? 0; if (!n) return 0; if (n === 1) return k[0];
+  let i, f, p;
+  if (closed) { const x = (((t % 1) + 1) % 1) * n; i = Math.floor(x); f = x - i; p = (j) => k[((j % n) + n) % n]; }
+  else { const x = Math.min(1, Math.max(0, t)) * (n - 1); i = Math.min(n - 2, Math.floor(x)); f = x - i; p = (j) => k[Math.min(n - 1, Math.max(0, j))]; }
+  const p0 = p(i - 1), p1 = p(i), p2 = p(i + 1), p3 = p(i + 2);
+  return 0.5 * (2 * p1 + (p2 - p0) * f + (2 * p0 - 5 * p1 + 4 * p2 - p3) * f * f + (3 * p1 - p0 - 3 * p2 + p3) * f * f * f);
+}
+// 길이 곡선 kL(s/L) · 폭 곡선 kW(|w|/W½ — 가운데 0 → 가장자리 1) 중 0 아닌 값이 있는가
+export const hasCurve = (prm) => [prm?.kL, prm?.kW].some((k) => Array.isArray(k) && k.some((v) => v));
+// 아랫면 이동량 D = Δt − h·Σbump + e·endW(s) + c·min(1, (w/W½)²) + kL(s/L) + kW(|w|/W½). e·c·곡선이 없거나 경로가 없으면 (s,w) 생략(기존과 비트 동일)
 const disp = (x, y, prm) => {
   const { dt, h, R, centers } = prm; let b = 0;
   for (const c of centers) b += bump(Math.hypot(x - c[0], y - c[1]) / R);
   let D = dt - h * b;
-  const e = prm.e ?? 0, cc = prm.c ?? 0;
-  if ((e || cc) && prm.path?.length) {
-    const [s, w] = swOnPath(prm, x, y);
-    if (e) D += e * endW(s, pathIndex(prm.path, !!prm.closed).L, prm.ell, prm.closed);
+  const e = prm.e ?? 0, cc = prm.c ?? 0, cv = hasCurve(prm);
+  if ((e || cc || cv) && prm.path?.length) {
+    const [s, w] = swOnPath(prm, x, y), L = pathIndex(prm.path, !!prm.closed).L;
+    if (e) D += e * endW(s, L, prm.ell, prm.closed);
     if (cc) D += cc * Math.min(1, (w / prm.halfW) ** 2);
+    if (cv) { if (prm.kL?.length) D += curveAt(prm.kL, s / L, !!prm.closed); if (prm.kW?.length) D += curveAt(prm.kW, Math.min(1, Math.abs(w) / prm.halfW)); }
   }
   return D;
 };
@@ -143,8 +155,8 @@ export function ledEll({ pitch = 0, count = 0, ss = null, L }) {
   const s = (ss ?? []).filter(Number.isFinite).sort((a, b) => a - b);
   return s.length > 1 && s.at(-1) > s[0] ? (s.at(-1) - s[0]) / (s.length - 1) : L / 4;
 }
-// e·c 가 있으면 아랫면 세분 최대 변 max(R/2, 2 mm), 없으면 0(세분 안 함)
-export const lineVarH = (prm) => ((prm.e ?? 0) || (prm.c ?? 0) ? Math.max((prm.R ?? 0) / 2, 2) : 0);
+// e·c·곡선이 있으면 아랫면 세분 최대 변 max(R/2, 2 mm), 없으면 0(세분 안 함)
+export const lineVarH = (prm) => ((prm.e ?? 0) || (prm.c ?? 0) || hasCurve(prm) ? Math.max((prm.R ?? 0) / 2, 2) : 0);
 
 // 변형 메쉬(같은 삼각형·면 번호, 새 정점 위치). 부피는 다시 셈. 두께 하한 MIN_T(그 자리 D 를 자름)
 // 주의: zt·zb 는 높이맵 칸 값 — 기울어진 윗면은 칸 안 기울기만큼(≈ slope·cell/2t) 만 고정됨(평판 가정)

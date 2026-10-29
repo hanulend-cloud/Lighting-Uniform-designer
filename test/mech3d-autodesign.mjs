@@ -1,6 +1,6 @@
 // P4 단계 실행기(가짜 io): node test/mech3d-autodesign.mjs
-import { runAutoDesign, shapeScore, halving, smoothU, halvingTotal, sameDesign, screenShapeVars, shapeTotal, pickVariant } from '../src/engine/mech3d/autodesign.js';
-import { shapeVarRanges, gridCandidates } from '../src/engine/mech3d/shape-opt.js';
+import { runAutoDesign, shapeScore, halving, smoothU, halvingTotal, sameDesign, screenShapeVars, shapeTotal, pickVariant, refineShapeCurve, curveDirection, shapeSize } from '../src/engine/mech3d/autodesign.js';
+import { shapeVarRanges, gridCandidates, curveAt } from '../src/engine/mech3d/shape-opt.js';
 import { milkyRows } from '../src/engine/mech3d/milky-search.js';
 import { ok, done } from './mech3d-util.mjs';
 
@@ -135,7 +135,7 @@ const peakRows = (ms, top, { len = 0.5, wid = 0.5, Uw = () => 0.9 } = {}) => ms.
   const r = await runAutoDesign({ stages: { shape: true }, obs, current: cur, shapePart: 0, shapeRanges: rg }, io);
   const sc = r.steps.find((x) => x.stage === 'shapeScreen');
   ok(sc.vars.join() === 'c' && seen[0].length === 13 && seen[1].length === 5 && seen[1].some((c) => c.c === 0 && c.dt === 0), `선별 → ['c'], 선별 13개(끝값+½) · 격자 5개(변수 1개 = 5단계, 현재 포함): ${sc.vars}`);
-  ok(r.best.shape.c > 0 && !r.unchanged && plans.at(-1).total === shapeTotal(13, 5), `최종 형상 c=${r.best.shape?.c}, 분모 ${plans.at(-1)?.total}`);
+  ok(r.best.shape.c > 0 && !r.unchanged && plans.at(-1).total === shapeTotal(13, 5) + 18, `최종 형상 c=${r.best.shape?.c}, 분모 ${plans.at(-1)?.total}`);
   const io2 = { ...io, evalShapes: mk(() => 0), verify: async () => ({ stats: st(0.75, 0.9), eff: 0.5 }) };
   const r2 = await runAutoDesign({ stages: { shape: true }, obs, current: cur, shapePart: 0, shapeRanges: rg }, io2);
   ok(r2.unchanged && r2.best.shape === null && r2.reason === '형상 변수의 효과가 잡음 수준 — 현재 형상 유지', `효과 없음 → 현재안 유지: ${r2.reason}`); }
@@ -270,4 +270,32 @@ ok(halvingTotal(27) === 35 && halvingTotal(4) === 10 && halvingTotal(1) === 3, '
   ok(c.basisD[0].milky === 1 && c.basisD[0].finish?.R === 0.95 && c.bases.length === 0 && c.ref?.milky == null && c.r.best.finish?.R === 0.9 && c.r.best.milky === 1, `②+④: 기준 Milky ${c.basisD[0].milky}(현재) · 케이스 최고 → 최종 ${c.r.best.finish?.R}`);
   const e = await run({ leds: true });
   ok(e.basisD[0].milky === 1 && e.basisD[0].finish === null && !e.ref && e.bases.length === 0, '② 만: 기존 그대로(기준 탐색 없음)'); }
+{ // ③ 곡선 다듬기(프로파일 따라가기) — 가짜 모형: 끝단이 어둡고(1 − 0.3·끝 가까움), 길이 곡선 kL 을 올린 곳이 밝아짐(+0.4·kL)
+  // 폭: 가장자리가 어둡고 kW 를 올리면 밝아짐. 반복마다 방향 = 결손(어두운 곳 +) — 균일도가 오르고 곡선이 끝·가장자리에서 양수가 됨
+  const ns = 40, nw = 6, obs = { targetLen: 0.95, targetWid: 0.95 };
+  const model = (c) => {
+    const prof = Float64Array.from({ length: ns }, (_, i) => { const t = (i + 0.5) / ns, end = Math.max(0, 1 - Math.min(t, 1 - t) / 0.2); return 1 - 0.3 * end + 0.4 * curveAt(c.kL ?? [], t); });
+    const wcol = Array.from({ length: nw }, (_, j) => { const wn = Math.abs(((j + 0.5) / nw) * 2 - 1); return 1 - 0.2 * wn * wn + 0.4 * curveAt(c.kW ?? [], wn); });
+    const map = new Float64Array(ns * nw); for (let i = 0; i < ns; i++) for (let j = 0; j < nw; j++) map[i * nw + j] = prof[i] * wcol[j];
+    const mx = Math.max(...prof), mw = Math.max(...wcol);
+    return { profile: Float64Array.from(prof, (v) => v / mx), map, nw, Ulen: Math.min(...prof) / mx, Uwid: Math.min(...wcol) / mw };
+  };
+  let nEval = 0;
+  const evalFn = async (cands) => cands.map((cand) => { nEval++; return { cand, ok: true, stats: model(cand), eff: 0.1 }; });
+  const zero = { dt: 0, h: 0, R: 1, e: 0, c: 0 }, b0 = { cand: zero, ok: true, stats: model(zero), eff: 0.1 };
+  const dir = curveDirection(b0.stats, 5, 3, false);
+  ok(dir.kL[0] > 0.9 && dir.kL[2] < 0 && dir.kL[4] > 0.9 && dir.kW[2] > dir.kW[0], `방향: 길이 ${dir.kL.map((v) => v.toFixed(2))} · 폭 ${dir.kW.map((v) => v.toFixed(2))}`);
+  const r = await refineShapeCurve(b0, evalFn, obs, { nL: 5, nW: 3, A0: 0.4, iters: 3 });
+  const s0 = shapeScore(b0, obs), s1 = shapeScore(r.best, obs);
+  ok(s1 > s0 + 0.05 && r.best.cand.kL[0] > 0 && r.best.cand.kL[4] > 0 && nEval <= 18 && r.tried.length === nEval, `곡선 다듬기: 점수 ${s0.toFixed(3)} → ${s1.toFixed(3)} · kL ${r.best.cand.kL.map((v) => v.toFixed(2))} · 평가 ${nEval}개`);
+  const flat = { cand: zero, ok: true, stats: { profile: new Float64Array(ns).fill(1), map: new Float64Array(ns * nw).fill(1), nw, Ulen: 1, Uwid: 1 }, eff: 0.1 };
+  const r2 = await refineShapeCurve(flat, evalFn, obs, { nL: 5, nW: 3, A0: 0.4, iters: 2 });
+  ok(r2.best === flat && r2.tried.length === 0, '결손 없음(이미 고름) → 그대로(평가 안 함)');
+}
+{ // 형상 변경 최소화: 마지막 단계에서 최고와 0.01 이내면 변화가 작은 안
+  const obs = { targetLen: 0.9, targetWid: 0.9 }, mk = (U) => ({ Ulen: U, Uwid: 0.9, profile: null });
+  const evalFn = async (cands) => cands.map((c) => ({ cand: c, ok: true, eff: 0.1, stats: mk(c.dt === 2 ? 0.80 : c.dt === 0.5 ? 0.795 : 0.7) }));
+  const best = await halving([{ dt: 2 }, { dt: 0.5 }, { dt: 0 }], evalFn, obs, [[3, 1, 1]]);
+  ok(best.cand.dt === 0.5 && Math.abs(shapeSize({ dt: -1, h: 0.5, kL: [0.2, -0.7], kW: [0.1] }) - 2.3) < 1e-12, `잡음 수준 차이면 작은 변경 dt ${best.cand.dt}`);
+}
 done();

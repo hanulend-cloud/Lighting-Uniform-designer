@@ -405,3 +405,6 @@ done();
   const many = Array.from({ length: 80 }, (_, k) => row(+(0.25 + k * 0.025).toFixed(3), 0.5, 0.5, 0.1)), hm = milkyTableHtml(many, 1.43, {});
   console.log((hm.match(/<tr/g) ?? []).length <= 14 && hm.includes('1.43 <span') && T.map((r) => `${r.milky}:${r.Ulen}`).join() === '1:0.6,3:0.78,3.5:0.81' && h.includes('data-ad="applyMilky" data-v="1"') && /class="sel"[^]*3\.50/.test(h) && h.includes('8.1%') && milkyTable([{ stage: 'shape' }]).length === 0 && milkyTable([...steps, { stage: 'guard' }]).length === 3
     ? 'PASS Milky 조정 표(마지막 Milky 단계만·정밀 값 우선·믿는 행·적용 단추)' : (process.exitCode = 1, `FAIL Milky 조정 표 ${JSON.stringify(T)} ${h}`)); }
+{ const { shapeText } = await import('../src/ui/m3/autodesign-panel.js');
+  const t = shapeText({ dt: 0, h: 0, e: 0, c: 0, kL: [0.6, -0.23, -0.14, -0.23, 0.6], kW: [0, 0, 0] });
+  console.log(t === '길이 두께 곡선 −0.23~+0.60 mm' ? 'PASS 형상 문구: 길이 두께 곡선(제어점 최소~최대) · 0 곡선 생략' : (process.exitCode = 1, `FAIL 형상 문구 ${t}`)); }

@@ -1,6 +1,7 @@
 // P4 자동설계 단계 실행기 — spec §1·§2. 순서 ② → ⑤ LED 높이 → ④ 케이스 면 → ① → ③(§2.3c), 체크 안 한 항목은 현재 값 고정. 계산은 io 가 맡는다(Worker / 시험 가짜).
 // ① 재가중 창은 기준 ±0.25(ESS 한계, spec §2.1). U(Milky) 는 단봉형(§2.1a) — 거친 탐색으로 최고점을 지나면 멈추고, 오르는 구간에서만 할선/이분으로 최소 통과 Milky. ② 는 기준(①·④ 함께면 거친 최고점 Milky ≤ 5·케이스 최고 등급, §2.2c)에서 최소 개수를 구한 뒤 ④·① 이 고른다.
 // io.milkyRows(d, ms, { precise }) — precise = 경계가 든 창의 재추적(광자 많이). 결과 { feasible, best(design), steps:[{stage, …}], reason, verified, current(현재안 io.verify), cancelled }
+import { hasCurve } from './shape-opt.js';
 import { milkyAxis } from './reweight.js';
 import { pickMilky, margin } from './milky-search.js';
 import { searchLeds } from './basis.js';
@@ -43,6 +44,49 @@ export function shapeBudget(eff) {
   const k = Number.isFinite(eff) && eff > 0 ? Math.min(10, Math.max(1, 0.5 / eff)) : 1;
   return { k, screen: { N: Math.round(6e4 * k), maxMs: Math.round(2500 * Math.min(k, 4)) }, schedule: SHAPE_SCHEDULE.map(([keep, N, ms]) => [keep, Math.round(N * k), Math.round(ms * Math.min(k, 4))]) };
 }
+// ③ 곡선 방향(순수) — 길이 프로파일·폭(지도 열 평균)의 결손(평균 대비 어두운 정도, 어두우면 +)을 제어점 위치에서 잼.
+// 길이 제어점 j: t = j/(nL−1)(닫힌 라인 j/nL), 그 둘레 ±½간격 칸 평균. 폭 제어점 k: |w|/W½ = k/(nW−1). 각 벡터는 최대 |값| = 1 로(결손 < 1% 면 0)
+// 반환 { kL, kW } — 지도 열 수 = map.length / profile.length(관측면 폭 칸), 열 중심 |w|/W½ = |(j+½)/nw·2 − 1|
+export function curveDirection(stats, nL = 7, nW = 3, closed = false) {
+  const p = stats?.profile, ns = p?.length ?? 0, nrm = (v) => { const m = Math.max(0, ...v.map(Math.abs)); return m < 0.01 ? v.map(() => 0) : v.map((x) => Math.round((x / m) * 1e4) / 1e4); };
+  const fin = (v) => Number.isFinite(v) && v > 0, mean = (a) => { const f = a.filter(fin); return f.length ? f.reduce((x, y) => x + y, 0) / f.length : NaN; };
+  if (!ns) return { kL: new Array(nL).fill(0), kW: new Array(nW).fill(0) };
+  const P = Array.from(p), m0 = mean(P), sp = closed ? 1 / nL : 1 / (nL - 1);
+  const kL = Array.from({ length: nL }, (_, j) => {
+    const tj = closed ? j / nL : j / (nL - 1), w = P.filter((_, i) => { let d = Math.abs((i + 0.5) / ns - tj); if (closed) d = Math.min(d, 1 - d); return d <= sp / 2 + 1e-9; });
+    const v = mean(w); return Number.isFinite(v) && m0 > 0 ? (m0 - v) / m0 : 0;
+  });
+  let kW = new Array(nW).fill(0);
+  const map = stats.map, nw = map?.length ? Math.round(map.length / ns) : 0;
+  if (nw >= 2 && nW >= 2) {
+    const col = Array.from({ length: nw }, (_, j) => mean(Array.from({ length: ns }, (_, i) => map[i * nw + j]))), c0 = mean(col), sw = 1 / (nW - 1);
+    kW = Array.from({ length: nW }, (_, k) => { const v = mean(col.filter((_, j) => Math.abs(Math.abs(((j + 0.5) / nw) * 2 - 1) - k * sw) <= sw / 2 + 1e-9)); return Number.isFinite(v) && c0 > 0 ? (c0 - v) / c0 : 0; });
+  }
+  return { kL: nrm(kL), kW: nrm(kW) };
+}
+// ③ 곡선 다듬기(2026-10-29 형상 자유도) — 격자 최선(best)에서 길이 곡선 kL·폭 곡선 kW 를 프로파일 결손 방향으로 바꿔 봄.
+// 반복마다 후보 = 부호 ±A × {길이만, 폭만, 둘 다}(최대 6개). 최선이 지금보다 SCORE_EPS 넘게 나으면 채택(작은 변화로 충분하면 그 안 — 형상 변경 최소화),
+// 아니면 A 절반. 결손이 없으면(이미 고름) 평가 없이 그대로. evalFn(cands, N, ms) → [{ cand, ok, stats, eff }]. 반환 { best, tried }
+export async function refineShapeCurve(best, evalFn, obs, { nL = 7, nW = 3, A0 = 1, iters = 3, N, maxMs, closed = false, cancelled = () => false, progress = null } = {}) {
+  let cur = best, A = A0;
+  const tried = [], rd = (v) => Math.round(v * 1e3) / 1e3;
+  for (let it = 0; it < iters; it++) {
+    if (cancelled()) break;
+    const dir = curveDirection(cur.stats, nL, nW, closed), hasL = dir.kL.some((v) => v), hasW = dir.kW.some((v) => v);
+    if (!hasL && !hasW) break;
+    const bL = cur.cand.kL ?? new Array(nL).fill(0), bW = cur.cand.kW ?? new Array(nW).fill(0), cands = [];
+    for (const sg of [1, -1]) for (const [uL, uW] of [[1, 0], [0, 1], [1, 1]]) {
+      if ((uL && !hasL) || (uW && !hasW) || (!uL && !hasL && !uW)) continue;
+      if (uL && uW && (!hasL || !hasW)) continue;   // 한쪽만 있으면 '둘 다' = 같은 후보
+      cands.push({ ...cur.cand, kL: bL.map((v, j) => rd(v + (uL ? sg * A * dir.kL[j] : 0))), kW: bW.map((v, k) => rd(v + (uW ? sg * A * dir.kW[k] : 0))) });
+    }
+    progress?.(it / iters, `곡선 다듬기 ${it + 1}/${iters} (후보 ${cands.length}개)`);
+    const res = await evalFn(cands, N, maxMs); tried.push(...res);
+    const top = res.filter((r) => r.ok).sort((a, b) => shapeScore(b, obs) - shapeScore(a, obs))[0];
+    if (top && shapeScore(top, obs) > shapeScore(cur, obs) + SCORE_EPS) cur = top; else A /= 2;
+  }
+  return { best: cur, tried };
+}
 // 단계별 평가 후보 수 합(진행률 분모) — 실제로는 통과 후보가 적으면 더 적음
 export const halvingTotal = (n, schedule = SHAPE_SCHEDULE) => schedule.reduce((s, [keep], i) => { const k = i === 0 ? n : Math.min(keep, s.last); return { sum: s.sum + k, last: k }; }, { sum: 0, last: n }).sum;
 export async function halving(cands, evalFn, obs, schedule = SHAPE_SCHEDULE, cancelled = () => false) {
@@ -51,11 +95,14 @@ export async function halving(cands, evalFn, obs, schedule = SHAPE_SCHEDULE, can
     if (cancelled()) return null;
     const res = (await evalFn(pool, schedule[s][1], schedule[s][2])).filter((r) => r.ok).sort((a, b) => shapeScore(b, obs) - shapeScore(a, obs));
     if (!res.length) return null;
-    last = res[0];
+    // 마지막 단계: 최고 점수와 SCORE_EPS 이내(잡음 수준)면 형상 변화가 가장 작은 안(형상 변경 최소화, 2026-10-29)
+    last = s < schedule.length - 1 ? res[0] : res.filter((r) => shapeScore(r, obs) >= shapeScore(res[0], obs) - SCORE_EPS).reduce((a, r) => (shapeSize(r.cand) < shapeSize(a.cand) ? r : a));
     pool = res.slice(0, schedule[s + 1]?.[0] ?? 1).map((r) => r.cand);
   }
   return last;
 }
+// 형상 변화 크기(mm) — 두께·포켓·끝단·가장자리 절댓값 + 곡선 최대 |값| (최소 변경 고르기용)
+export const shapeSize = (c) => ['dt', 'h', 'e', 'c'].reduce((t, k) => t + Math.abs(c?.[k] ?? 0), 0) + Math.max(0, ...(c?.kL ?? []).map(Math.abs)) + Math.max(0, ...(c?.kW ?? []).map(Math.abs));
 
 // 진행률 분모 — 선별 후보 수 + 압축 평가 수. 선별은 io.shapePlan?.({ screen, grid, total }) 로 먼저 알리고, 그 뒤 evalShapes 호출마다 후보 1개씩 센다
 export const shapeTotal = (nScreen, nGrid, schedule = SHAPE_SCHEDULE) => nScreen + halvingTotal(nGrid, schedule);
@@ -286,7 +333,8 @@ export async function runAutoDesign(cfg, io) {
   }
   // 계산 순서(2026-10-29): ② 위치(·⑤ 높이·④ 케이스) → ③ 형상 → ① Milky. Milky 는 마지막 — 앞 단계로 목표에 못 미치면 효율을 내주더라도
   // 목표를 만족하는 가장 낮은 Milky 로 올림(결과 카드의 Milky 조정 표로 설계자가 효율과 맞바꿔 낮출 수 있음)
-  let shapeCands = cfg.shapeCands, shapeNone = false;
+  let shapeCands = cfg.shapeCands, shapeNone = false, shapeZero = null;   // shapeZero = 선별의 '변경 없음' 결과(곡선 다듬기 출발점)
+  const nCurve = cfg.curve === false ? 0 : 6 * (cfg.curve?.iters ?? 3);   // 곡선 다듬기 평가 수(진행률 분모)
   if (stages.shape && cfg.shapeRanges) {   // ③ 1단계 선별 → 2단계 격자 (cfg.shapeCands 만 있으면 아래 기존 경로)
     const rg = cfg.shapeRanges, nScreen = 1 + 4 * Object.keys(rg).filter((k) => k !== 'R').length;
     io.shapePlan?.({ screen: nScreen, grid: null, total: null });
@@ -294,20 +342,43 @@ export async function runAutoDesign(cfg, io) {
     const sc = await screenShapeVars((cands, N, ms) => io.evalShapes(d, cands, N, ms), rg, obs, cfg.screen);
     if (stop()) return { cancelled: true };
     steps.push({ stage: 'shapeScreen', gains: sc.gains, vars: sc.vars, results: (sc.results ?? []).map((r) => ({ cand: r.cand, ok: r.ok, why: r.why ?? null, Ulen: r.stats?.Ulen ?? null, Uwid: r.stats?.Uwid ?? null })) });   // results = 후보별 판정(진단·설명용)
-    if (!sc.vars.length) { shapeNone = true; feasible = margin(currentVerified.stats, obs) >= 0; reason = '형상 변수의 효과가 잡음 수준 — 현재 형상 유지'; }
+    shapeZero = (sc.results ?? []).find((r) => r.ok && ['dt', 'h', 'e', 'c'].every((k) => !(r.cand[k] ?? 0))) ?? null;
+    if (!sc.vars.length) { shapeNone = true; io.shapePlan?.({ screen: nScreen, grid: 0, total: nScreen + nCurve }); feasible = margin(currentVerified.stats, obs) >= 0; reason = '형상 변수의 효과가 잡음 수준 — 현재 형상 유지'; }
     else {
       const gv = sc.vars.includes('h') && rg.R ? [...sc.vars, 'R'] : sc.vars, nR = gv.includes('R') ? 3 : 1;
       shapeCands = gridCandidates(gv, rg, 5 ** sc.vars.length * nR <= 45 ? 5 : 3);   // 변수가 적으면 중간값(±½)까지 5단계, 많으면 3단계(후보 ≤ 27)
-      io.shapePlan?.({ screen: nScreen, grid: shapeCands.length, total: shapeTotal(nScreen, shapeCands.length, cfg.schedule) });
+      io.shapePlan?.({ screen: nScreen, grid: shapeCands.length, total: shapeTotal(nScreen, shapeCands.length, cfg.schedule) + nCurve });
+    }
+  }
+  // ③ 곡선 다듬기(길이·폭 두께 곡선) — 출발 = 격자 최선(없으면 선별의 '변경 없음'). 예산 = 압축 2단계(광자·시간). undefined = 중지
+  async function curveStage(start) {
+    if (!start || nCurve === 0) return start;
+    const sch = cfg.schedule ?? SHAPE_SCHEDULE, [, N, ms] = sch[Math.min(1, sch.length - 1)];
+    io.progress?.('shape', 0.9, '형상 곡선 다듬기');
+    const r = await refineShapeCurve(start, (cands, n, t) => io.evalShapes(d, cands, n, t), obs, { nL: cfg.curve?.nL ?? 7, nW: cfg.curve?.nW ?? 3, iters: cfg.curve?.iters ?? 3, A0: cfg.shapeRanges?.e?.[1] ?? 1, N, maxMs: ms, closed: !!cfg.line?.closed, cancelled: stop });
+    if (stop()) return undefined;
+    steps.push({ stage: 'shapeCurve', tried: r.tried.length, improved: r.best !== start });
+    return r.best;
+  }
+  if (stages.shape && shapeNone && shapeZero && nCurve) {   // 선별 변수 효과가 잡음 수준이어도 곡선은 시도
+    const best = await curveStage(shapeZero);
+    if (best === undefined) return { cancelled: true };
+    if (best !== shapeZero) {
+      d = { ...d, shape: { part: cfg.shapePart, ...best.cand } };
+      steps.push({ stage: 'shape', best });
+      if (margin(best.stats, obs) < 0) { feasible = false; reason = `형상 최적안도 목표 미달 — 길이 U ${best.stats.Ulen.toFixed(2)}${best.stats.Uwid == null ? '' : ` · 폭 U ${best.stats.Uwid.toFixed(2)}`}`; }
+      else { feasible = true; reason = ''; }
     }
   }
   if (stages.shape && !shapeNone && shapeCands?.length) {   // ③
     io.progress?.('shape', 0, `형상 후보 ${shapeCands.length}개 평가`);
-    const best = await halving(shapeCands, (cands, N, ms) => io.evalShapes(d, cands, N, ms), obs, cfg.schedule, stop);
+    let best = await halving(shapeCands, (cands, N, ms) => io.evalShapes(d, cands, N, ms), obs, cfg.schedule, stop);
     if (stop()) return { cancelled: true };
+    best = await curveStage(best);
+    if (best === undefined) return { cancelled: true };
     steps.push({ stage: 'shape', best });
     if (best) {
-      const c = best.cand, zero = ['dt', 'h', 'e', 'c'].every((k) => !(c[k] ?? 0));   // 전부 0 이면 R 무관 — 빈 shapeMod 안 만듦
+      const c = best.cand, zero = ['dt', 'h', 'e', 'c'].every((k) => !(c[k] ?? 0)) && !hasCurve(c);   // 전부 0 이면 R 무관 — 빈 shapeMod 안 만듦
       d = { ...d, shape: zero ? null : { part: cfg.shapePart, ...c } };
       if (margin(best.stats, obs) < 0) { feasible = false; reason = `형상 최적안도 목표 미달 — 길이 U ${best.stats.Ulen.toFixed(2)}${best.stats.Uwid == null ? '' : ` · 폭 U ${best.stats.Uwid.toFixed(2)}`}`; }
       else { feasible = true; reason = ''; }

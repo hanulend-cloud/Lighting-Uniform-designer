@@ -527,7 +527,7 @@ const adPaths = new WeakMap();   // 라인·기준 좌표별 중심선 메모(�
 // ③ 형상 기준 좌표 = 대상 부품 윗면 방향(관측면이 기울거나 꺾여도 부품 두께를 바르게 — 2026-10-29). 원본 메쉬별 메모
 const SHAPE_F = new WeakMap();
 const shapeFrame = (base, line) => { let m = SHAPE_F.get(base); if (!m || m.line !== line) SHAPE_F.set(base, (m = { line, F: partFrame(base, line.frame) })); return m.F; };
-function shapeModFor({ dt, h, R, e = 0, c = 0 }, M, line, F = line.frame) {   // F = 형상 기준 좌표(shapeFrame — 대상 부품 윗면 방향)
+function shapeModFor({ dt, h, R, e = 0, c = 0, kL = null, kW = null }, M, line, F = line.frame) {   // kL·kW = 길이·폭 두께 곡선(제어점, mm)   // F = 형상 기준 좌표(shapeFrame — 대상 부품 윗면 방향)
   const em = L.currentEmitters(M, line);
   const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
   const centers = em.map((x) => [dot(x.pos, F.u), dot(x.pos, F.v)]);
@@ -535,7 +535,7 @@ function shapeModFor({ dt, h, R, e = 0, c = 0 }, M, line, F = line.frame) {   //
   const fk = F.d.map((x) => x.toFixed(6)).join(); let P = PM.get(fk); if (!P) PM.set(fk, (P = pathFromLine(line, F)));   // 기준 좌표별
   const lv = M.light.kind === 'step' ? M.light.step?.virtual ?? null : null, lay = M.light.kind === 'manual' ? M.light.manual : lv && !lv.positions ? lv : null;   // 편집한 배치 = 발광점 간격으로
   const ell = ledEll({ pitch: lay?.pitch ?? 0, count: lay?.count ?? 0, ss: centers.map(([x, y]) => swOnPath(P, x, y)[0]), L: P.L });
-  return { frame: { u: F.u, v: F.v, d: F.d }, dt, h, R, e, c, centers, cell: 0.5, path: P.path, halfW: P.halfW, closed: P.closed, L: P.L, ell };
+  return { frame: { u: F.u, v: F.v, d: F.d }, dt, h, R, e, c, ...(kL?.some((v) => v) ? { kL } : {}), ...(kW?.some((v) => v) ? { kW } : {}), centers, cell: 0.5, path: P.path, halfW: P.halfW, closed: P.closed, L: P.L, ell };
 }
 // 최종안의 LED 몸체가 기구 부품과 새로 겹치는 수(LED STEP) — 현재안에 이미 있던 겹침은 뺌. 0 = 없음
 function designClash(d, ctx, M0, rt, line) {
