@@ -220,10 +220,10 @@ export function createMech3dView(canvas, { onPick, gizmo = null }) {
       for (const { n, a, b } of cnt.values()) if (n === 1) pts.push(new THREE.Vector3(P[3 * a], P[3 * a + 1], P[3 * a + 2]), new THREE.Vector3(P[3 * b], P[3 * b + 1], P[3 * b + 2]));
     }
     if (!pts.length) return null;
-    // 굵은 선 2겹(화면 px 두께, 가려도 보임): 바깥 짙은 테두리 7px + 안쪽 밝은 하늘색 4px — 어떤 배경·색지도 위에서도 또렷하게
+    // 선 2겹(화면 px 두께, 가려도 보임): 바깥 짙은 테두리 4px + 안쪽 밝은 하늘색 2px — 과하지 않게(2026-10-29, 기존 7/4px)
     const arr = new Float32Array(pts.length * 3); pts.forEach((v, k) => arr.set([v.x, v.y, v.z], 3 * k));
     const grp = new THREE.Group(), w = canvas.clientWidth || 800, h = canvas.clientHeight || 400;
-    for (const [col, lw, ro] of [[0x062a33, 7, 4], [OBS_HI, 4, 4.1]]) {
+    for (const [col, lw, ro] of [[0x062a33, 4, 4], [OBS_HI, 2, 4.1]]) {
       const g = new LineSegmentsGeometry(); g.setPositions(arr);
       const m = new LineMaterial({ color: col, linewidth: lw, depthTest: false, transparent: true, opacity: 0.95 }); m.resolution.set(w, h); fatMats.add(m);
       m.addEventListener('dispose', () => fatMats.delete(m));

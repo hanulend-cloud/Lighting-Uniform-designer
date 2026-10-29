@@ -346,3 +346,9 @@ done();
 { const { reachDiag } = await import('../src/ui/m3/opt-dash.js');
   const L = { emitted: 1, escaped: 0.7, absSurf: 0.2, absVol: 0.1 }, d = reachDiag(L, { '1|5': 0.5, '-1|-1': 0.15, '2|0': 0.0495 }, ['케이스', '확산판', '커버']);
   console.log(d && d.html.includes('관측면에 도착한 빛 0.050%') && d.html.includes('거의 없음') && d.html.includes('확산판 면 #5 50%') && d.html.includes('LED에서 바로 공기로') && d.html.includes('흡수 30%') && reachDiag(L, { '1|5': 0.3 }, []) === null ? 'PASS 빛 도달 진단(관측면 < 1% → 빛이 간 곳)' : (process.exitCode = 1, `FAIL 빛 도달 진단 ${d?.html}`)); }
+{ const { pointProfiles } = await import('../src/ui/m3/results-panel.js');
+  // 3×2 격자(k = i·nw + j), 칸 (1,0) 은 관측면 밖 → NaN. 각 곡선은 자기 최대 = 1
+  const G = { ns: 3, nw: 2, valid: [1, 1, 0, 1, 1, 1] }, map = [2, 4, 9, 8, 1, 6];
+  const p = pointProfiles(G, map, 2, 1), q0 = pointProfiles(G, map, 1, 0);
+  const near = (a, b) => a.length === b.length && a.every((v, k) => (Number.isNaN(b[k]) ? Number.isNaN(v) : Math.abs(v - b[k]) < 1e-9));
+  console.log(near(p.along, [4 / 8, 8 / 8, 6 / 8]) && near(p.across, [1 / 6, 1]) && near(q0.along, [2 / 2, NaN, 1 / 2]) && near(q0.across, [NaN, 1]) ? 'PASS 지정 점 프로파일: 길이(w 고정)·폭(s 고정) 곡선 · 관측면 밖 = 끊김' : (process.exitCode = 1, `FAIL 지정 점 프로파일 ${JSON.stringify([...p.along])} ${JSON.stringify([...q0.across])}`)); }

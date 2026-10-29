@@ -139,7 +139,7 @@ function wireHover(cv) {
 // 2D 광량 분포(v2 평판 화면 수준) — 색 = 최대 대비 %(오른쪽 색 막대 눈금), s·w mm 눈금, LED 위치(노란 점),
 // 최저점 표시(값·위치), 마우스 위치 읽기. equal = 가로세로 같은 축척(실제 비율, 확대 창에서 선택). 모든 치수는 dpr 배
 // v = { G, map, leds:[{s,w}] } · cv._mapv 에 저장 → 마우스 읽기·확대 창이 다시 그림
-const MAP_PAD = { l: 40, r: 64, t: 8, b: 30 }, EXAG_MAX = 8;
+const MAP_PAD = { l: 40, r: 64, t: 8, b: 30 }, EXAG_MAX = 8, PIN_COLOR = '#ff8a1f';
 // 지도 배치(순수) — 한 줄(가로 = 길이 s, 1D 프로파일과 같은 가로축). 길고 좁은 관측면(예: 440 × 5.5 mm)은 상자 높이를 다 쓰면
 // 폭이 수십 배 과장되므로 폭 확대를 EXAG_MAX 배까지만(띠 높이 최소 28 px) — 띠는 상자 가운데. (예전엔 여러 줄로 접었지만 1D 프로파일과 맞춰 보기 어려움)
 // equal = 가로세로 같은 축척(확대 창에서 선택) — 줄 안에서 정확히 1:1.
@@ -162,6 +162,15 @@ export function mapLayout(G, W, H, dpr = 1, equal = false) {
     return [r * segL + ((px - ox) / PW) * segL, w1 - (y / rowH) * wd];
   };
   return { ox, oy, PW, rowH, pitch, K, segL, w0, w1, L, xy, at, exag: rowH / wd / (PW / segL) };
+}
+// 2D 에서 지정한 칸 (i, j) 을 지나는 1D 곡선 — along = 길이 방향(w 칸 j 고정), across = 폭 방향(s 칸 i 고정, 원형 라인이면 반경 방향).
+// 각 곡선은 자기 최대 = 1, 관측면 밖 칸 = NaN(끊김) — 순수
+export function pointProfiles(G, map, i, j) {
+  const along = new Float64Array(G.ns), across = new Float64Array(G.nw);
+  for (let a = 0; a < G.ns; a++) { const k = a * G.nw + j; along[a] = G.valid[k] ? map[k] : NaN; }
+  for (let b = 0; b < G.nw; b++) { const k = i * G.nw + b; across[b] = G.valid[k] ? map[k] : NaN; }
+  for (const c of [along, across]) { const m = finiteMax(c); for (let k = 0; k < c.length; k++) c[k] = m > 0 ? c[k] / m : NaN; }
+  return { along, across };
 }
 function mapBox(cv, G, dpr, equal) { return mapLayout(G, cv.width, cv.height, dpr, equal); }
 export function drawMap(cv, v, dpr = 1, hover = null, equal = false) {
@@ -219,6 +228,13 @@ export function drawMap(cv, v, dpr = 1, hover = null, equal = false) {
     x.fillStyle = '#ffffff'; x.textAlign = 'left'; x.textBaseline = 'top'; x.fillText(lbl, lx, ly);
     x.font = `${10.5 * dpr}px sans-serif`;
   }
+  // 지정 점(클릭) — 주황 십자선 + 점: 이 점을 지나는 길이·폭 1D 프로파일이 아래에 함께 나옴
+  if (v.pin) {
+    const [px, py] = xy(v.pin.s, v.pin.w);
+    x.strokeStyle = PIN_COLOR; x.lineWidth = 1.3 * dpr;
+    x.beginPath(); x.moveTo(px, oy); x.lineTo(px, oy + rowH); x.moveTo(ox, py); x.lineTo(ox + PW, py); x.stroke();
+    x.fillStyle = PIN_COLOR; x.beginPath(); x.arc(px, py, 3.5 * dpr, 0, 2 * Math.PI); x.fill();
+  }
   // 마우스 위치 읽기(칸 [i, j]) — 그 줄 안에서 십자선
   if (hover && mx > 0) {
     const [i, j] = hover, k = i * G.nw + j, cs = (i + 0.5) * G.ds, cw = w0 + (j + 0.5) * G.cell, val = G.valid[k] ? `${((map[k] / mx) * 100).toFixed(1)}%` : '관측면 밖';
@@ -243,6 +259,7 @@ function wireMapHover(cv) {
   };
   cv.addEventListener('mousemove', (e) => { const M = cv._mapv; if (M) drawMap(cv, M.v, M.dpr, cell(e), M.equal); });
   cv.addEventListener('mouseleave', () => { const M = cv._mapv; if (M) drawMap(cv, M.v, M.dpr, null, M.equal); });
+  cv.addEventListener('click', (e) => { const M = cv._mapv, c = cell(e); if (M && c) cv._onPin?.(c, M.v.G); });   // 클릭 = 그 점 프로파일 지정
 }
 const clearCanvas = (c) => c.getContext('2d').clearRect(0, 0, c.width, c.height);
 const dprNow = () => Math.max(1, globalThis.devicePixelRatio || 1);
@@ -266,7 +283,7 @@ export function createResultsPanel(el, { onQuality = null } = {}) {
       <div class="m3-withm"><canvas class="m3-g" data-r="map" width="600" height="200"></canvas>
         <div class="m3-m"><div class="l">평균 광량</div><div class="v" data-r="avg">–</div><div class="s" data-r="avgs"></div>${gaugeHtml('avgg')}
           <div class="l" style="margin-top:6px">광 효율</div><div class="v sm" data-r="eff">–</div><div class="s">관측면 원뿔 안 / LED 총 방출</div></div></div></div>
-    <div class="m3-blk"><div class="m3-t">길이 방향 1D 프로파일 <span>폭 평균 · 빨간 점선 = 목표 하한 <button type="button" class="m3-zoom" data-zoom="prof" title="큰 창으로 보기" aria-label="길이 프로파일 확대">⤢</button></span></div>
+    <div class="m3-blk"><div class="m3-t">길이 방향 1D 프로파일 <span><span data-r="psub">폭 평균 · 2D 클릭 = 그 점 기준 곡선 추가</span> · 빨간 점선 = 목표 하한 <button type="button" class="m3-zoom" data-zoom="prof" title="큰 창으로 보기" aria-label="길이 프로파일 확대">⤢</button></span></div>
       <div class="m3-withm"><canvas class="m3-g" data-r="prof" width="600" height="150"></canvas>
         <div class="m3-m"><div class="l">길이 균일도 U</div><div class="v" data-r="ul">–</div>${gaugeHtml('ulg')}<div class="s" data-r="ulj"></div></div></div></div>
     <div class="m3-blk"><div class="m3-t">폭 방향 1D 프로파일 <span><span data-r="wsub"></span> <button type="button" class="m3-zoom" data-zoom="wprof" title="큰 창으로 보기" aria-label="폭 프로파일 확대">⤢</button></span></div>
@@ -275,6 +292,10 @@ export function createResultsPanel(el, { onQuality = null } = {}) {
   const q = (k) => el.querySelector(`[data-r="${k}"]`);
   const RATIO = { map: 2.6, prof: 2.6, wprof: 3.2 };   // 눈금·색 막대·읽기가 들어가도록 높게
   wireHover(q('prof')); wireHover(q('wprof')); wireMapHover(q('map'));
+  // 지정 점(mm — 화질을 바꿔도 같은 위치). 같은 칸을 다시 누르면 해제
+  let pin = null;
+  const onPin = ([i, j], G) => { const s = (i + 0.5) * G.ds, w = G.w0 + (j + 0.5) * G.cell; pin = pin && Math.abs(pin.s - s) < G.ds / 2 && Math.abs(pin.w - w) < G.cell / 2 ? null : { s, w }; if (last) update(last); };
+  q('map')._onPin = onPin;
   q('quality').onchange = (e) => onQuality?.(e.target.value);
   // 큰 창(⤢) — 같은 그림을 화면 크기로. 계산이 이어지면 같이 갱신 · 2D 는 [실제 비율] 전환 · Esc·바깥 클릭·닫기
   const VIEW = { map: null, prof: null, wprof: null }, TITLE = { map: '2D 광량 분포 (관측면 펼침)', prof: '길이 방향 1D 프로파일', wprof: '폭 방향 1D 프로파일' };
@@ -298,7 +319,7 @@ export function createResultsPanel(el, { onQuality = null } = {}) {
     ov.addEventListener('click', (e) => { if (e.target === ov) closeBig(); });
     ov.querySelector('[data-big-close]').onclick = closeBig;
     const eq = ov.querySelector('[data-big-eq]'); if (eq) eq.onchange = () => { big.equal = eq.checked; paint('map', big.cv); };
-    if (kind === 'map') wireMapHover(big.cv); else wireHover(big.cv);
+    if (kind === 'map') { wireMapHover(big.cv); big.cv._onPin = onPin; } else wireHover(big.cv);
     sizeBig(); paint(kind, big.cv);
   }
   el.addEventListener('click', (e) => { const b = e.target.closest('[data-zoom]'); if (b) openBig(b.dataset.zoom); });
@@ -336,21 +357,30 @@ export function createResultsPanel(el, { onQuality = null } = {}) {
     const dpr = dprNow();
     q('mapsub').textContent = `s 0–${G.L.toFixed(0)} mm × w ${G.w0.toFixed(1)}–${(G.w0 + G.nw * G.cell).toFixed(1)} mm`;
     const pm = finiteMax(st.profile), leds = args.leds ?? [];
-    VIEW.map = { G, map: st.map, leds };
-    VIEW.prof = { curves: [{ ys: Array.from(st.profile, (v) => v / pm), color: '#1f6fd1', name: '폭 평균' }], tg: observe.targetLen, opt: { x0: 0, x1: G.L, xl: 's (mm)', leds: leds.map((p) => p.s) } };
+    // 지정 점 → 칸 (화질·관측면이 바뀌어 밖이면 해제)
+    const pi = pin ? Math.floor(pin.s / G.ds) : -1, pj = pin ? Math.floor((pin.w - G.w0) / G.cell) : -1;
+    if (pin && !(pi >= 0 && pi < G.ns && pj >= 0 && pj < G.nw)) pin = null;
+    const pp = pin ? pointProfiles(G, st.map, pi, pj) : null, ring = G.closed ? '원주' : '길이', rad = G.closed ? '반경(폭)' : '폭';
+    VIEW.map = { G, map: st.map, leds, pin };
+    VIEW.prof = { curves: [{ ys: Array.from(st.profile, (v) => v / pm), color: '#1f6fd1', name: '폭 평균' }, ...(pp ? [{ ys: Array.from(pp.along), color: PIN_COLOR, name: `지정 점 w=${pin.w.toFixed(1)}` }] : [])], tg: observe.targetLen, opt: { x0: 0, x1: G.L, xl: 's (mm)', leds: leds.map((p) => p.s) } };
+    q('psub').textContent = pin ? `폭 평균 + 지정 점(주황, ${ring} 방향) · 같은 점 다시 클릭 = 해제` : '폭 평균 · 2D 클릭 = 그 점 기준 곡선 추가';
     paint('map', q('map')); paint('prof', q('prof'));
     gauge('ul', st.Ulen, observe.targetLen);
-    if (st.Uwid == null || !st.win) {
+    if (pp && (st.Uwid == null || !st.win)) {   // 폭 판정이 없어도 지정 점의 폭(원형 = 반경) 방향 곡선은 보여 줌
+      VIEW.wprof = { curves: [{ ys: Array.from(pp.across), color: PIN_COLOR, name: `지정 점 s=${pin.s.toFixed(1)}` }], tg: null, opt: { x0: G.w0, x1: G.w0 + G.nw * G.cell, xl: 'w (mm)', leds: [] } };
+      paint('wprof', q('wprof')); resetGauge(q('uwg'));
+      q('uw').textContent = '–'; q('uw').className = 'v'; q('uwj').textContent = '폭 판정 불가(폭이 격자 2칸 미만)'; q('wsub').textContent = `지정 점 s = ${pin.s.toFixed(1)} mm · ${rad} 방향`;
+    } else if (st.Uwid == null || !st.win) {
       VIEW.wprof = null; clearCanvas(q('wprof')); resetGauge(q('uwg'));
       q('uw').textContent = '–'; q('uw').className = 'v'; q('uwj').textContent = '폭 판정 불가(폭이 격자 2칸 미만)'; q('wsub').textContent = '';
     } else {
       // 판정 = 최저 창(실선), 비교 = 길이 전체 평균(점선) — 각자 최대 = 100%
       const wp = windowProfile(G, snap.sum, st.win[0], st.win[1]), wm = finiteMax(wp), wa = windowProfile(G, snap.sum, 0, G.ns), wam = finiteMax(wa);
-      VIEW.wprof = { curves: [{ ys: Array.from(wp, (v) => v / wm), color: '#1f6fd1', name: `최저 창 s=${st.sWorst.toFixed(0)}` }, { ys: Array.from(wa, (v) => v / wam), color: '#3fae7a', dash: [4, 3], name: '길이 전체 평균' }],
+      VIEW.wprof = { curves: [{ ys: Array.from(wp, (v) => v / wm), color: '#1f6fd1', name: `최저 창 s=${st.sWorst.toFixed(0)}` }, { ys: Array.from(wa, (v) => v / wam), color: '#3fae7a', dash: [4, 3], name: '길이 전체 평균' }, ...(pp ? [{ ys: Array.from(pp.across), color: PIN_COLOR, name: `지정 점 s=${pin.s.toFixed(1)}` }] : [])],
         tg: observe.targetWid, opt: { x0: G.w0, x1: G.w0 + G.nw * G.cell, xl: 'w (mm)', leds: [...new Set(leds.map((p) => +p.w.toFixed(2)))] } };
       paint('wprof', q('wprof'));
       gauge('uw', st.Uwid, observe.targetWid);
-      q('wsub').textContent = `최저 창 s = ${st.sWorst.toFixed(1)} mm`;
+      q('wsub').textContent = `최저 창 s = ${st.sWorst.toFixed(1)} mm${pp ? ` · 지정 점 s = ${pin.s.toFixed(1)} mm(주황, ${rad} 방향)` : ''}`;
     }
     const lc = lumCard(st, snap.photometry, observe.targetLum);
     q('avg').textContent = lc.value; q('avgs').textContent = lc.sub; q('avg').className = `v ${lc.pass == null ? '' : lc.pass ? 'ok' : 'bad'}`;
