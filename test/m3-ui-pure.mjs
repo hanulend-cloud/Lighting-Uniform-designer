@@ -74,16 +74,16 @@ ok(JSON.stringify(judgeText(0.85, 0.8)) === '{"cls":"ok","text":"목표 0.80 · 
   ok(rel.value === '75%' && rel.ratio === null && abs.value === '1234 cd/m²' && abs.pass === true && Math.abs(abs.ratio - 1.2344) < 1e-12 && none.pass === null && none.sub === '목표 없음',
     `평균 광량 카드: 상대 ${rel.value}, 절대 ${abs.value}(${abs.sub})`); }
 { const T = checkLabels({ interference: { status: 'bad', count: 2 }, reach: { status: 'ok', minReach: 0.92, minDist: 6.5 }, wall: { status: 'warn', min: 0.5 }, leak: { status: 'ok', ratio: 0.04 } });
-  ok(T.map((t) => t.text).join(' | ') === 'LED–부품 간섭 2건 | LED–커버 6.5 mm · 도달 92% | 살두께 0.50 mm | 새는 빛 4%' && T.map((t) => t.st).join() === 'bad,ok,warn,ok', `점검 배지: ${T.map((t) => t.text).join(' | ')}`);
+  ok(T.map((t) => t.text).join(' | ') === 'LED–부품 간섭 2건 | 살두께 0.50 mm' && T.map((t) => t.st).join() === 'bad,warn', `점검 배지(조립·성형만): ${T.map((t) => t.text).join(' | ')}`);
   ok(checkLabels({}).every((t) => t.st === 'na' && t.text.endsWith('–')) && checkLabels({ interference: { status: 'ok', count: 0 } })[0].text === 'LED–부품 간섭 없음', '점검 전 → 회색 –'); }
 // 반올림: 판정과 표시가 엇갈리지 않게(좋을수록 큰 값은 내림, 작을수록 좋은 값은 올림, 미달 폭은 최소 0.01)
 ok(fmtU(0.7999) === '0.79' && fmtU(0.92) === '0.92' && fmtU(0.29) === '0.29' && fmtU(1) === '1.00' && fmtU(NaN) === '–'
   && judgeText(0.7999, 0.8).text === '목표 0.80 · 미달 −0.01', `U 표시 내림 · 미달 폭: ${fmtU(0.7999)} / ${judgeText(0.7999, 0.8).text}`);
 { const st = { profile: Float64Array.from([1, 0.5]) }, a = lumCard(st, { lum: 999.7 }, 1000), e = lumCard({ profile: Float64Array.from([NaN, NaN]) }, null, null);
   ok(a.value === '999 cd/m²' && a.pass === false && a.sub.endsWith('미달 −1') && e.value === '–', `광량 내림·빈 프로파일: ${a.value} ${a.sub} / ${e.value}`); }
-{ const T = checkLabels({ reach: { status: 'warn', minReach: 0.499, minDist: 6.5 }, wall: { status: 'warn', min: 0.7996 }, leak: { status: 'warn', ratio: 0.2004 } }), L7 = checkLabels({ leak: { status: 'ok', ratio: 0.07 } })[3].text;
-  ok(T[1].text.endsWith('도달 49%') && T[2].text === '살두께 0.79 mm' && T[3].text === '새는 빛 21%' && L7 === '새는 빛 7%' && checkLabels({ reach: { status: 'ok', minReach: 1, minDist: null } })[1].text === 'LED–커버 가림',
-    `점검 반올림: ${T.map((t) => t.text).join(' | ')} | ${L7}`); }
+{ const { leakText } = await import('../src/ui/m3/status-bar.js');
+  ok(checkLabels({ wall: { status: 'warn', min: 0.7996 } })[1].text === '살두께 0.79 mm' && leakText({ status: 'warn', ratio: 0.2004, worst: { part: 1, face: 5, ratio: 0.12 } }, ['케이스', '확산판']) === '새는 빛 21% · 주로 확산판 면 #5 12%'
+    && leakText({ status: 'ok', ratio: 0.07, worst: { part: -1, face: -1, ratio: 0.07 } }) === '새는 빛 7% · 주로 틈으로 바로 7%' && leakText({ status: 'na' }) === '', '살두께 내림 · 새는 빛 문구(올림, 가장 많이 새는 면)'); }
 ok(judgeText(0.8004, 0.8009).cls === 'ok' && judgeText(0.7999, 0.8).cls === 'bad' && judgeText(0.8, 0.8).cls === 'ok' && judgeText(0.855, 0.8567).text === '목표 0.85 · 합격', '판정 = 표시(내림)값 비교, 목표도 내림 표시');
 { const base = { parts: [{ material: { kind: 'milky' } }, { material: { kind: 'opaque' } }], light: { kind: 'manual' }, observe: { faces: [{ part: 0, face: 1 }] } };
   const a = stageAvailability(base, { non25: [0, 0.5] });

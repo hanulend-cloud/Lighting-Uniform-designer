@@ -338,14 +338,14 @@ function sizeCanvas(cv, ratio) {
 }
 
 const QUALITY_OPTS = [['low', '저화질'], ['mid', '중화질'], ['high', '고화질']];   // 칸 수 100×8 · 200×12 · 400×16 — 높을수록 계산 오래(중 ≈2배 · 고 ≈4배 광자)
-export function createResultsPanel(el, { onQuality = null, fileName = () => 'uds' } = {}) {
+export function createResultsPanel(el, { onQuality = null, fileName = () => 'uds', onLeak = null } = {}) {
   const gaugeHtml = (k) => `<div class="m3-gauge" data-r="${k}"><div class="f"></div><div class="tg"></div></div>`;
   el.innerHTML = `
     <div class="m3-msg" data-r="msg" hidden></div>
     <div class="m3-blk"><div class="m3-t">2D 광량 분포 (관측면 펼침) <span><span data-r="mapsub"></span> <select data-r="quality" title="2D 분포·1D 프로파일 해상도 — 저 100×8칸(빠름) · 중 200×12칸(광자 ≈2배) · 고 400×16칸(광자 ≈4배)" aria-label="분포 화질">${QUALITY_OPTS.map(([v, t]) => `<option value="${v}">${t}</option>`).join('')}</select> <label title="2D = 칸 중심 사이 선형 보간 · 1D = 평활 곡선(σ 1칸, 원자료는 흐린 선). 판정 U·최저점은 원자료 그대로"><input type="checkbox" data-r="smooth"> 부드럽게</label> <button type="button" data-r="txt" title="2D 분포를 TXT(탭 구분, 최대 대비 %)로 저장">TXT</button> <button type="button" class="m3-zoom" data-zoom="map" title="큰 창으로 보기" aria-label="2D 광량 분포 확대">⤢</button></span></div>
       <div class="m3-withm"><canvas class="m3-g" data-r="map" width="600" height="200"></canvas>
         <div class="m3-m"><div class="l">평균 광량</div><div class="v" data-r="avg">–</div><div class="s" data-r="avgs"></div>${gaugeHtml('avgg')}
-          <div class="l" style="margin-top:6px">광 효율</div><div class="v sm" data-r="eff">–</div><div class="s">관측면 원뿔 안 / LED 총 방출</div></div></div></div>
+          <div class="l" style="margin-top:6px">광 효율</div><div class="v sm" data-r="eff">–</div><div class="s">관측면 원뿔 안 / LED 총 방출</div><button type="button" class="m3-leak" data-r="leak" hidden title="누르면 3D 에서 가장 많이 새는 면을 강조"></button></div></div></div>
     <div class="m3-blk"><div class="m3-t">길이 방향 1D 프로파일 <span><span data-r="psub">폭 평균 · 2D 클릭 = 그 점 기준 곡선 추가</span> · 빨간 점선 = 목표 하한 <button type="button" class="m3-zoom" data-zoom="prof" title="큰 창으로 보기" aria-label="길이 프로파일 확대">⤢</button></span></div>
       <div class="m3-withm"><canvas class="m3-g" data-r="prof" width="600" height="150"></canvas>
         <div class="m3-m"><div class="l">길이 균일도 U</div><div class="v" data-r="ul">–</div>${gaugeHtml('ulg')}<div class="s" data-r="ulj"></div></div></div></div>
@@ -360,6 +360,7 @@ export function createResultsPanel(el, { onQuality = null, fileName = () => 'uds
   const onPin = ([i, j], G) => { const s = (i + 0.5) * G.ds, w = G.w0 + (j + 0.5) * G.cell; pin = pin && Math.abs(pin.s - s) < G.ds / 2 && Math.abs(pin.w - w) < G.cell / 2 ? null : { s, w }; if (last) update(last); };
   q('map')._onPin = onPin;
   q('quality').onchange = (e) => onQuality?.(e.target.value);
+  q('leak').onclick = () => onLeak?.();
   // 부드럽게(보는 사람별, uds.m3.smooth — 기본 켬)
   let smooth = true; try { smooth = localStorage.getItem('uds.m3.smooth') !== '0'; } catch {}
   q('smooth').checked = smooth;
@@ -490,6 +491,7 @@ export function createResultsPanel(el, { onQuality = null, fileName = () => 'uds
     if (lc.ratio != null) fill(q('avgg'), lc.ratio * 50, lc.pass, 50);   // 목표 = 가운데, 목표의 2배 = 가득
     const eff = snap.photometry?.eff;
     q('eff').textContent = Number.isFinite(eff) ? `${(eff * 100).toFixed(1)}%` : '–';
+    const lk = args.leak ?? ''; if (q('leak').textContent !== lk) q('leak').textContent = lk; q('leak').hidden = !lk;   // 새는 빛(광 효율 아래)
     paintBig();   // 큰 창도 계산을 따라감
   }
   if (typeof ResizeObserver !== 'undefined') {

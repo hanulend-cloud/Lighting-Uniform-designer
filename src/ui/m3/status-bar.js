@@ -10,15 +10,20 @@ export const checkAria = (x) => `${x.text} — ${statusWord(x.st)}`;
 export const isActivateKey = (e) => e.key === 'Enter' || e.key === ' ' || e.key === 'Spacebar';
 
 // 표시 반올림은 판정 쪽으로: 도달률·살두께(클수록 좋음)는 내림, 새는 빛(작을수록 좋음)은 올림
-// C = { interference, reach, wall, leak } (checks.js 결과) → [{ id, st, text }]
+// C = { interference, wall } (checks.js 결과) → [{ id, st, text }] — 조립·성형 점검만(시뮬레이션이 못 잡는 것, 2026-10-29).
+// LED–커버 도달(직진 광선만 봐서 도광 구조에서 잘못 경고)은 뺐고, 새는 빛은 광분포 시뮬레이션 결과(광 효율 옆, leakText)로 옮김
 export function checkLabels(C) {
-  const I = C.interference, R = C.reach, W = C.wall, K = C.leak, na = (x) => !x || x.status === 'na';
+  const I = C.interference, W = C.wall, na = (x) => !x || x.status === 'na';
   return [
     { id: 'interference', st: I?.status ?? 'na', text: na(I) ? 'LED–부품 간섭 –' : I.status === 'warn' ? `LED 포팅(투과 부품 안) ${I.count}건` : I.count ? `LED–부품 간섭 ${I.count}건` : 'LED–부품 간섭 없음' },
-    { id: 'reach', st: R?.status ?? 'na', text: na(R) ? 'LED–커버 –' : R.minDist != null ? `LED–커버 ${R.minDist.toFixed(1)} mm · 도달 ${Math.floor(R.minReach * 100 + 1e-9)}%` : 'LED–커버 가림' },
     { id: 'wall', st: W?.status ?? 'na', text: na(W) ? '살두께 –' : `살두께 ${(Math.floor(W.min * 100 + 1e-9) / 100).toFixed(2)} mm` },
-    { id: 'leak', st: K?.status ?? 'na', text: na(K) ? '새는 빛 –' : `새는 빛 ${Math.ceil(K.ratio * 100 - 1e-9)}%` },
   ];
+}
+// 새는 빛(순수) — 관측면 밖으로 나간 빛 비율(올림)과 가장 많이 새는 면. K = checkLeak 결과, names = 부품 이름. 없으면 ''
+export function leakText(K, names = []) {
+  if (!K || K.status === 'na' || !Number.isFinite(K.ratio)) return '';
+  const w = K.worst, where = w && w.part >= 0 ? `${names[w.part] ?? `부품 ${w.part + 1}`} 면 #${w.face} ${Math.ceil(w.ratio * 100 - 1e-9)}%` : w ? `틈으로 바로 ${Math.ceil(w.ratio * 100 - 1e-9)}%` : '';
+  return `새는 빛 ${Math.ceil(K.ratio * 100 - 1e-9)}%${where ? ` · 주로 ${where}` : ''}`;
 }
 
 // 띠는 1초마다 다시 그려지므로 뼈대를 한 번만 만들고 값이 바뀐 곳만 고친다(눌렀다 뗄 때 노드가 살아 있도록).
@@ -26,9 +31,9 @@ export function checkLabels(C) {
 const STATE_BY_EL = new WeakMap();
 const setText = (n, v) => { if (n.textContent !== v) n.textContent = v; };
 const setAttr = (n, k, v) => { if (n.getAttribute(k) !== v) n.setAttribute(k, v); };
-const IDS = ['interference', 'reach', 'wall', 'leak'];
+const IDS = ['interference', 'wall'];
 function init(el) {
-  el.innerHTML = `<span class="mut m3-chkok" data-s="ok">✓ 설계 점검 이상 없음</span>
+  el.innerHTML = `<span class="mut m3-chkok" data-s="ok">✓ 조립·성형 점검 이상 없음(간섭 · 살두께)</span>
     ${IDS.map((id) => `<span class="m3-chk" role="button" tabindex="0" data-chk="${id}"><span class="m3-dot na"></span><span class="m3-ico" aria-hidden="true"></span><span data-t></span></span>`).join('')}
     <span class="m3-stxt" data-s="txt" hidden></span>`;
   const S = {

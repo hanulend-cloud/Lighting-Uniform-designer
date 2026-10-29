@@ -29,7 +29,7 @@ import { renderAdvanced } from '../l2-advanced.js';
 import { defaultRowGap, renderReflDb } from '../mech3d-light-panel.js';
 import { positionsFromLayout, addPosition, alignPositions } from '../../engine/mech3d/led-edit.js';
 import { createResultsPanel } from './results-panel.js';
-import { renderStatusBar } from './status-bar.js';
+import { renderStatusBar, leakText } from './status-bar.js';
 import { createAdRunner } from './autodesign-run.js';
 import { renderAutoPanel, stageAvailability, clampCap, overallFrac, etaText, reusableCurrent, defaultHousingPart, applyDz, applyFinish, capDefault, nextFinish, finishText, shapeText, tileConfigHtml } from './autodesign-panel.js';
 import { ledHeightRange, heightCandidates, catalogOf, finishCandidatesFor, setReflMaterial, partFinishEdit } from '../../engine/mech3d/housing-led.js';
@@ -176,7 +176,7 @@ export async function mount(ctx) {
   }
   const a = A = { ctx, store, pool, view: null, meshShown: null, lineKey: '', Gc: null, obsShown: null, checks: {}, markKey: '', timing: { start: 0, first: null, noise5: null } };
   a.prog = createProgressive({ ports: pool.ports(), onUpdate: onCalc, opts: { targetNoise: ctx.mspec.observe.targetNoise ?? 0.01 } });
-  a.results = createResultsPanel($('#m3-res'), { fileName: () => String(A?.store?.mspec?.name ?? 'uds').replace(/\.(stp|step)$/i, ''), onQuality: (v) => A.store.update('observe', (m) => { m.observe.quality = v; }) });
+  a.results = createResultsPanel($('#m3-res'), { onLeak: () => A.store.update('session', (_, s) => { s.focusCheck = s.focusCheck === 'leak' ? null : 'leak'; }), fileName: () => String(A?.store?.mspec?.name ?? 'uds').replace(/\.(stp|step)$/i, ''), onQuality: (v) => A.store.update('observe', (m) => { m.observe.quality = v; }) });
   a.optDash = createOptDash($('#m3-optdash'), { config: (k) => (A?.tileState ? tileConfigHtml(k, A.tileState) : { on: false, html: '' }), onSel: (k, v) => adSel(k, v), board: $('#m3-factor'), now: () => (A ? factorNow() : {}) }); a.simDash = createSimDash($('#m3-simdash'), { onCtl: () => cmdHandlers().onToggleCalc() });   // 아래 칸 = 기구 최적화 · 오른쪽 맨 위 = 광분포 시뮬레이션(항상 보임, 계산 제어 단추)
   a.cmd = mountCommandBar($('#m3-cmd'), cmdHandlers());
   a.unsub = store.subscribe(onChange);
@@ -303,7 +303,7 @@ function onCalc(snap) {
   if (T.start && snap.stats && T.first == null) T.first = (now - T.start) / 1000;
   if (T.start && snap.stats?.relNoise != null && snap.stats.relNoise <= 0.05 && T.noise5 == null) T.noise5 = (now - T.start) / 1000;
   updateLeakCheck(snap);
-  A.results.update({ snap, observe: M.observe, message: guidance(snap), leds: ledSW(M, S.line) });
+  A.results.update({ snap, observe: M.observe, message: guidance(snap), leds: ledSW(M, S.line), leak: leakText(A.checks.leak, M.parts.map((p) => p.name)) });
   A.simDash?.sample(snap, M.observe.targetNoise ?? 0.01, M.observe, M.parts.map((p) => p.name), M.parts.length, !!adState().running);
   drawLightPaths();
   paintObs(snap);
@@ -350,14 +350,13 @@ function renderMarkers() {
   const size = (id) => (f === id ? 20 : 12);
   for (const it of C.interference?.items ?? []) out.push({ type: 'ring', pos: it.pos, color: it.kind === 'potted' ? 0xffa000 : 0xff3b30, size: size('interference') });   // 포팅 LED(투과 부품 안) = 주황 경고
   for (const it of C.reach?.items ?? []) {
-    const warn = it.reach < (M.checks?.minReach ?? 0.5), col = warn ? 0xffa000 : 0x4cd964;
+    const col = 0x4cd964;   // LED 방향 화살표만(도달 경고 고리는 뺌 — 직진만 봐서 도광 구조에서 잘못 경고, 2026-10-29)
     // LED 방향 = 화살표, 빛 원뿔(len = min(4, 0.4·간격))보다 1.6배 길게 — 단 닿는 면을 넘지 않게(간격의 90%). LED 를 끄면(hideLeds) 함께 숨김
     if (it.dist != null && !A.store.session.hideLeds) out.push({ type: 'arrow', pos: it.pos, axis: it.axis, len: Math.min(1.6 * Math.min(4, 0.4 * it.dist), 0.9 * it.dist), color: col });
-    if (warn || f === 'reach') out.push({ type: 'ring', pos: it.pos, color: col, size: size('reach') });
   }
   if (C.wall?.pos && (C.wall.status === 'warn' || f === 'wall')) out.push({ type: 'ring', pos: C.wall.pos, color: 0xffa000, size: size('wall') });
   const w = C.leak?.worst;
-  if (w && w.part >= 0 && rt?.parts[w.part] && (C.leak.status === 'warn' || f === 'leak')) {
+  if (w && w.part >= 0 && rt?.parts[w.part] && f === 'leak') {   // 결과 패널의 '새는 빛' 을 눌렀을 때만
     const t = extractFaces(rt.parts[w.part], new Set([w.face]));
     out.push({ type: 'tris', positions: t.positions, triangles: t.triangles, color: 0xff8c1a, opacity: f === 'leak' ? 0.8 : 0.5 });
   }
