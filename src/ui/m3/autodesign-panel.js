@@ -137,8 +137,8 @@ export function tileConfigHtml(k, { avail, sel, running, names = [], milkyPart =
 export function autoCardHtml({ avail, sel, running, canRevert = false, noLine = false, applied = null }) {
   const on = AD_ITEMS.filter(([, , ks]) => ks.some((k) => sel[k] && avail[k]?.ok)).map(([, l]) => l.split(' ')[0]);
   const run = `<button type="button" class="m3-ad-run" data-ad="run"${!on.length || noLine ? ' disabled' : ''}${noLine ? ' title="관측 라인이 없음"' : ''}>▶ 실행</button>`;
-  if (running) return `<div class="m3-ad-bar"><b><i class="m3-fl">5</i>기구 최적화</b>${progHtml(running)}</div>`;
-  return `<div class="m3-ad-bar"><b><i class="m3-fl">5</i>기구 최적화</b><span class="m3-ad-on">${on.length ? `켠 항목 <b>${on.join(' ')}</b>` : '<span class="mut">설계 인자 현황에서 바꿀 항목을 체크하세요</span>'}</span>${run}${canRevert ? '<button type="button" data-ad="revert" title="마지막 적용 전 값으로">↶ 되돌리기</button>' : ''}<span class="m3-ad-sp"></span><button type="button" data-ad="close" title="아래 칸 접기">접기 ▾</button></div>${appliedHtml(applied)}`;
+  if (running) return `<div class="m3-ad-bar">${progHtml(running)}</div>`;
+  return `<div class="m3-ad-bar">${run}<span class="m3-ad-on">${on.length ? `켠 항목 <b>${on.join(' ')}</b>` : '<span class="mut">위 설계 인자에서 바꿀 항목을 체크하세요</span>'}</span>${canRevert ? '<span class="m3-ad-sp"></span><button type="button" data-ad="revert" title="마지막 적용 전 값으로">↶ 되돌리기</button>' : ''}</div>${appliedHtml(applied)}`;
 }
 // 형상 문구 — 0 인 항 생략. e = 끝단 두께, c = 폭 가장자리 두께(+ 가장자리 두껍게 · − 얇게), h < 0 = 돌출
 const sg = (v) => `${v >= 0 ? '+' : '−'}${f2(Math.abs(v))}`, nz = (v) => Number.isFinite(v) && Math.abs(v) >= 5e-5;
@@ -208,12 +208,18 @@ export function appliedHtml(applied) {
 // 실행 중 카드 구조가 같으면 진행 막대·문구만 바꿈(갱신마다 innerHTML 을 다시 만들지 않게)
 // '현재안 유지'인데 시험한 후보가 있으면(차이가 잡음 수준) [그래도 적용] — 후보 값을 함께 보임
 const altBtn = (r) => (r.unchanged && r.alt ? `<button type="button" data-ad="applyAlt" title="찾은 후보가 현재안보다 계산 잡음 수준만큼만 나아 '현재안 유지'로 판정됨 — 그래도 바꾸려면">그래도 적용${r.alt.milky != null ? ` (Milky ${(+r.alt.milky).toFixed(2)})` : ''} · ${f2(r.alt.Ulen)}/${f2(r.alt.Uwid)}</button>` : '');
-// 결과 한 줄(아래 칸 맨 위) — 판정 · 길이/폭 U 전→후 · [결과 보기] [적용] [취소]
+// 결과 카드(2026-10-29: 같은 내용이 여러 번 반복되던 것을 하나로) — 판정 한 단어 · 작은 비교표(바뀐 사양 + 길이 U·폭 U·광 효율) ·
+// 한계 한 줄 · [적용] [그래도 적용] [취소] [자세히](프로파일·사유 전문 = 결과 창)
+const KEEP_ROW = /<th>(길이 U|폭 U|광 효율)/;
+export const limitText = (reason) => { const m = /한계:\s*([^·)]+)/.exec(String(reason ?? '')); return m ? m[1].trim() : ''; };
 export function resultLineHtml(r) {
-  const b = r.best, c = r.cur, tg = r.targets ?? {}, u = (k, t) => `${f2(c[k])}→<b>${f2(b[k])}</b>${passMark(b[k], t)}`;
-  return `<div class="m3-ad-bar"><b>✨ 기구 최적화 결과</b><span class="${r.unchanged ? 'mut' : r.feasible ? 'ok' : 'bad'}">${r.unchanged ? '현재안 유지' : r.feasible ? '목표 통과' : '목표 미달'}</span>
-    <span>길이 U ${u('Ulen', tg.len)} · 폭 U ${u('Uwid', tg.wid)}</span><button type="button" data-ad="view">결과 보기</button>
-    <button type="button" data-ad="apply"${r.unchanged ? ' disabled title="현재안이 이미 최선(차이 없음)"' : r.clash > 0 ? ' disabled title="LED 몸체가 부품과 겹침"' : ''}>적용</button>${altBtn(r)}<button type="button" data-ad="cancel">취소</button></div>`;
+  const verdict = r.unchanged ? ['keep', '현재안 유지', '더 나은 안 없음'] : r.feasible ? ['ok', '목표 통과', '최적안을 찾음'] : ['bad', '목표 미달', '가장 가까운 안'];
+  const rows = cmpRows(r).split('</tr>').filter((x) => x.includes('<tr>') && (x.includes('class="chg"') || KEEP_ROW.test(x))).map((x) => `${x}</tr>`).join('');
+  const lim = limitText(r.reason), clash = r.clash > 0 ? `<div class="m3-clash" role="alert">LED 몸체가 부품과 겹침(${r.clash}개) — 적용 불가</div>` : '';
+  return `<div class="m3-rcard ${verdict[0]}"><div class="m3-rcard-hd"><b class="m3-rv">${verdict[1]}</b><span class="mut">${verdict[2]}</span></div>
+    <table class="m3-cmp m3-cmp-s"><tr><th></th><th>지금</th><th>최적 후보</th></tr>${rows}</table>${clash}
+    ${lim ? `<div class="m3-rlim">💡 한계: ${esc(lim)}</div>` : ''}
+    <div class="m3-rbtn"><button type="button" data-ad="apply"${r.unchanged ? ' disabled title="현재안이 이미 최선(차이 없음)"' : r.clash > 0 ? ' disabled title="LED 몸체가 부품과 겹침"' : ''}>적용</button>${altBtn(r)}<button type="button" data-ad="cancel">취소</button><span class="m3-ad-sp"></span><button type="button" data-ad="view" title="프로파일 비교·사유 전문">자세히 ▸</button></div></div>`;
 }
 // el 에 그리고 이벤트를 h 로 넘김. state = { avail, sel, running, result, resultOpen, … } — 결과가 있으면 한 줄 + (열림) 결과 창
 export function renderAutoPanel(el, state, h) {

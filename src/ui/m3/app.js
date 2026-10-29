@@ -130,15 +130,13 @@ function getView() {
   viewP ??= import('../mech3d-view.js').then(({ createMech3dView }) => {
     const v = createMech3dView($('#mech3d-canvas'), { onPick: (s) => { if (A) onPick(s); }, gizmo: $('#m3-axes') });
     const el = $('#m3-views');
-    el.innerHTML = VIEWS.map(([k, t]) => `<button data-view="${k}">${t}</button>`).join('') + '<button type="button" data-xray aria-pressed="false" title="전체 부품 반투명 — 속 구조를 봄">투시</button><button type="button" data-paths aria-pressed="false" title="광경로 화살표 켜기/끄기">광경로</button><button type="button" data-mon aria-pressed="false" title="시뮬레이션 모니터 — 광분포 시뮬레이션·설계 인자 현황·기구 최적화를 떠 있는 창으로 모아 계속 보기">📊 모니터</button><button type="button" data-theme-toggle aria-pressed="false"></button>';
+    el.innerHTML = VIEWS.map(([k, t]) => `<button data-view="${k}">${t}</button>`).join('') + '<button type="button" data-xray aria-pressed="false" title="전체 부품 반투명 — 속 구조를 봄">투시</button><button type="button" data-paths aria-pressed="false" title="광경로 화살표 켜기/끄기">광경로</button><button type="button" data-theme-toggle aria-pressed="false"></button>';
     el.querySelectorAll('[data-view]').forEach((b) => { b.onclick = () => { v.setView(b.dataset.view); A?.store.update('view', (_, s) => { s.view = b.dataset.view; }); }; });
     // 3D 배경 밝게/어둡게 — 보는 사람별 편의 설정(새로고침해도 유지)
     const tb = el.querySelector('[data-theme-toggle]'), vp = $('#mech3d-canvas').parentElement;
     const applyTheme = (t) => { v.setTheme(t); vp.dataset.theme = t; const wr = $('#mech3d-wrap'); if (wr) wr.dataset.theme = t; tb.textContent = t === 'dark' ? '☀ 밝게' : '☾ 어둡게'; tb.setAttribute('aria-pressed', String(t === 'dark')); tb.title = '3D 배경 밝게/어둡게'; };
     el.querySelector('[data-xray]').onclick = () => setXrayOn(!xrayOn());
     el.querySelector('[data-paths]').onclick = () => setPathsOn(!pathsOn());
-    el.querySelector('[data-mon]').onclick = () => monitor?.toggle();
-    if (monitor?.isOpen()) { const b = el.querySelector('[data-mon]'); b.classList.add('on'); b.setAttribute('aria-pressed', 'true'); }
     let t0 = 'light'; try { t0 = localStorage.getItem('uds.m3.theme') === 'dark' ? 'dark' : 'light'; } catch {}
     applyTheme(t0);
     tb.onclick = () => { const t = v.theme() === 'dark' ? 'light' : 'dark'; try { localStorage.setItem('uds.m3.theme', t); } catch {} applyTheme(t); };
@@ -150,12 +148,12 @@ function getView() {
 // ---- 마운트 ----
 // 반사 소재표 행 = 반사 소재 DB(없으면 기본 소재표)
 const reflCat = () => catalogOf(A?.ctx.reflectDb?.() ?? null);
-let monitor = null;   // 시뮬레이션 모니터 — 화면(DOM) 하나에 하나, 기구가 바뀌어도 유지
+let monitor = null;   // ⑤ 기구 최적화 창 — 화면(DOM) 하나에 하나, 기구가 바뀌어도 유지
 export async function mount(ctx) {
   mountSplitter(document.querySelector('.m3-main'));   // 좌·우 창 폭 끌어서 조절(한 번만 붙음)
   mountDockSplitter(document.querySelector('#m3-dock'), document.querySelector('#mech3d-wrap'));   // 아래 칸 높이 조절
-  // 시뮬레이션 모니터(떠 있는 창) — 계산 현황·설계 인자 현황·기구 최적화 칸을 옮겨 담음. 단추 = 3D 보기 막대 [📊 모니터]
-  monitor ??= createMonitor({ host: $('#mech3d-wrap'), items: [$('#m3-simdash'), $('#m3-factor'), $('#m3-dock')], onChange: (on) => { const b = document.querySelector('#m3-views [data-mon]'); if (b) { b.classList.toggle('on', on); b.setAttribute('aria-pressed', String(on)); } } });
+  // ⑤ 기구 최적화 창(떠 있는 창) — 설계 인자 현황·기구 최적화 칸을 기본 화면에서 빼서 담음. 여닫기 = 명령줄 [5 기구 최적화]
+  monitor ??= createMonitor({ host: $('#mech3d-wrap'), items: [$('#m3-factor'), $('#m3-dock')], onChange: (on) => { const b = document.querySelector('#m3-cmd [data-c="opt"]'); if (b) { b.classList.toggle('on', on); b.setAttribute('aria-pressed', String(on)); } if (on && A && !adState().open) adSetOpen(true); } });
   mountFacSplitter(document.querySelector('#m3-factor'), document.querySelector('.m3-left'));   // 왼쪽 맨 아래(부품 속성 밑) 설계 인자 현황 높이 조절
   if (A && A.ctx.mspec === ctx.mspec) { A.ctx = ctx; return; }   // 같은 기구 — 그대로
   unmount();
@@ -179,6 +177,7 @@ export async function mount(ctx) {
   a.results = createResultsPanel($('#m3-res'), { onLeak: () => A.store.update('session', (_, s) => { s.focusCheck = s.focusCheck === 'leak' ? null : 'leak'; }), fileName: () => String(A?.store?.mspec?.name ?? 'uds').replace(/\.(stp|step)$/i, ''), onQuality: (v) => A.store.update('observe', (m) => { m.observe.quality = v; }) });
   a.optDash = createOptDash($('#m3-optdash'), { config: (k) => (A?.tileState ? tileConfigHtml(k, A.tileState) : { on: false, html: '' }), onSel: (k, v) => adSel(k, v), board: $('#m3-factor'), now: () => (A ? factorNow() : {}) }); a.simDash = createSimDash($('#m3-simdash'), { onCtl: () => cmdHandlers().onToggleCalc() });   // 아래 칸 = 기구 최적화 · 오른쪽 맨 위 = 광분포 시뮬레이션(항상 보임, 계산 제어 단추)
   a.cmd = mountCommandBar($('#m3-cmd'), cmdHandlers());
+  if (monitor?.isOpen()) $('#m3-cmd [data-c="opt"]')?.classList.add('on');
   a.unsub = store.subscribe(onChange);
   a.keydown = onKey; window.addEventListener('keydown', onKey);
   const view = await getView();
@@ -433,7 +432,8 @@ function clearanceOf(i) {
 }
 
 // ---- 기구 최적화(P4) ----
-function adState() { return (A.ad ??= { open: (() => { try { return localStorage.getItem('uds.m3.autoOpen') === '1'; } catch { return false; } })(), sel: { milky: true, leds: false, shape: false, shapePart: -1, milkyMax: null, height: false, housing: false, housingPart: -1, housingSpecial: false, boost: false }, running: null, result: null, undo: null, milkyPart: null, runner: null, info: null, stepBusy: false, stepWorker: null }); }
+// open = 늘 true(접기 없음 — 기구 최적화 칸은 ⑤ 창 안에만 있고 창을 닫으면 숨김, 2026-10-29)
+function adState() { return (A.ad ??= { open: true, sel: { milky: true, leds: false, shape: false, shapePart: -1, milkyMax: null, height: false, housing: false, housingPart: -1, housingSpecial: false, boost: false }, running: null, result: null, undo: null, milkyPart: null, runner: null, info: null, stepBusy: false, stepWorker: null }); }
 function adInfo() {   // 부품별 비 2.5D 비율(관측 방향) — 라인이 있을 때만. (기구·라인) 별 캐시(높이맵 계산이 무거움)
   const st = adState(), S = A.store.session, rt = getMech3d();
   if (!st.info || st.info.rt !== rt || st.info.line !== S.line) st.info = { rt, line: S.line, non25: S.line && rt ? rt.parts.map((p) => heightsFor(p, S.line.frame, 0.5).non25) : [], boxes: rt ? rt.parts.map((p) => bounds(p.positions)) : [] };   // boxes = ④ 기본 대상용 외곽
@@ -479,7 +479,7 @@ function renderAuto() {
   A.optDash?.refresh();
   renderAutoPanel(el, { avail, sel, running: st.running, result: st.result, resultOpen: !!st.resultOpen, names: M.parts.map((p) => p.name), canRevert: !!st.undo, applied: st.undo ? st.applied ?? null : null, noLine: !A.store.session.line, milkyPart: mp, housingMat: hm ? { name: hm.name, max: hm.max } : null, catalog: reflCat() }, {
     onSel: (k, v) => adSel(k, v),
-    onAction: (k) => ({ run: adRunBoost, stop: adStop, close: () => adSetOpen(false), apply: adApply, applyAlt: adApplyAlt, cancel: adCancel, revert: adRevert, step: adStep, view: () => { st.resultOpen = true; renderAuto(); }, hide: () => { st.resultOpen = false; renderAuto(); } })[k]?.(),
+    onAction: (k) => ({ run: adRunBoost, stop: adStop, close: () => monitor?.close(), apply: adApply, applyAlt: adApplyAlt, cancel: adCancel, revert: adRevert, step: adStep, view: () => { st.resultOpen = true; renderAuto(); }, hide: () => { st.resultOpen = false; renderAuto(); } })[k]?.(),
   });
 }
 function adStop() { const st = adState(); if (!st.running || !st.runner) return; st.runner.cancel(); setStatus('기구 최적화 중지됨'); A.optDash?.stop(); }
@@ -826,7 +826,7 @@ async function adRun(opt = {}) {
     const C = res.current;   // 현재안 = 최종안과 같은 추정기
     let nStep = null; if (M0.light.kind === 'step') { try { nStep = L.currentEmitters(M0, line).length; } catch { nStep = 0; } }
     const smI = sp >= 0 && M0.parts[sp]?.shapeMod ? sp : M0.parts.findIndex((p) => p.shapeMod), sm = smI >= 0 ? M0.parts[smI].shapeMod : null;   // 비교표 '현재' 열 — 이미 적용된 형상(표시만)
-    st.resultOpen = true;   // 끝나면 결과 창을 크게 띄움
+    st.resultOpen = false;   // 끝나면 결과 카드(요약)만 — 자세한 결과 창은 [자세히]
     st.result = { targets: { len: obs.targetLen, wid: obs.targetWid }, design: res.best, feasible: res.feasible, reason: res.reason, hint: res.hint ?? null, shape: res.best.shape ?? null, screen: res.steps?.find((x) => x.stage === 'shapeScreen')?.gains ?? null, stepLeds: nStep, unchanged: !!res.unchanged, ctx, stages,
       added: opt.added ?? [], base: opt.base ?? null, clash: designClash(res.best, ctx, M0, rt, line),
       finish: stages.housing ? (() => { const c = { ...M0.parts[hp].finish, ...(M0.parts[hp].coating ? { coating: M0.parts[hp].coating } : {}) }; return { cur: c, best: res.best.finish ?? c }; })() : null, height: stages.height && hInfo ? { dz: res.best.dz ?? 0, gap: hInfo.gap } : null,
@@ -1296,7 +1296,7 @@ function cmdHandlers() {
     onAuto: () => adSetOpen(!adState().open),
     // 흐름 4·5단계 단추 — 해당 칸을 보여 주고 잠깐 강조(모니터가 열려 있으면 그 안에서)
     onSim: () => flash($('#m3-simdash')),
-    onOpt: () => { if (!adState().open) adSetOpen(true); flash($('#m3-dock')); },
+    onOpt: () => monitor?.toggle(),   // ⑤ 기구 최적화 창 열고 닫기(기본 화면에는 최적화 칸 없음)
     adFlow: () => ({ running: !!A?.ad?.running, result: !!A?.ad?.result }),
     onExit: () => A.ctx.onExit(),
   };

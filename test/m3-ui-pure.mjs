@@ -389,3 +389,10 @@ done();
   const r1 = flowState({ state: 'running', stats: { relNoise: 0.02 } }, st(0.58, 0.64), M), r2 = flowState({ state: 'done' }, st(0.58, 0.64), M), r3 = flowState({ state: 'done' }, st(0.85, 0.9), M), r4 = flowState({ state: 'done' }, st(0.58, 0.64), M, { running: true });
   console.log(r1.sim.text === '계산 중 50% · 58% / 64%' && r1.opt.text === '시뮬레이션 뒤' && r2.sim.cls === 'bad' && r2.sim.done && r2.opt.cls === 'need' && r3.sim.cls === 'ok' && r3.opt.done && r4.opt.text === '진행 중' && flowState(null, null, M).sim.text === '–'
     ? 'PASS 흐름 4 광분포 시뮬레이션 · 5 기구 최적화 상태' : (process.exitCode = 1, `FAIL 흐름 ${JSON.stringify([r1, r2, r3, r4])}`)); }
+{ const { resultLineHtml, limitText } = await import('../src/ui/m3/autodesign-panel.js');
+  // 결과 카드: 판정 한 단어 · 비교표 = 바뀐 사양 + 길이 U·폭 U·광 효율(안 바뀐 LED 줄 없음) · 한계 한 줄 · [자세히]
+  const r = { unchanged: false, feasible: false, reason: '목표 미달 (균일도 최고 … · 한계: 길이 방향 — 끝단이 가장 어두움 · ④ 케이스)', targets: { len: 0.8, wid: 0.8 },
+    cur: { count: 40, pitch: 10, milky: 1.43, Ulen: 0.61, Uwid: 0.6, eff: 0.107 }, best: { count: 40, pitch: 10, milky: 1.8, Ulen: 0.66, Uwid: 0.62, eff: 0.1 } };
+  const h = resultLineHtml(r);
+  console.log(h.includes('m3-rcard bad') && h.includes('목표 미달') && h.includes('<th>Milky') && !h.includes('<th>LED') && h.includes('<th>길이 U') && h.includes('<th>광 효율') && h.includes('💡 한계: 길이 방향 — 끝단이 가장 어두움') && h.includes('data-ad="view"') && limitText('없음') === ''
+    ? 'PASS 기구 최적화 결과 카드(판정·바뀐 사양만·한계 한 줄)' : (process.exitCode = 1, `FAIL 결과 카드 ${h}`)); }

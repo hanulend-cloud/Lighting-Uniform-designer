@@ -707,7 +707,7 @@ main:has(#m3-start:not([hidden])) { grid-template-rows: minmax(0, 1fr); }
 .fb-plot { flex: 1; min-height: 30px; overflow: hidden; }
 .fb-chart { display: block; }
 .fb-chart .od-now { stroke: #8a96a8; stroke-width: 1; }
-.fb-row { flex: none; display: grid; grid-template-columns: 9px auto auto minmax(0, 1fr); gap: 5px; align-items: center; padding: 2px 0; border-top: 1px dashed var(--m3-line); font-size: 11.5px; }
+.fb-row { flex: none; display: grid; grid-template-columns: 16px 9px auto auto minmax(0, 1fr);   /* 체크 · 색 점 · 이름 · 상태 · 값 */ gap: 5px; align-items: center; padding: 2px 0; border-top: 1px dashed var(--m3-line); font-size: 11.5px; }
 .fb-row.fb-off { opacity: .5; }
 .fb-dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
 .fb-val { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -742,7 +742,8 @@ body.booting::after { content: "불러오는 중…"; position: fixed; left: 50%
 .m3-mon .m3-dock { height: auto; }
 .m3-mon .m3-dock .od-grid { grid-template-columns: 1fr; }
 .m3-mon .m3-fac-split, .m3-mon .m3-dock-split { display: none; }
-.m3-mon.min .m3-mon-body > :not(#m3-simdash) { display: none; }
+.m3-mon.min #m3-factor, .m3-mon.min #m3-optdash, .m3-mon.min .m3-mon-flow { display: none; }   /* 접기 = 기구 최적화 실행 줄만 */
+.m3-cmd .m3-step.on { outline: 2px solid var(--m3-acc); }
 .m3-mon-rs { position: absolute; right: 0; bottom: 0; width: 16px; height: 16px; cursor: nwse-resize; touch-action: none; background: linear-gradient(135deg, transparent 50%, #9aa7b8 50%, #9aa7b8 60%, transparent 60%, transparent 72%, #9aa7b8 72%, #9aa7b8 82%, transparent 82%); }
 .m3-mon.min .m3-mon-rs { display: none; }
 #m3-views button[data-mon].on { background: var(--m3-accbg); border-color: var(--m3-acc); color: var(--m3-acc); }
@@ -769,3 +770,13 @@ body.booting::after { content: "불러오는 중…"; position: fixed; left: 50%
 .m3-fl { display: inline-grid; place-items: center; width: 16px; height: 16px; border-radius: 50%; background: var(--m3-acc); color: #fff; font-style: normal; font-size: 10.5px; font-weight: 700; margin-right: 4px; vertical-align: 1px; }
 .m3-mon-flow { font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .m3-leak { display: block; margin-top: 4px; padding: 2px 0; border: 0; background: none; color: #b7791f; font: inherit; font-size: 11.5px; text-align: left; cursor: pointer; text-decoration: underline dotted; }
+/* 기구 최적화 결과 카드 — 판정 · 작은 비교표 · 한계 한 줄 · 단추 */
+.m3-rcard { border: 1px solid var(--m3-line); border-left: 4px solid #8a96a8; border-radius: 8px; padding: 8px 10px; margin: 6px 0; background: #fbfcfe; }
+.m3-rcard.ok { border-left-color: #1f9d55; } .m3-rcard.bad { border-left-color: #d64545; } .m3-rcard.keep { border-left-color: #8a96a8; }
+.m3-rcard-hd { display: flex; align-items: baseline; gap: 8px; margin-bottom: 4px; }
+.m3-rv { font-size: 15px; } .m3-rcard.ok .m3-rv { color: #1f9d55; } .m3-rcard.bad .m3-rv { color: #d64545; }
+.m3-cmp-s { width: 100%; font-size: 12.5px; }
+.m3-rlim { font-size: 12px; color: #6b5a1f; background: #fff8e6; border-radius: 6px; padding: 4px 8px; margin-top: 6px; }
+.m3-rbtn { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 8px; }
+.od-log > summary { cursor: pointer; font-size: 12.5px; padding: 4px 0; }
+.m3-mon .fb-plot { flex: none; height: 120px; }   /* 창 안(높이 auto)에서도 그래프가 보이게 */

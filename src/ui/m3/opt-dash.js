@@ -36,10 +36,10 @@ export function factorBoardHtml(S, nw = {}, cfg = null) {
     for (const e of ev) if (!b || scoreOf(e, tl, tw) > scoreOf(b, tl, tw)) b = e;
     const chip = t && t.status !== 'off' ? { wait: '대기', run: `진행 ${Math.round(t.frac * 100)}%`, done: '완료' }[t.status] : on ? '켜짐' : '꺼짐';
     const txt = `지금 ${nowTxt}${b ? ` → ${b.label} (${f2(b.Ulen)}/${f2(b.Uwid)})` : ''}`;
-    const box = c?.box ? `<label class="fb-sw" title="${esc(c.why || '최적화에 사용')}">${c.box}</label>` : '';
+    const box = c?.box ? `<label class="fb-sw" title="${esc(c.why || '최적화에 사용')}">${c.box}</label>` : '<span></span>';   // 빈 칸도 자리 유지(격자 5칸)
     return `<div class="fb-row${on ? '' : ' fb-off'}" title="${esc(txt)}">${box}<i class="fb-dot" style="background:${FB_COL[k]}"></i><b>${name}</b><span class="od-chip">${chip}</span><span class="fb-val"><span class="mut">지금</span> ${esc(nowTxt)}${b ? ` → <b>${esc(b.label)}</b> <span class="mut">(${f2(b.Ulen)}/${f2(b.Uwid)})</span>` : ''}</span></div>${c?.on && c.opt ? `<div class="fb-opt">${c.opt}</div>` : ''}`;   // 켠 항목의 설정(상한·대상)
   };
-  return `<div class="od-h"><i class="m3-fl">5</i>설계 인자 현황 <span class="mut">${Number.isFinite(nw.Ulen) ? `지금 ${f2(nw.Ulen)}/${f2(nw.Uwid)}` : ''}</span></div>
+  return `<div class="od-h">설계 인자 <span class="mut">체크 = 최적화에 사용</span> <span class="mut">${Number.isFinite(nw.Ulen) ? `지금 ${f2(nw.Ulen)}/${f2(nw.Uwid)}` : ''}</span></div>
     <div class="od-legend">색 = 인자 · 실선 길이 U · 점선 폭 U <i class="od-kt"></i>목표 <i style="border-color:#8a96a8"></i>지금 <span style="color:#f0b400">○</span>최고</div>
     <div class="fb-plot"></div>
     ${row('milky', '① Milky', Number.isFinite(nw.milky) ? f2(nw.milky) : '확산 부품 없음')}${row('position', '② 위치', nw.leds ?? '–')}${row('shape', '③ 형상', nw.shape ?? '원래 형상')}`;
@@ -115,8 +115,7 @@ export function createOptDash(el, h = {}) {
   if (h.board && typeof ResizeObserver !== 'undefined') { let w0 = 0, h0 = 0; new ResizeObserver(() => { const b = h.board; if (b.clientWidth === w0 && b.clientHeight === h0) return; w0 = b.clientWidth; h0 = b.clientHeight; renderBoard(); }).observe(h.board); }   // 칸 크기가 바뀌면 그래프를 그 크기로 다시
   function render() {
     const idle = !S || S.ended != null || S.stopped;
-    const head = !S ? `<div class="od-h">기구 최적화 항목 <span class="mut">항목 켜기·설정 = 설계 인자 현황의 체크 · [▶ 실행]하면 타일마다 진행과 최적화 전후 사양이 나옵니다</span></div>` : '';
-    if (!S) { el.innerHTML = `${head}<div class="od-grid">${STAGES.map(([k, name]) => { const c = h.config?.(k) ?? { on: false }; return `<div class="od-tile ${c.on ? 'od-sel' : 'od-off'}"><div class="od-th"><b>${name}</b><span class="od-chip">${c.on ? '켜짐' : '꺼짐'}</span></div><div class="mut od-tx">${c.on ? '실행하면 여기에 전 → 후 사양' : '설계 인자 현황에서 체크하면 최적화에 사용'}</div></div>`; }).join('')}</div>`; return; }
+    if (!S) { el.innerHTML = ''; return; }   // 실행 전 = 비움(항목 켜기는 위 설계 인자 체크)
     const sec = ((performance.now() - S.t0) / 1000) | 0, nEval = STAGES.reduce((a, [k]) => a + S.tiles[k].evals.length, 0);
     const tile = ([k, name]) => {
       const t = S.tiles[k], ev = t.evals;
@@ -132,9 +131,11 @@ export function createOptDash(el, h = {}) {
         ${evalSparkSvg(ev, S.tgLen, S.tgWid, bi)}
         <div class="od-bar"><i style="width:${Math.round(t.frac * 100)}%"></i></div><div class="od-tx mut">${esc(t.text)}</div>`}</div>`;
     };
-    el.innerHTML = `<div class="od-h">기구 최적화 진행 <span class="mut">${S.ended == null ? `진행 ${sec}초` : S.ended ? '완료 — 목표 통과' : '완료 — 목표 미달'} · 시험한 후보 ${nEval}개 · 값 = 길이 U / 폭 U · 목표 ${f2(S.tgLen)}/${f2(S.tgWid)}</span>${S.verify && Number.isFinite(S.verify.Ulen) ? ` <span class="od-note">정밀 계산 ${esc(S.verify.label)} → ${f2(S.verify.Ulen)}/${f2(S.verify.Uwid)}</span>` : ''}${S.note ? ` <span class="od-note">${esc(S.note)}</span>` : ''}</div>
-      <div class="od-legend"><i class="od-k1"></i>길이 U <i class="od-k2"></i>폭 U <i class="od-kt"></i>목표 <i class="od-kb"></i>최고</div>
-      <div class="od-grid">${STAGES.map(tile).join('')}</div>`;
+    // 진행 중 = 항목 타일(시험·최고·진행) 펼침, 끝나면 '진행 기록' 한 줄로 접음(결과는 위 결과 카드 하나로 — 반복 없이)
+    const body = `<div class="od-legend"><i class="od-k1"></i>길이 U <i class="od-k2"></i>폭 U <i class="od-kt"></i>목표 <i class="od-kb"></i>최고 <span class="mut">· 값 = 길이 U / 폭 U</span></div><div class="od-grid">${STAGES.map(tile).join('')}</div>`;
+    const busy = S.ended == null && !S.stopped;
+    el.innerHTML = busy ? `<div class="od-h">진행 ${sec}초 <span class="mut">· 시험한 후보 ${nEval}개${S.note ? ` · ${esc(S.note)}` : ''}</span></div>${body}`
+      : `<details class="od-log"><summary>진행 기록 <span class="mut">· 후보 ${nEval}개 · 항목별 전 → 후</span></summary>${body}</details>`;
   }
   render(); renderBoard();
   function stop() { if (S) { S.stopped = true; draw(); } }
