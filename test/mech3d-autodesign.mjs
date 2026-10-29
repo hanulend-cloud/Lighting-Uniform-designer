@@ -176,7 +176,7 @@ ok(halvingTotal(27) === 35 && halvingTotal(4) === 10 && halvingTotal(1) === 3, '
   const f = { part: 1, kind: 'whiteDiffuse', R: 0.85 };
   ok(sameDesign({ ...b, finish: f }, { ...b, finish: { ...f } }) && sameDesign({ ...b, finish: null }, b) && !sameDesign({ ...b, finish: f }, b)
     && !sameDesign({ ...b, finish: f }, { ...b, finish: { ...f, R: 0.9 } }) && !sameDesign({ ...b, finish: f }, { ...b, finish: { ...f, part: 2 } }) && !sameDesign({ ...b, finish: f }, { ...b, finish: { ...f, kind: 'metal' } }), 'sameDesign: finish'); }
-{ // 실행 순서 ② → ⑤ → ④ → ① → ③ (가짜 io 호출 순서), ⑤ 는 best · ④ 는 통과 중 최저 등급, d 에 반영
+{ // 실행 순서 ② → ⑤ → ④ → ③ → ① (가짜 io 호출 순서), ⑤ 는 best · ④ 는 통과 중 최저 등급, d 에 반영
   const G = { ns: 2, nw: 1, ds: 1, cell: 1, w0: -0.5, L: 2, closed: false, winS: 5, area: new Float64Array([1, 1]), valid: new Uint8Array([1, 1]) }, log = [], prog = [];
   const fins = [{ kind: 'whiteDiffuse', R: 0.85, current: true }, { kind: 'whiteDiffuse', R: 0.9 }, { kind: 'whiteDiffuse', R: 0.95 }];
   const io = {
@@ -188,8 +188,8 @@ ok(halvingTotal(27) === 35 && halvingTotal(4) === 10 && halvingTotal(1) === 3, '
     verify: async (d) => ({ stats: st(d.dz ? 0.95 : 0.6, 0.9), eff: 0.6 }), progress: (s) => { if (prog.at(-1) !== s) prog.push(s); }, cancelled: () => false };
   const r = await runAutoDesign({ stages: { leds: true, height: true, housing: true, milky: true, shape: true }, obs: { targetLen: 0.8, targetWid: 0 }, current: { milky: 3, count: 5, pitch: 0, shape: null, finish: null, dz: 0 },
     milkyMax: 5, G, line: { length: 2, closed: false }, nMax: 4, heightRange: [-1, 3], finishCands: fins, housingPart: 1, shapePart: 0, shapeCands: [{ dt: 0.2, h: 0, R: 2.75, e: 0, c: 0 }] }, io);
-  ok(log.join() === 'ledsRef,leds,height,housing,milky,shape', `호출 순서: ${log.join()}`);
-  ok(prog.join() === 'current,leds,height,housing,milky,shape,verify', `진행 단계: ${prog.join()}`);
+  ok(log.join() === 'ledsRef,leds,height,housing,shape,milky', `호출 순서: ${log.join()}`);
+  ok(prog.join() === 'current,leds,height,housing,shape,milky,verify', `진행 단계: ${prog.join()}`);
   ok(r.best.dz === 1.5 && r.best.finish?.part === 1 && r.best.finish.R === 0.9 && r.best.finish.kind === 'whiteDiffuse', `⑤ dz=${r.best.dz} · ④ ${JSON.stringify(r.best.finish)}(통과 중 최저 등급)`);
   ok(r.steps.some((x) => x.stage === 'height' && x.results1.length === 7) && r.steps.some((x) => x.stage === 'housing'), 'steps 에 height(후보 7개)·housing'); }
 { // ④ 현재 면 처리(current)가 뽑히면 finish = 현재 값(null) · ⑤ 0 이면 dz 0 → 같은 설계 → 현재안 그대로

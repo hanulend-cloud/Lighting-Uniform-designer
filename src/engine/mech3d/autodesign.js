@@ -284,27 +284,8 @@ export async function runAutoDesign(cfg, io) {
       if (margin(r.best.stats, obs) < 0) { feasible = false; reason = `케이스 면 최고 등급에서도 목표 미달 — ${uText(r.best.stats)}`; }
     }
   }
-  if (stages.milky) {   // ① 균일도 우선 — 목표 도달이면 최소 Milky, 아니면 균일도 최고 Milky + 한계·보완(④ 한 단계 위, spec §2.1a)
-    const m = await searchMilkyPeak(d, cfg, io, steps, sCap);
-    if (!m) return { cancelled: true };
-    if (m.found) d = { ...d, milky: m.found.milky };
-    else if (!m.peak) { feasible = false; reason = '믿을 수 있는 격자점이 없음 — 광자를 늘리세요'; }
-    else {
-      const p = m.peak, atCap = p.milky >= sCap - 0.3;
-      feasible = false; d = { ...d, milky: p.milky };
-      reason = `균일도 최고 Milky ${p.milky}에서도 ${uText(p)} — 목표 ${obs.targetLen.toFixed(2)}${p.Uwid == null ? '' : ` / ${obs.targetWid.toFixed(2)}`} 미달 · ${limitText(p, obs)}${atCap ? ` · Milky 상한(${sCap})을 올리거나 ②~⑤ 를 함께 쓰세요` : ''}`;
-      if (cfg.housingProbe && io.evalVariants && !stop()) {   // 보완 계산: 최고점 Milky 에서 케이스 면 한 단계 위 한 번
-        io.progress?.('milky', 0.95, '보완 계산 (④ 케이스 면 한 단계 위)');
-        const [h] = await io.evalVariants(d, [{ finish: cfg.housingProbe }], 3e5, 6000);
-        if (stop()) return { cancelled: true };
-        if (h?.ok) {
-          hint = { finish: cfg.housingProbe, Ulen: h.stats.Ulen, Uwid: h.stats.Uwid };
-          const ft = cfg.finishText ?? ((f) => `${f.kind}${f.R != null ? ` ${Math.round(f.R * 100)}%` : ''}`);
-          reason += ` · ④ 케이스 ${ft(cfg.housingProbe)} 와 함께 쓰면 ${uText(hint)}`;
-        }
-      }
-    }
-  }
+  // 계산 순서(2026-10-29): ② 위치(·⑤ 높이·④ 케이스) → ③ 형상 → ① Milky. Milky 는 마지막 — 앞 단계로 목표에 못 미치면 효율을 내주더라도
+  // 목표를 만족하는 가장 낮은 Milky 로 올림(결과 카드의 Milky 조정 표로 설계자가 효율과 맞바꿔 낮출 수 있음)
   let shapeCands = cfg.shapeCands, shapeNone = false;
   if (stages.shape && cfg.shapeRanges) {   // ③ 1단계 선별 → 2단계 격자 (cfg.shapeCands 만 있으면 아래 기존 경로)
     const rg = cfg.shapeRanges, nScreen = 1 + 4 * Object.keys(rg).filter((k) => k !== 'R').length;
@@ -331,6 +312,27 @@ export async function runAutoDesign(cfg, io) {
       if (margin(best.stats, obs) < 0) { feasible = false; reason = `형상 최적안도 목표 미달 — 길이 U ${best.stats.Ulen.toFixed(2)}${best.stats.Uwid == null ? '' : ` · 폭 U ${best.stats.Uwid.toFixed(2)}`}`; }
       else { feasible = true; reason = ''; }
     } else { feasible = false; reason = '제약(살두께·간섭)을 만족하는 형상 후보가 없음 — 범위를 줄이세요'; }
+  }
+  if (stages.milky) {   // ① 균일도 우선 — 목표 도달이면 최소 Milky, 아니면 균일도 최고 Milky + 한계·보완(④ 한 단계 위, spec §2.1a)
+    const m = await searchMilkyPeak(d, cfg, io, steps, sCap);
+    if (!m) return { cancelled: true };
+    if (m.found) { d = { ...d, milky: m.found.milky }; feasible = true; reason = ''; }   // 마지막 단계 — 앞 단계(②·③) 미달이어도 Milky 로 목표 도달이면 통과
+    else if (!m.peak) { feasible = false; reason = '믿을 수 있는 격자점이 없음 — 광자를 늘리세요'; }
+    else {
+      const p = m.peak, atCap = p.milky >= sCap - 0.3;
+      feasible = false; d = { ...d, milky: p.milky };
+      reason = `균일도 최고 Milky ${p.milky}에서도 ${uText(p)} — 목표 ${obs.targetLen.toFixed(2)}${p.Uwid == null ? '' : ` / ${obs.targetWid.toFixed(2)}`} 미달 · ${limitText(p, obs)}${atCap ? ` · Milky 상한(${sCap})을 올리거나 ②~⑤ 를 함께 쓰세요` : ''}`;
+      if (cfg.housingProbe && io.evalVariants && !stop()) {   // 보완 계산: 최고점 Milky 에서 케이스 면 한 단계 위 한 번
+        io.progress?.('milky', 0.95, '보완 계산 (④ 케이스 면 한 단계 위)');
+        const [h] = await io.evalVariants(d, [{ finish: cfg.housingProbe }], 3e5, 6000);
+        if (stop()) return { cancelled: true };
+        if (h?.ok) {
+          hint = { finish: cfg.housingProbe, Ulen: h.stats.Ulen, Uwid: h.stats.Uwid };
+          const ft = cfg.finishText ?? ((f) => `${f.kind}${f.R != null ? ` ${Math.round(f.R * 100)}%` : ''}`);
+          reason += ` · ④ 케이스 ${ft(cfg.housingProbe)} 와 함께 쓰면 ${uText(hint)}`;
+        }
+      }
+    }
   }
   if (stop()) return { cancelled: true };
   io.progress?.('verify', 0, '최종안 정밀 재계산');

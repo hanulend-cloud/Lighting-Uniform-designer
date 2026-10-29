@@ -19,7 +19,7 @@ export const nextFinish = (cur, pool = FINISH_GRADES) => {
   return same.find((x) => x.R >= R + 0.1 - 1e-9) ?? same.at(-1) ?? null;
 };
 // 전체 진행률 — 단계 무게(현재안 5 · ② 35 · ⑤ 20 · ④ 20 · ① 35 · ③ 50 · 최종 10)를 켠 단계로 정규화. 순서 = 실행 순서
-const STAGE_W = [['current', 5], ['leds', 35], ['height', 20], ['housing', 20], ['milky', 35], ['shape', 50], ['verify', 10]];
+const STAGE_W = [['current', 5], ['leds', 35], ['height', 20], ['housing', 20], ['shape', 50], ['milky', 35], ['verify', 10]];   // 엔진 실행 순서와 같게
 export function overallFrac(stages, stage, frac) {
   const on = ([k]) => k === 'current' || k === 'verify' || !!stages?.[k];
   const ws = STAGE_W.filter(on), total = ws.reduce((s, [, w]) => s + w, 0), i = ws.findIndex(([k]) => k === stage);
@@ -208,6 +208,29 @@ export function appliedHtml(applied) {
 // 실행 중 카드 구조가 같으면 진행 막대·문구만 바꿈(갱신마다 innerHTML 을 다시 만들지 않게)
 // '현재안 유지'인데 시험한 후보가 있으면(차이가 잡음 수준) [그래도 적용] — 후보 값을 함께 보임
 const altBtn = (r) => (r.unchanged && r.alt ? `<button type="button" data-ad="applyAlt" title="찾은 후보가 현재안보다 계산 잡음 수준만큼만 나아 '현재안 유지'로 판정됨 — 그래도 바꾸려면">그래도 적용${r.alt.milky != null ? ` (Milky ${(+r.alt.milky).toFixed(2)})` : ''} · ${f2(r.alt.Ulen)}/${f2(r.alt.Uwid)}</button>` : '');
+// Milky 조정 표(2026-10-29) — 마지막 ① Milky 단계 기록(뒤에서부터 연속 'milky' 단계, ② 기준 'ledsRef' 제외)의 Milky 별 길이 U·폭 U·광 효율.
+// 같은 Milky 는 나중(정밀) 값 · 믿는(trusted) 행만 · Milky 오름차순. Milky 가 마지막 단계라 최종안의 다른 인자 그대로의 추정 — 순수
+export function milkyTable(steps = []) {
+  const m = new Map();
+  let e = steps.length; while (e > 0 && (steps[e - 1]?.stage === 'guard' || steps[e - 1]?.stage === 'ledsVerify')) e--;   // 검증 뒤 기록(현재안 유지·② 재확인)은 건너뜀
+  let i = e - 1; while (i >= 0 && steps[i]?.stage === 'milky' && steps[i].phase !== 'ledsRef') i--;
+  for (const st of steps.slice(i + 1, e)) for (const r of st.rows ?? []) if (r.trusted && Number.isFinite(r.Ulen)) m.set((+r.milky).toFixed(2), { milky: +r.milky, Ulen: r.Ulen, Uwid: r.Uwid, eff: r.eff });
+  return [...m.values()].sort((a, b) => a.milky - b.milky);
+}
+// 표 HTML — chosen = 최적화가 고른 Milky(강조). 줄마다 [적용](data-ad="applyMilky" data-v=Milky). 목표 통과 ✓/✕ · 효율 %
+export function milkyTableHtml(rows, chosen, tg = {}) {
+  if (!rows?.length) return '';
+  // 줄 줄이기 — 간격 = max(0.25, 범위/10) 을 0.25 단위로, 격자마다 가장 가까운 행 + 최적 행(최대 ≈ 12줄)
+  const lo = rows[0].milky, hi = rows.at(-1).milky, stp = Math.max(0.25, Math.ceil((hi - lo) / 10 / 0.25) * 0.25), pick = new Set();
+  for (let g = Math.ceil(lo / stp) * stp; g <= hi + 1e-9; g += stp) pick.add(rows.reduce((a, r) => (Math.abs(r.milky - g) < Math.abs(a.milky - g) ? r : a)));
+  const ch = rows.reduce((a, r) => (Math.abs(r.milky - chosen) < Math.abs(a.milky - chosen) ? r : a)); if (Math.abs(ch.milky - chosen) < 0.005) pick.add(ch);
+  rows = rows.filter((r) => pick.has(r));
+  const pm = (v, t) => (Number.isFinite(v) && Number.isFinite(t) ? (v + 1e-9 >= t ? ' <b class="ok">✓</b>' : ' <b class="bad">✕</b>') : '');
+  const tr = (r) => { const sel = Math.abs(r.milky - chosen) < 0.005;
+    return `<tr${sel ? ' class="sel"' : ''}><td>${r.milky.toFixed(2)}${sel ? ' <span class="mut">최적</span>' : ''}</td><td>${f2(r.Ulen)}${pm(r.Ulen, tg.len)}</td><td>${f2(r.Uwid)}${pm(r.Uwid, tg.wid)}</td><td>${Number.isFinite(r.eff) ? `${(r.eff * 100).toFixed(1)}%` : '–'}</td><td>${sel ? '' : `<button type="button" data-ad="applyMilky" data-v="${+r.milky.toFixed(2)}">적용</button>`}</td></tr>`; };
+  return `<details class="m3-mtab"><summary>Milky 조정 <span class="mut">— 낮추면 광 효율↑ · 균일도↓ (다른 인자는 최적안 그대로의 추정)</span></summary>
+    <table class="m3-cmp m3-cmp-s"><tr><th>Milky</th><th>길이 U</th><th>폭 U</th><th>광 효율</th><th></th></tr>${rows.map(tr).join('')}</table></details>`;
+}
 // 결과 카드(2026-10-29: 같은 내용이 여러 번 반복되던 것을 하나로) — 판정 한 단어 · 작은 비교표(바뀐 사양 + 길이 U·폭 U·광 효율) ·
 // 한계 한 줄 · [적용] [그래도 적용] [취소] [자세히](프로파일·사유 전문 = 결과 창)
 const KEEP_ROW = /<th>(길이 U|폭 U|광 효율)/;
@@ -219,6 +242,7 @@ export function resultLineHtml(r) {
   return `<div class="m3-rcard ${verdict[0]}"><div class="m3-rcard-hd"><b class="m3-rv">${verdict[1]}</b><span class="mut">${verdict[2]}</span></div>
     <table class="m3-cmp m3-cmp-s"><tr><th></th><th>지금</th><th>최적 후보</th></tr>${rows}</table>${clash}
     ${lim ? `<div class="m3-rlim">💡 한계: ${esc(lim)}</div>` : ''}
+    ${milkyTableHtml(r.milkyRows, r.best?.milky, r.targets ?? {})}
     <div class="m3-rbtn"><button type="button" data-ad="apply"${r.unchanged ? ' disabled title="현재안이 이미 최선(차이 없음)"' : r.clash > 0 ? ' disabled title="LED 몸체가 부품과 겹침"' : ''}>적용</button>${altBtn(r)}<button type="button" data-ad="cancel">취소</button><span class="m3-ad-sp"></span><button type="button" data-ad="view" title="프로파일 비교·사유 전문">자세히 ▸</button></div></div>`;
 }
 // el 에 그리고 이벤트를 h 로 넘김. state = { avail, sel, running, result, resultOpen, … } — 결과가 있으면 한 줄 + (열림) 결과 창
@@ -239,7 +263,7 @@ export function renderAutoPanel(el, state, h) {
     const k = x.dataset.ad;
     if (x.type === 'checkbox') x.onchange = () => h.onSel(k, x.checked);
     else if (x.tagName === 'SELECT' || x.type === 'number') x.onchange = () => h.onSel(k, x.value === '' ? NaN : +x.value);
-    else x.onclick = () => h.onAction(k);
+    else x.onclick = () => h.onAction(k, x.dataset.v);   // data-v = 값(Milky 조정 표의 Milky)
   });
   const m = el.querySelector('.m3-rmodal');
   if (m) m.addEventListener('click', (e) => { if (e.target === m) h.onAction('hide'); });

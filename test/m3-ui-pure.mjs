@@ -117,7 +117,7 @@ ok(nextFinish({ kind: 'whiteDiffuse', R: 0.85 })?.R === 0.95 && nextFinish({ kin
 ok(clampCap(12) === 9.9 && clampCap(0.1) === 0.5 && clampCap(3) === 3 && clampCap(0) === null && clampCap(-2) === null && clampCap(NaN) === null, 'Milky 상한: 0.5~9.9 로 자름 · 0/음수/NaN = 기본');
 { const all = { milky: true, leds: true, shape: true }, m = { milky: true };
   ok(overallFrac(m, 'current', 0) === 0 && Math.abs(overallFrac(m, 'milky', 0) - 5 / 50) < 1e-12 && Math.abs(overallFrac(m, 'milky', 0.5) - 22.5 / 50) < 1e-12 && overallFrac(m, 'verify', 1) === 1, '전체 진행률: 켠 단계만 정규화(① 만 = 5+35+10)');
-  ok(Math.abs(overallFrac(all, 'shape', 0) - 75 / 135) < 1e-12 && overallFrac(all, 'shape', 2) <= 1 && overallFrac(m, 'shape', 0.5) === 0, '전체 진행률: 단계 순서·무게 · 꺼진 단계 = 0');
+  ok(Math.abs(overallFrac(all, 'shape', 0) - 40 / 135) < 1e-12 && overallFrac(all, 'shape', 2) <= 1 && overallFrac(m, 'shape', 0.5) === 0, '전체 진행률: 단계 순서(② → ③ → ①)·무게 · 꺼진 단계 = 0');
   const hh = { leds: true, height: true, housing: true, milky: true };
   ok(Math.abs(overallFrac(hh, 'height', 0) - 40 / 125) < 1e-12 && Math.abs(overallFrac(hh, 'housing', 0.5) - 70 / 125) < 1e-12 && Math.abs(overallFrac(hh, 'milky', 0) - 80 / 125) < 1e-12, '전체 진행률: ⑤ 높이·④ 케이스 면(각 20)은 ② 와 ① 사이');
   ok(etaText(5000, 0.05) === '' && etaText(10000, 0.5) === '남은 약 10초' && etaText(1000, 1) === '', `남은 시간: 10% 이후만 (${etaText(10000, 0.5)})`); }
@@ -396,3 +396,12 @@ done();
   const h = resultLineHtml(r);
   console.log(h.includes('m3-rcard bad') && h.includes('목표 미달') && h.includes('<th>Milky') && !h.includes('<th>LED') && h.includes('<th>길이 U') && h.includes('<th>광 효율') && h.includes('💡 한계: 길이 방향 — 끝단이 가장 어두움') && h.includes('data-ad="view"') && limitText('없음') === ''
     ? 'PASS 기구 최적화 결과 카드(판정·바뀐 사양만·한계 한 줄)' : (process.exitCode = 1, `FAIL 결과 카드 ${h}`)); }
+{ const { milkyTable, milkyTableHtml } = await import('../src/ui/m3/autodesign-panel.js');
+  // Milky 조정 표: 마지막 Milky 단계 기록(뒤에서부터 연속 'milky', ② 기준 'ledsRef' 제외)만 · 같은 Milky 는 정밀(나중) 값 · 믿는 행만 · Milky 오름차순
+  const row = (m, u, w, e, t = true) => ({ milky: m, Ulen: u, Uwid: w, eff: e, trusted: t });
+  const steps = [{ stage: 'milky', phase: 'ledsRef', rows: [row(9, 0.1, 0.1, 0.01)] }, { stage: 'leds' }, { stage: 'shape' },
+    { stage: 'milky', phase: 'coarse', rows: [row(1, 0.6, 0.6, 0.11), row(3, 0.75, 0.7, 0.08), row(5, 0.8, 0.79, 0.05, false)] }, { stage: 'milky', phase: 'peak', precise: true, rows: [row(3, 0.78, 0.74, 0.081), row(3.5, 0.81, 0.8, 0.07)] }];
+  const T = milkyTable(steps), h = milkyTableHtml(T, 3.5, { len: 0.8, wid: 0.8 });
+  const many = Array.from({ length: 80 }, (_, k) => row(+(0.25 + k * 0.025).toFixed(3), 0.5, 0.5, 0.1)), hm = milkyTableHtml(many, 1.43, {});
+  console.log((hm.match(/<tr/g) ?? []).length <= 14 && hm.includes('1.43 <span') && T.map((r) => `${r.milky}:${r.Ulen}`).join() === '1:0.6,3:0.78,3.5:0.81' && h.includes('data-ad="applyMilky" data-v="1"') && /class="sel"[^]*3\.50/.test(h) && h.includes('8.1%') && milkyTable([{ stage: 'shape' }]).length === 0 && milkyTable([...steps, { stage: 'guard' }]).length === 3
+    ? 'PASS Milky 조정 표(마지막 Milky 단계만·정밀 값 우선·믿는 행·적용 단추)' : (process.exitCode = 1, `FAIL Milky 조정 표 ${JSON.stringify(T)} ${h}`)); }

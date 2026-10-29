@@ -780,3 +780,6 @@ body.booting::after { content: "불러오는 중…"; position: fixed; left: 50%
 .m3-rbtn { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 8px; }
 .od-log > summary { cursor: pointer; font-size: 12.5px; padding: 4px 0; }
 .m3-mon .fb-plot { flex: none; height: 120px; }   /* 창 안(높이 auto)에서도 그래프가 보이게 */
+.m3-mtab { margin-top: 6px; } .m3-mtab > summary { cursor: pointer; font-size: 12.5px; }
+.m3-mtab tr.sel td { font-weight: 600; background: #eef5ff; }
+.m3-mtab td button { padding: 1px 8px; font-size: 11.5px; }
