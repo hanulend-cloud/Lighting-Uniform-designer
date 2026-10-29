@@ -26,6 +26,7 @@ export function migrateMech3d(m) {
   const f = Number(m.light.spec.fluxLm);
   m.light.spec.fluxLm = Number.isFinite(f) && f > 0 ? f : 0;
   m.observe.targetLum ??= null;
+  m.groups ??= [];   // 부품 그룹 [{ id, name, parts }] (피처 트리, 2026-10-30)
   // 계산 오차 목표 기본 2% → 1%(2026-10-29: 1D 튐·2D 얼룩) — 예전 기본값(2%·없음)만 1% 로, 사용자가 고른 값은 그대로
   if (m.observe.noiseRev !== 1) { if (m.observe.targetNoise == null || m.observe.targetNoise === 0.02) m.observe.targetNoise = 0.01; m.observe.noiseRev = 1; }
   m.checks = { ...defaultChecks(), ...(m.checks ?? {}) };

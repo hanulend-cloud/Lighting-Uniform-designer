@@ -1,3 +1,4 @@
+import { groupMembers } from './feature-tree.js';
 // 속성 패널 — spec 2026-10-15 m3-cad-ui §2: 피처 트리에서 고른 노드의 편집기만 보인다(기존 편집기를 노드별로 재사용).
 // ui = { dbList, catalog(반사 소재표 행), auto, dir, lineInfo, meshInfo(고른 부품 실제 메쉬 외곽·부피) }, h = app.js propHandlers()
 import { renderPartProps, renderContactsProps } from '../mech3d-panel.js';
@@ -9,6 +10,12 @@ export function renderPropertyPanel(el, M, S, ui, h) {
   if (id.startsWith('part:')) {
     const i = +id.slice(5);
     renderPartProps(el, M, { part: i, face: S.sel?.part === i ? S.sel.face : null, contacts: M.contacts, names: M.parts.map((p) => p.name), clearance: ui.clearance, xfMsg: ui.xfMsg, xfInfo: ui.xfInfo, meshInfo: ui.meshInfo ?? null, catalog: ui.catalog ?? catalogOf(null), admin: !!ui.admin, clearList: ui.clearList ?? [], clearUsed: ui.clearUsed ?? {}, milkyUsed: ui.milkyUsed ?? {} }, ui.dbList, h);
+    return;
+  }
+  if (id.startsWith('group:')) {   // 부품 그룹 — 이름·부품 목록(이름은 트리에서 더블클릭으로 변경)
+    const gid = id.slice(6), g = gid === '_light' ? { name: '광원으로 옮긴 부품', auto: true } : (M.groups ?? []).find((x) => x.id === gid), mem = groupMembers(M, gid);
+    const e = (t) => String(t ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+    el.innerHTML = `<div class="m3-h">그룹 · ${e(g?.name ?? '')} <span class="mut">부품 ${mem.length}개</span></div><div class="mut">${g?.auto ? '도면에서 광원으로 옮긴 부품을 자동으로 묶음' : '이름 = 피처 트리에서 더블클릭 · [그룹 해제] = 묶음만 풀기(부품은 그대로)'}</div><div class="m3-grp-list">${mem.map((i) => `<div>${e(M.parts[i]?.name)}</div>`).join('')}</div>`;
     return;
   }
   switch (id) {

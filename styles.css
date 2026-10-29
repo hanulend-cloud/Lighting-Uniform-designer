@@ -783,3 +783,13 @@ body.booting::after { content: "불러오는 중…"; position: fixed; left: 50%
 .m3-mtab { margin-top: 6px; } .m3-mtab > summary { cursor: pointer; font-size: 12.5px; }
 .m3-mtab tr.sel td { font-weight: 600; background: #eef5ff; }
 .m3-mtab td button { padding: 1px 8px; font-size: 11.5px; }
+/* 피처 트리 그룹(2026-10-30) — 접기 ▸▾ · 깊이 들여쓰기 · 그룹 단추 · 이름 고치기 입력칸 */
+.m3-node.d2 { padding-left: 38px; }
+.m3-node.grp { font-weight: 600; }
+.m3-fold { display: inline-block; width: 12px; text-align: center; color: var(--m3-mut); cursor: pointer; font-size: 11px; flex: none; }
+.m3-node.d0 .m3-fold { margin-left: -2px; }
+.m3-tree-act { float: right; display: inline-flex; gap: 4px; }
+.m3-tree-act button { border: 1px solid var(--m3-line); background: #fff; border-radius: 5px; padding: 1px 6px; font: inherit; font-size: 11px; cursor: pointer; }
+.m3-tree-act button:disabled { opacity: .45; cursor: default; }
+.m3-ren { font: inherit; font-size: 12.5px; padding: 0 4px; border: 1px solid var(--m3-acc); border-radius: 4px; min-width: 0; flex: 1; }
+.m3-grp-list { margin-top: 6px; font-size: 12px; max-height: 240px; overflow: auto; }

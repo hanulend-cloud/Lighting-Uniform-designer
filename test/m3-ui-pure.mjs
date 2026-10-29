@@ -47,7 +47,7 @@ ok(calcLabel({ state: 'running' }) === '⏸ 계산 중' && calcLabel({ state: 'p
   ok(N[0].eye === 'all' && N[1].eye === 'on' && N[2].eye === 'off' && N.find((n) => n.id === 'leds').eye === undefined, '눈 단추: 숨긴 부품 off · 머리 = 모두 보기 · 직접 배치 LED 없음');
   ok(treeNodes(M, { node: null, line: null, hidden: [] }).find((n) => n.id === 'parts').eye === undefined, '숨긴 것 없으면 머리 눈 단추 없음');
   const h = treeHtml(M, { node: null, line: null, hidden: [1] });
-  ok(/data-eye="part:1"[^>]*aria-pressed="false"/.test(h) && /class="m3-node child  hid"/.test(h), '눈 단추 HTML · 숨긴 행 흐리게');
+  ok(/data-eye="part:1"[^>]*aria-pressed="false"/.test(h) && /class="m3-node child d1  hid"/.test(h), '눈 단추 HTML · 숨긴 행 흐리게');
   const stp = { ...M, light: { ...defaultLight(), kind: 'step', step: { leds: [0, 1], excluded: [] } } };
   ok(treeNodes(stp, { node: null, line: null, hideLeds: true }).find((n) => n.id === 'leds').eye === 'off', 'LED STEP 노드 눈 단추');
   const T = toggleVisibility;
@@ -412,3 +412,19 @@ done();
   const base = { feasible: false, reason: '', targets: { len: 0.8, wid: 0.8 }, cur: { milky: 1, Ulen: 0.6, Uwid: 0.6, eff: 0.1 }, best: { milky: 2, Ulen: 0.7, Uwid: 0.6, eff: 0.09 } };
   const a = resultLineHtml(base), b = resultLineHtml({ ...base, unchanged: true }), c = resultLineHtml({ ...base, clash: 2 });
   console.log(a.includes('data-ad="continue"') && b.includes('지금 설계 그대로') && !c.includes('data-ad="continue"') ? 'PASS 결과 카드 [이 안에서 이어서] — 현재안 유지도(적용 없이), 겹침 = 없음' : (process.exitCode = 1, 'FAIL 이어서 단추')); }
+{ const { treeNodes, makeGroup, ungroup, groupMembers, toggleVisibility } = await import('../src/ui/m3/feature-tree.js');
+  const P = (name, role) => ({ ...setPartMaterial(defaultPart(0, name, 1), 'opaque'), ...(role ? { role } : {}) });
+  const MM = { ...M, parts: [P('A'), P('B'), P('C'), P('D'), P('L1', 'light'), P('L2', 'light')], groups: [{ id: 'g1', name: '커버류', parts: [1, 2] }] };
+  const ids = (S) => treeNodes(MM, { node: null, line: null, ...S }).map((n) => n.id).filter((i) => i.startsWith('part') || i.startsWith('group'));
+  // 그룹은 첫 부품 자리에 · 펼침 = 부품 들여쓰기(depth 2) · 접힘 = 숨김 · 광원으로 옮긴 부품 = 자동 묶음(기본 접힘)
+  const N = treeNodes(MM, { node: null, line: null }), g = N.find((n) => n.id === 'group:g1');
+  const okT = ids({}).join() === 'parts,part:0,group:g1,part:1,part:2,part:3,group:_light' && g.fold === 'open' && g.badge === '2' && N.find((n) => n.id === 'part:1').depth === 2
+    && ids({ fold: { g1: true } }).join() === 'parts,part:0,group:g1,part:3,group:_light' && ids({ fold: { _light: false } }).includes('part:5') && ids({ fold: { parts: true } }).join() === 'parts';
+  // 그룹 만들기: 다른 그룹에서 빼고, 빈 그룹은 지움 · 풀기 · 멤버
+  const a = makeGroup(MM.groups, [2, 3], '새 그룹'), b = ungroup(a.groups, 'g1');
+  const okG = a.groups.find((x) => x.id === 'g1').parts.join() === '1' && a.groups.find((x) => x.id === a.id).parts.join() === '2,3' && b.length === 1 && makeGroup([{ id: 'g1', name: 'x', parts: [1] }], [1], 'y').groups.length === 1
+    && groupMembers(MM, 'g1').join() === '1,2' && groupMembers(MM, '_light').join() === '4,5';
+  // 그룹 눈: 하나라도 보이면 모두 숨김, 다 숨었으면 모두 보임
+  const v1 = toggleVisibility('group:g1', false, 6, [1], false, [1, 2]), v2 = toggleVisibility('group:g1', false, 6, [1, 2, 3], false, [1, 2]);
+  const okV = v1.hidden.join() === '1,2' && v2.hidden.join() === '3';
+  console.log(okT && okG && okV ? 'PASS 부품 그룹: 트리(펼침·접힘·자동 광원 묶음) · 만들기·풀기 · 그룹 보기 전환' : (process.exitCode = 1, `FAIL 부품 그룹 ${okT} ${okG} ${okV} ${ids({})}`)); }

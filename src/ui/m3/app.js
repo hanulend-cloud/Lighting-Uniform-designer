@@ -18,7 +18,7 @@ import { createPool } from './pool.js';
 import * as L from './leds.js';
 import { buildObsOverlay, cellColors, extractFaces } from './colormap.js';
 import { mountCommandBar } from './command-bar.js';
-import { renderFeatureTree, toggleVisibility } from './feature-tree.js';
+import { renderFeatureTree, toggleVisibility, makeGroup, ungroup, groupMembers } from './feature-tree.js';
 import { mountSplitter, mountDockSplitter, mountFacSplitter } from './splitter.js';
 import { createOptDash, createSimDash } from './opt-dash.js';
 import { geomQuery, geomLimit } from './geom-client.js';
@@ -1408,8 +1408,31 @@ function renderAll(tag = 'all') {
   renderView();
   const lay = M.light.kind === 'step' ? L.stepLayout(M, S.line) : undefined;   // LED STEP 실제 배치(가상 실패 표시용)
   renderFeatureTree($('#m3-tree'), M, S, {
-    onNode: (id) => st.update('session', (_, x) => { x.node = id; x.sel = id.startsWith('part:') ? { part: +id.slice(5), face: null } : null; if (id !== 'leds') x.ledSel = null; }),
-    onEye: (id, only) => st.update('view', (m, x) => Object.assign(x, toggleVisibility(id, only, m.parts.length, x.hidden, x.hideLeds))),
+    onNode: (id, o = {}) => st.update('session', (_, x) => {
+      if (o.multi && id.startsWith('part:')) {   // Ctrl/Shift+클릭 = 여러 부품 선택(지금 선택한 부품도 포함)
+        const set = new Set(x.multi ?? []); if (!set.size && x.node?.startsWith('part:')) set.add(x.node);
+        if (set.has(id)) set.delete(id); else set.add(id);
+        x.multi = [...set]; x.node = id; x.sel = { part: +id.slice(5), face: null }; return;
+      }
+      x.multi = []; x.node = id; x.sel = id.startsWith('part:') ? { part: +id.slice(5), face: null } : null; if (id !== 'leds') x.ledSel = null;
+    }),
+    onEye: (id, only) => st.update('view', (m, x) => Object.assign(x, toggleVisibility(id, only, m.parts.length, x.hidden, x.hideLeds, id.startsWith('group:') ? groupMembers(m, id.slice(6)) : []))),
+    onFold: (id) => st.update('session', (_, x) => { const k = id === 'parts' ? 'parts' : id.slice(6), def = k === '_light'; x.fold = { ...x.fold, [k]: !(x.fold?.[k] ?? def) }; }),   // 접기·펼치기(세션)
+    onTreeAct: (k) => {   // ＋ 그룹(선택한 부품들) · 그룹 해제
+      if (k === 'group') {
+        const ps = [...new Set([...(S.multi ?? []), ...(S.node?.startsWith('part:') ? [S.node] : [])])].filter((x) => x.startsWith('part:')).map((x) => +x.slice(5));
+        if (!ps.length) return;
+        let gid = null; st.update('meta', (m) => { const r = makeGroup(m.groups, ps); m.groups = r.groups; gid = r.id; });
+        st.update('session', (_, x) => { x.multi = []; x.node = `group:${gid}`; x.sel = null; x.fold = { ...x.fold, [gid]: false, parts: false }; });
+      } else if (k === 'ungroup' && S.node?.startsWith('group:') && S.node !== 'group:_light') {
+        const gid = S.node.slice(6); st.update('meta', (m) => { m.groups = ungroup(m.groups, gid); }); st.update('session', (_, x) => { x.node = 'parts'; });
+      }
+    },
+    onRename: (id, name) => st.update('meta', (m) => {   // 이름 더블클릭 → 바꾸기(부품·사용자 그룹) — 계산 다시 안 함
+      if (id.startsWith('part:')) { const p = m.parts[+id.slice(5)]; if (p) p.name = name; }
+      else if (id.startsWith('group:')) { const g = (m.groups ?? []).find((x) => x.id === id.slice(6)); if (g) g.name = name; }
+    }),
+    onRedraw: () => st.update('session'),
   }, lay);
   const pi = S.node?.startsWith('part:') ? +S.node.slice(5) : -1, clr = pi >= 0 ? clearanceOf(pi) : null;
   if (clr !== A.clrShown) { A.clrShown = clr; renderMarkers(); }

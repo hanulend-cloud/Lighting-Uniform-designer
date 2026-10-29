@@ -20,7 +20,7 @@ await T.advance(1000); ok(saved === 2, 'flush 뒤 예약 저장 취소');
 let thrown = false; try { st.update('nope'); } catch (e) { thrown = /알 수 없는 변경 태그/.test(e.message); }
 ok(thrown, '모르는 태그 → 오류');
 un(); st.update('light'); ok(seen.length === 5, `구독 해제 뒤 알림 없음 (${seen.join()})`);
-ok(TAGS.length === 7 && ['material', 'light', 'observe', 'contacts'].every((t) => PHYSICS.has(t)) && !PHYSICS.has('target') && !PHYSICS.has('view') && !PHYSICS.has('session'), '물리 태그 = material·light·observe·contacts');
+ok(TAGS.length === 8 && !PHYSICS.has('meta') && ['material', 'light', 'observe', 'contacts'].every((t) => PHYSICS.has(t)) && !PHYSICS.has('target') && !PHYSICS.has('view') && !PHYSICS.has('session'), '물리 태그 = material·light·observe·contacts');
 ok(['material', 'light', 'observe', 'target'].every((t) => GEOM_CHECK.has(t)) && !GEOM_CHECK.has('contacts'), '기하 점검 태그 = material·light·observe·target(기준값)');
 st.dispose(); await T.advance(1000); ok(saved === 3, 'dispose → 남은 저장 실행(light 변경)');
 {   // 견고성: 구독자 격리 · 저장 오류 · dispose 뒤 갱신

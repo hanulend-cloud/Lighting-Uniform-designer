@@ -15,11 +15,26 @@ export function partBadge(p) {
 // eye: 보기 켜기/끄기 단추 — 'on' | 'off' (부품·LED 노드), 'all' (부품 머리: 숨긴 부품이 있을 때 "모두 보기")
 export function treeNodes(M, S, lay) {
   const L = M.light, O = M.observe, out = [], hid = new Set(S.hidden ?? []);
-  const node = (id, label, badge, child = false, kind = '', eye) => out.push({ id, label, badge, child, kind, sel: S.node === id, eye });
+  const node = (id, label, badge, child = false, kind = '', eye, extra = {}) => out.push({ id, label, badge, child, kind, sel: S.node === id || (S.multi ?? []).includes(id), eye, depth: child ? 1 : 0, ...extra });
+  const fold = (k, def = false) => (S.fold?.[k] ?? def);   // 접힘 상태(세션) — 광원으로 옮긴 부품 묶음은 기본 접힘
   node('target', '◎ 목표', `${Math.round(O.targetLen * 100)}% / ${Math.round(O.targetWid * 100)}%`);   // 맨 위 — 무엇을 맞출지 먼저
-  node('parts', '▾ 부품', String(M.parts.length), false, '', hid.size || S.hideLeds ? 'all' : undefined);
+  node('parts', '부품', String(M.parts.length), false, '', hid.size || S.hideLeds ? 'all' : undefined, { fold: fold('parts') ? 'closed' : 'open' });
+  // 그룹(2026-10-30): 사용자 그룹(M.groups) = 첫 부품 자리에 머리 + 펼치면 부품(들여쓰기 2단) · 그룹 밖 광원으로 옮긴 부품 = 자동 묶음 '_light'(기본 접힘)
+  const gOf = new Map(), G = [...(M.groups ?? [])];
+  for (const g of G) for (const i of g.parts) if (i < M.parts.length && !gOf.has(i)) gOf.set(i, g);
+  const lightFree = M.parts.map((p, i) => i).filter((i) => M.parts[i].role === 'light' && !gOf.has(i));
+  if (lightFree.length) { const g = { id: '_light', name: '광원으로 옮긴 부품', parts: lightFree, auto: true }; G.push(g); for (const i of lightFree) gOf.set(i, g); }
+  const shown = new Set();
   // 도면에서 광원으로 옮긴 부품 = '→ 광원'(보기는 광원 그룹이 함) · 추적 제외 = '제외 ·' 접두
-  M.parts.forEach((p, i) => node(`part:${i}`, p.name, p.role === 'light' ? '→ 광원' : `${p.untrace ? '제외 · ' : ''}${partBadge(p)}`, true, p.role === 'light' ? 'led' : p.untrace ? 'off' : p.material.kind, p.role === 'light' ? undefined : hid.has(i) ? 'off' : 'on'));
+  const partNode = (p, i, depth) => node(`part:${i}`, p.name, p.role === 'light' ? '→ 광원' : `${p.untrace ? '제외 · ' : ''}${partBadge(p)}`, true, p.role === 'light' ? 'led' : p.untrace ? 'off' : p.material.kind, p.role === 'light' ? undefined : hid.has(i) ? 'off' : 'on', { depth });
+  if (!fold('parts')) M.parts.forEach((p, i) => {
+    const g = gOf.get(i);
+    if (!g) { partNode(p, i, 1); return; }
+    if (shown.has(g.id)) return; shown.add(g.id);
+    const mem = g.parts.filter((k) => k < M.parts.length), allHid = mem.length && mem.every((k) => hid.has(k)), closed = fold(g.id, !!g.auto);
+    node(`group:${g.id}`, g.name, String(mem.length), true, 'group', g.auto ? undefined : allHid ? 'off' : 'on', { fold: closed ? 'closed' : 'open', depth: 1, auto: !!g.auto });
+    if (!closed) for (const k of mem) partNode(M.parts[k], k, 2);
+  });
   // 광원 머리 눈 단추 = 광원 그룹(LED 몸체·PCB·지향각) 한 번에 켜기/끄기
   node('light', '▾ 광원', L.kind === 'step' && L.step?.fromMech ? '3D 도면' : { none: '지정 안 함', step: 'LED STEP', manual: '직접 배치' }[L.kind], false, '', L.kind === 'step' ? (S.hideLeds ? 'off' : 'on') : undefined);
   if (L.kind !== 'none') {
@@ -34,10 +49,28 @@ export function treeNodes(M, S, lay) {
   node('obs', '▾ 관측면', ln ? `${LINE_KIND[ln.kind] ?? ln.kind} ${ln.length.toFixed(0)}×${ln.width.toFixed(0)}` : O.faces.length ? '인식 중' : '미지정');
   return out;
 }
-// 눈 단추 처리(순수): id = 'parts' | 'part:i' | 'leds', only = Shift(이 부품만) → { hidden, hideLeds }
-export function toggleVisibility(id, only, nParts, hidden = [], hideLeds = false) {
+// 그룹 연산(순수, 2026-10-30) — groups = [{ id, name, parts:[번호] }]. 새 그룹의 부품은 다른 그룹에서 빠지고, 빈 그룹은 지움
+export function makeGroup(groups = [], parts, name) {
+  const set = new Set(parts), n = groups.reduce((m, g) => Math.max(m, +String(g.id).replace(/\D/g, '') || 0), 0) + 1, id = `g${n}`;
+  const rest = groups.map((g) => ({ ...g, parts: g.parts.filter((i) => !set.has(i)) })).filter((g) => g.parts.length);
+  return { id, groups: [...rest, { id, name: name || `그룹 ${n}`, parts: [...set].sort((a, b) => a - b) }] };
+}
+export const ungroup = (groups = [], id) => groups.filter((g) => g.id !== id);
+// 그룹 부품 번호 — '_light' = 그룹 밖 광원으로 옮긴 부품(자동 묶음)
+export function groupMembers(M, id) {
+  if (id === '_light') { const inG = new Set((M.groups ?? []).flatMap((g) => g.parts)); return M.parts.map((p, i) => i).filter((i) => M.parts[i].role === 'light' && !inG.has(i)); }
+  return ((M.groups ?? []).find((g) => g.id === id)?.parts ?? []).filter((i) => i < M.parts.length);
+}
+// 눈 단추 처리(순수): id = 'parts' | 'part:i' | 'group:g' | 'leds', only = Shift(이 부품만) → { hidden, hideLeds }. members = 그룹 부품(group: 일 때)
+export function toggleVisibility(id, only, nParts, hidden = [], hideLeds = false, members = []) {
   const h = new Set(hidden);
   if (id === 'parts') return { hidden: [], hideLeds: false };
+  if (id.startsWith('group:')) {   // 하나라도 보이면 모두 숨김, 다 숨었으면 모두 보임 · Shift = 이 그룹만 보기
+    if (only) return { hidden: [...Array(nParts).keys()].filter((k) => !members.includes(k)), hideLeds: true };
+    const anyShown = members.some((k) => !h.has(k));
+    for (const k of members) { if (anyShown) h.add(k); else h.delete(k); }
+    return { hidden: [...h].sort((a, b) => a - b), hideLeds };
+  }
   if (id === 'leds' || id === 'light') return only ? { hidden: [...Array(nParts).keys()], hideLeds: false } : { hidden: [...h], hideLeds: !hideLeds };
   const i = +id.slice(5);
   if (only) return { hidden: [...Array(nParts).keys()].filter((k) => k !== i), hideLeds: true };
@@ -47,20 +80,42 @@ export function toggleVisibility(id, only, nParts, hidden = [], hideLeds = false
 const BOUND = new WeakMap();   // el → { h, html }  (이벤트는 컨테이너에 한 번만 위임, 핸들러는 최신 것)
 const EYE = { on: ['👁', '보기 끄기 (Shift+클릭: 이 부품만 보기)', 'true'], off: ['◌', '보기 켜기 (Shift+클릭: 이 부품만 보기)', 'false'], all: ['👁', '모두 보기', 'false'] };
 const eyeHtml = (n) => n.eye ? `<span class="m3-eye ${n.eye}" role="button" tabindex="0" data-eye="${esc(n.id)}" title="${EYE[n.eye][1]}" aria-label="${esc(n.label)} ${EYE[n.eye][1]}" aria-pressed="${EYE[n.eye][2]}">${EYE[n.eye][0]}</span>` : '';
-export const treeHtml = (M, S, lay) => `<div class="m3-h">피처 트리</div>${treeNodes(M, S, lay).map((n) => `<div class="m3-node ${n.child ? 'child' : ''} ${n.sel ? 'sel' : ''} ${n.eye === 'off' ? 'hid' : ''}" role="button" tabindex="0"${n.sel ? ' aria-current="true"' : ''} data-node="${esc(n.id)}">${eyeHtml(n)}${esc(n.label)} <span class="${n.child ? `m3-badge k-${esc(n.kind)}` : 'b'}">${esc(n.badge)}</span></div>`).join('')}`;
+// 노드: 접기 ▸/▾(data-fold) · 이름(data-lbl — 더블클릭 = 이름 바꾸기, 부품·사용자 그룹만) · 깊이(d1·d2 들여쓰기). 머리 = 그룹 단추
+const caret = (n) => (n.fold ? `<span class="m3-fold" role="button" tabindex="-1" data-fold="${esc(n.id)}" aria-label="${n.fold === 'open' ? '접기' : '펼치기'}" aria-expanded="${n.fold === 'open'}">${n.fold === 'open' ? '▾' : '▸'}</span>` : '');
+const renamable = (n) => n.id.startsWith('part:') || (n.id.startsWith('group:') && !n.auto);
+export function treeHead(M, S) {
+  const multi = (S.multi ?? []).filter((x) => x.startsWith('part:')), canG = multi.length > 0 || S.node?.startsWith('part:'), canU = S.node?.startsWith('group:') && S.node !== 'group:_light';
+  return `<div class="m3-h">피처 트리 <span class="m3-tree-act"><button type="button" data-tact="group"${canG ? '' : ' disabled'} title="선택한 부품을 그룹으로 묶기 — Ctrl(또는 Shift)+클릭으로 여러 부품 선택">＋ 그룹</button><button type="button" data-tact="ungroup"${canU ? '' : ' disabled'} title="선택한 그룹 풀기(부품은 그대로)">그룹 해제</button></span></div>`;
+}
+export const treeHtml = (M, S, lay) => `${treeHead(M, S)}${treeNodes(M, S, lay).map((n) => `<div class="m3-node ${n.child ? 'child' : ''} d${n.depth ?? 0}${n.id.startsWith('group:') ? ' grp' : ''} ${n.sel ? 'sel' : ''} ${n.eye === 'off' ? 'hid' : ''}" role="button" tabindex="0"${n.sel ? ' aria-current="true"' : ''} data-node="${esc(n.id)}">${caret(n)}${eyeHtml(n)}<span class="m3-lbl"${renamable(n) ? ' data-lbl title="더블클릭: 이름 바꾸기"' : ''}>${esc(n.label)}</span> <span class="${n.child && !n.id.startsWith('group:') ? `m3-badge k-${esc(n.kind)}` : 'b'}">${esc(n.badge)}</span></div>`).join('')}`;
 export function renderFeatureTree(el, M, S, h, lay) {
   let B = BOUND.get(el);
   if (!B) {
     B = { h, html: null }; BOUND.set(el, B);
     const fire = (e) => {
+      if (e.target.classList?.contains?.('m3-ren')) return;   // 이름 고치는 중
+      const t = e.target.closest?.('[data-tact]'); if (t?.dataset?.tact != null && el.contains(t)) { if (!t.disabled) B.h?.onTreeAct?.(t.dataset.tact); return; }   // ＋ 그룹 · 그룹 해제
+      const f = e.target.closest?.('[data-fold]'); if (f?.dataset?.fold != null && el.contains(f)) { e.stopPropagation?.(); B.h?.onFold?.(f.dataset.fold); return; }   // 접기·펼치기
       const y = e.target.closest?.('[data-eye]');   // 눈 단추: 선택하지 않고 보기만 전환
       if (y && el.contains(y)) { e.stopPropagation?.(); B.h?.onEye?.(y.dataset.eye, !!e.shiftKey); return; }
-      const n = e.target.closest?.('[data-node]'); if (n && el.contains(n)) B.h?.onNode?.(n.dataset.node);
+      const n = e.target.closest?.('[data-node]'); if (n && el.contains(n)) B.h?.onNode?.(n.dataset.node, { multi: !!(e.ctrlKey || e.metaKey || e.shiftKey) });   // Ctrl/Shift = 여러 부품 선택(그룹 만들기)
     };
     el.addEventListener('click', fire);
+    // 이름 더블클릭 → 그 자리 입력칸(Enter·바깥 클릭 = 저장, Esc = 취소) → h.onRename(id, 새 이름)
+    el.addEventListener('dblclick', (e) => {
+      const lb = e.target.closest?.('[data-lbl]'), n = lb?.closest('[data-node]'); if (!lb || !n || !el.contains(n)) return;
+      e.preventDefault(); B.editing = true;
+      const old = lb.textContent, inp = el.ownerDocument.createElement('input');
+      inp.className = 'm3-ren'; inp.value = old; inp.setAttribute('aria-label', '이름'); lb.replaceWith(inp); inp.focus(); inp.select();
+      let done = false;
+      const end = (save) => { if (done) return; done = true; B.editing = false; const v = inp.value.trim(); B.html = null; if (save && v && v !== old) B.h?.onRename?.(n.dataset.node, v); else B.h?.onRedraw?.(); };
+      inp.addEventListener('keydown', (k) => { k.stopPropagation(); if (k.key === 'Enter') end(true); else if (k.key === 'Escape') end(false); });
+      inp.addEventListener('blur', () => end(true));
+    });
     el.addEventListener('keydown', (e) => { if ((e.key !== 'Enter' && e.key !== ' ' && e.key !== 'Spacebar') || !e.target.closest?.('[data-node]')) return; e.preventDefault(); fire(e); });
   }
   B.h = h;
+  if (B.editing) return;   // 이름 고치는 중엔 다시 그리지 않음(입력칸 유지)
   const html = treeHtml(M, S, lay);
   if (html === B.html) return;
   B.html = html;

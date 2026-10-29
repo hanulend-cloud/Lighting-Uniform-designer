@@ -1,10 +1,10 @@
 // 3D 기구 모드 상태 저장소 — spec 2026-10-15 m3-cad-ui §3.
 // mspec = 저장 상태(spec.mech3d 객체 그대로), session = 세션 상태. update(tag, fn) → fn(mspec, session) 실행 → 구독자에게 tag 알림.
 // 저장(persist)은 저장 상태 태그일 때만, delay(ms) 디바운스.
-export const TAGS = ['material', 'light', 'observe', 'target', 'contacts', 'view', 'session'];
+export const TAGS = ['material', 'light', 'observe', 'target', 'contacts', 'view', 'session', 'meta'];   // meta = 이름·그룹(저장만, 계산 다시 안 함)
 export const PHYSICS = new Set(['material', 'light', 'observe', 'contacts']);        // 계산 다시 시작
 export const GEOM_CHECK = new Set(['material', 'light', 'observe', 'target']);       // 기하 점검 다시(target = 점검 기준값)
-const PERSIST = new Set(['material', 'light', 'observe', 'target', 'contacts']);
+const PERSIST = new Set(['material', 'light', 'observe', 'target', 'contacts', 'meta']);
 
 export function initialSession() {
   return {
@@ -20,6 +20,8 @@ export function initialSession() {
     hidden: [],          // 3D 에서 숨긴 기구 부품 번호(보기 전용 — 계산에는 그대로 포함)
     hideLeds: false,     // LED STEP 부품(PCB·LED) 숨김
     xfMsg: null,         // 크기·위치 조절이 간섭으로 제한됐을 때 { part, text }
+    multi: [],           // 피처 트리 여러 부품 선택(Ctrl/Shift+클릭 — 그룹 만들기)
+    fold: {},            // 트리 접힘 { parts | 그룹 id: true } — 광원으로 옮긴 부품 묶음 '_light' 는 기본 접힘
   };
 }
 
