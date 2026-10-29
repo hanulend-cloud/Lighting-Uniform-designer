@@ -4,6 +4,7 @@
 //   observe → 관측 라인 다시 인식 · 물리 태그 → 점진 계산 재시작 · 기하 점검 태그 → 점검 ①②③ · target → 판정만 다시. 모두 다시 그림.
 // 점진 계산 갱신(1초마다)은 store 알림 없이 결과 패널·상태 띠·색지도만 다시 그린다(입력 중 속성 패널이 다시 그려지지 않게).
 import { getMech3d, getLedMesh, setLedMesh, saveLedIDB, applyPartMods, redetectContacts } from '../../engine/mech3d/runtime.js';
+import { createMonitor } from './monitor.js';
 import { findLeds, supportPart, emitterFaceAway, autoLedGroup } from '../../engine/mech3d/led-detect.js';
 import { loadClear, saveClear, clearExportJson, clearImport, parseMaterialFile } from '../../model/material-io.js';
 import { setPartMaterial, setPartMaterialParam, CLEAR_BASE, applyClearEntry, clearEntryFromForm, editClearEntry, syncClearParts } from '../../engine/mech3d/materials.js';
@@ -129,13 +130,15 @@ function getView() {
   viewP ??= import('../mech3d-view.js').then(({ createMech3dView }) => {
     const v = createMech3dView($('#mech3d-canvas'), { onPick: (s) => { if (A) onPick(s); }, gizmo: $('#m3-axes') });
     const el = $('#m3-views');
-    el.innerHTML = VIEWS.map(([k, t]) => `<button data-view="${k}">${t}</button>`).join('') + '<button type="button" data-xray aria-pressed="false" title="전체 부품 반투명 — 속 구조를 봄">투시</button><button type="button" data-paths aria-pressed="false" title="광경로 화살표 켜기/끄기">광경로</button><button type="button" data-theme-toggle aria-pressed="false"></button>';
+    el.innerHTML = VIEWS.map(([k, t]) => `<button data-view="${k}">${t}</button>`).join('') + '<button type="button" data-xray aria-pressed="false" title="전체 부품 반투명 — 속 구조를 봄">투시</button><button type="button" data-paths aria-pressed="false" title="광경로 화살표 켜기/끄기">광경로</button><button type="button" data-mon aria-pressed="false" title="최적화 모니터 — 현재 설계 계산·설계 인자 현황·자동설계를 떠 있는 창으로 모아 계속 보기">📊 모니터</button><button type="button" data-theme-toggle aria-pressed="false"></button>';
     el.querySelectorAll('[data-view]').forEach((b) => { b.onclick = () => { v.setView(b.dataset.view); A?.store.update('view', (_, s) => { s.view = b.dataset.view; }); }; });
     // 3D 배경 밝게/어둡게 — 보는 사람별 편의 설정(새로고침해도 유지)
     const tb = el.querySelector('[data-theme-toggle]'), vp = $('#mech3d-canvas').parentElement;
     const applyTheme = (t) => { v.setTheme(t); vp.dataset.theme = t; const wr = $('#mech3d-wrap'); if (wr) wr.dataset.theme = t; tb.textContent = t === 'dark' ? '☀ 밝게' : '☾ 어둡게'; tb.setAttribute('aria-pressed', String(t === 'dark')); tb.title = '3D 배경 밝게/어둡게'; };
     el.querySelector('[data-xray]').onclick = () => setXrayOn(!xrayOn());
     el.querySelector('[data-paths]').onclick = () => setPathsOn(!pathsOn());
+    el.querySelector('[data-mon]').onclick = () => monitor?.toggle();
+    if (monitor?.isOpen()) { const b = el.querySelector('[data-mon]'); b.classList.add('on'); b.setAttribute('aria-pressed', 'true'); }
     let t0 = 'light'; try { t0 = localStorage.getItem('uds.m3.theme') === 'dark' ? 'dark' : 'light'; } catch {}
     applyTheme(t0);
     tb.onclick = () => { const t = v.theme() === 'dark' ? 'light' : 'dark'; try { localStorage.setItem('uds.m3.theme', t); } catch {} applyTheme(t); };
@@ -147,9 +150,12 @@ function getView() {
 // ---- 마운트 ----
 // 반사 소재표 행 = 반사 소재 DB(없으면 기본 소재표)
 const reflCat = () => catalogOf(A?.ctx.reflectDb?.() ?? null);
+let monitor = null;   // 최적화 모니터 — 화면(DOM) 하나에 하나, 기구가 바뀌어도 유지
 export async function mount(ctx) {
   mountSplitter(document.querySelector('.m3-main'));   // 좌·우 창 폭 끌어서 조절(한 번만 붙음)
   mountDockSplitter(document.querySelector('#m3-dock'), document.querySelector('#mech3d-wrap'));   // 아래 칸 높이 조절
+  // 최적화 모니터(떠 있는 창) — 계산 현황·설계 인자 현황·자동설계 칸을 옮겨 담음. 단추 = 3D 보기 막대 [📊 모니터]
+  monitor ??= createMonitor({ host: $('#mech3d-wrap'), items: [$('#m3-simdash'), $('#m3-factor'), $('#m3-dock')], onChange: (on) => { const b = document.querySelector('#m3-views [data-mon]'); if (b) { b.classList.toggle('on', on); b.setAttribute('aria-pressed', String(on)); } } });
   mountFacSplitter(document.querySelector('#m3-factor'), document.querySelector('.m3-left'));   // 왼쪽 맨 아래(부품 속성 밑) 설계 인자 현황 높이 조절
   if (A && A.ctx.mspec === ctx.mspec) { A.ctx = ctx; return; }   // 같은 기구 — 그대로
   unmount();

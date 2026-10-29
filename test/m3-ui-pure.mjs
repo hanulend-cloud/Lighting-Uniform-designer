@@ -371,3 +371,7 @@ done();
   const t = profileTxt([{ title: '길이 방향 1D', v: { curves: [{ name: '폭 평균', ys: [0.9, 1], raw: [0.8, 1] }, { name: 'B', ys: [NaN, 0.5] }], opt: { x0: 0, x1: 10, xl: 's (mm)' } } }, { title: '폭', v: null }]);
   const L = t.split('\n');
   console.log(L.includes('# 길이 방향 1D') && L.includes('s (mm)\t폭 평균\tB') && L.includes('2.5\t80.00\t') && L.includes('7.5\t100.00\t50.00') && !t.includes('# 폭') ? 'PASS 1D 프로파일 TXT(원자료 %, 없는 그림 생략)' : (process.exitCode = 1, `FAIL 1D TXT ${JSON.stringify(L)}`)); }
+{ const { clampRect } = await import('../src/ui/m3/monitor.js');
+  // 처음 = 오른쪽에 붙임, 화면 밖으로 끈 창 = 안으로, 너무 큰 창 = 화면 크기로, 너무 작은 창 = 최소 크기
+  const a = clampRect({ x: null, y: 90, w: 460, h: 560 }, 1600, 900), b = clampRect({ x: 5000, y: -50, w: 460, h: 560 }, 1600, 900), c = clampRect({ x: 0, y: 0, w: 5000, h: 5000 }, 1000, 700), d = clampRect({ x: 10, y: 10, w: 10, h: 10 }, 1000, 700);
+  console.log(a.x === 1124 && a.y === 90 && b.x === 1132 && b.y === 8 && c.w === 984 && c.h === 684 && d.w === 320 && d.h === 160 ? 'PASS 최적화 모니터 창 위치·크기 맞춤' : (process.exitCode = 1, `FAIL 모니터 ${JSON.stringify([a, b, c, d])}`)); }

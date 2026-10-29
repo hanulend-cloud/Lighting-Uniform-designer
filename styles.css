@@ -729,3 +729,20 @@ body.booting::after { content: "불러오는 중…"; position: fixed; left: 50%
 .m3-matdb .m3-tabs { margin: 4px 10px; }
 .m3-simcard .od-diag { margin: 3px 0; padding: 4px 6px; border-radius: 6px; background: #fff4e5; color: #8a4b00; font-size: 11.5px; line-height: 1.45; }
 #mech3d-wrap[data-theme="dark"] .m3-simcard .od-diag { background: #3a2a12; color: #ffc37a; }
+/* 최적화 모니터(떠 있는 창, monitor.js) — 현재 설계 계산 · 설계 인자 현황 · 자동설계·최적화를 옮겨 담음 */
+.m3-mon { position: fixed; z-index: 60; display: grid; grid-template-rows: auto minmax(0, 1fr); background: #fff; color: #20262f; border: 1px solid var(--m3-line); border-radius: 10px; box-shadow: 0 10px 34px rgba(16,24,40,.28); overflow: hidden; font-size: 13px; }
+.m3-mon[hidden] { display: none; }
+.m3-mon-hd { display: flex; align-items: center; gap: 6px; padding: 6px 8px 6px 12px; background: #f3f6fa; border-bottom: 1px solid var(--m3-line); cursor: move; user-select: none; touch-action: none; }
+.m3-mon-sp { flex: 1; }
+.m3-mon-hd button { border: 1px solid var(--m3-line); background: #fff; border-radius: 6px; padding: 3px 8px; cursor: pointer; font: inherit; font-size: 12px; }
+.m3-mon-body { overflow: auto; min-height: 0; display: flex; flex-direction: column; }
+.m3-mon-body > * { flex: none; border-left: 0 !important; }
+.m3-mon-body > * + * { border-top: 1px solid var(--m3-line); }
+.m3-mon .m3-faccard { height: auto; min-height: 220px; overflow: visible; }
+.m3-mon .m3-dock { height: auto; }
+.m3-mon .m3-dock .od-grid { grid-template-columns: 1fr; }
+.m3-mon .m3-fac-split, .m3-mon .m3-dock-split { display: none; }
+.m3-mon.min .m3-mon-body > :not(#m3-simdash) { display: none; }
+.m3-mon-rs { position: absolute; right: 0; bottom: 0; width: 16px; height: 16px; cursor: nwse-resize; touch-action: none; background: linear-gradient(135deg, transparent 50%, #9aa7b8 50%, #9aa7b8 60%, transparent 60%, transparent 72%, #9aa7b8 72%, #9aa7b8 82%, transparent 82%); }
+.m3-mon.min .m3-mon-rs { display: none; }
+#m3-views button[data-mon].on { background: var(--m3-accbg); border-color: var(--m3-acc); color: var(--m3-acc); }
