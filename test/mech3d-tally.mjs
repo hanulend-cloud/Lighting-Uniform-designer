@@ -1,5 +1,5 @@
 // 관측 집계: node test/mech3d-tally.mjs
-import { tallyGeometry, makeAccumulator, tallyStats, windowProfile } from '../src/engine/mech3d/tally.js';
+import { tallyGeometry, makeAccumulator, tallyStats, windowProfile, autoCells } from '../src/engine/mech3d/tally.js';
 import { recognizeLine, lightData, lineFromData } from '../src/engine/mech3d/line.js';
 import { rng } from '../src/engine/l2/mc-slab.js';
 import { runMC3D } from '../src/engine/mech3d/mc3d.js';
@@ -111,5 +111,11 @@ ok(S.counted === nV && S.noiseWarn === false, `집계 셀 ${S.counted}, 잡음 �
   const r = rng(7), B = 10, accs3 = Array.from({ length: B }, () => { const a = new Float64Array(G.ns * G.nw); for (let k = 0; k < a.length; k++) if (G.valid[k]) { let s = 0; for (let n = 0; n < 50; n++) s += r() < 0.5 ? 1 : 0; a[k] = (s / 50) * G.area[k]; } return a; });
   const S3 = tallyStats(G, accs3, obs);
   ok(S3.relNoise > 0 && S3.relNoiseCell > 0 && S3.relNoise < S3.relNoiseCell * 0.8, `잡음: 줄·열 ${(S3.relNoise * 100).toFixed(2)}% < 칸 ${(S3.relNoiseCell * 100).toFixed(2)}%`);
+}
+// 화질: 440×5.5 mm 관측면 — 저 100×8 칸(4.4×0.69 mm) · 중 200×12 · 고 400×16(1.1×0.34 mm), 짧은 면은 최소 칸에서 멈춤
+{
+  const c = (q) => autoCells(440, 5.5, q), lo = c('low'), mi = c('mid'), hi = c('high');
+  ok(Math.abs(lo.cellS - 4.4) < 1e-9 && Math.abs(lo.cellW - 5.5 / 8) < 1e-9 && Math.abs(mi.cellS - 2.2) < 1e-9 && Math.abs(hi.cellS - 1.1) < 1e-9 && Math.abs(hi.cellW - 0.34375) < 1e-9, `화질 칸: 저 ${lo.cellS}×${lo.cellW.toFixed(2)} · 중 ${mi.cellS}×${mi.cellW.toFixed(2)} · 고 ${hi.cellS}×${hi.cellW.toFixed(2)} mm`);
+  ok(autoCells(40, 2, 'high').cellS === 0.25 && autoCells(40, 2, 'high').cellW === 0.25 && autoCells(40, 2, undefined).cellS === 1, '짧은 면: 최소 칸 · 화질 없음 = 저화질(기존 저장 설계)');
 }
 done();

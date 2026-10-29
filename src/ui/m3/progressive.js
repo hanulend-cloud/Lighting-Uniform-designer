@@ -23,6 +23,7 @@ export function photometry(G, sum, ledger, { fluxLm = 0, nLeds = 0, cone = 90 } 
 // job = { sceneKey, scene:{ mechParts, mspec, ledParts, lineData, G, obs, emitters }, G, obs, nLeds, fluxLm } 또는 그것을 돌려주는 함수(준비 안 됨 = null)
 export function createProgressive({ ports, timers = globalThis, onUpdate = () => {}, opts = {} }) {
   const o = { ...PROG_DEFAULTS, ...opts };
+  const cap = () => job?.maxPhotons ?? o.maxPhotons;   // 계산 한도 — 작업(화질)별, 없으면 기본
   let gen = 0, state = 'idle', reason = null, error = null, job = null, pendingJob = null, debounce = null, ticker = null;
   let paths = {}, bins, binIssued, ledger, leak, nextChunk, issued, retry, doneChunks, photons, ignored, snap, early, nMin, nMax;
   let wantPaused = false, disposed = false;   // wantPaused: 대기·시작 중 일시정지 요청 → 시작될 때 적용
@@ -85,11 +86,11 @@ export function createProgressive({ ports, timers = globalThis, onUpdate = () =>
   async function pump(k, g) {
     busy[k] = g;
     try {
-      while (g === gen && state === 'running' && (retry.length > 0 || issued < o.maxPhotons) && !ports[k].off?.()) {   // off: GPU 사용 중 쉬는 CPU 포트
+      while (g === gen && state === 'running' && (retry.length > 0 || issued < cap()) && !ports[k].off?.()) {   // off: GPU 사용 중 쉬는 CPU 포트
         // 버려진(장면 불일치) 청크 번호를 먼저 다시 쓴다 — 시드가 빈틈없이 이어져야 runJob 과 같은 배치가 됨
         let c, N, b;
         if (retry.length > 0) ({ c, N, b } = retry.shift());
-        else { c = nextChunk++; N = Math.min(o.fixedChunk ? o.chunkN : size[k], o.maxPhotons - issued); issued += N; b = pickBin(c); binIssued[b] += N; }
+        else { c = nextChunk++; N = Math.min(o.fixedChunk ? o.chunkN : size[k], cap() - issued); issued += N; b = pickBin(c); binIssued[b] += N; }
         let r;
         const t0 = now();
         try { r = await send(ports[k], { type: 'chunk', sceneKey: job.sceneKey, seed: chunkSeed(o.seedBase, c), N }, o.chunkTimeoutMs); } catch (e) { fail(g, e); return; }
@@ -102,7 +103,7 @@ export function createProgressive({ ports, timers = globalThis, onUpdate = () =>
         adapt(k, N, Number.isFinite(r.ms) && r.ms > 0 ? r.ms : now() - t0, !!r.gpu);
         accumulate(b, N, r);
         if (state !== 'running') { snap = compute(); emit(); }                              // 일시정지·완료 뒤 도착한 청크
-        else if (photons >= o.maxPhotons) finish('max');
+        else if (photons >= cap()) finish('max');
         else if (!early && bins.filter(Boolean).length >= 2) { early = true; onTick(); }   // 첫 지표는 1초를 기다리지 않음
       }
     } finally { if (busy[k] === g) busy[k] = 0; }
@@ -164,7 +165,7 @@ export function createProgressive({ ports, timers = globalThis, onUpdate = () =>
       job = { ...job, obs: obs ? { ...job.obs, targetLen: obs.targetLen, targetWid: obs.targetWid } : job.obs, fluxLm: fluxLm ?? job.fluxLm };
       snap = compute();
       const rn = snap.stats?.relNoise;
-      if (state === 'done' && reason === 'converged' && rn != null && rn > o.targetNoise && photons < o.maxPhotons) {
+      if (state === 'done' && reason === 'converged' && rn != null && rn > o.targetNoise && photons < cap()) {
         state = 'running'; reason = null; startTick(); emit(); pumpAll(gen); return;
       }
     }

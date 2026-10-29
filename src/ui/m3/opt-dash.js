@@ -163,7 +163,7 @@ export function reachDiag(ledger, leak, names = []) {
   const abs = ((ledger.absSurf ?? 0) + (ledger.absVol ?? 0)) / E;
   const few = reach < 0.001;   // 0.1% 미만 = 설정 문제일 가능성 큼, 1% 미만 = 구조상 적음(계산이 오래 걸림)
   return { reach, html: `<b>관측면에 도착한 빛 ${(reach * 100).toFixed(few ? 3 : 2)}%</b> — ${few ? '거의 없음(설정 확인 필요)' : '매우 적음(계산이 오래 걸림)'}. 빛이 간 곳: ${top.join(' · ') || '–'}${abs > 0.05 ? ` · 흡수 ${(abs * 100).toFixed(0)}%` : ''}
-    ${few ? '' : '<div class="mut">관측면 쪽을 뺀 바깥면을 반사 처리(불투명 백색)하면 도착 빛이 늘어 빨라집니다</div>'}<div class="mut">확인: ① 관측면 화살표가 빛이 나오는 바깥쪽을 향하는지 ② LED 노란 원뿔(발광 방향)이 부품 쪽을 향하는지 ③ 관측면이 다른 부품에 덮여 있지 않은지 — 3D 의 주황 면 = 가장 많이 새는 곳</div>` };
+    ${few ? '' : '<div class="mut">관측면 쪽을 뺀 바깥면을 반사 처리(불투명 백색)하면 도착 빛이 늘어 빨라집니다</div>'}<div class="mut">확인: ① 관측면 화살표가 빛이 나오는 바깥쪽을 향하는지 ② LED 노란 점선(발광 방향)이 부품 쪽을 향하는지 ③ 관측면이 다른 부품에 덮여 있지 않은지 — 3D 의 주황 면 = 가장 많이 새는 곳</div>` };
 }
 // 오른쪽 맨 위 카드(항상 보임) — onCtl = 계산 제어 단추(일시정지·재개·다시 계산). 광경로 목록은 접는 칸
 export function createSimDash(el, { onCtl = null } = {}) {

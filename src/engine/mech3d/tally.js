@@ -5,11 +5,17 @@
 // 격자: s 칸 = obs.cellS ?? max(1, L/100), w 칸 = obs.cellW ?? max(0.5, 최대폭/8). obs.cell 이 있으면 둘 다 그 값(구버전 호환).
 // 셀 면적은 래스터 마스크를 걸으며 구한다(곡선·테이퍼·꺾인 영역에서 (s,w) 셀의 실제 면적은 ds·cw 가 아님).
 // w 격자 폭은 영역의 최대 국소 폭(래스터 거리장 최댓값) + 2칸. 유효 = 면적 ≥ 0.5·ds·cw.
+// 2D 분포·1D 프로파일 화질(집계 격자 칸 수) — 길이 칸 수 s · 폭 칸 수 w · 최소 칸(mm). 칸이 많을수록 칸당 광자가 줄어 같은 정확도까지 광자가 더 필요(중 ≈ 2배, 고 ≈ 4배)
+export const GRID_QUALITY = { low: { s: 100, w: 8, minS: 1, minW: 0.5 }, mid: { s: 200, w: 12, minS: 0.5, minW: 0.35 }, high: { s: 400, w: 16, minS: 0.25, minW: 0.25 } };
+export function autoCells(L, width, quality) {
+  const q = GRID_QUALITY[quality] ?? GRID_QUALITY.low;
+  return { cellS: Math.max(q.minS, L / q.s), cellW: Math.max(q.minW, width / q.w) };
+}
 export function tallyGeometry(line, obs) {
   const edge = obs.edgeExcl ?? 0.5, L = line.length, R = line.data.raster;
   let dtMax = 0; for (let k = 0; k < R.mask.length; k++) if (R.mask[k] && R.dt[k] > dtMax) dtMax = R.dt[k];
   const maxHalf = Math.max(line.width / 2, dtMax * R.cell);
-  const cellS = obs.cell ?? obs.cellS ?? Math.max(1, L / 100), cell = obs.cell ?? obs.cellW ?? Math.max(0.5, (2 * maxHalf) / 8);   // cell = w 칸
+  const ac = autoCells(L, 2 * maxHalf, obs.quality), cellS = obs.cell ?? obs.cellS ?? ac.cellS, cell = obs.cell ?? obs.cellW ?? ac.cellW;   // cell = w 칸
   const ns = Math.max(1, Math.round(L / cellS)), ds = L / ns;
   const nw = Math.ceil((2 * (maxHalf + 2 * cell)) / cell), w0 = -nw * cell / 2;
   const area = new Float64Array(ns * nw), pa = R.cell * R.cell, pixOk = new Uint8Array(R.nx * R.ny);

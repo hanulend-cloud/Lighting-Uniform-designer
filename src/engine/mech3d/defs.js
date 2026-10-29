@@ -12,7 +12,7 @@ export function defaultLight() {
   };
 }
 export function defaultObserve() {
-  return { faces: [], dir: null, cone: 90, cell: null, cellS: null, cellW: null, winS: null, edgeExcl: 0.5, targetLen: 0.8, targetWid: 0.8, targetLum: null, targetNoise: 0.02 };
+  return { faces: [], dir: null, cone: 90, cell: null, cellS: null, cellW: null, quality: 'low', winS: null, edgeExcl: 0.5, targetLen: 0.8, targetWid: 0.8, targetLum: null, targetNoise: 0.02 };
 }
 // 설계 점검 기준(spec 2026-10-15 §5): 최소 살두께 mm, 최소 도달률(0~1), 새는 빛 한도(0~1)
 export function defaultChecks() {

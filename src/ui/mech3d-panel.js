@@ -78,7 +78,7 @@ export function materialPickHtml(p, groups) {
 // 측정값 입력·피팅·DB 편집은 '소재 DB 관리'(관리자 모드) 창에서. 관리자 모드면 아래에 숫자 물성 칸(미세 조정)도 보임
 function basicMaterialHtml(p, dbList, catalog, sel = {}) {
   const mat = p.material, groups = materialGroups({ milky: dbList, clear: sel.clearList ?? [], refl: catalog });
-  const milky = mat.kind === 'milky' ? `<div class="m3-row"><label>확산 정도</label><input type="number" min="0" max="10" step="0.1" value="${esc(mat.milky)}" data-m3-mat="milky" aria-label="Milky 값"> <span class="mut">Milky · 높을수록 고르게 · 어두워짐</span></div>` : '';
+  const milky = mat.kind === 'milky' ? `<div class="m3-row"><label>확산 정도</label><input type="number" min="0" max="10" step="0.1" value="${esc(mat.milky)}" data-m3-mat="milky" aria-label="Milky 값"> <span class="mut">${+mat.milky > 0 ? '' : '<b>지금 투명</b> · '}Milky · 0 = 투명 · 높을수록 고르게 · 어두워짐</span></div>` : '';
   return `<div class="m3-row"><label>소재</label>${materialPickHtml(p, groups)}</div>${milky}
     <div class="m3-row mut m3-matsum">${esc(materialSummary(p, { milky: dbList, refl: catalog }))}</div>
     ${sel.admin ? `<div class="m3-admin"><div class="m3-sub">관리자 · 물성 직접 조정</div>${adminMaterialHtml(p, catalog)}</div>` : ''}`;

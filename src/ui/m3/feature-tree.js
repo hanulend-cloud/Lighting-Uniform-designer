@@ -6,7 +6,7 @@ export const esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '
 const LINE_KIND = { line: '직선', circle: '원', path: '곡선' };
 export function partBadge(p) {
   const m = p.material, lab = PART_KINDS[m?.kind]?.label ?? '?';
-  if (m.kind === 'milky') return `${lab} ${(+m.milky).toFixed(1)}`;
+  if (m.kind === 'milky') return +m.milky > 0 ? `${lab} ${(+m.milky).toFixed(1)}` : `${lab} 0 · 투명`;   // Milky 0 = 확산 없음(투명)
   if (m.kind === 'clear' || m.kind === 'whiteTrans') return `${lab} ${Math.round(m.T * 100)}%`;
   return p.finish?.R != null ? `${lab} ${Math.round(p.finish.R * 100)}%` : lab;
 }

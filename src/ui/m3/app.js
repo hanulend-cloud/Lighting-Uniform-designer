@@ -8,7 +8,7 @@ import { findLeds, supportPart, emitterFaceAway, autoLedGroup } from '../../engi
 import { loadClear, saveClear, clearExportJson, clearImport, parseMaterialFile } from '../../model/material-io.js';
 import { setPartMaterial, setPartMaterialParam, CLEAR_BASE, applyClearEntry, clearEntryFromForm, editClearEntry, syncClearParts } from '../../engine/mech3d/materials.js';
 import { lineFromData, lightData, obsDirection } from '../../engine/mech3d/line.js';
-import { tallyGeometry, tallyStats } from '../../engine/mech3d/tally.js';
+import { tallyGeometry, tallyStats, autoCells } from '../../engine/mech3d/tally.js';
 import { bounds } from '../../engine/mech3d/mesh.js';
 import { runGeomChecks, checkLeak } from '../../engine/mech3d/checks.js';
 import { createStore, PHYSICS, GEOM_CHECK } from './store.js';
@@ -170,7 +170,7 @@ export async function mount(ctx) {
   }
   const a = A = { ctx, store, pool, view: null, meshShown: null, lineKey: '', Gc: null, obsShown: null, checks: {}, markKey: '', timing: { start: 0, first: null, noise5: null } };
   a.prog = createProgressive({ ports: pool.ports(), onUpdate: onCalc, opts: { targetNoise: ctx.mspec.observe.targetNoise ?? 0.02 } });
-  a.results = createResultsPanel($('#m3-res'));
+  a.results = createResultsPanel($('#m3-res'), { onQuality: (v) => A.store.update('observe', (m) => { m.observe.quality = v; }) });
   a.optDash = createOptDash($('#m3-optdash'), { config: (k) => (A?.tileState ? tileConfigHtml(k, A.tileState) : { on: false, html: '' }), onSel: (k, v) => adSel(k, v), board: $('#m3-factor'), now: () => (A ? factorNow() : {}) }); a.simDash = createSimDash($('#m3-simdash'), { onCtl: () => cmdHandlers().onToggleCalc() });   // 아래 칸 = 자동설계 · 오른쪽 맨 위 = 현재 설계 계산(항상 보임, 계산 제어 단추)
   a.cmd = mountCommandBar($('#m3-cmd'), cmdHandlers());
   a.unsub = store.subscribe(onChange);
@@ -240,7 +240,7 @@ function afterLine() { restartCalc(); rerunGeomChecks(); A.store.update('session
 const tallyObs = (O, dir) => ({ ...O, dir, cell: null, cellS: O.cellS ?? null, cellW: O.cellW ?? null, winS: O.winS ?? null });
 // 집계 격자 — (라인, cellS, cellW, winS, 가장자리 제외) 별로 캐시(계산 ≈60ms). 색지도 덧그림도 같은 캐시에 (main.js:286-290)
 function geometry(obs) {
-  const S = A.store.session, key = JSON.stringify([obs.cellS, obs.cellW, obs.winS, obs.edgeExcl]);
+  const S = A.store.session, key = JSON.stringify([obs.cellS, obs.cellW, obs.quality, obs.winS, obs.edgeExcl]);
   if (!A.Gc || A.Gc.line !== S.line || A.Gc.key !== key) A.Gc = { line: S.line, key, G: tallyGeometry(S.line, obs), overlay: null };
   return A.Gc.G;
 }
@@ -261,7 +261,7 @@ export function jobFor(M, mechParts, { emitters = null, line = null, G = null, o
     ms.light.step = { ...ms.light.step, offset: [0, 0, 0], rot: [0, 0, 0], leds: lay.leds, pcb: lay.pcb, excluded: lay.excluded, emitters: JSON.parse(JSON.stringify(lay.emitters)), virtual: null };
   }
   return {
-    sceneKey: `s${++sceneSeq}`, G: g, obs: o, nLeds: em.length, fluxLm: M.light.spec.fluxLm ?? 0,
+    sceneKey: `s${++sceneSeq}`, G: g, obs: o, nLeds: em.length, fluxLm: M.light.spec.fluxLm ?? 0, maxPhotons: 1e8 * ({ mid: 2, high: 4 }[o.quality] ?? 1),   // 화질이 높을수록(칸 많음) 계산 한도도
     scene: { mechParts: L.rawParts(mechParts), mspec: ms, ledParts, lineData: lightData(ln), G: g, obs: o, emitters: em },
   };
 }
@@ -1343,7 +1343,7 @@ function lineInfo() {
   return M.observe.faces.length && !S.lineErr ? '라인 인식 중…' : '';
 }
 // 자동 격자 값(표시용 — tally.js 규칙과 같음. w 칸은 최대 국소 폭 대신 라인 폭으로 근사) (main.js:376)
-function autoGrid() { const l = A.store.session.line; return l ? { cellS: Math.max(1, l.length / 100), cellW: Math.max(0.5, l.width / 8), winS: Math.max(5, l.length / 10) } : null; }
+function autoGrid() { const l = A.store.session.line; return l ? { ...autoCells(l.length, l.width, A.store.mspec.observe.quality), winS: Math.max(5, l.length / 10) } : null; }
 function renderAll(tag = 'all') {
   const st = A.store, M = st.mspec, S = st.session;
   const LS = ledsNow(); A.ledTotal = LS.list.length;

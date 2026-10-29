@@ -257,11 +257,12 @@ function sizeCanvas(cv, ratio) {
   return true;
 }
 
-export function createResultsPanel(el) {
+const QUALITY_OPTS = [['low', '저화질'], ['mid', '중화질'], ['high', '고화질']];   // 칸 수 100×8 · 200×12 · 400×16 — 높을수록 계산 오래(중 ≈2배 · 고 ≈4배 광자)
+export function createResultsPanel(el, { onQuality = null } = {}) {
   const gaugeHtml = (k) => `<div class="m3-gauge" data-r="${k}"><div class="f"></div><div class="tg"></div></div>`;
   el.innerHTML = `
     <div class="m3-msg" data-r="msg" hidden></div>
-    <div class="m3-blk"><div class="m3-t">2D 광량 분포 (관측면 펼침) <span><span data-r="mapsub"></span> <button type="button" class="m3-zoom" data-zoom="map" title="큰 창으로 보기" aria-label="2D 광량 분포 확대">⤢</button></span></div>
+    <div class="m3-blk"><div class="m3-t">2D 광량 분포 (관측면 펼침) <span><span data-r="mapsub"></span> <select data-r="quality" title="2D 분포·1D 프로파일 해상도 — 저 100×8칸(빠름) · 중 200×12칸(광자 ≈2배) · 고 400×16칸(광자 ≈4배)" aria-label="분포 화질">${QUALITY_OPTS.map(([v, t]) => `<option value="${v}">${t}</option>`).join('')}</select> <button type="button" class="m3-zoom" data-zoom="map" title="큰 창으로 보기" aria-label="2D 광량 분포 확대">⤢</button></span></div>
       <div class="m3-withm"><canvas class="m3-g" data-r="map" width="600" height="200"></canvas>
         <div class="m3-m"><div class="l">평균 광량</div><div class="v" data-r="avg">–</div><div class="s" data-r="avgs"></div>${gaugeHtml('avgg')}
           <div class="l" style="margin-top:6px">광 효율</div><div class="v sm" data-r="eff">–</div><div class="s">관측면 원뿔 안 / LED 총 방출</div></div></div></div>
@@ -274,6 +275,7 @@ export function createResultsPanel(el) {
   const q = (k) => el.querySelector(`[data-r="${k}"]`);
   const RATIO = { map: 2.6, prof: 2.6, wprof: 3.2 };   // 눈금·색 막대·읽기가 들어가도록 높게
   wireHover(q('prof')); wireHover(q('wprof')); wireMapHover(q('map'));
+  q('quality').onchange = (e) => onQuality?.(e.target.value);
   // 큰 창(⤢) — 같은 그림을 화면 크기로. 계산이 이어지면 같이 갱신 · 2D 는 [실제 비율] 전환 · Esc·바깥 클릭·닫기
   const VIEW = { map: null, prof: null, wprof: null }, TITLE = { map: '2D 광량 분포 (관측면 펼침)', prof: '길이 방향 1D 프로파일', wprof: '폭 방향 1D 프로파일' };
   let big = null;
@@ -326,6 +328,7 @@ export function createResultsPanel(el) {
   function update(args) {
     last = args;
     const { snap, observe, message } = args, st = snap?.stats, G = snap?.G;
+    if (observe && document.activeElement !== q('quality')) q('quality').value = observe.quality ?? 'low';
     el.querySelectorAll('.m3-blk').forEach((b) => b.classList.toggle('dim', !st || !!st.empty));
     if (!st || st.empty || !G) { clear(message); return; }
     q('msg').hidden = !message; q('msg').textContent = message || '';
