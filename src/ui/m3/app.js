@@ -465,17 +465,18 @@ function renderAuto() {
   const el = $('#m3-auto'), st = adState();
   el.hidden = false;   // 닫혀 있어도 한 줄 머리는 늘 보인다(메뉴가 사라진 것처럼 보이지 않게)
   $('#m3-dock')?.classList.toggle('collapsed', !st.open);   // 접으면 아래 칸 = 한 줄(대시보드 숨김)
-  if (!st.open) {
-    el.innerHTML = '<button type="button" class="m3-ad-collapsed" data-ad="open" aria-expanded="false">✨ 자동설계 · 최적화 <span class="mut">— 펼치기 ▴</span></button>';
-    el.querySelector('[data-ad="open"]').onclick = () => { adSetOpen(true); };
-    return;
-  }
   const M = A.store.mspec, avail = stageAvailability(M, adInfo());
   if (!st.running && !avail.shape.parts?.includes(st.sel.shapePart)) st.sel.shapePart = avail.shape.ok ? avail.shape.parts[0] : -1;   // 부품 소재·형상이 바뀌어 대상이 빠지면 첫 후보로
   if (!st.running && !avail.housing.parts?.includes(st.sel.housingPart)) { const k = defaultHousingPart(M, adInfo().boxes); st.sel.housingPart = avail.housing.ok ? (avail.housing.parts.includes(k) ? k : avail.housing.parts[0]) : -1; }   // ④ 기본 = 관측 부품을 감싸는 가장 큰 불투명 부품
   const mp = st.running ? st.milkyPart : adMilkyPart(M, avail), sel = { ...st.sel, milkyMax: st.sel.milkyMax ?? capDefault(st.sel, avail, mp != null ? M.parts[mp].material.milky : 0) };
   const hm = st.sel.housingPart >= 0 ? reflCat().find((e) => !e.special && e.id === M.parts[st.sel.housingPart]?.reflMaterial) : null;   // ④ 대상 반사 소재
   A.tileState = { avail, sel, running: st.running, names: M.parts.map((p) => p.name), milkyPart: mp, housingMat: hm ? { name: hm.name, max: hm.max } : null };
+  if (!st.open) {   // 설정(tileState)은 위에서 먼저 — 설계 인자 현황 줄 체크가 접힘과 무관하게 보이게
+    el.innerHTML = '<button type="button" class="m3-ad-collapsed" data-ad="open" aria-expanded="false">✨ 자동설계 · 최적화 <span class="mut">— 펼치기 ▴</span></button>';
+    el.querySelector('[data-ad="open"]').onclick = () => { adSetOpen(true); };
+    A.optDash?.refresh();   // 접혀 있어도 설계 인자 현황의 체크 상자는 갱신
+    return;
+  }
   A.optDash?.refresh();
   renderAutoPanel(el, { avail, sel, running: st.running, result: st.result, resultOpen: !!st.resultOpen, names: M.parts.map((p) => p.name), canRevert: !!st.undo, applied: st.undo ? st.applied ?? null : null, noLine: !A.store.session.line, milkyPart: mp, housingMat: hm ? { name: hm.name, max: hm.max } : null, catalog: reflCat() }, {
     onSel: (k, v) => adSel(k, v),

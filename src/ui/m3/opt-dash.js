@@ -27,15 +27,17 @@ export function evalSparkSvg(evals, tgLen, tgWid, bestIdx = -1, w = 220, h = 70)
 // 그래프 1개에 인자 3개: 시험 순서대로 후보의 길이 U(실선)·폭 U(점선)를 인자 색으로 · 목표선(빨강) · 지금 설계(회색) · 최고 후보(노란 원)
 // 아래 인자별 한 줄(상태 · 지금 → 최고). 그래프는 .fb-plot 자리의 실제 크기로 factorChartSvg 가 그림(스크롤 없이 칸에 맞춤)
 const FB_COL = { milky: '#3b82f6', position: '#f59e0b', shape: '#a855f7' };
-export function factorBoardHtml(S, nw = {}) {
+// cfg(k) → { on, box(체크 상자), opt(설정 html), why } — 줄 앞에서 바로 켜고 끔(2026-10-29, 최적화 타일에서 옮김). 없으면 표시만
+export function factorBoardHtml(S, nw = {}, cfg = null) {
   const tl = S?.tgLen ?? nw.tgLen, tw = S?.tgWid ?? nw.tgWid;
   const row = (k, name, nowTxt) => {
-    const t = S?.tiles?.[k], on = t ? t.status !== 'off' : !!nw.on?.[k];
+    const c = cfg?.(k), t = S?.tiles?.[k], on = c ? !!c.on : t ? t.status !== 'off' : !!nw.on?.[k];
     const ev = (t?.evals ?? []).filter((e) => e.ok !== false && Number.isFinite(e.Ulen)); let b = null;
     for (const e of ev) if (!b || scoreOf(e, tl, tw) > scoreOf(b, tl, tw)) b = e;
-    const chip = t ? { off: '미사용', wait: '대기', run: `진행 ${Math.round(t.frac * 100)}%`, done: '완료' }[t.status] : on ? '켜짐' : '꺼짐';
+    const chip = t && t.status !== 'off' ? { wait: '대기', run: `진행 ${Math.round(t.frac * 100)}%`, done: '완료' }[t.status] : on ? '켜짐' : '꺼짐';
     const txt = `지금 ${nowTxt}${b ? ` → ${b.label} (${f2(b.Ulen)}/${f2(b.Uwid)})` : ''}`;
-    return `<div class="fb-row${on ? '' : ' fb-off'}" title="${esc(txt)}"><i class="fb-dot" style="background:${FB_COL[k]}"></i><b>${name}</b><span class="od-chip">${chip}</span><span class="fb-val"><span class="mut">지금</span> ${esc(nowTxt)}${b ? ` → <b>${esc(b.label)}</b> <span class="mut">(${f2(b.Ulen)}/${f2(b.Uwid)})</span>` : ''}</span></div>`;
+    const box = c?.box ? `<label class="fb-sw" title="${esc(c.why || '최적화에 사용')}">${c.box}</label>` : '';
+    return `<div class="fb-row${on ? '' : ' fb-off'}" title="${esc(txt)}">${box}<i class="fb-dot" style="background:${FB_COL[k]}"></i><b>${name}</b><span class="od-chip">${chip}</span><span class="fb-val"><span class="mut">지금</span> ${esc(nowTxt)}${b ? ` → <b>${esc(b.label)}</b> <span class="mut">(${f2(b.Ulen)}/${f2(b.Uwid)})</span>` : ''}</span></div>${c?.on && c.opt ? `<div class="fb-opt">${c.opt}</div>` : ''}`;   // 켠 항목의 설정(상한·대상)
   };
   return `<div class="od-h">설계 인자 현황 <span class="mut">${Number.isFinite(nw.Ulen) ? `지금 ${f2(nw.Ulen)}/${f2(nw.Uwid)}` : ''}</span></div>
     <div class="od-legend">색 = 인자 · 실선 길이 U · 점선 폭 U <i class="od-kt"></i>목표 <i style="border-color:#8a96a8"></i>지금 <span style="color:#f0b400">○</span>최고</div>
@@ -69,16 +71,28 @@ export function factorChartSvg(S, nw = {}, W = 240, H = 100) {
   } else body += hl(tl, 'od-tg') + hl(tw, 'od-tg od-tg2') + hl(nw.Ulen, 'od-now') + `<text class="od-none" x="${(x0 + x1) / 2}" y="${(y0 + y1) / 2 + 4}" text-anchor="middle">자동설계를 실행하면 후보 균일도가 그려짐</text>`;
   return `<svg class="fb-chart" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}"><rect x="${x0}" y="${y0}" width="${x1 - x0}" height="${y1 - y0}" fill="none" stroke="#c7cfdb" stroke-width=".5"/>${body}<text class="od-ax" x="2" y="${y0 + 6}">${hi.toFixed(2)}</text><text class="od-ax" x="2" y="${y1}">${lo.toFixed(2)}</text></svg>`;
 }
+// 최적화 타일 전후 사양표(순수) — b0 = 실행 전 사양(factorNow), best = 그 항목 최고 후보 { label, Ulen, Uwid }. 바뀐 칸 강조 · 목표 통과 ✓/✕
+const SPEC_NOW = { milky: (b) => (Number.isFinite(b.milky) ? `Milky ${f2(b.milky)}` : '–'), position: (b) => b.leds ?? '–', shape: (b) => b.shape ?? '원래 형상' };
+export function beforeAfterHtml(k, b0, best, tl, tw, n = 0) {
+  if (!best) return '<div class="mut od-tx">쓸 수 있는 후보 없음</div>';
+  const pass = (v, t) => (Number.isFinite(v) && Number.isFinite(t) ? (v + 1e-9 >= t ? ' <b class="od-ok">✓</b>' : ' <b class="od-bad">✕</b>') : '');
+  const row = (name, a, b, extra = '') => `<tr><th>${name}</th><td>${a}</td><td class="${a !== b ? 'chg' : ''}">${b}${extra}</td></tr>`;
+  return `<table class="od-ba"><tr><th></th><th>전</th><th>후</th></tr>
+    ${row('사양', esc(SPEC_NOW[k]?.(b0) ?? '–'), esc(best.label))}
+    ${row('길이 U', f2(b0.Ulen), f2(best.Ulen), pass(best.Ulen, tl))}
+    ${row('폭 U', f2(b0.Uwid), f2(best.Uwid), pass(best.Uwid, tw))}</table><div class="mut od-tx">후보 ${n}개 중 최고 · 적용은 위 [적용]</div>`;
+}
 // 후보의 점수(목표 대비 여유 — 둘 다 있으면 작은 쪽)
 const scoreOf = (e, tl, tw) => (e.ok === false || !Number.isFinite(e.Ulen) ? -Infinity : Math.min(e.Ulen - tl, Number.isFinite(e.Uwid) && Number.isFinite(tw) ? e.Uwid - tw : Infinity));
 
 // h = { config(k) → { on, html }(타일 머리의 켜기 스위치·설정), onSel(key, value) } — 실행 전·후에는 타일에서 항목을 고르고, 실행 중에는 진행을 봄
 export function createOptDash(el, h = {}) {
   let S = null, raf = 0;
-  el.addEventListener('change', (e) => { const x = e.target.closest('[data-ad]'); if (!x || !h.onSel) return; const k = x.dataset.ad; h.onSel(k, x.type === 'checkbox' ? x.checked : x.tagName === 'SELECT' ? +x.value : x.value === '' ? NaN : +x.value); });
+  const onChange = (e) => { const x = e.target.closest('[data-ad]'); if (!x || !h.onSel) return; const k = x.dataset.ad; h.onSel(k, x.type === 'checkbox' ? x.checked : x.tagName === 'SELECT' ? +x.value : x.value === '' ? NaN : +x.value); };
+  el.addEventListener('change', onChange); h.board?.addEventListener('change', onChange);   // 켜기·설정 = 설계 인자 현황 줄
   const blank = () => Object.fromEntries(STAGES.map(([k]) => [k, { status: 'off', frac: 0, text: '', evals: [] }]));
   function reset({ stages = {}, tgLen, tgWid } = {}) {
-    S = { tiles: blank(), tgLen, tgWid, t0: performance.now(), cur: null, note: '', seq: [] };
+    S = { tiles: blank(), tgLen, tgWid, t0: performance.now(), cur: null, note: '', seq: [], before: h.now?.() ?? {} };   // before = 실행 전 사양(타일 전후 비교)
     for (const [k] of STAGES) S.tiles[k].status = stages[k] ? 'wait' : 'off';
     draw();
   }
@@ -97,25 +111,26 @@ export function createOptDash(el, h = {}) {
   function finish(ok, text = '') { if (!S) return; for (const [k] of STAGES) if (S.tiles[k].status === 'run') { S.tiles[k].status = 'done'; S.tiles[k].frac = 1; } S.note = text; S.ended = ok; draw(); }
   function draw() { if (raf) return; raf = setTimeout(() => { raf = 0; render(); renderBoard(); }, 40); }   // setTimeout: 화면이 숨겨져도(다른 탭) 갱신 — rAF 는 멈춤
   // 높이 조절 손잡이(.m3-fac-split)는 남기고 내용만 바꿈
-  function renderBoard() { if (!h.board) return; let c = h.board.querySelector('.fb-body'); if (!c) { c = document.createElement('div'); c.className = 'fb-body'; h.board.appendChild(c); } const nw = h.now?.() ?? {}; c.innerHTML = factorBoardHtml(S, nw); const p = c.querySelector('.fb-plot'); if (p && p.clientWidth > 40 && p.clientHeight > 30) p.innerHTML = factorChartSvg(S, nw, p.clientWidth, p.clientHeight); }
+  function renderBoard() { if (!h.board) return; let c = h.board.querySelector('.fb-body'); if (!c) { c = document.createElement('div'); c.className = 'fb-body'; h.board.appendChild(c); } const nw = h.now?.() ?? {}; c.innerHTML = factorBoardHtml(S, nw, h.config); const p = c.querySelector('.fb-plot'); if (p && p.clientWidth > 40 && p.clientHeight > 30) p.innerHTML = factorChartSvg(S, nw, p.clientWidth, p.clientHeight); }
   if (h.board && typeof ResizeObserver !== 'undefined') { let w0 = 0, h0 = 0; new ResizeObserver(() => { const b = h.board; if (b.clientWidth === w0 && b.clientHeight === h0) return; w0 = b.clientWidth; h0 = b.clientHeight; renderBoard(); }).observe(h.board); }   // 칸 크기가 바뀌면 그래프를 그 크기로 다시
   function render() {
     const idle = !S || S.ended != null || S.stopped;
-    const head = !S ? `<div class="od-h">최적화 항목 <span class="mut">바꿀 항목을 켜고 [▶ 실행] — 실행하면 같은 타일에 진행·값 변화가 실시간으로 보입니다</span></div>` : '';
-    if (!S) { el.innerHTML = `${head}<div class="od-grid">${STAGES.map(([k, name]) => { const c = h.config?.(k) ?? { on: false, html: '' }; return `<div class="od-tile ${c.on ? 'od-sel' : 'od-off'}"><div class="od-th"><b>${name}</b></div>${c.html}</div>`; }).join('')}</div>`; return; }
+    const head = !S ? `<div class="od-h">최적화 항목 <span class="mut">항목 켜기·설정 = 설계 인자 현황의 체크 · [▶ 실행]하면 타일마다 진행과 최적화 전후 사양이 나옵니다</span></div>` : '';
+    if (!S) { el.innerHTML = `${head}<div class="od-grid">${STAGES.map(([k, name]) => { const c = h.config?.(k) ?? { on: false }; return `<div class="od-tile ${c.on ? 'od-sel' : 'od-off'}"><div class="od-th"><b>${name}</b><span class="od-chip">${c.on ? '켜짐' : '꺼짐'}</span></div><div class="mut od-tx">${c.on ? '실행하면 여기에 전 → 후 사양' : '설계 인자 현황에서 체크하면 최적화에 사용'}</div></div>`; }).join('')}</div>`; return; }
     const sec = ((performance.now() - S.t0) / 1000) | 0, nEval = STAGES.reduce((a, [k]) => a + S.tiles[k].evals.length, 0);
     const tile = ([k, name]) => {
       const t = S.tiles[k], ev = t.evals;
       let bi = -1, bs = -Infinity; ev.forEach((e, i) => { const s = scoreOf(e, S.tgLen, S.tgWid); if (s > bs) { bs = s; bi = i; } });
       const last = ev[ev.length - 1], best = bi >= 0 ? ev[bi] : null;
       const chip = { off: '미사용', wait: '대기', run: `진행 ${Math.round(t.frac * 100)}%`, done: '완료' }[t.status];
-      const c = idle ? h.config?.(k) : null;   // 실행이 끝났으면 다시 고를 수 있게 스위치·설정을 같이
-      return `<div class="od-tile od-${t.status}${c?.on ? ' od-sel' : ''}"><div class="od-th"><b>${name}</b><span class="od-chip">${chip}</span></div>${c ? c.html : ''}
-        ${t.status === 'off' ? (c ? '' : '<div class="mut od-off">이번 실행에서 쓰지 않음</div>') : `
+      // 끝난 타일 = 최적화 전 → 후 사양(사양 · 길이 U · 폭 U), 진행 중 = 시험·최고·진행 막대. 켜기·설정은 설계 인자 현황에서
+      const done = t.status === 'done' || (idle && t.status !== 'off');
+      return `<div class="od-tile od-${t.status}"><div class="od-th"><b>${name}</b><span class="od-chip">${chip}</span></div>
+        ${t.status === 'off' ? '<div class="mut od-off">이번 실행에서 쓰지 않음</div>' : done ? beforeAfterHtml(k, S.before ?? {}, best, S.tgLen, S.tgWid, ev.length) : `
         <div class="od-row"><span class="mut">시험</span> ${last ? `${esc(last.label)} → ${f2(last.Ulen)}/${f2(last.Uwid)}${last.ok === false ? ` <span class="od-bad">${esc(last.why ?? '탈락')}</span>` : ''}` : '<span class="mut">–</span>'}</div>
         <div class="od-row"><span class="mut">최고</span> ${best ? `<b>${esc(best.label)}</b> → <b class="${bs >= 0 ? 'od-ok' : ''}">${f2(best.Ulen)}/${f2(best.Uwid)}</b>` : '<span class="mut">–</span>'} <span class="mut">· 후보 ${ev.length}개</span></div>
         ${evalSparkSvg(ev, S.tgLen, S.tgWid, bi)}
-        <div class="od-bar"><i style="width:${Math.round((t.status === 'done' ? 1 : t.frac) * 100)}%"></i></div><div class="od-tx mut">${esc(t.text)}</div>`}</div>`;
+        <div class="od-bar"><i style="width:${Math.round(t.frac * 100)}%"></i></div><div class="od-tx mut">${esc(t.text)}</div>`}</div>`;
     };
     el.innerHTML = `<div class="od-h">최적화 진행현황 <span class="mut">${S.ended == null ? `진행 ${sec}초` : S.ended ? '완료 — 목표 통과' : '완료 — 목표 미달'} · 시험한 후보 ${nEval}개 · 값 = 길이 U / 폭 U · 목표 ${f2(S.tgLen)}/${f2(S.tgWid)}</span>${S.verify && Number.isFinite(S.verify.Ulen) ? ` <span class="od-note">정밀 계산 ${esc(S.verify.label)} → ${f2(S.verify.Ulen)}/${f2(S.verify.Uwid)}</span>` : ''}${S.note ? ` <span class="od-note">${esc(S.note)}</span>` : ''}</div>
       <div class="od-legend"><i class="od-k1"></i>길이 U <i class="od-k2"></i>폭 U <i class="od-kt"></i>목표 <i class="od-kb"></i>최고</div>

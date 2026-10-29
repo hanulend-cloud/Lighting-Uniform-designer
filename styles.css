@@ -746,3 +746,13 @@ body.booting::after { content: "불러오는 중…"; position: fixed; left: 50%
 .m3-mon-rs { position: absolute; right: 0; bottom: 0; width: 16px; height: 16px; cursor: nwse-resize; touch-action: none; background: linear-gradient(135deg, transparent 50%, #9aa7b8 50%, #9aa7b8 60%, transparent 60%, transparent 72%, #9aa7b8 72%, #9aa7b8 82%, transparent 82%); }
 .m3-mon.min .m3-mon-rs { display: none; }
 #m3-views button[data-mon].on { background: var(--m3-accbg); border-color: var(--m3-acc); color: var(--m3-acc); }
+/* 설계 인자 현황 줄 앞 체크(최적화 사용) · 켠 항목 설정 줄 · 최적화 타일 전후 사양표 */
+.fb-sw { display: inline-flex; align-items: center; margin-right: 2px; cursor: pointer; }
+.fb-sw input { margin: 0; cursor: pointer; }
+.fb-opt { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: center; padding: 0 0 3px 22px; font-size: 11.5px; }
+.fb-opt .od-opt { margin: 0; }
+.fb-opt input[type="number"] { width: 52px; }
+.od-ba { width: 100%; border-collapse: collapse; font-size: 12px; margin: 2px 0; }
+.od-ba th, .od-ba td { padding: 2px 4px; text-align: left; border-bottom: 1px solid var(--m3-line); }
+.od-ba th { color: var(--m3-mut); font-weight: 500; white-space: nowrap; }
+.od-ba td.chg { color: var(--m3-acc); font-weight: 600; }

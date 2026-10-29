@@ -110,8 +110,7 @@ ok(judgeText(0.8004, 0.8009).cls === 'ok' && judgeText(0.7999, 0.8).cls === 'bad
   const a = { milky: { ok: true }, leds: { ok: true }, shape: { ok: false } };
   ok(capDefault({ milky: true }, a, 3) === 9.9 && capDefault({ milky: true, leds: true }, a, 3) === 5 && capDefault({ milky: true, leds: true }, a, 6) === 6 && capDefault({ milky: true, leds: true }, { ...a, leds: { ok: false } }, 3) === 9.9, 'Milky 상한 기본: ① 만 9.9 · ② 함께 5');
   const h1 = card({ avail: a, sel: { milky: true }, running: null }), h2 = card({ avail: a, sel: { milky: true, leds: true }, running: null });
-  ok(h1.includes('value="9.9" data-ad="milkyMax"') && h1.includes('Milky 상한'), '카드: ① 만 → 상한 9.9');
-  ok(h2.includes('value="5" data-ad="milkyMax"'), '카드: ② 함께 → 상한 5'); }
+  ok(!h1.includes('data-ad="milkyMax"') && !h2.includes('data-ad="milkyMax"'), '카드: Milky 상한 입력칸 없음(상한 = 자동)'); }
 // ④ 보완 계산 후보: 현재보다 높은 등급(gradeOf) 중 가장 낮은 것 · 최고 등급이면 null
 ok(nextFinish({ kind: 'whiteDiffuse', R: 0.85 })?.R === 0.95 && nextFinish({ kind: 'whiteDiffuse', R: 0.85 }).kind === 'whiteDiffuse' && nextFinish({ kind: 'whiteDiffuse', R: 0.9 })?.R === 0.97
   && nextFinish({ kind: 'metal', R: 0.88 })?.R === 0.95 && nextFinish({ kind: 'whiteDiffuse', R: 0.97 }) === null && nextFinish(null)?.R === 0.85 && nextFinish({ kind: 'gloss' })?.R === 0.85, '④ 보완 안내: 같은 종류 +0.10 이상 최저(백색 85→95, 90→97) · 최고면 없음');
@@ -126,9 +125,9 @@ ok(clampCap(12) === 9.9 && clampCap(0.1) === 0.5 && clampCap(3) === 3 && clampCa
   ok((s.match(/<polyline/g) ?? []).length === 2 && s.includes('<svg') && profileSvg(null, [1]) === '' && profileSvg([], [1]) === '', '길이 프로파일 SVG: 선 2개 · 없으면 생략');
   const base = { parts: [{ material: { kind: 'milky' } }], light: { kind: 'manual' }, observe: { faces: [] } }, a = stageAvailability(base, { non25: [0] });
   const run = card({ avail: a, sel: { milky: true, shape: true, shapePart: 0 }, running: { frac: 0.4, text: 'x' }, names: ['LGP'], milkyPart: 0 });
-  ok(/data-ad="milky" checked disabled/.test(run) && /data-ad="milkyMax"[^>]*disabled/.test(run) && /data-ad="shapePart"[^>]*disabled/.test(run) && /role="progressbar"[^>]*aria-valuenow="40"/.test(run) && run.includes('대상: LGP'), '실행 중: 입력 비활성 · 진행 막대 aria · ① 대상 부품');
+  ok(/data-ad="milky" checked disabled/.test(run) && /data-ad="shapePart"[^>]*disabled/.test(run) && /role="progressbar"[^>]*aria-valuenow="40"/.test(run) && run.includes('대상: LGP'), '실행 중: 입력 비활성 · 진행 막대 aria · ① 대상 부품');
   const nl = card({ avail: a, sel: { milky: true }, running: null, noLine: true });
-  ok(/data-ad="run" disabled title="관측 라인이 없음"/.test(nl) && /aria-label="Milky 상한"/.test(nl), '라인 없음 → 실행 비활성 · 상한 aria-label');
+  ok(/data-ad="run" disabled title="관측 라인이 없음"/.test(nl), '라인 없음 → 실행 비활성');
   const c = compareHtml({ cur: { count: 5, pitch: 0, milky: 3, Ulen: 0.6, Uwid: 0.7, eff: 0.5, shape: { dt: 0, h: 0.2, R: 3 }, profile: [1, 2] }, best: { count: 5, pitch: 0, milky: 3, Ulen: 0.8, Uwid: 0.7, eff: 0.5, profile: [2, 2] }, feasible: true, reason: '', shape: null });
   ok(c.includes('적용된 형상') && (c.match(/<polyline/g) ?? []).length === 2, '비교표: 적용된 형상 · 프로파일 SVG');
   const t1 = shapeText({ dt: 0.5, h: 0.4, R: 6, e: -0.3, c: 0.2 }), t2 = shapeText({ dt: 0, h: -0.25, R: 4.5, e: 0, c: -0.1 });
@@ -375,3 +374,12 @@ done();
   // 처음 = 오른쪽에 붙임, 화면 밖으로 끈 창 = 안으로, 너무 큰 창 = 화면 크기로, 너무 작은 창 = 최소 크기
   const a = clampRect({ x: null, y: 90, w: 460, h: 560 }, 1600, 900), b = clampRect({ x: 5000, y: -50, w: 460, h: 560 }, 1600, 900), c = clampRect({ x: 0, y: 0, w: 5000, h: 5000 }, 1000, 700), d = clampRect({ x: 10, y: 10, w: 10, h: 10 }, 1000, 700);
   console.log(a.x === 1124 && a.y === 90 && b.x === 1132 && b.y === 8 && c.w === 984 && c.h === 684 && d.w === 320 && d.h === 160 ? 'PASS 최적화 모니터 창 위치·크기 맞춤' : (process.exitCode = 1, `FAIL 모니터 ${JSON.stringify([a, b, c, d])}`)); }
+{ const { factorBoardHtml, beforeAfterHtml } = await import('../src/ui/m3/opt-dash.js');
+  // 설계 인자 현황: 줄 앞 체크 상자(켜기·끄기), 켠 항목만 설정 줄, 못 쓰는 항목 = 비활성
+  const cfg = (k) => ({ milky: { on: true, box: '<input type="checkbox" data-ad="milky" checked>', opt: '<div class="od-opt">상한</div>', why: 'Milky' }, position: { on: false, box: '<input type="checkbox" data-ad="position">', opt: '', why: '' }, shape: { on: false, box: '<input type="checkbox" data-ad="shape" disabled>', opt: '', why: '확산 부품 없음' } })[k];
+  const h = factorBoardHtml(null, { milky: 2 }, cfg);
+  const okB = h.includes('data-ad="milky" checked') && h.includes('data-ad="position"') && h.includes('data-ad="shape" disabled') && (h.match(/class="fb-opt"/g) ?? []).length === 1 && h.includes('title="확산 부품 없음"');
+  // 최적화 타일 전후: 사양·길이 U·폭 U, 바뀐 칸 강조, 목표 통과 ✓/✕
+  const t = beforeAfterHtml('milky', { milky: 2, Ulen: 0.58, Uwid: 0.64 }, { label: 'Milky 3.50', Ulen: 0.82, Uwid: 0.71 }, 0.8, 0.8, 7);
+  const okT = t.includes('Milky 2.00') && t.includes('<td class="chg">Milky 3.50') && /0\.82 <b class="od-ok">✓/.test(t) && /0\.71 <b class="od-bad">✕/.test(t) && t.includes('후보 7개') && beforeAfterHtml('shape', {}, null).includes('후보 없음');
+  console.log(okB && okT ? 'PASS 설계 인자 현황 체크(켜기·설정) · 최적화 타일 전후 사양표' : (process.exitCode = 1, `FAIL 인자 체크/전후 ${okB} ${okT} ${t}`)); }

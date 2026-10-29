@@ -116,20 +116,21 @@ export function tileConfigHtml(k, { avail, sel, running, names = [], milkyPart =
   const pname = (i) => esc(names[i] ?? `부품 ${i + 1}`), dis = running ? ' disabled' : '';
   if (k === 'position') {   // ② 기구 위치 = LED 배치 + LED 높이(쓸 수 있는 것만)
     const okL = !!avail.leds?.ok, okH = !!avail.height?.ok;
-    if (!okL && !okH) return { on: false, html: `<label class="od-sw off"><input type="checkbox" data-ad="position" disabled> 사용 안 함</label><div class="od-why mut">${esc(avail.leds?.why ?? avail.height?.why ?? '')}</div>` };
-    const on = !!(sel.leds || sel.height);
-    return { on, html: `<label class="od-sw"><input type="checkbox" data-ad="position"${on ? ' checked' : ''}${dis}> ${on ? '사용' : '사용 안 함'}</label><div class="od-why mut">${okL ? 'LED 개수·피치·열' : ''}${okL && okH ? ' + ' : ''}${okH ? 'LED–커버 거리(높이)' : ''}${okL && avail.leds.note ? ` · ${esc(avail.leds.note)}` : ''}</div>` };
+    if (!okL && !okH) { const why = avail.leds?.why ?? avail.height?.why ?? ''; return { on: false, box: '<input type="checkbox" data-ad="position" disabled aria-label="② 기구 위치 사용">', opt: '', why, html: `<label class="od-sw off"><input type="checkbox" data-ad="position" disabled> 사용 안 함</label><div class="od-why mut">${esc(why)}</div>` }; }
+    const on = !!(sel.leds || sel.height), why = `${okL ? 'LED 개수·피치·열' : ''}${okL && okH ? ' + ' : ''}${okH ? 'LED–커버 거리(높이)' : ''}${okL && avail.leds.note ? ` · ${avail.leds.note}` : ''}`;
+    return { on, box: `<input type="checkbox" data-ad="position"${on ? ' checked' : ''}${dis} aria-label="② 기구 위치 사용">`, opt: '', why, html: `<label class="od-sw"><input type="checkbox" data-ad="position"${on ? ' checked' : ''}${dis}> ${on ? '사용' : '사용 안 함'}</label><div class="od-why mut">${esc(why)}</div>` };
   }
   const a = avail[k];
-  if (!a) return { on: false, html: '' };
-  if (!a.ok) return { on: false, html: `<label class="od-sw off"><input type="checkbox" data-ad="${k}" disabled> 사용 안 함</label><div class="od-why mut">${esc(a.why)}</div>` };
+  if (!a) return { on: false, box: '', opt: '', why: '', html: '' };
+  if (!a.ok) return { on: false, box: `<input type="checkbox" data-ad="${k}" disabled aria-label="${k} 사용">`, opt: '', why: a.why ?? '', html: `<label class="od-sw off"><input type="checkbox" data-ad="${k}" disabled> 사용 안 함</label><div class="od-why mut">${esc(a.why)}</div>` };
   const on = !!sel[k], sw = `<label class="od-sw"><input type="checkbox" data-ad="${k}"${on ? ' checked' : ''}${dis}> ${on ? '사용' : '사용 안 함'}</label>`;
   let opt = '';
-  if (on && k === 'milky') opt = `${milkyPart != null ? `<div class="od-opt mut">대상: ${pname(milkyPart)}</div>` : ''}<div class="od-opt">상한 <input type="number" min="0.5" max="9.9" step="0.5" value="${sel.milkyMax ?? capDefault(sel, avail)}" data-ad="milkyMax" aria-label="Milky 상한"${dis}></div>`;
+  if (on && k === 'milky') opt = milkyPart != null ? `<div class="od-opt mut">대상: ${pname(milkyPart)}</div>` : '';   // 상한 입력칸은 뺌(2026-10-29) — 상한 = capDefault 자동
   if (on && k === 'shape') opt = `<div class="od-opt">대상 <select data-ad="shapePart" aria-label="③ 대상 부품"${dis}>${avail.shape.parts.map((i) => `<option value="${i}"${i === sel.shapePart ? ' selected' : ''}>${pname(i)}</option>`).join('')}</select></div>`;
   if (on && k === 'housing') opt = `<div class="od-opt">대상 <select data-ad="housingPart" aria-label="④ 대상 부품"${dis}>${avail.housing.parts.map((i) => `<option value="${i}"${i === sel.housingPart ? ' selected' : ''}>${pname(i)}</option>`).join('')}</select> <span class="mut">${housingMat ? `${esc(housingMat.name)} · 최대 ${Math.round(housingMat.max * 100)}%` : '소재 미지정'}</span></div>
     <label class="od-opt"><input type="checkbox" data-ad="housingSpecial"${sel.housingSpecial ? ' checked' : ''}${dis}> 특수 표면처리 허용</label>`;
-  return { on, html: `${sw}<div class="od-why mut">${esc(TILE_NOTE[k] ?? '')}${a.note ? ` · ${esc(a.note)}` : ''}</div>${opt}` };
+  const why = `${TILE_NOTE[k] ?? ''}${a.note ? ` · ${a.note}` : ''}`;
+  return { on, box: `<input type="checkbox" data-ad="${k}"${on ? ' checked' : ''}${dis} aria-label="${k} 사용">`, opt, why, html: `${sw}<div class="od-why mut">${esc(why)}</div>${opt}` };
 }
 // 자동설계 한 줄(대시보드 맨 위) — 켠 항목 · [▶ 실행] · [되돌리기] · [접기]. 실행 중 = 진행 막대 · [중지]. 항목 고르기는 아래 타일에서
 // noLine = 관측 라인 없음(실행 불가)
@@ -137,7 +138,7 @@ export function autoCardHtml({ avail, sel, running, canRevert = false, noLine = 
   const on = AD_ITEMS.filter(([, , ks]) => ks.some((k) => sel[k] && avail[k]?.ok)).map(([, l]) => l.split(' ')[0]);
   const run = `<button type="button" class="m3-ad-run" data-ad="run"${!on.length || noLine ? ' disabled' : ''}${noLine ? ' title="관측 라인이 없음"' : ''}>▶ 실행</button>`;
   if (running) return `<div class="m3-ad-bar"><b>✨ 자동설계</b>${progHtml(running)}</div>`;
-  return `<div class="m3-ad-bar"><b>✨ 자동설계</b><span class="m3-ad-on">${on.length ? `켠 항목 <b>${on.join(' ')}</b>` : '<span class="mut">아래 타일에서 바꿀 항목을 켜세요</span>'}</span>${run}${canRevert ? '<button type="button" data-ad="revert" title="마지막 적용 전 값으로">↶ 되돌리기</button>' : ''}<span class="m3-ad-sp"></span><button type="button" data-ad="close" title="아래 칸 접기">접기 ▾</button></div>${appliedHtml(applied)}`;
+  return `<div class="m3-ad-bar"><b>✨ 자동설계</b><span class="m3-ad-on">${on.length ? `켠 항목 <b>${on.join(' ')}</b>` : '<span class="mut">설계 인자 현황에서 바꿀 항목을 체크하세요</span>'}</span>${run}${canRevert ? '<button type="button" data-ad="revert" title="마지막 적용 전 값으로">↶ 되돌리기</button>' : ''}<span class="m3-ad-sp"></span><button type="button" data-ad="close" title="아래 칸 접기">접기 ▾</button></div>${appliedHtml(applied)}`;
 }
 // 형상 문구 — 0 인 항 생략. e = 끝단 두께, c = 폭 가장자리 두께(+ 가장자리 두껍게 · − 얇게), h < 0 = 돌출
 const sg = (v) => `${v >= 0 ? '+' : '−'}${f2(Math.abs(v))}`, nz = (v) => Number.isFinite(v) && Math.abs(v) >= 5e-5;
