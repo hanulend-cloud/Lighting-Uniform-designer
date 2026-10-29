@@ -121,7 +121,8 @@ export function meshGap(A, B, maxDist = 20) {
 }
 
 // A 가 B 를 파고든 깊이(양방향 표본점 중 상대 솔리드 안 + 표면에서 가장 먼 것) — { depth, pos } | null(tol 이하)
-export function meshPenetration(A, B, tol = TOL) {
+// stopAt: 겹침 깊이가 이 값을 넘는 점을 찾으면 바로 반환(최대 깊이 대신 '넘는가' 만 — newInterference 용)
+export function meshPenetration(A, B, tol = TOL, stopAt = Infinity) {
   const ba = boxOf(A), bb = boxOf(B);
   if (boxBoxDist(ba, bb) > 0) return null;
   let out = null;
@@ -133,7 +134,7 @@ export function meshPenetration(A, B, tol = TOL) {
       if (boxDist(by, p) > 0) continue;
       const h = nearestOnMesh(Y, p, Infinity, cand);
       if (!h || h.d <= Math.max(tol, out?.depth ?? 0)) continue;   // 표면 근처(접촉면)·이미 더 깊은 것 있음
-      if (insidePart(Ys, p)) out = { depth: h.d, pos: p };
+      if (insidePart(Ys, p)) { out = { depth: h.d, pos: p }; if (h.d > stopAt) return out; }
     }
   }
   return out;
@@ -172,6 +173,18 @@ export function interferenceKeys(cand, others, ledParts = [], emitters = [], tol
     if (boxDist(cb, q) === 0 && insidePart(Cs, q)) out.set(`e:${k}`, 0);
   });
   return out;
+}
+
+// 새로 생긴 간섭의 첫 키(없으면 null) — before = interferenceKeys(원래 형상) 의 키→깊이. 새 키(any 겹침) 또는 기존보다 margin 넘게 깊어짐.
+// interferenceKeys 와 같은 판정이지만 찾는 즉시 멈춤(깊게 겹친 형상 후보에서 깊이를 끝까지 재느라 화면이 수십 초 멈추던 것)
+export function newInterference(cand, others, ledParts = [], before = new Map(), margin = 0.05, tol = TOL) {
+  const test = (k, m) => {
+    const lim = before.has(k) ? (before.get(k) ?? 0) + margin : 0, p = meshPenetration(cand, m, tol, lim);
+    return p && p.depth > lim ? k : null;
+  };
+  for (let j = 0; j < others.length; j++) { const m = others[j]; if (m && m !== cand) { const k = test(`p:${j}`, m); if (k) return k; } }
+  for (let j = 0; j < ledParts.length; j++) { const k = test(`l:${j}`, ledParts[j]); if (k) return k; }
+  return null;
 }
 
 const lerpXf = (a, b, t) => {

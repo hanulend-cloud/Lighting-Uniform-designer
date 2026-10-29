@@ -37,6 +37,12 @@ export const sameDesign = (a, b) => ['count', 'pitch', 'milky'].every((k) => (a?
 
 // 단계적 압축: schedule = [[남길 수(첫 단계는 전체), 광자 수, 후보당 시간 제한 ms?]…]. 각 단계 결과 점수로 다음 단계 후보를 줄임
 export const SHAPE_SCHEDULE = [[27, 6e4, 2500], [6, 2e5, 4000], [2, 6e5, 6000]];
+// ③ 평가 광자 예산 — 광 효율(관측면 도달 / 방출)이 낮으면 관측면에 닿는 광자가 적어 균일도(최저÷최고)가 잡음으로 크게 낮아짐
+// (효율 10%·6만 광자 → '변경 없음' 후보 길이 U 0.36 vs 정밀 0.60, 2026-10-29). 기준 효율 50% 대비 부족한 만큼(최대 10배) 광자·시간을 늘림
+export function shapeBudget(eff) {
+  const k = Number.isFinite(eff) && eff > 0 ? Math.min(10, Math.max(1, 0.5 / eff)) : 1;
+  return { k, screen: { N: Math.round(6e4 * k), maxMs: Math.round(2500 * Math.min(k, 4)) }, schedule: SHAPE_SCHEDULE.map(([keep, N, ms]) => [keep, Math.round(N * k), Math.round(ms * Math.min(k, 4))]) };
+}
 // 단계별 평가 후보 수 합(진행률 분모) — 실제로는 통과 후보가 적으면 더 적음
 export const halvingTotal = (n, schedule = SHAPE_SCHEDULE) => schedule.reduce((s, [keep], i) => { const k = i === 0 ? n : Math.min(keep, s.last); return { sum: s.sum + k, last: k }; }, { sum: 0, last: n }).sum;
 export async function halving(cands, evalFn, obs, schedule = SHAPE_SCHEDULE, cancelled = () => false) {

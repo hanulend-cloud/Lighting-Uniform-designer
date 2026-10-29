@@ -1,5 +1,5 @@
 // ③ LGP 형상: node test/mech3d-shape-opt.mjs
-import { frameHeights, deformPart, refineForBumps, bump, minThickness, shapeCandidates, isWatertight, refinedFor, heightsFor, memoStats, pathFromLine, swOnPath, endW, lineVarH, shapeVarRanges, gridCandidates, ledEll } from '../src/engine/mech3d/shape-opt.js';
+import { frameHeights, deformPart, refineForBumps, bump, minThickness, shapeCandidates, isWatertight, refinedFor, heightsFor, memoStats, pathFromLine, swOnPath, endW, lineVarH, shapeVarRanges, gridCandidates, ledEll, partFrame } from '../src/engine/mech3d/shape-opt.js';
 import { meshVolume } from '../src/engine/mech3d/mesh.js';
 import { boxMesh, ok, done } from './mech3d-util.mjs';
 
@@ -112,4 +112,17 @@ const xPath = { path: Array.from({ length: 41 }, (_, i) => [i, 5]), halfW: 5, cl
   const ms = performance.now() - t0;
   ok(ms < 1500 && Number.isFinite(acc), `swOnPath 10만 점 × 경로 2000점: ${ms.toFixed(0)} ms`); }
 ok(ledEll({ pitch: 7, count: 5, L: 100 }) === 7 && ledEll({ count: 5, L: 100 }) === 20 && ledEll({ ss: [30, 10, 20, 40], L: 100 }) === 10 && ledEll({ count: 1, ss: [50], L: 100 }) === 25, 'ℓ = LED 피치: 피치 · 균등 L/n · 발광점 평균 간격 · 1개 L/4');
+{ // 형상 기준 좌표 = 대상 부품 윗면 방향(2026-10-29) — 관측 좌표가 14.5° 기울어도(꺾인 확산판) 상자 도광판은 +z 기준이라
+  // 옆면 칸이 얇게 잡히지 않음(전에는 0.36 mm → '변경 없음' 후보까지 살두께 탈락). 이미 맞으면 같은 객체 그대로
+  const c = Math.cos(0.2531), s = Math.sin(0.2531), F = { u: [c, 0, s], v: [0, 1, 0], d: [-s, 0, c] }, box = boxMesh(8, 0, 6.5, 22, 400, 5.5);
+  const G = partFrame(box, F), Ht = heightsFor(box, F, 0.5), Hg = heightsFor(box, G, 0.5), z0 = { dt: 0, h: 0, R: 1, centers: [], e: 0, c: 0 };
+  ok(Math.abs(G.d[2] - 1) < 1e-9 && Math.abs(G.v[1] - 1) < 1e-9 && Math.abs(G.u[0] - 1) < 1e-9, `부품 기준 d = ${G.d.map((v) => v.toFixed(3))}`);
+  ok(minThickness(Ht, z0) < 0.8 && Math.abs(minThickness(Hg, z0) - 5.5) < 1e-3, `최소 두께: 관측 기준 ${minThickness(Ht, z0).toFixed(2)} → 부품 기준 ${minThickness(Hg, z0).toFixed(2)} mm`);
+  const F0 = { u: [1, 0, 0], v: [0, 1, 0], d: [0, 0, 1] };
+  ok(partFrame(box, F0) === F0, '이미 윗면 방향 = 같은 좌표 객체(기존 결과 그대로)');
+}
+{ const { shapeBudget, SHAPE_SCHEDULE } = await import('../src/engine/mech3d/autodesign.js');
+  const a = shapeBudget(0.107), b = shapeBudget(0.6), c = shapeBudget(0.01), d = shapeBudget(NaN);
+  ok(Math.abs(a.k - 4.673) < 1e-3 && a.screen.N === 280374 && a.schedule[2][1] === Math.round(6e5 * a.k) && a.schedule[0][2] === 10000 && b.k === 1 && b.screen.N === 6e4 && c.k === 10 && d.k === 1 && d.schedule[1][1] === SHAPE_SCHEDULE[1][1],
+    `③ 평가 광자 = 효율 반비례(효율 10.7% → ×${a.k.toFixed(2)}, 최대 ×10, 시간 ×4 까지)`); }
 done();

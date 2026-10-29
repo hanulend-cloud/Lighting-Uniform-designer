@@ -1,5 +1,5 @@
 // 부품 간격·간섭·제한: node test/mech3d-clearance.mjs
-import { closestOnTri, meshGap, meshPenetration, partClearance, interferenceKeys, limitXform, axisLimits, travelDistance } from '../src/engine/mech3d/clearance.js';
+import { closestOnTri, meshGap, meshPenetration, partClearance, interferenceKeys, limitXform, axisLimits, travelDistance, newInterference } from '../src/engine/mech3d/clearance.js';
 import { boxMesh, ok, done } from './mech3d-util.mjs';
 
 const near = (a, b, e = 1e-6) => Math.abs(a - b) < e;
@@ -46,4 +46,12 @@ const A = boxMesh(0, 0, 0, 10, 10, 2);
   ok(Math.abs(L.uniform - 1) < 0.02, `비율 고정: 바닥에 닿아 더 못 키움: ${L.uniform}`);
   const L2 = axisLimits(blk, { offset: [0, 0, 1], scale: [1, 1, 1] }, [floor, wl, wr]);
   ok(Math.abs(L2.size[2] - 4) < 0.1 && Math.abs(L2.uniform - 2) < 0.05, `1mm 띄우면 Z 최대 4 · 비율 고정 2배(높이 반 1mm = 바닥까지 1mm): ${L2.size[2]} ${L2.uniform}`); }
+{ // ③ 형상 후보 간섭 빠른 판정(2026-10-29: 깊게 겹친 후보의 깊이 재기가 화면을 29초 멈춤) — 새 겹침 또는 기존보다 0.05 mm 넘게 깊어지면 그 키, 아니면 null
+  const cand = boxMesh(0, 0, 0, 10, 10, 2), leds = [boxMesh(2, 2, -1, 1, 1, 1.5), boxMesh(6, 6, -3, 1, 1, 1)], wall = boxMesh(-1, 0, 0, 1.2, 10, 2);   // LED0 0.5 겹침 · LED1 떨어짐 · 벽 0.2 겹침
+  const before = interferenceKeys(cand, [wall], [], []);
+  ok(newInterference(cand, [wall], [], before) === null, '기존 겹침(벽)만 → 새 간섭 없음');
+  ok(newInterference(cand, [wall], leds, before) === 'l:0', '새로 LED 와 겹침 → l:0');
+  const deeper = boxMesh(-1, 0, 0, 1.6, 10, 2);   // 벽 겹침 0.2 → 0.6
+  ok(newInterference(cand, [deeper], [], before) === 'p:0' && newInterference(cand, [boxMesh(-1, 0, 0, 1.23, 10, 2)], [], before) === null, '기존보다 0.05 mm 넘게 깊어짐 = 간섭, 이내 = 아님');
+}
 done();

@@ -9,6 +9,24 @@ export const bump = (r) => (r >= 1 ? 0 : 0.5 * (1 + Math.cos(Math.PI * r)));
 export const toFrame = (F, p) => [dot(p, F.u), dot(p, F.v), dot(p, F.d)];
 export const fromFrame = (F, q) => [0, 1, 2].map((k) => q[0] * F.u[k] + q[1] * F.v[k] + q[2] * F.d[k]);
 
+// 형상 기준 좌표 — 대상 부품의 윗면(관측 쪽) 방향. 관측 좌표 F 의 d 쪽을 보는(n·d > minDot) 삼각형들의 면적 가중 법선 = d',
+// v' = F.v 를 d' 에 수직으로, u' = v' × d'(F 와 같은 손잡이). 관측면이 기울거나 꺾여 있어도(예: 꺾인 확산판 → 14.5°) 상자형 도광판의
+// 옆면이 비스듬히 잡혀 두께가 얇게 재지던 것(→ 모든 형상 후보 살두께 탈락, 2026-10-29) 방지. 이미 거의 같으면(d'·d > 0.9995) F 그대로
+export function partFrame(mesh, F, minDot = 0.5) {
+  const P = mesh.positions, T = mesh.triangles, n = [0, 0, 0];
+  for (let t = 0; t < T.length; t += 3) {
+    const a = T[t] * 3, b = T[t + 1] * 3, c = T[t + 2] * 3;
+    const ux = P[b] - P[a], uy = P[b + 1] - P[a + 1], uz = P[b + 2] - P[a + 2], vx = P[c] - P[a], vy = P[c + 1] - P[a + 1], vz = P[c + 2] - P[a + 2];
+    const cx = uy * vz - uz * vy, cy = uz * vx - ux * vz, cz = ux * vy - uy * vx, l = Math.hypot(cx, cy, cz);
+    if (l > 0 && (cx * F.d[0] + cy * F.d[1] + cz * F.d[2]) / l > minDot) { n[0] += cx; n[1] += cy; n[2] += cz; }   // 면적 가중(|cross| = 2·면적)
+  }
+  const nl = Math.hypot(...n); if (!(nl > 0)) return F;
+  const d = n.map((x) => x / nl); if (dot(d, F.d) > 0.9995) return F;
+  const pv = dot(F.v, d), v0 = F.v.map((x, k) => x - pv * d[k]), vl = Math.hypot(...v0); if (!(vl > 1e-9)) return F;
+  const v = v0.map((x) => x / vl), u = [v[1] * d[2] - v[2] * d[1], v[2] * d[0] - v[0] * d[2], v[0] * d[1] - v[1] * d[0]];
+  return { u, v, d };
+}
+
 // 관측 좌표 높이맵 — at(x,y) = { zt, zb } (마스크 밖이면 가장 가까운 칸). non25 = 비 2.5D 칸 비율
 export function frameHeights(mesh, F, cell = 0.5) {
   const P = mesh.positions, Q = new Float32Array(P.length);
