@@ -1,6 +1,5 @@
-// 상태 띠 — spec 2026-10-15 m3-cad-ui §2: 신뢰도(잡음 ±%, 진행 막대) · 광자 수 · 계산 상태 · 설계 점검 배지 4개(클릭 → 3D 표식 강조) · 알림 문구
+// 상태 띠 — 설계 점검 배지 4개(클릭 → 3D 표식 강조) · 알림 문구. 계산 진행(신뢰도·광자)은 '광분포 시뮬레이션' 카드·명령줄 4단계에만(2026-10-29: 두 곳에 있어 헷갈림)
 export const esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
-const STATE = { idle: '대기', pending: '변경 감지…', starting: '장면 준비…', running: '계산 중', paused: '일시정지', error: '오류' };
 // 색만으로 상태를 전하지 않는다: 상태 단어(스크린리더) + 작은 기호
 export const STATUS_WORD = { ok: '양호', warn: '경고', bad: '불량', na: '미계산' };
 export const STATUS_ICON = { ok: '✓', warn: '!', bad: '✕', na: '–' };
@@ -29,13 +28,11 @@ const setText = (n, v) => { if (n.textContent !== v) n.textContent = v; };
 const setAttr = (n, k, v) => { if (n.getAttribute(k) !== v) n.setAttribute(k, v); };
 const IDS = ['interference', 'reach', 'wall', 'leak'];
 function init(el) {
-  el.innerHTML = `<span class="m3-rel">신뢰도 <span class="m3-barw"><span class="m3-barf"></span></span>
-      <b data-s="rn"></b><span class="mut" data-s="info"></span></span>
-    <span class="mut m3-chkok" data-s="ok">✓ 설계 점검 이상 없음</span>
+  el.innerHTML = `<span class="mut m3-chkok" data-s="ok">✓ 설계 점검 이상 없음</span>
     ${IDS.map((id) => `<span class="m3-chk" role="button" tabindex="0" data-chk="${id}"><span class="m3-dot na"></span><span class="m3-ico" aria-hidden="true"></span><span data-t></span></span>`).join('')}
     <span class="m3-stxt" data-s="txt" hidden></span>`;
   const S = {
-    h: null, bar: el.querySelector('.m3-barf'), rn: el.querySelector('[data-s="rn"]'), info: el.querySelector('[data-s="info"]'), txt: el.querySelector('[data-s="txt"]'),
+    h: null, txt: el.querySelector('[data-s="txt"]'),
     chk: Object.fromEntries(IDS.map((id) => { const n = el.querySelector(`[data-chk="${id}"]`); return [id, { n, dot: n.querySelector('.m3-dot'), ico: n.querySelector('.m3-ico'), t: n.querySelector('[data-t]') }]; })),
   };
   const fire = (e) => { const n = e.target.closest?.('[data-chk]'); if (n && el.contains(n)) S.h?.onCheck?.(n.dataset.chk); };
@@ -48,13 +45,6 @@ function init(el) {
 export function renderStatusBar(el, d, h) {
   const S = STATE_BY_EL.get(el) ?? init(el);
   S.h = h;
-  const c = d.calc, rn = c?.stats?.relNoise, st = c?.state ?? 'idle';
-  const prog = Number.isFinite(rn) && rn > 0 ? Math.min(1, d.targetNoise / rn) : 0;
-  const stTxt = st === 'done' ? (c.reason === 'converged' ? '계산 완료' : '계산 한도 도달 — 정확도 미달') : STATE[st] ?? st;
-  const w = `${(prog * 100).toFixed(0)}%`;
-  if (S.bar.style.width !== w) S.bar.style.width = w;
-  setText(S.rn, Number.isFinite(rn) ? `±${(rn * 100).toFixed(1)}%` : '–');
-  setText(S.info, `목표 ±${(d.targetNoise * 100).toFixed(1)}% · 광자 ${(c?.photons ?? 0).toLocaleString()} · ${stTxt}`);
   for (const x of checkLabels(d.checks ?? {})) {
     const o = S.chk[x.id], on = d.focus === x.id, cls = `m3-chk${on ? ' on' : ''}`, show = x.st === 'warn' || x.st === 'bad';   // 문제일 때만 배지
     if (o.n.hidden !== !show) o.n.hidden = !show;
@@ -64,7 +54,7 @@ export function renderStatusBar(el, d, h) {
     setText(o.ico, statusIcon(x.st)); setText(o.t, x.text);
     setAttr(o.n, 'aria-label', checkAria(x)); setAttr(o.n, 'aria-pressed', on ? 'true' : 'false');
   }
-  const anyBad = checkLabels(d.checks ?? {}).some((x) => x.st === 'warn' || x.st === 'bad'), okN = S.ok ?? (S.ok = S.bar.closest('.m3-status')?.querySelector('[data-s="ok"]'));
+  const anyBad = checkLabels(d.checks ?? {}).some((x) => x.st === 'warn' || x.st === 'bad'), okN = S.ok ?? (S.ok = el.querySelector('[data-s="ok"]'));
   if (okN && okN.hidden !== anyBad) okN.hidden = anyBad;
   const tx = d.text ? String(d.text) : '';
   setText(S.txt, tx);

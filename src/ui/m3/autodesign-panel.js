@@ -1,4 +1,4 @@
-// 자동설계 카드 — spec P4 §3. 체크 5개(①~⑤) · ③·④ 대상 부품 · [실행]/[중지] · 진행 · 현재|최적 비교 · [적용][취소][되돌리기][STEP]
+// 기구 최적화 카드 — spec P4 §3. 체크 5개(①~⑤) · ③·④ 대상 부품 · [실행]/[중지] · 진행 · 현재|최적 비교 · [적용][취소][되돌리기][STEP]
 import { stepRefEmitter } from '../../engine/mech3d/virtual-leds.js';   // 가상 배치 기준 LED(엔진과 같은 규칙)
 import { setPartFinish } from '../../engine/mech3d/materials.js';
 import { FINISH_GRADES, gradeOf, DEFAULT_FINISH_CATALOG } from '../../engine/mech3d/housing-led.js';
@@ -105,11 +105,11 @@ export function applyFinish(M, f) {
 const ITEMS = [['milky', '① Milky 레벨'], ['leds', '② LED 개수·피치'], ['shape', '③ LGP 형상'], ['housing', '④ 케이스 면 처리'], ['height', '⑤ LED 높이(LED–커버 거리)']];
 const progHtml = (running) => {
   const pct = Math.round((running.frac ?? 0) * 100);
-  return `<div class="m3-ad-prog"><div class="bar" role="progressbar" aria-label="자동설계 진행" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${pct}"><i style="width:${pct}%"></i></div><span>${esc(running.text)}</span> <button type="button" data-ad="stop">중지</button></div>`;
+  return `<div class="m3-ad-prog"><div class="bar" role="progressbar" aria-label="기구 최적화 진행" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${pct}"><i style="width:${pct}%"></i></div><span>${esc(running.text)}</span> <button type="button" data-ad="stop">중지</button></div>`;
 };
 // 최적화 타일(가운데 칸)의 켜기 스위치·항목 설정(순수) — 고르는 곳 = 진행을 보는 곳(아래 칸 대시보드와 한 자리)
 // state = { avail, sel, running, names, milkyPart, housingMat } → { on, html }(html = 스위치 + 설정, 쓸 수 없으면 이유)
-// 화면의 자동설계 = 3 항목: ① Milky · ② 기구 위치(= 엔진 ② LED 배치 + ⑤ LED 높이) · ③ 기구 형상. 케이스 반사율(④)은 부품 속성에서 직접
+// 화면의 기구 최적화 = 3 항목: ① Milky · ② 기구 위치(= 엔진 ② LED 배치 + ⑤ LED 높이) · ③ 기구 형상. 케이스 반사율(④)은 부품 속성에서 직접
 export const AD_ITEMS = [['milky', '① Milky', ['milky']], ['position', '② 기구 위치', ['leds', 'height']], ['shape', '③ 기구 형상', ['shape']]];
 export const TILE_NOTE = { position: 'LED 개수·피치·열과 LED–커버 거리(높이)', milky: 'Milky 값을 바꿔 균일도 최고점을 찾음(밝기는 줄어듦)', leds: 'LED 개수·피치·열을 바꿈', shape: '도광판 아랫면 형상(두께·끝단·가장자리)', housing: '케이스 반사율(소재 상한 안)', height: 'LED–커버 거리' };
 export function tileConfigHtml(k, { avail, sel, running, names = [], milkyPart = null, housingMat = null }) {
@@ -132,13 +132,13 @@ export function tileConfigHtml(k, { avail, sel, running, names = [], milkyPart =
   const why = `${TILE_NOTE[k] ?? ''}${a.note ? ` · ${a.note}` : ''}`;
   return { on, box: `<input type="checkbox" data-ad="${k}"${on ? ' checked' : ''}${dis} aria-label="${k} 사용">`, opt, why, html: `${sw}<div class="od-why mut">${esc(why)}</div>${opt}` };
 }
-// 자동설계 한 줄(대시보드 맨 위) — 켠 항목 · [▶ 실행] · [되돌리기] · [접기]. 실행 중 = 진행 막대 · [중지]. 항목 고르기는 아래 타일에서
+// 기구 최적화 한 줄(대시보드 맨 위) — 켠 항목 · [▶ 실행] · [되돌리기] · [접기]. 실행 중 = 진행 막대 · [중지]. 항목 고르기는 아래 타일에서
 // noLine = 관측 라인 없음(실행 불가)
 export function autoCardHtml({ avail, sel, running, canRevert = false, noLine = false, applied = null }) {
   const on = AD_ITEMS.filter(([, , ks]) => ks.some((k) => sel[k] && avail[k]?.ok)).map(([, l]) => l.split(' ')[0]);
   const run = `<button type="button" class="m3-ad-run" data-ad="run"${!on.length || noLine ? ' disabled' : ''}${noLine ? ' title="관측 라인이 없음"' : ''}>▶ 실행</button>`;
-  if (running) return `<div class="m3-ad-bar"><b>✨ 자동설계</b>${progHtml(running)}</div>`;
-  return `<div class="m3-ad-bar"><b>✨ 자동설계</b><span class="m3-ad-on">${on.length ? `켠 항목 <b>${on.join(' ')}</b>` : '<span class="mut">설계 인자 현황에서 바꿀 항목을 체크하세요</span>'}</span>${run}${canRevert ? '<button type="button" data-ad="revert" title="마지막 적용 전 값으로">↶ 되돌리기</button>' : ''}<span class="m3-ad-sp"></span><button type="button" data-ad="close" title="아래 칸 접기">접기 ▾</button></div>${appliedHtml(applied)}`;
+  if (running) return `<div class="m3-ad-bar"><b><i class="m3-fl">5</i>기구 최적화</b>${progHtml(running)}</div>`;
+  return `<div class="m3-ad-bar"><b><i class="m3-fl">5</i>기구 최적화</b><span class="m3-ad-on">${on.length ? `켠 항목 <b>${on.join(' ')}</b>` : '<span class="mut">설계 인자 현황에서 바꿀 항목을 체크하세요</span>'}</span>${run}${canRevert ? '<button type="button" data-ad="revert" title="마지막 적용 전 값으로">↶ 되돌리기</button>' : ''}<span class="m3-ad-sp"></span><button type="button" data-ad="close" title="아래 칸 접기">접기 ▾</button></div>${appliedHtml(applied)}`;
 }
 // 형상 문구 — 0 인 항 생략. e = 끝단 두께, c = 폭 가장자리 두께(+ 가장자리 두껍게 · − 얇게), h < 0 = 돌출
 const sg = (v) => `${v >= 0 ? '+' : '−'}${f2(Math.abs(v))}`, nz = (v) => Number.isFinite(v) && Math.abs(v) >= 5e-5;
@@ -211,14 +211,14 @@ const altBtn = (r) => (r.unchanged && r.alt ? `<button type="button" data-ad="ap
 // 결과 한 줄(아래 칸 맨 위) — 판정 · 길이/폭 U 전→후 · [결과 보기] [적용] [취소]
 export function resultLineHtml(r) {
   const b = r.best, c = r.cur, tg = r.targets ?? {}, u = (k, t) => `${f2(c[k])}→<b>${f2(b[k])}</b>${passMark(b[k], t)}`;
-  return `<div class="m3-ad-bar"><b>✨ 자동설계 결과</b><span class="${r.unchanged ? 'mut' : r.feasible ? 'ok' : 'bad'}">${r.unchanged ? '현재안 유지' : r.feasible ? '목표 통과' : '목표 미달'}</span>
+  return `<div class="m3-ad-bar"><b>✨ 기구 최적화 결과</b><span class="${r.unchanged ? 'mut' : r.feasible ? 'ok' : 'bad'}">${r.unchanged ? '현재안 유지' : r.feasible ? '목표 통과' : '목표 미달'}</span>
     <span>길이 U ${u('Ulen', tg.len)} · 폭 U ${u('Uwid', tg.wid)}</span><button type="button" data-ad="view">결과 보기</button>
     <button type="button" data-ad="apply"${r.unchanged ? ' disabled title="현재안이 이미 최선(차이 없음)"' : r.clash > 0 ? ' disabled title="LED 몸체가 부품과 겹침"' : ''}>적용</button>${altBtn(r)}<button type="button" data-ad="cancel">취소</button></div>`;
 }
 // el 에 그리고 이벤트를 h 로 넘김. state = { avail, sel, running, result, resultOpen, … } — 결과가 있으면 한 줄 + (열림) 결과 창
 export function renderAutoPanel(el, state, h) {
   const r = state.result, full = r ? compareHtml({ ...r, canRevert: state.canRevert, ...(state.catalog ? { catalog: state.catalog } : {}) }) : '';
-  const html = r ? `${resultLineHtml(r)}${state.resultOpen ? `<div class="m3-rmodal" role="dialog" aria-modal="true" aria-label="자동설계 결과"><div class="m3-rmodal-in"><div class="m3-rmodal-hd"><b>자동설계 결과</b><span class="m3-ad-sp"></span><button type="button" data-ad="hide">닫기 (결과는 남음)</button></div>
+  const html = r ? `${resultLineHtml(r)}${state.resultOpen ? `<div class="m3-rmodal" role="dialog" aria-modal="true" aria-label="기구 최적화 결과"><div class="m3-rmodal-in"><div class="m3-rmodal-hd"><b>기구 최적화 결과</b><span class="m3-ad-sp"></span><button type="button" data-ad="hide">닫기 (결과는 남음)</button></div>
       <div class="m3-rverdict ${r.unchanged ? '' : r.feasible ? 'ok' : 'bad'}">${r.unchanged ? `현재 설계보다 나은 안을 찾지 못함 — 현재안 유지${r.alt ? ' (찾은 후보와 차이가 계산 잡음 수준 — 원하면 [그래도 적용])' : ''}` : r.feasible ? '✓ 목표 통과' : '✕ 목표 미달 — 가장 가까운 안'}</div>${full}</div></div>` : ''}` : autoCardHtml(state);
   const key = r ? html : autoCardHtml({ ...state, running: state.running ? { frac: 0, text: '' } : null });
   const bar = state.running && !r && el._adKey === key ? el.querySelector('.m3-ad-prog .bar') : null;

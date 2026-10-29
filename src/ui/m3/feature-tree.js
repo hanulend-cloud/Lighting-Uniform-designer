@@ -11,7 +11,7 @@ export function partBadge(p) {
   return p.finish?.R != null ? `${lab} ${Math.round(p.finish.R * 100)}%` : lab;
 }
 // M = spec.mech3d, S = store.session, lay = LED STEP 실제 배치(stepLayout 결과, 생략 = 모름) → [{ id, label, badge, child, kind, sel, eye? }]
-// 편집한 배치(STEP 에서 추가·삭제 = positions, 자동설계 균등 = count·pitch)를 그리지 못했으면(오류·메쉬 없음) 배지 '배치 편집 실패' · 개수 = 원래
+// 편집한 배치(STEP 에서 추가·삭제 = positions, 기구 최적화 균등 = count·pitch)를 그리지 못했으면(오류·메쉬 없음) 배지 '배치 편집 실패' · 개수 = 원래
 // eye: 보기 켜기/끄기 단추 — 'on' | 'off' (부품·LED 노드), 'all' (부품 머리: 숨긴 부품이 있을 때 "모두 보기")
 export function treeNodes(M, S, lay) {
   const L = M.light, O = M.observe, out = [], hid = new Set(S.hidden ?? []);

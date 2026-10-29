@@ -756,3 +756,15 @@ body.booting::after { content: "불러오는 중…"; position: fixed; left: 50%
 .od-ba th, .od-ba td { padding: 2px 4px; text-align: left; border-bottom: 1px solid var(--m3-line); }
 .od-ba th { color: var(--m3-mut); font-weight: 500; white-space: nowrap; }
 .od-ba td.chg { color: var(--m3-acc); font-weight: 600; }
+/* 명령줄 흐름 4 광분포 시뮬레이션 · 5 기구 최적화 — 상태 문구 색, '필요' 단계 강조 */
+.m3-cmd .m3-fs { font-size: 12px; margin-left: 2px; color: var(--m3-mut); }
+.m3-cmd .m3-fs.ok { color: #1f9d55; font-weight: 600; } .m3-cmd .m3-fs.bad { color: #d64545; font-weight: 600; } .m3-cmd .m3-fs.run { color: var(--m3-acc); }
+.m3-cmd .m3-fs.need { color: #b7791f; font-weight: 600; }
+.m3-cmd .m3-step.need { border-color: #e0a63a; background: #fff7e6; }
+.m3-cmd .m3-step.need i { background: #e0a63a; color: #fff; }
+/* 흐름 단추로 찾아간 칸 잠깐 강조 */
+@keyframes m3flash { 0% { box-shadow: inset 0 0 0 3px var(--m3-acc); } 100% { box-shadow: inset 0 0 0 3px transparent; } }
+.m3-flash { animation: m3flash 1.4s ease-out; }
+/* 칸 제목 단계 번호(명령줄 흐름과 같은 번호) */
+.m3-fl { display: inline-grid; place-items: center; width: 16px; height: 16px; border-radius: 50%; background: var(--m3-acc); color: #fff; font-style: normal; font-size: 10.5px; font-weight: 700; margin-right: 4px; vertical-align: 1px; }
+.m3-mon-flow { font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }

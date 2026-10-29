@@ -138,7 +138,7 @@ export function wireMeasForms(root) {
   }; });
 }
 
-// 반사 소재(spec P4 §2.3d·§2.3e) — 불투명 부품만. 목록 = 반사 소재 DB(기본 / 사용자 그룹, 상태). 특수 처리는 자동설계 ④ 에서만(여기선 표시)
+// 반사 소재(spec P4 §2.3d·§2.3e) — 불투명 부품만. 목록 = 반사 소재 DB(기본 / 사용자 그룹, 상태). 특수 처리는 기구 최적화 ④ 에서만(여기선 표시)
 // form = { addOpen, msg } — [＋ 측정값으로 소재 추가] 인라인 양식
 export function reflAddFormHtml(msg = '') {
   return `<div class="m3-edit m3-refladd">

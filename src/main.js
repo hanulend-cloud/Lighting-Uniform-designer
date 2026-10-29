@@ -226,7 +226,7 @@ const GUIDE = `사용 순서 (3D 기구 설계)
 2. 왼쪽 트리에서 부품을 골라 소재(Milky·투명·불투명)와 반사 소재를 정함
 3. 파일 › LED STEP 불러오기 → LED 하나의 발광면 클릭(편집 › LED 발광면 지정)
 4. 편집 › 관측면 지정 → 빛을 보는 면 클릭 — 계산이 시작됨
-5. 계산 › 자동설계 — 바꿀 항목을 체크하고 실행 → 결과 비교 후 [적용]
+5. 계산 › 기구 최적화 — 바꿀 항목을 체크하고 실행 → 결과 비교 후 [적용]
 6. 파일 › 프로젝트 저장(JSON)으로 작업을 보관`;
 // 소재·표면 DB 꾸러미(실측 Milky · 반사 소재 · 투명 측정값의 사용자 항목) — 다른 PC 로 옮기기
 function exportMaterials() {
@@ -282,11 +282,11 @@ function setupMenubar() {
     ] },
     { label: '계산', items: [
       { id: 'calc', label: '다시 계산 / 일시정지', enabled: m3 },
-      { id: 'auto', label: '자동설계 열기', enabled: m3 },
+      { id: 'auto', label: '기구 최적화 열기', enabled: m3 },
     ] },
     { label: '설정', items: [
       { id: 'target', label: '목표 균일도 · 계산 정밀도 · 설계 점검 기준…', enabled: m3 },
-      { id: 'auto', label: '자동설계 기본값 (Milky 상한 · 보완 자동 추가)…', enabled: m3 },
+      { id: 'auto', label: '기구 최적화 기본값 (Milky 상한 · 보완 자동 추가)…', enabled: m3 },
       '-',
       { id: 'admin', label: '관리자 모드 (소재 DB 관리)', checked: isAdmin },
       { id: 'mat-db', label: '소재 DB 관리…', enabled: () => m3() && isAdmin() },
@@ -311,7 +311,7 @@ function setupMenubar() {
     if (id === 'xray') return m3app.setXrayOn(!m3app.xrayOn());
     if (id === 'guide') return alert(GUIDE);
     if (id === 'about') return alert(`Uniform Design Simulator ${APP_VERSION} (${APP_DATE})
-3D 기구 설계 — 도광·확산 부품의 균일도 해석과 자동설계
+3D 기구 설계 — 도광·확산 부품의 균일도 해석과 기구 최적화
 예제 프로젝트: 평판 구조 + LED STEP 10개 1열`);
     m3app.command(id);
   };

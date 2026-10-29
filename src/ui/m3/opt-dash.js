@@ -1,11 +1,11 @@
-// 아래 칸 대시보드 — ① 최적화 진행현황(6 항목 타일) ② 시뮬레이션 진행현황(수렴 그래프).
-// 최적화: app.js 의 자동설계 io 가 progress(stage, frac, text) · evals(stage, [{label, Ulen, Uwid, ok, why}]) 를 부른다.
+// 아래 칸 대시보드 — ① 기구 최적화 진행(6 항목 타일) ② 시뮬레이션 진행현황(수렴 그래프).
+// 최적화: app.js 의 기구 최적화 io 가 progress(stage, frac, text) · evals(stage, [{label, Ulen, Uwid, ok, why}]) 를 부른다.
 // 타일마다 상태(대기·진행 %·완료·건너뜀) · 시험 중 값 → 지금까지 최고 · 후보별 길이/폭 U 점 그래프(목표선) · 진행 막대.
 // 시뮬레이션: 점진 계산 스냅숏마다 sample(snap, targetNoise) — 광자 수에 따른 잡음 %·길이/폭 U 추정과 진행률 %(잡음이 목표에 닿으면 100%).
 import { calcLabel } from './command-bar.js';
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
 export const STAGES = [['milky', '① Milky'], ['position', '② 기구 위치 (LED 배치 · 높이)'], ['shape', '③ 기구 형상']];
-// 자동설계 진행 단계 이름 → 타일(LED 배치·높이 = ② 기구 위치). 현재안·기준·검증 = 타일 없음(머리 줄 문구로만)
+// 기구 최적화 진행 단계 이름 → 타일(LED 배치·높이 = ② 기구 위치). 현재안·기준·검증 = 타일 없음(머리 줄 문구로만)
 export const tileOf = (stage) => (stage === 'milky' || stage === 'shape' ? stage : stage === 'leds' || stage === 'height' ? 'position' : null);
 const f2 = (v) => (Number.isFinite(v) ? v.toFixed(2) : '–');
 
@@ -39,7 +39,7 @@ export function factorBoardHtml(S, nw = {}, cfg = null) {
     const box = c?.box ? `<label class="fb-sw" title="${esc(c.why || '최적화에 사용')}">${c.box}</label>` : '';
     return `<div class="fb-row${on ? '' : ' fb-off'}" title="${esc(txt)}">${box}<i class="fb-dot" style="background:${FB_COL[k]}"></i><b>${name}</b><span class="od-chip">${chip}</span><span class="fb-val"><span class="mut">지금</span> ${esc(nowTxt)}${b ? ` → <b>${esc(b.label)}</b> <span class="mut">(${f2(b.Ulen)}/${f2(b.Uwid)})</span>` : ''}</span></div>${c?.on && c.opt ? `<div class="fb-opt">${c.opt}</div>` : ''}`;   // 켠 항목의 설정(상한·대상)
   };
-  return `<div class="od-h">설계 인자 현황 <span class="mut">${Number.isFinite(nw.Ulen) ? `지금 ${f2(nw.Ulen)}/${f2(nw.Uwid)}` : ''}</span></div>
+  return `<div class="od-h"><i class="m3-fl">5</i>설계 인자 현황 <span class="mut">${Number.isFinite(nw.Ulen) ? `지금 ${f2(nw.Ulen)}/${f2(nw.Uwid)}` : ''}</span></div>
     <div class="od-legend">색 = 인자 · 실선 길이 U · 점선 폭 U <i class="od-kt"></i>목표 <i style="border-color:#8a96a8"></i>지금 <span style="color:#f0b400">○</span>최고</div>
     <div class="fb-plot"></div>
     ${row('milky', '① Milky', Number.isFinite(nw.milky) ? f2(nw.milky) : '확산 부품 없음')}${row('position', '② 위치', nw.leds ?? '–')}${row('shape', '③ 형상', nw.shape ?? '원래 형상')}`;
@@ -68,7 +68,7 @@ export function factorChartSvg(S, nw = {}, W = 240, H = 100) {
     }
     if (best >= 0) body += `<circle class="od-best" cx="${X(best).toFixed(1)}" cy="${Y(seq[best].Ulen).toFixed(1)}" r="5"><title>최고 ${esc(seq[best].label)} (${f2(seq[best].Ulen)}/${f2(seq[best].Uwid)})</title></circle>`;
     body += `<text class="od-ax" x="${x0}" y="${H - 2}">후보 1</text><text class="od-ax" x="${x1}" y="${H - 2}" text-anchor="end">${n}</text>`;
-  } else body += hl(tl, 'od-tg') + hl(tw, 'od-tg od-tg2') + hl(nw.Ulen, 'od-now') + `<text class="od-none" x="${(x0 + x1) / 2}" y="${(y0 + y1) / 2 + 4}" text-anchor="middle">자동설계를 실행하면 후보 균일도가 그려짐</text>`;
+  } else body += hl(tl, 'od-tg') + hl(tw, 'od-tg od-tg2') + hl(nw.Ulen, 'od-now') + `<text class="od-none" x="${(x0 + x1) / 2}" y="${(y0 + y1) / 2 + 4}" text-anchor="middle">기구 최적화를 실행하면 후보 균일도가 그려짐</text>`;
   return `<svg class="fb-chart" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}"><rect x="${x0}" y="${y0}" width="${x1 - x0}" height="${y1 - y0}" fill="none" stroke="#c7cfdb" stroke-width=".5"/>${body}<text class="od-ax" x="2" y="${y0 + 6}">${hi.toFixed(2)}</text><text class="od-ax" x="2" y="${y1}">${lo.toFixed(2)}</text></svg>`;
 }
 // 최적화 타일 전후 사양표(순수) — b0 = 실행 전 사양(factorNow), best = 그 항목 최고 후보 { label, Ulen, Uwid }. 바뀐 칸 강조 · 목표 통과 ✓/✕
@@ -115,7 +115,7 @@ export function createOptDash(el, h = {}) {
   if (h.board && typeof ResizeObserver !== 'undefined') { let w0 = 0, h0 = 0; new ResizeObserver(() => { const b = h.board; if (b.clientWidth === w0 && b.clientHeight === h0) return; w0 = b.clientWidth; h0 = b.clientHeight; renderBoard(); }).observe(h.board); }   // 칸 크기가 바뀌면 그래프를 그 크기로 다시
   function render() {
     const idle = !S || S.ended != null || S.stopped;
-    const head = !S ? `<div class="od-h">최적화 항목 <span class="mut">항목 켜기·설정 = 설계 인자 현황의 체크 · [▶ 실행]하면 타일마다 진행과 최적화 전후 사양이 나옵니다</span></div>` : '';
+    const head = !S ? `<div class="od-h">기구 최적화 항목 <span class="mut">항목 켜기·설정 = 설계 인자 현황의 체크 · [▶ 실행]하면 타일마다 진행과 최적화 전후 사양이 나옵니다</span></div>` : '';
     if (!S) { el.innerHTML = `${head}<div class="od-grid">${STAGES.map(([k, name]) => { const c = h.config?.(k) ?? { on: false }; return `<div class="od-tile ${c.on ? 'od-sel' : 'od-off'}"><div class="od-th"><b>${name}</b><span class="od-chip">${c.on ? '켜짐' : '꺼짐'}</span></div><div class="mut od-tx">${c.on ? '실행하면 여기에 전 → 후 사양' : '설계 인자 현황에서 체크하면 최적화에 사용'}</div></div>`; }).join('')}</div>`; return; }
     const sec = ((performance.now() - S.t0) / 1000) | 0, nEval = STAGES.reduce((a, [k]) => a + S.tiles[k].evals.length, 0);
     const tile = ([k, name]) => {
@@ -132,7 +132,7 @@ export function createOptDash(el, h = {}) {
         ${evalSparkSvg(ev, S.tgLen, S.tgWid, bi)}
         <div class="od-bar"><i style="width:${Math.round(t.frac * 100)}%"></i></div><div class="od-tx mut">${esc(t.text)}</div>`}</div>`;
     };
-    el.innerHTML = `<div class="od-h">최적화 진행현황 <span class="mut">${S.ended == null ? `진행 ${sec}초` : S.ended ? '완료 — 목표 통과' : '완료 — 목표 미달'} · 시험한 후보 ${nEval}개 · 값 = 길이 U / 폭 U · 목표 ${f2(S.tgLen)}/${f2(S.tgWid)}</span>${S.verify && Number.isFinite(S.verify.Ulen) ? ` <span class="od-note">정밀 계산 ${esc(S.verify.label)} → ${f2(S.verify.Ulen)}/${f2(S.verify.Uwid)}</span>` : ''}${S.note ? ` <span class="od-note">${esc(S.note)}</span>` : ''}</div>
+    el.innerHTML = `<div class="od-h">기구 최적화 진행 <span class="mut">${S.ended == null ? `진행 ${sec}초` : S.ended ? '완료 — 목표 통과' : '완료 — 목표 미달'} · 시험한 후보 ${nEval}개 · 값 = 길이 U / 폭 U · 목표 ${f2(S.tgLen)}/${f2(S.tgWid)}</span>${S.verify && Number.isFinite(S.verify.Ulen) ? ` <span class="od-note">정밀 계산 ${esc(S.verify.label)} → ${f2(S.verify.Ulen)}/${f2(S.verify.Uwid)}</span>` : ''}${S.note ? ` <span class="od-note">${esc(S.note)}</span>` : ''}</div>
       <div class="od-legend"><i class="od-k1"></i>길이 U <i class="od-k2"></i>폭 U <i class="od-kt"></i>목표 <i class="od-kb"></i>최고</div>
       <div class="od-grid">${STAGES.map(tile).join('')}</div>`;
   }
@@ -184,7 +184,7 @@ export function reachDiag(ledger, leak, names = []) {
 export function createSimDash(el, { onCtl = null } = {}) {
   let H = [], tgt = 0.02, raf = 0, state = '', obs = null, P = [], names = [], reason = '';
   // names = 부품 이름, nMech = 기구 부품 수(LED STEP 부품 번호는 그 뒤 — 경로에서 뺌)
-  let busy = false;   // 자동설계 중(점진 계산 일시정지)
+  let busy = false;   // 기구 최적화 중(점진 계산 일시정지)
   let diag = null;   // 빛 도달 진단(관측면 도달 < 1%)
   function sample(snap, targetNoise, observe, nm = names, nMech = nm.length, adBusy = false) {
     busy = adBusy; tgt = targetNoise ?? tgt; obs = observe ?? obs; state = snap?.state ?? ''; reason = snap?.reason ?? ''; names = nm; P = topPaths(snap?.paths, nMech);
@@ -214,17 +214,17 @@ export function createSimDash(el, { onCtl = null } = {}) {
         <text class="od-ax" x="${x0}" y="${h - 4}">광자 ${H[0].ph.toLocaleString()}</text><text class="od-ax" x="${x1}" y="${h - 4}" text-anchor="end">${last.ph.toLocaleString()} (로그)</text></svg>`;
     }
     const sTxt = { running: '계산 중', paused: '일시정지', done: reason === 'converged' ? '완료 — 목표 정확도 도달' : '계산 한도 도달 — 정확도 미달', pending: '대기', starting: '장면 준비' }[state] ?? state ?? '';
-    const ctl = busy ? '자동설계 중' : calcLabel({ state, reason });
+    const ctl = busy ? '기구 최적화 중' : calcLabel({ state, reason });
     // 틀은 한 번만 만들고 칸마다 바뀐 것만 고침 — 계산 중 갱신이 잦아도 단추 클릭·접는 칸이 끊기지 않게
     if (!el.querySelector('.od-simh')) {
-      el.innerHTML = `<div class="od-h od-simh">현재 설계 계산 <span class="mut" data-s="st"></span><span class="m3-ad-sp"></span>${onCtl ? '<button type="button" data-sim-ctl></button>' : ''}</div>
+      el.innerHTML = `<div class="od-h od-simh"><i class="m3-fl">4</i>광분포 시뮬레이션 <span class="mut" data-s="st"></span><span class="m3-ad-sp"></span>${onCtl ? '<button type="button" data-sim-ctl></button>' : ''}</div>
         <div class="od-pct"><b data-s="pct"></b><div class="od-bar od-bar-big" title="계산 오차가 목표에 닿으면 100%"><i data-s="bar"></i></div></div>
         <div class="od-row mut" data-s="row"></div><div class="od-diag" data-s="diag" hidden></div>
         <details class="od-more"><summary><span data-s="sum">정확도 그래프 · 광경로</span></summary><div data-s="svg"></div><div data-s="paths"></div></details>`;
       el.querySelector('[data-sim-ctl]')?.addEventListener('click', () => onCtl?.());
     }
     const set = (k, html) => { const n = el.querySelector(`[data-s="${k}"]`); if (n && n.innerHTML !== html) n.innerHTML = html; };
-    set('st', busy ? '자동설계 중 — 일시정지(끝나면 이어서)' : esc(sTxt));
+    set('st', busy ? '기구 최적화 중 — 일시정지(끝나면 이어서)' : esc(sTxt));
     const btn = el.querySelector('[data-sim-ctl]'); if (btn) { if (btn.textContent !== ctl) btn.textContent = ctl; btn.disabled = busy; }
     set('pct', `${pct.toFixed(0)}%`); el.querySelector('[data-s="bar"]').style.width = `${pct.toFixed(0)}%`;
     set('row', `오차 ${last && Number.isFinite(last.noise) ? `±${(last.noise * 100).toFixed(1)}%` : '–'} → 목표 ±${(tgt * 100).toFixed(1)}% · 광자 ${last ? last.ph.toLocaleString() : 0}${last ? ` · 길이 U ${f2(last.Ulen)} · 폭 U ${f2(last.Uwid)}` : ''}${state === 'running' ? etaText(H, tgt) : ''}`);

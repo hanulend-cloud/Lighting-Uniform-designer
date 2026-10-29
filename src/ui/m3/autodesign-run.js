@@ -1,4 +1,4 @@
-// 자동설계 Worker io — spec P4 §2. 기존 scene/chunk 프로토콜(chunk-host.js)을 그대로 쓰고 rw·emitters 만 덧붙인다.
+// 기구 최적화 Worker io — spec P4 §2. 기존 scene/chunk 프로토콜(chunk-host.js)을 그대로 쓰고 rw·emitters 만 덧붙인다.
 // trace(job, {N, maxMs, minN, chunkN, batches, rw}) → 배치별 합 + 격자 지도 + ESS + 실제 광자 수. traceEach(job, emitterSets, {N, maxMs, minN}) → 후보마다 방출 1 기준 지도(②, 시간 예산).
 // 시간 제한(maxMs): N 에 닿거나 (경과 ≥ maxMs 이고 ≥ minN 광자·배치마다 청크 1개) 이면 새 청크를 멈추고 진행 중 청크만 마저 받음.
 //   이때 청크 크기는 Worker 마다 잰 속도로 ≈chunkMs 분량(Milky 가 높으면 광자당 비용이 ~10배 → 고정 청크면 제한이 안 먹음).
@@ -9,9 +9,9 @@ const MIN_CHUNK = 1000;
 // 한 Worker 루프가 실패하면 같은 호출의 다른 루프도 새 청크를 보내지 않고 첫 오류를 다시 던짐
 export function createAdRunner({ ports, now = () => globalThis.performance?.now?.() ?? Date.now(), sceneTimeoutMs = 60000, chunkTimeoutMs = 30000, timers = globalThis }) {
   let stopped = false, seed = 7001, onStop = null;
-  const stopP = new Promise((_, rej) => { onStop = () => rej(new Error('자동설계 중지')); });
+  const stopP = new Promise((_, rej) => { onStop = () => rej(new Error('기구 최적화 중지')); });
   stopP.catch(() => {});
-  const check = (ctl) => { if (stopped) throw new Error('자동설계 중지'); if (ctl?.err) throw ctl.err; };
+  const check = (ctl) => { if (stopped) throw new Error('기구 최적화 중지'); if (ctl?.err) throw ctl.err; };
   const withTimeout = (pr, what, ms) => {
     let id;
     const to = new Promise((_, rej) => { id = timers.setTimeout(() => rej(new Error(`Worker 응답 없음 (${what} ${ms / 1000}초)`)), ms); });

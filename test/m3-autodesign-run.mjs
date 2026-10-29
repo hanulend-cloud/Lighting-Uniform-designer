@@ -1,4 +1,4 @@
-// 자동설계 Worker io(가짜 포트): node test/m3-autodesign-run.mjs
+// 기구 최적화 Worker io(가짜 포트): node test/m3-autodesign-run.mjs
 import { createAdRunner } from '../src/ui/m3/autodesign-run.js';
 import { ok, done } from './mech3d-util.mjs';
 

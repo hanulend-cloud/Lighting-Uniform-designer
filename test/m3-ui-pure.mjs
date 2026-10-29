@@ -19,7 +19,7 @@ const M = {
   parts: [setPartMaterialParam(setPartMaterial(defaultPart(0, '커버', 1), 'milky'), 'milky', 3), setPartMaterial(defaultPart(1, '하우징', 1), 'opaque')],
   light: { ...defaultLight(), kind: 'manual' }, observe: { ...defaultObserve(), faces: [{ part: 0, face: 1 }] },
 };
-// 자동설계 왼쪽 칸 + 가운데 타일(항목 스위치·설정)을 합친 HTML — 카드 시험용
+// 기구 최적화 왼쪽 칸 + 가운데 타일(항목 스위치·설정)을 합친 HTML — 카드 시험용
 const card = (o) => autoCardHtml(o) + ['milky', 'leds', 'shape', 'housing', 'height'].map((k) => tileConfigHtml(k, o).html).join('');
 { const N = treeNodes(M, { node: 'part:0', line: { kind: 'line', closed: false, length: 116, width: 16 } });
   ok(N.map((n) => n.id).join() === 'target,parts,part:0,part:1,light,leds,obs' && N[0].badge === '80% / 80%', `트리 노드(목표 맨 위): ${N.map((n) => n.id).join()}`);
@@ -148,7 +148,7 @@ ok(clampCap(12) === 9.9 && clampCap(0.1) === 0.5 && clampCap(3) === 3 && clampCa
   ok(h1.includes('STEP 에서 편집한 배치') && /data-lp-edit="orig">STEP 원래대로/.test(h1), '배치 행: 편집 → STEP 원래대로');
   ok(/data-lp-edit="add" disabled title="LED 발광면을 먼저 지정하세요"/.test(h2) && /data-lp-edit="add" disabled title="관측면을 먼저/.test(h3), '발광면·라인 없으면 편집 비활성 + 이유');
   ok(/data-lp-edit="add" disabled/.test(stepLayoutRowHtml({ ...st, emitters: [{ part: 3 }] }, ln)) && /data-lp-edit="add" disabled/.test(stepLayoutRowHtml({ ...st, emitters: [{ part: 1, needsCheck: true }] }, ln)), '편집 활성 = 엔진 기준 규칙(제외·확인 필요 발광점만 → 비활성)');
-  ok(stepLayoutRowHtml({ ...st, virtual: { count: 6, pitch: 15 } }, ln).includes('자동설계 배치 6개 피치 15mm'), '배치 행: 자동설계 균등 배치 표시');
+  ok(stepLayoutRowHtml({ ...st, virtual: { count: 6, pitch: 15 } }, ln).includes('기구 최적화 배치 6개 피치 15mm'), '배치 행: 기구 최적화 균등 배치 표시');
   ok(virtCountMax({ length: 1000 }) === 200 && virtCountMax({ length: 1 }) === 1 && virtCountMax(null) === 200, '개수 상한: max(1, min(200, ⌊L/2⌋))');
   const c1 = clampVirtual({ count: 5, pitch: 40 }, { length: 100, closed: false }), c2 = clampVirtual({ count: 999, pitch: 3 }, { length: 100, closed: true }), c3 = clampVirtual({ count: 2.4, pitch: -1 }, null);
   ok(c1.count === 5 && c1.pitch === 25 && c2.count === 50 && c2.pitch === 0 && c3.count === 2 && c3.pitch === 0, `clampVirtual: (n−1)·p ≤ L · 닫힌 = 균등 · 상한 (${JSON.stringify([c1, c2, c3])})`);
@@ -373,7 +373,7 @@ done();
 { const { clampRect } = await import('../src/ui/m3/monitor.js');
   // 처음 = 오른쪽에 붙임, 화면 밖으로 끈 창 = 안으로, 너무 큰 창 = 화면 크기로, 너무 작은 창 = 최소 크기
   const a = clampRect({ x: null, y: 90, w: 460, h: 560 }, 1600, 900), b = clampRect({ x: 5000, y: -50, w: 460, h: 560 }, 1600, 900), c = clampRect({ x: 0, y: 0, w: 5000, h: 5000 }, 1000, 700), d = clampRect({ x: 10, y: 10, w: 10, h: 10 }, 1000, 700);
-  console.log(a.x === 1124 && a.y === 90 && b.x === 1132 && b.y === 8 && c.w === 984 && c.h === 684 && d.w === 320 && d.h === 160 ? 'PASS 최적화 모니터 창 위치·크기 맞춤' : (process.exitCode = 1, `FAIL 모니터 ${JSON.stringify([a, b, c, d])}`)); }
+  console.log(a.x === 1124 && a.y === 90 && b.x === 1132 && b.y === 8 && c.w === 984 && c.h === 684 && d.w === 320 && d.h === 160 ? 'PASS 시뮬레이션 모니터 창 위치·크기 맞춤' : (process.exitCode = 1, `FAIL 모니터 ${JSON.stringify([a, b, c, d])}`)); }
 { const { factorBoardHtml, beforeAfterHtml } = await import('../src/ui/m3/opt-dash.js');
   // 설계 인자 현황: 줄 앞 체크 상자(켜기·끄기), 켠 항목만 설정 줄, 못 쓰는 항목 = 비활성
   const cfg = (k) => ({ milky: { on: true, box: '<input type="checkbox" data-ad="milky" checked>', opt: '<div class="od-opt">상한</div>', why: 'Milky' }, position: { on: false, box: '<input type="checkbox" data-ad="position">', opt: '', why: '' }, shape: { on: false, box: '<input type="checkbox" data-ad="shape" disabled>', opt: '', why: '확산 부품 없음' } })[k];
@@ -383,3 +383,9 @@ done();
   const t = beforeAfterHtml('milky', { milky: 2, Ulen: 0.58, Uwid: 0.64 }, { label: 'Milky 3.50', Ulen: 0.82, Uwid: 0.71 }, 0.8, 0.8, 7);
   const okT = t.includes('Milky 2.00') && t.includes('<td class="chg">Milky 3.50') && /0\.82 <b class="od-ok">✓/.test(t) && /0\.71 <b class="od-bad">✕/.test(t) && t.includes('후보 7개') && beforeAfterHtml('shape', {}, null).includes('후보 없음');
   console.log(okB && okT ? 'PASS 설계 인자 현황 체크(켜기·설정) · 최적화 타일 전후 사양표' : (process.exitCode = 1, `FAIL 인자 체크/전후 ${okB} ${okT} ${t}`)); }
+{ const { flowState } = await import('../src/ui/m3/command-bar.js');
+  // 흐름 4 광분포 시뮬레이션 → 5 기구 최적화: 계산 중 % · 완료 통과/미달 · 미달이면 5 '필요' · 최적화 진행 중
+  const M = { observe: { targetLen: 0.8, targetWid: 0.8, targetNoise: 0.01 } }, st = (a, b) => ({ Ulen: a, Uwid: b });
+  const r1 = flowState({ state: 'running', stats: { relNoise: 0.02 } }, st(0.58, 0.64), M), r2 = flowState({ state: 'done' }, st(0.58, 0.64), M), r3 = flowState({ state: 'done' }, st(0.85, 0.9), M), r4 = flowState({ state: 'done' }, st(0.58, 0.64), M, { running: true });
+  console.log(r1.sim.text === '계산 중 50% · 58% / 64%' && r1.opt.text === '시뮬레이션 뒤' && r2.sim.cls === 'bad' && r2.sim.done && r2.opt.cls === 'need' && r3.sim.cls === 'ok' && r3.opt.done && r4.opt.text === '진행 중' && flowState(null, null, M).sim.text === '–'
+    ? 'PASS 흐름 4 광분포 시뮬레이션 · 5 기구 최적화 상태' : (process.exitCode = 1, `FAIL 흐름 ${JSON.stringify([r1, r2, r3, r4])}`)); }

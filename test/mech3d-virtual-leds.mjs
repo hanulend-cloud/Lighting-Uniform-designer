@@ -18,7 +18,7 @@ const step = { leds: [1, 2], pcb: 0, excluded: [], emitters: [{ part: 1, pos: [2
   ok([0, 1, 2, 3, 4, 5].every((i) => Math.abs(bk[i] - b0[i] - (i % 3 === 0 ? strip.fromSW(s[2], 0)[0] - 20 : 0)) < 1e-5), '몸체 복사 = 기준 몸체를 s 차이만큼 이동(직선)'); }
 { const v = virtualLayout({ parts, step: { ...step, excluded: [1] }, line: strip, count: 2, pitch: 30 });
   ok(Math.abs(Math.abs(v.emitters[1].pos[0] - v.emitters[0].pos[0]) - 30) < 1e-6 && v.ref === 2, '제외된 LED 는 기준이 안 됨 → 다음 LED 가 기준, 피치 30'); }
-{ // count 0 = LED 몸체 없음(PCB·기타만) · 발광점 위치 지정(자동설계 ② 후보)
+{ // count 0 = LED 몸체 없음(PCB·기타만) · 발광점 위치 지정(기구 최적화 ② 후보)
   const z = virtualLayout({ parts, step, line: strip, count: 0 });
   ok(z.parts.length === 2 && z.leds.length === 0 && z.emitters.length === 0 && z.pcb === 0 && z.parts[1] === screw, 'count 0: LED 몸체 없이 PCB·기타만');
   const full = virtualLayout({ parts, step, line: strip, count: 3, pitch: 10 }), s3 = full.emitters.map((e) => e.s);

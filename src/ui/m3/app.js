@@ -130,7 +130,7 @@ function getView() {
   viewP ??= import('../mech3d-view.js').then(({ createMech3dView }) => {
     const v = createMech3dView($('#mech3d-canvas'), { onPick: (s) => { if (A) onPick(s); }, gizmo: $('#m3-axes') });
     const el = $('#m3-views');
-    el.innerHTML = VIEWS.map(([k, t]) => `<button data-view="${k}">${t}</button>`).join('') + '<button type="button" data-xray aria-pressed="false" title="전체 부품 반투명 — 속 구조를 봄">투시</button><button type="button" data-paths aria-pressed="false" title="광경로 화살표 켜기/끄기">광경로</button><button type="button" data-mon aria-pressed="false" title="최적화 모니터 — 현재 설계 계산·설계 인자 현황·자동설계를 떠 있는 창으로 모아 계속 보기">📊 모니터</button><button type="button" data-theme-toggle aria-pressed="false"></button>';
+    el.innerHTML = VIEWS.map(([k, t]) => `<button data-view="${k}">${t}</button>`).join('') + '<button type="button" data-xray aria-pressed="false" title="전체 부품 반투명 — 속 구조를 봄">투시</button><button type="button" data-paths aria-pressed="false" title="광경로 화살표 켜기/끄기">광경로</button><button type="button" data-mon aria-pressed="false" title="시뮬레이션 모니터 — 광분포 시뮬레이션·설계 인자 현황·기구 최적화를 떠 있는 창으로 모아 계속 보기">📊 모니터</button><button type="button" data-theme-toggle aria-pressed="false"></button>';
     el.querySelectorAll('[data-view]').forEach((b) => { b.onclick = () => { v.setView(b.dataset.view); A?.store.update('view', (_, s) => { s.view = b.dataset.view; }); }; });
     // 3D 배경 밝게/어둡게 — 보는 사람별 편의 설정(새로고침해도 유지)
     const tb = el.querySelector('[data-theme-toggle]'), vp = $('#mech3d-canvas').parentElement;
@@ -150,11 +150,11 @@ function getView() {
 // ---- 마운트 ----
 // 반사 소재표 행 = 반사 소재 DB(없으면 기본 소재표)
 const reflCat = () => catalogOf(A?.ctx.reflectDb?.() ?? null);
-let monitor = null;   // 최적화 모니터 — 화면(DOM) 하나에 하나, 기구가 바뀌어도 유지
+let monitor = null;   // 시뮬레이션 모니터 — 화면(DOM) 하나에 하나, 기구가 바뀌어도 유지
 export async function mount(ctx) {
   mountSplitter(document.querySelector('.m3-main'));   // 좌·우 창 폭 끌어서 조절(한 번만 붙음)
   mountDockSplitter(document.querySelector('#m3-dock'), document.querySelector('#mech3d-wrap'));   // 아래 칸 높이 조절
-  // 최적화 모니터(떠 있는 창) — 계산 현황·설계 인자 현황·자동설계 칸을 옮겨 담음. 단추 = 3D 보기 막대 [📊 모니터]
+  // 시뮬레이션 모니터(떠 있는 창) — 계산 현황·설계 인자 현황·기구 최적화 칸을 옮겨 담음. 단추 = 3D 보기 막대 [📊 모니터]
   monitor ??= createMonitor({ host: $('#mech3d-wrap'), items: [$('#m3-simdash'), $('#m3-factor'), $('#m3-dock')], onChange: (on) => { const b = document.querySelector('#m3-views [data-mon]'); if (b) { b.classList.toggle('on', on); b.setAttribute('aria-pressed', String(on)); } } });
   mountFacSplitter(document.querySelector('#m3-factor'), document.querySelector('.m3-left'));   // 왼쪽 맨 아래(부품 속성 밑) 설계 인자 현황 높이 조절
   if (A && A.ctx.mspec === ctx.mspec) { A.ctx = ctx; return; }   // 같은 기구 — 그대로
@@ -177,7 +177,7 @@ export async function mount(ctx) {
   const a = A = { ctx, store, pool, view: null, meshShown: null, lineKey: '', Gc: null, obsShown: null, checks: {}, markKey: '', timing: { start: 0, first: null, noise5: null } };
   a.prog = createProgressive({ ports: pool.ports(), onUpdate: onCalc, opts: { targetNoise: ctx.mspec.observe.targetNoise ?? 0.01 } });
   a.results = createResultsPanel($('#m3-res'), { fileName: () => String(A?.store?.mspec?.name ?? 'uds').replace(/\.(stp|step)$/i, ''), onQuality: (v) => A.store.update('observe', (m) => { m.observe.quality = v; }) });
-  a.optDash = createOptDash($('#m3-optdash'), { config: (k) => (A?.tileState ? tileConfigHtml(k, A.tileState) : { on: false, html: '' }), onSel: (k, v) => adSel(k, v), board: $('#m3-factor'), now: () => (A ? factorNow() : {}) }); a.simDash = createSimDash($('#m3-simdash'), { onCtl: () => cmdHandlers().onToggleCalc() });   // 아래 칸 = 자동설계 · 오른쪽 맨 위 = 현재 설계 계산(항상 보임, 계산 제어 단추)
+  a.optDash = createOptDash($('#m3-optdash'), { config: (k) => (A?.tileState ? tileConfigHtml(k, A.tileState) : { on: false, html: '' }), onSel: (k, v) => adSel(k, v), board: $('#m3-factor'), now: () => (A ? factorNow() : {}) }); a.simDash = createSimDash($('#m3-simdash'), { onCtl: () => cmdHandlers().onToggleCalc() });   // 아래 칸 = 기구 최적화 · 오른쪽 맨 위 = 광분포 시뮬레이션(항상 보임, 계산 제어 단추)
   a.cmd = mountCommandBar($('#m3-cmd'), cmdHandlers());
   a.unsub = store.subscribe(onChange);
   a.keydown = onKey; window.addEventListener('keydown', onKey);
@@ -205,11 +205,11 @@ export function unmount() {
 function onChange(tag) {
   if (!A) return;
   const M = A.store.mspec;
-  // 자동설계: 물리 편집이면 실행 중 = 중지(스냅샷과 어긋남), 결과 표시 중 = 결과 지움(옛 값 기준)
+  // 기구 최적화: 물리 편집이면 실행 중 = 중지(스냅샷과 어긋남), 결과 표시 중 = 결과 지움(옛 값 기준)
   const ad = A.ad;
   if (ad && PHYSICS.has(tag)) {
-    if (ad.running && ad.runner && !ad.runner.stopped) { ad.runner.cancel(); A.store.session.status = '편집으로 자동설계를 중지함'; }
-    else if (ad.result) { ad.result = null; A.meshShown = null; A.store.session.status = '값이 바뀌어 자동설계 결과를 지움'; }
+    if (ad.running && ad.runner && !ad.runner.stopped) { ad.runner.cancel(); A.store.session.status = '편집으로 기구 최적화를 중지함'; }
+    else if (ad.result) { ad.result = null; A.meshShown = null; A.store.session.status = '값이 바뀌어 기구 최적화 결과를 지움'; }
   }
   if (tag === 'light') { const t = dropStaleAdjust(M.light); if (t) A.store.session.status = t; }   // 배치가 바뀌어 무효가 된 LED 개별 조정(spec §4a)
   if (tag === 'observe' || tag === 'material') refreshLine();   // material: 부품 크기·위치가 바뀌면 라인도 다시(키가 같으면 건너뜀)
@@ -251,8 +251,8 @@ function geometry(obs) {
   return A.Gc.G;
 }
 // 디바운스가 끝날 때 부르는 작업 생성기 — 라인·광원이 없으면 null(안내), 직접 배치 오류는 던짐(계산 실패로 표시)
-// 작업 생성(현재 또는 자동설계 후보 설계) — M: spec.mech3d(복사본 가능), mechParts: 기구 메쉬(형상 후보면 바뀐 부품 포함)
-// 자동설계는 실행 시작 때 스냅샷(line·G·obs)을 넘김 — 실행 중 라인이 바뀌어도 같은 기준
+// 작업 생성(현재 또는 기구 최적화 후보 설계) — M: spec.mech3d(복사본 가능), mechParts: 기구 메쉬(형상 후보면 바뀐 부품 포함)
+// 기구 최적화는 실행 시작 때 스냅샷(line·G·obs)을 넘김 — 실행 중 라인이 바뀌어도 같은 기준
 export function jobFor(M, mechParts, { emitters = null, line = null, G = null, obs = null } = {}) {
   const ln = line ?? A.store.session.line;
   if (!ln) return null;
@@ -280,7 +280,7 @@ function partMeshInfo(i) {
   return MESH_INFO.get(m);
 }
 function makeJob() { return A ? jobFor(A.store.mspec, getMech3d().parts) : null; }
-// 자동설계 중이면 미룸 — 점진 계산이 공유 Worker 에 장면을 보내면 실행이 '장면이 바뀜' 으로 실패. 끝나면 adRun 이 다시 부름
+// 기구 최적화 중이면 미룸 — 점진 계산이 공유 Worker 에 장면을 보내면 실행이 '장면이 바뀜' 으로 실패. 끝나면 adRun 이 다시 부름
 function restartCalc() {
   if (A.ad?.running) { A.ad.deferred = true; return; }
   A.timing = { start: 0, first: null, noise5: null }; A.prog.restart(makeJob);
@@ -433,7 +433,7 @@ function clearanceOf(i) {
   return g.clrOut;
 }
 
-// ---- 자동설계(P4) ----
+// ---- 기구 최적화(P4) ----
 function adState() { return (A.ad ??= { open: (() => { try { return localStorage.getItem('uds.m3.autoOpen') === '1'; } catch { return false; } })(), sel: { milky: true, leds: false, shape: false, shapePart: -1, milkyMax: null, height: false, housing: false, housingPart: -1, housingSpecial: false, boost: false }, running: null, result: null, undo: null, milkyPart: null, runner: null, info: null, stepBusy: false, stepWorker: null }); }
 function adInfo() {   // 부품별 비 2.5D 비율(관측 방향) — 라인이 있을 때만. (기구·라인) 별 캐시(높이맵 계산이 무거움)
   const st = adState(), S = A.store.session, rt = getMech3d();
@@ -442,10 +442,10 @@ function adInfo() {   // 부품별 비 2.5D 비율(관측 방향) — 라인이 
 }
 const adMilkyPart = (M, avail) => (avail.milky.ok ? (avail.milky.parts.find((i) => M.observe.faces.some((f) => f.part === i)) ?? avail.milky.parts[0]) : null);
 const adClone = (x) => (x == null ? null : JSON.parse(JSON.stringify(x)));
-// 자동설계 카드 펼침 상태 — 새로고침해도 기억(브라우저별 편의 설정)
+// 기구 최적화 카드 펼침 상태 — 새로고침해도 기억(브라우저별 편의 설정)
 const AD_OPEN_KEY = 'uds.m3.autoOpen';
 function adSetOpen(v) { adState().open = v; try { localStorage.setItem(AD_OPEN_KEY, v ? '1' : '0'); } catch {} renderAuto(); }
-// 자동설계 항목·설정 바꾸기(왼쪽 칸·가운데 타일 공용)
+// 기구 최적화 항목·설정 바꾸기(왼쪽 칸·가운데 타일 공용)
 function adSel(k, v) {
   const st = adState(); if (st.running) return;
   if (k === 'position') { const av = stageAvailability(A.store.mspec, adInfo()); st.sel.leds = !!v && !!av.leds?.ok; st.sel.height = !!v && !!av.height?.ok; }   // ② 기구 위치 = LED 배치 + 높이
@@ -472,7 +472,7 @@ function renderAuto() {
   const hm = st.sel.housingPart >= 0 ? reflCat().find((e) => !e.special && e.id === M.parts[st.sel.housingPart]?.reflMaterial) : null;   // ④ 대상 반사 소재
   A.tileState = { avail, sel, running: st.running, names: M.parts.map((p) => p.name), milkyPart: mp, housingMat: hm ? { name: hm.name, max: hm.max } : null };
   if (!st.open) {   // 설정(tileState)은 위에서 먼저 — 설계 인자 현황 줄 체크가 접힘과 무관하게 보이게
-    el.innerHTML = '<button type="button" class="m3-ad-collapsed" data-ad="open" aria-expanded="false">✨ 자동설계 · 최적화 <span class="mut">— 펼치기 ▴</span></button>';
+    el.innerHTML = '<button type="button" class="m3-ad-collapsed" data-ad="open" aria-expanded="false"><i class="m3-fl">5</i>기구 최적화 <span class="mut">— 목표 미달일 때 Milky·LED 위치·형상 후보 찾기 · 펼치기 ▴</span></button>';
     el.querySelector('[data-ad="open"]').onclick = () => { adSetOpen(true); };
     A.optDash?.refresh();   // 접혀 있어도 설계 인자 현황의 체크 상자는 갱신
     return;
@@ -483,7 +483,7 @@ function renderAuto() {
     onAction: (k) => ({ run: adRunBoost, stop: adStop, close: () => adSetOpen(false), apply: adApply, applyAlt: adApplyAlt, cancel: adCancel, revert: adRevert, step: adStep, view: () => { st.resultOpen = true; renderAuto(); }, hide: () => { st.resultOpen = false; renderAuto(); } })[k]?.(),
   });
 }
-function adStop() { const st = adState(); if (!st.running || !st.runner) return; st.runner.cancel(); setStatus('자동설계 중지됨'); A.optDash?.stop(); }
+function adStop() { const st = adState(); if (!st.running || !st.runner) return; st.runner.cancel(); setStatus('기구 최적화 중지됨'); A.optDash?.stop(); }
 // 실행 문맥 = 시작 때 스냅샷 { M0: mspec 복사, line, G, obs, rt: 기구 런타임, mp: ① 대상 부품 } — 평가·미리보기·적용이 모두 이것 기준
 // 형상 원본 = 원본 메쉬 + 크기·위치 조절(이미 적용된 shapeMod 는 빼고 — 적용 때 shapeMod 를 바꿔 끼우므로 평가와 같게)
 // 같은 (원본, xform) 이면 같은 객체 — 세분·높이맵 메모(메쉬 객체 기준)가 맞도록
@@ -703,7 +703,7 @@ async function adRunBoost() {
 async function adRun(opt = {}) {
   const a = A, st = adState(), S = A.store.session;
   if (!S.line || st.running) return null;
-  if (/^자동설계 실패/.test(S.status ?? '')) setStatus('');   // 지난 실패 문구는 지움
+  if (/^기구 최적화 실패/.test(S.status ?? '')) setStatus('');   // 지난 실패 문구는 지움
   const M0 = adClone(A.store.mspec), line = S.line, rt = getMech3d();   // 실행 격리 — 편집은 실행을 중지시킴(onChange)
   const avail = stageAvailability(M0, adInfo()), stages = opt.stages ?? { milky: st.sel.milky && avail.milky.ok, leds: st.sel.leds && avail.leds.ok, shape: st.sel.shape && avail.shape.ok && avail.shape.parts.includes(st.sel.shapePart),
     height: st.sel.height && avail.height.ok, housing: st.sel.housing && avail.housing.ok && avail.housing.parts.includes(st.sel.housingPart) };
@@ -819,7 +819,7 @@ async function adRun(opt = {}) {
       stages, obs, G, line, current: cur, milkyMax: st.sel.milkyMax ?? null, housingProbe, finishText: (f) => finishText(f, reflCat()), nMax: Math.max(1, Math.min(60, Math.floor(line.length / 2))), pitchRange: null, stepMode: stp,
       shapePart: sp, shapeRanges, currentVerified, heightRange: hInfo?.range ?? null, housingPart: hp, finishCands, ledsAtCurrentMilky: !!opt.added?.length,
     }, io);
-  } catch (e) { if (A === a && !R.stopped) setStatus(`자동설계 실패: ${e.message}`); }
+  } catch (e) { if (A === a && !R.stopped) setStatus(`기구 최적화 실패: ${e.message}`); }
   if (A !== a) return;   // 그사이 이탈
   globalThis.__adLast = res;   // 진단용(콘솔에서 단계별 결과 확인)
   st.running = null; st.runner = null;
@@ -836,7 +836,7 @@ async function adRun(opt = {}) {
     const gd = res.unchanged ? res.steps?.find((x) => x.stage === 'guard') : null;   // 찾은 후보가 현재안보다 잡음 수준만큼만 나음 — 원하면 적용
     if (gd?.tried && gd.triedVerified?.stats) st.result.alt = { design: gd.tried, Ulen: gd.triedVerified.stats.Ulen, Uwid: gd.triedVerified.stats.Uwid, eff: gd.triedVerified.eff, milky: gd.tried.milky };
   }
-  // Worker 에 자동설계 장면이 올라가 있음 — 진행 중이던 계산·실행 중 편집은 다시 시작, 끝난 계산은 그대로.
+  // Worker 에 기구 최적화 장면이 올라가 있음 — 진행 중이던 계산·실행 중 편집은 다시 시작, 끝난 계산은 그대로.
   // restart 는 일시정지 상태를 이어가므로(wantPaused) 사용자가 멈춘 게 아니면 resume(대기 중 resume = 일시정지 요청 해제)
   if (st.deferred) { st.deferred = false; restartCalc(); if (st.userPaused) A.prog.pause(); else A.prog.resume(); }
   A.meshShown = null; renderView(); renderAuto();
@@ -919,7 +919,7 @@ function adStep() {
 }
 
 // 3D 도면에서 광원 지정 — 클릭한 부품과 같은 모양(면 수·부피·면적·크기)의 기구 부품을 모두 광원 그룹으로 옮긴다:
-// 메쉬를 LED STEP 처럼 복사(발광면 인식·배치 편집·자동설계를 그대로 씀)하고, 원본은 role 'light'(빛 계산·보기에서 빠짐 — 삭제 아님).
+// 메쉬를 LED STEP 처럼 복사(발광면 인식·배치 편집·기구 최적화를 그대로 씀)하고, 원본은 role 'light'(빛 계산·보기에서 빠짐 — 삭제 아님).
 // 클릭한 면 = 발광면(렌즈 윗면으로 보정). PCB 는 기구 부품 그대로 남김(면 처리 그대로 계산)
 // 새 기구 STEP 을 불러온 직후: 같은 모양이 반복되는 작은 부품(LED)을 찾아 바로 도면 광원으로(발광면 = PCB 반대쪽).
 // 광원이 이미 지정돼 있거나 못 찾으면 그대로. 틀렸으면 광원 노드의 [다른 LED 로 다시 지정]·[도면 광원 해제]로 고친다
@@ -1033,7 +1033,7 @@ function propHandlers() {
     onFinish: (i, face, f) => st.update('material', (m, x) => {
       const r = partFinishEdit(m.parts[i], face, f, reflCat());
       m.parts[i] = r.part;
-      if (r.clamped) x.status = `소재 상한(${Math.round(r.max * 100)}%) 초과 — 특수 표면처리는 자동설계 ④ 에서 허용`;
+      if (r.clamped) x.status = `소재 상한(${Math.round(r.max * 100)}%) 초과 — 특수 표면처리는 기구 최적화 ④ 에서 허용`;
     }),
     // 측정값으로 반사 소재 추가(spec P4 §2.3e) — 사용자 항목 등록 후 이 부품에 적용. f = 양식 문자열(% 단위) → 오류 문구 | 없음
     onReflAdd: (i, f) => {
@@ -1093,7 +1093,7 @@ function propHandlers() {
       st.update('material', (m, x) => { if (i != null) m.parts[i] = applyClearEntry(m.parts[i], e); else m.parts = syncClearParts(m.parts, e.id, e); x.status = `측정 소재 "${e.name}" 등록${i != null ? ' · 적용' : ''}(n ${e.n}, 투과율 ${Math.round(e.T * 1000) / 10}% @ ${e.tRef} mm)`; });
       return null;
     },
-    // 반사 소재 DB 관리(목표 노드) — 바뀐 뒤 다시 그림(부품 속성·자동설계 ④ 후보·카드). 오류 문구 | null
+    // 반사 소재 DB 관리(목표 노드) — 바뀐 뒤 다시 그림(부품 속성·기구 최적화 ④ 후보·카드). 오류 문구 | null
     onReflDb: (op, id, arg) => {
       const db = ctx.reflectDb?.(); if (!db) { setStatus('반사 소재 DB 없음'); return '반사 소재 DB 없음'; }
       if (op === 'export') { downloadText('uds-reflect.json', db.exportJson('all'), 'application/json'); setStatus('반사 소재 DB 를 uds-reflect.json 으로 내보냄'); return null; }
@@ -1176,7 +1176,7 @@ function propHandlers() {
     onRetryLine: () => { A.lineKey = ''; refreshLine(); },
     onTarget: (key, v) => st.update('target', (m) => { m.observe[key] = v; }),
     onCheckParam: (key, v) => st.update('target', (m) => { m.checks[key] = v; }),
-    // 반사 소재표 — id = null → 기본값으로(저장 삭제). 계산에는 영향 없음(자동설계 ④ 후보·부품 편집기 상한만)
+    // 반사 소재표 — id = null → 기본값으로(저장 삭제). 계산에는 영향 없음(기구 최적화 ④ 후보·부품 편집기 상한만)
     // 반사 소재 DB 칸 고침(spec P4 §2.3e) — 사용자 항목은 그대로, 공용 항목은 사용자 사본 "… (수정)" 을 만들어 고침. 부품 반사율은 그대로(다음 편집부터 새 상한)
     onCatalog: (id, key, v) => st.update('session', (_, x) => {
       const db = A.ctx.reflectDb?.(), e = db?.get(id);
@@ -1275,6 +1275,7 @@ function importLedStep(file) {
   }).catch((e) => say(`불러오기 실패: ${e.message}`));
 }
 // 명령 막대
+const flash = (n) => { if (!n) return; n.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); n.classList.remove('m3-flash'); void n.offsetWidth; n.classList.add('m3-flash'); };
 function cmdHandlers() {
   return {
     onImport: (f) => A.ctx.onImportMech3d(f),
@@ -1288,12 +1289,16 @@ function cmdHandlers() {
     }),
     onFit: () => A.view?.fit(),
     onToggleCalc: () => {   // '⏸ 계산 중'(대기·장면 준비 포함) → 일시정지, 일시정지 → 재개, 그 밖(완료·오류·대기) → 다시 계산
-      // 자동설계 중: 계산이 끝났거나 대기였으면(미룬 계산 없음) = 다시 계산 요청, 아니면 일시정지 여부를 뒤집음
-      if (A.ad?.running) { const st = A.ad; st.userPaused = st.deferred ? !st.userPaused : false; st.deferred = true; setStatus(st.userPaused ? '자동설계가 끝나도 계산은 멈춰 둠' : '자동설계가 끝나면 계산 재개'); return; }
+      // 기구 최적화 중: 계산이 끝났거나 대기였으면(미룬 계산 없음) = 다시 계산 요청, 아니면 일시정지 여부를 뒤집음
+      if (A.ad?.running) { const st = A.ad; st.userPaused = st.deferred ? !st.userPaused : false; st.deferred = true; setStatus(st.userPaused ? '기구 최적화가 끝나도 계산은 멈춰 둠' : '기구 최적화가 끝나면 계산 재개'); return; }
       const s = A.prog.snapshot().state;
       if (s === 'running' || s === 'pending' || s === 'starting') A.prog.pause(); else if (s === 'paused') A.prog.resume(); else restartCalc();
     },
     onAuto: () => adSetOpen(!adState().open),
+    // 흐름 4·5단계 단추 — 해당 칸을 보여 주고 잠깐 강조(모니터가 열려 있으면 그 안에서)
+    onSim: () => flash($('#m3-simdash')),
+    onOpt: () => { if (!adState().open) adSetOpen(true); flash($('#m3-dock')); },
+    adFlow: () => ({ running: !!A?.ad?.running, result: !!A?.ad?.result }),
     onExit: () => A.ctx.onExit(),
   };
 }
@@ -1347,7 +1352,7 @@ function ledUi(LS, n) {
   const clash = [...new Set(ledClashItems(A.checks.interference?.items, n, LS.em, LS.lay).filter((x) => say[x.kind]).map((x) => say[x.kind](x.part)))];
   return { n, total: LS.list.length, s, gap: minFinite(ledGaps(LS.em)), adj: validAdjust(M.light)?.[n] ?? { ds: 0, dz: 0 }, excluded: it.excluded, clash };
 }
-// 커버까지 거리(공통) → 모든 LED 를 관측 방향으로 같은 양 이동(자동설계 ⑤ 와 같은 applyDz: STEP offset·발광점 / 직접 배치 깊이)
+// 커버까지 거리(공통) → 모든 LED 를 관측 방향으로 같은 양 이동(기구 최적화 ⑤ 와 같은 applyDz: STEP offset·발광점 / 직접 배치 깊이)
 function ledDist(g) {
   const st = A.store, M = st.mspec, S = st.session;
   if (!S.line) return;
@@ -1398,7 +1403,7 @@ function renderView() {
   const v = A.view, cur = getMech3d();
   if (!v || !cur) return;
   const M = A.store.mspec, S = A.store.session, stp = M.light.kind === 'step' ? M.light.step : null;
-  const pv = adPreview();   // 자동설계 비교 중 = 최적안 미리보기(형상 메쉬·LED 위치)
+  const pv = adPreview();   // 기구 최적화 비교 중 = 최적안 미리보기(형상 메쉬·LED 위치)
   const lay = stp ? L.stepLayout(pv?.M ?? M, S.line) : null, lp = lay?.parts ?? null;   // 원래/가상 배치(캐시 객체) — 미리보기면 최적안 배치(몸체 = 화살표)
   const ledSet = new Set(lay?.leds ?? []), exSet = new Set(lay?.excluded ?? []);   // 제외된 LED 는 회색(불투명) — 발광 화살표도 빠짐
   const kinds = [...M.parts.map((p) => p.material.kind), ...(lp ?? []).map((_, i) => (i === lay.pcb ? 'pcb' : ledSet.has(i) && !exSet.has(i) ? 'led' : 'opaque'))];

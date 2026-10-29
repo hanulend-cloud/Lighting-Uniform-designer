@@ -38,7 +38,7 @@ export function ledRowsHtml(o, line, attr) {
   const gap = rows !== 2 ? '' : ` 열 간격 ±<input type="number" min="0" ${max != null ? `max="${max}" ` : ''}step="0.5" value="${o.rowGap ?? 0}" ${a}="rowGap" aria-label="열 간격 mm(중심선에서 ±)">mm <span class="mut">${max != null ? `중심선에서 ±δ · 최대 ±${max.toFixed(1)} mm(관측 폭 ${line.width.toFixed(1)} mm)` : '중심선에서 ±δ · 관측 폭 안으로 자름'}</span>`;
   return `<div class="m3-row">열 수 <select ${a}="rows" aria-label="LED 열 수"><option value="1" ${sel(rows, 1)}>1열</option><option value="2" ${sel(rows, 2)}>2열</option></select>${gap}</div>`;
 }
-// 2열로 처음 바꿀 때 열 간격 = 0.27·W(자동설계 ② 가운데 후보) · 라인 없으면 0
+// 2열로 처음 바꿀 때 열 간격 = 0.27·W(기구 최적화 ② 가운데 후보) · 라인 없으면 0
 export const defaultRowGap = (line) => (line?.width ? rowGapOptions(line, [0.27])[0] ?? 0 : 0);
 const rowsTxt = (o) => (o?.rows === 2 ? `2열 × ${o.count}개` : `${o.count}개`);
 
@@ -76,7 +76,7 @@ export function renderLightProps(el, m, ui, h) {
   wireManual(el, h);
 }
 
-// 가상 배치 개수 상한 = 자동설계 ② 와 같은 차수: max(1, min(200, ⌊L/2⌋)). 라인 없으면 200
+// 가상 배치 개수 상한 = 기구 최적화 ② 와 같은 차수: max(1, min(200, ⌊L/2⌋)). 라인 없으면 200
 export const virtCountMax = (line) => Math.max(1, Math.min(200, Math.floor((line?.length ?? 400) / 2)));
 // 가상 배치 값 보정(순수): 개수 1~상한 정수 · 피치 ≥ 0, (개수−1)·피치 ≤ 라인 길이 · 닫힌 라인 = 피치 0(균등)
 // 열: rows 1|2 · 2열 열 간격 0 이하 = 기본(0.27·W) · 상한 반폭 − 0.5 mm(0.1 내림) · 1열 = 0
@@ -96,7 +96,7 @@ export function stepLayoutRowHtml(st, line = null, n = null) {
   const v = st.virtual, ref = stepRefEmitter(st);
   const why = !ref ? 'LED 발광면을 먼저 지정하세요' : !line ? '관측면을 먼저 지정하세요(라인 인식 후 편집)' : '';
   const dis = why ? ` disabled title="${why}"` : '';
-  const state = !v ? 'STEP 원래 배치' : Array.isArray(v.positions) ? 'STEP 에서 편집한 배치' : `자동설계 배치 ${rowsTxt(v)} ${v.pitch > 0 ? `피치 ${v.pitch}mm` : '균등'}`;
+  const state = !v ? 'STEP 원래 배치' : Array.isArray(v.positions) ? 'STEP 에서 편집한 배치' : `기구 최적화 배치 ${rowsTxt(v)} ${v.pitch > 0 ? `피치 ${v.pitch}mm` : '균등'}`;
   return `<div class="m3-row">${n != null ? `LED ${n}개 · ` : ''}${state}</div>
     <div class="m3-row"><button type="button" data-lp-edit="add"${dis}>+ LED 추가</button> <button type="button" data-lp-edit="align"${dis}>같은 간격으로</button>${v ? ' <button type="button" data-lp-edit="orig">STEP 원래대로</button>' : ''}</div>
     <div class="m3-row mut">${why || '추가 = 가장 넓은 빈자리 가운데에 기준 LED 복사 · 삭제·이동은 LED 를 골라서'}</div>`;
@@ -148,7 +148,7 @@ export function ledPanelHtml(m, ui) {
   const faceP = L.kind === 'manual' && man?.pcb?.kind === 'face', noGap = !Number.isFinite(d.gap);
   const dis = faceP ? 'PCB 를 기구 면으로 지정해서 높이는 그 면이 정함 — 광원 노드에서 "관측면 아래 깊이" 로 바꾸면 조절 가능' : noGap ? 'LED 앞쪽에서 커버(관측면 부품)를 찾지 못함' : '';
   const arrange = st ? stepLayoutRowHtml(st, ui.line ?? null, ui.lay?.emitters?.length ?? null)
-    : `${man.positions?.length ? `<div class="m3-row mut">자동설계 배치 — 위치 ${man.positions.length}개(피치가 일정하지 않을 수 있음) · 개수·피치·열을 고치면 균등 배치로</div>` : ''}<div class="m3-row">개수<input type="number" min="1" step="1" value="${man.count}" data-lp-man="count" aria-label="LED 개수"> 피치<input type="number" min="0" step="0.5" value="${man.pitch}" data-lp-man="pitch" aria-label="LED 피치 mm">mm <span class="mut">(0 = 균등)</span></div>${ledRowsHtml(man, ui.line ?? null, 'man')}`;
+    : `${man.positions?.length ? `<div class="m3-row mut">기구 최적화 배치 — 위치 ${man.positions.length}개(피치가 일정하지 않을 수 있음) · 개수·피치·열을 고치면 균등 배치로</div>` : ''}<div class="m3-row">개수<input type="number" min="1" step="1" value="${man.count}" data-lp-man="count" aria-label="LED 개수"> 피치<input type="number" min="0" step="0.5" value="${man.pitch}" data-lp-man="pitch" aria-label="LED 피치 mm">mm <span class="mut">(0 = 균등)</span></div>${ledRowsHtml(man, ui.line ?? null, 'man')}`;
   const adjOn = !!(d.adj?.ds || d.adj?.dz), canDel = !!st && (!st.virtual || (!!stepRefEmitter(st) && !!ui.line));   // 원래 배치 = 제외 토글, 편집한 배치 = 목록에서 삭제
   return `<div class="m3-h m3-title m3-ledh"><span>LED ${d.n + 1} · ${d.total}개 중 · 라인 위치 ${num(d.s, 1)} mm</span><span class="m3-ledsel">${ledNavHtml(d.n, d.total)}<button type="button" data-lp-ledsel="" title="LED 선택 해제(Esc)" aria-label="LED 선택 해제">✕</button></span></div>
     <div class="m3-card"><div class="m3-sub">배광 <span class="mut">(모든 LED 공통)</span></div>
@@ -248,7 +248,7 @@ export function reflDbHtml(cat, ui = {}) {
       메모 <input data-lp-addn size="8" aria-label="메모"> <button data-lp-addok="${id}">추가</button><button data-lp-addno>취소</button></div></td></tr>` : '';
     return `<tr><th>${e.special ? '특수 · ' : ''}${name}</th><td>${KIND_SHORT[e.kind] ?? e.kind}</td><td>${cell(e, 'R')}</td><td>${cell(e, 'max')}</td><td>${u ? '사용자 · ' : ''}${reflStatusText(e)}</td><td>${e.nSamples ?? 0}</td><td>${act}</td></tr>${add}`;
   };
-  return `<div class="m3-sub">반사 소재 DB <span class="mut">반사율 % · 불투명 부품 상한 · 자동설계 ④ 후보 · 공용은 [복사] 후 수정</span></div>
+  return `<div class="m3-sub">반사 소재 DB <span class="mut">반사율 % · 불투명 부품 상한 · 기구 최적화 ④ 후보 · 공용은 [복사] 후 수정</span></div>
     <div class="m3-cat-wrap"><table class="m3-cmp m3-cat"><tr><th>소재</th><th>종류</th><th>R</th><th>상한</th><th>상태</th><th>측정</th><th></th></tr>${cat.map(row).join('')}</table></div>
     <div class="m3-row"><button data-lp-dbexp>내보내기</button><label class="m3-file"><span>불러오기</span><input type="file" accept=".json,application/json" data-lp-dbimp hidden></label></div>`;
 }

@@ -51,7 +51,7 @@ export function mountSplitter(main) {
   apply();
 }
 
-// 아래 칸(자동설계·대시보드) 높이 조절 — 위 경계 손잡이를 위아래로 끌기(uds.m3.dockH, px). 3D·결과 칸은 최소 MIN_MAIN 을 남김. 두 번 클릭 = 기본
+// 아래 칸(기구 최적화·대시보드) 높이 조절 — 위 경계 손잡이를 위아래로 끌기(uds.m3.dockH, px). 3D·결과 칸은 최소 MIN_MAIN 을 남김. 두 번 클릭 = 기본
 // 키 바꿈: 기본 높이를 줄인 것(250 → 200, 2026-10-27)이 예전에 끌어 둔 값에 가려지지 않게
 const DOCK_KEY = 'uds.m3.dockH2', DOCK_DEF = 200, DOCK_MIN = 120, MIN_MAIN = 240;
 export const clampDock = (h, wrapH) => Math.round(Math.max(DOCK_MIN, Math.min(h, Math.max(DOCK_MIN, wrapH - MIN_MAIN - 90))));   // 90 = 명령줄·상태줄

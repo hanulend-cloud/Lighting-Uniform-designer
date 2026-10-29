@@ -12,7 +12,7 @@ let ledCache = [], manCache = null, layCache = [];
 export function resetLedCaches() { ledCache = []; manCache = null; layCache = []; }
 export const rawParts = (parts) => parts.map(({ positions, triangles, faceIds, faceCount, volume }) => ({ positions, triangles, faceIds, faceCount, volume }));
 
-// LED STEP 부품(위치 보정 적용 — 화면·인식용, (메쉬, offset, rot) 별 캐시 3칸 LRU: 자동설계 ⑤ 후보·미리보기가 현재 위치를 밀어내지 않게). Worker 에는 원본을 보내고 composeScene 이 같은 변환을 한다
+// LED STEP 부품(위치 보정 적용 — 화면·인식용, (메쉬, offset, rot) 별 캐시 3칸 LRU: 기구 최적화 ⑤ 후보·미리보기가 현재 위치를 밀어내지 않게). Worker 에는 원본을 보내고 composeScene 이 같은 변환을 한다
 function stepPartsNow(M) {
   const st = M?.light?.step, lm = getLedMesh();
   if (!st || !lm?.parts?.length || lm.name !== st.name) return null;
@@ -22,7 +22,7 @@ function stepPartsNow(M) {
   return c.parts;
 }
 // 원래/가상 배치 하나로(spec P4 §2.2a) → { parts, leds, pcb, excluded, emitters, virtual, err? } | null.
-// 입력이 같으면 같은 객체(화면 meshKey 비교용). 캐시 4칸(LRU — 자동설계 복사본이 화면 항목을 밀어내지 않게). line 이 없으면 원래 배치(개별 조정 없음)
+// 입력이 같으면 같은 객체(화면 meshKey 비교용). 캐시 4칸(LRU — 기구 최적화 복사본이 화면 항목을 밀어내지 않게). line 이 없으면 원래 배치(개별 조정 없음)
 // LED 개별 조정(light.ledAdjust, 배치가 맞을 때만)은 line 이 있을 때 반영 — 결과 adjusted 면 parts 는 조정된 월드 좌표
 export function stepLayout(M, line = null) {
   const st = M?.light?.step, parts = stepPartsNow(M);
