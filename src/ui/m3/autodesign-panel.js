@@ -126,7 +126,7 @@ export function tileConfigHtml(k, { avail, sel, running, names = [], milkyPart =
   const on = !!sel[k], sw = `<label class="od-sw"><input type="checkbox" data-ad="${k}"${on ? ' checked' : ''}${dis}> ${on ? '사용' : '사용 안 함'}</label>`;
   let opt = '';
   if (on && k === 'milky') opt = milkyPart != null ? `<div class="od-opt mut">대상: ${pname(milkyPart)}</div>` : '';   // 상한 입력칸은 뺌(2026-10-29) — 상한 = capDefault 자동
-  if (on && k === 'shape') opt = `<div class="od-opt">대상 <select data-ad="shapePart" aria-label="③ 대상 부품"${dis}>${avail.shape.parts.map((i) => `<option value="${i}"${i === sel.shapePart ? ' selected' : ''}>${pname(i)}</option>`).join('')}</select></div>`;
+  if (k === 'shape') opt = `<div class="od-opt">형상 바꿀 부품 <select data-ad="shapePart" aria-label="③ 대상 부품"${dis}>${avail.shape.parts.map((i) => `<option value="${i}"${i === sel.shapePart ? ' selected' : ''}>${pname(i)}</option>`).join('')}</select></div>`;
   if (on && k === 'housing') opt = `<div class="od-opt">대상 <select data-ad="housingPart" aria-label="④ 대상 부품"${dis}>${avail.housing.parts.map((i) => `<option value="${i}"${i === sel.housingPart ? ' selected' : ''}>${pname(i)}</option>`).join('')}</select> <span class="mut">${housingMat ? `${esc(housingMat.name)} · 최대 ${Math.round(housingMat.max * 100)}%` : '소재 미지정'}</span></div>
     <label class="od-opt"><input type="checkbox" data-ad="housingSpecial"${sel.housingSpecial ? ' checked' : ''}${dis}> 특수 표면처리 허용</label>`;
   const why = `${TILE_NOTE[k] ?? ''}${a.note ? ` · ${a.note}` : ''}`;

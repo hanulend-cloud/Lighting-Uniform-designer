@@ -153,7 +153,7 @@ export async function mount(ctx) {
   mountSplitter(document.querySelector('.m3-main'));   // 좌·우 창 폭 끌어서 조절(한 번만 붙음)
   mountDockSplitter(document.querySelector('#m3-dock'), document.querySelector('#mech3d-wrap'));   // 아래 칸 높이 조절
   // ⑤ 기구 최적화 창(떠 있는 창) — 설계 인자 현황·기구 최적화 칸을 기본 화면에서 빼서 담음. 여닫기 = 명령줄 [5 기구 최적화]
-  monitor ??= createMonitor({ host: $('#mech3d-wrap'), items: [$('#m3-factor'), $('#m3-dock')], onChange: (on) => { const b = document.querySelector('#m3-cmd [data-c="opt"]'); if (b) { b.classList.toggle('on', on); b.setAttribute('aria-pressed', String(on)); } if (on && A && !adState().open) adSetOpen(true); } });
+  monitor ??= createMonitor({ host: $('#mech3d-wrap'), items: [$('#m3-factor'), $('#m3-dock')], onChange: (on) => { const b = document.querySelector('#m3-cmd [data-c="opt"]'); if (b) { b.classList.toggle('on', on); b.setAttribute('aria-pressed', String(on)); } if (on && A && !adState().open) adSetOpen(true); if (A) renderMarkers(); } });
   mountFacSplitter(document.querySelector('#m3-factor'), document.querySelector('.m3-left'));   // 왼쪽 맨 아래(부품 속성 밑) 설계 인자 현황 높이 조절
   if (A && A.ctx.mspec === ctx.mspec) { A.ctx = ctx; return; }   // 같은 기구 — 그대로
   unmount();
@@ -347,6 +347,9 @@ function renderMarkers() {
   if (!A?.view) return;
   const C = A.checks, f = A.store.session.focusCheck, M = A.store.mspec, rt = getMech3d(), out = [];
   const size = (id) => (f === id ? 20 : 12);
+  // ③ 형상 바꿀 부품 — 기구 최적화 창이 열려 있고 ③ 을 켰으면 보라색으로 덮어 표시
+  const ad = A.ad, spi = ad?.sel?.shape && monitor?.isOpen() ? ad.sel.shapePart : -1;
+  if (spi >= 0 && rt?.parts[spi]) out.push({ type: 'tris', positions: rt.parts[spi].positions, triangles: rt.parts[spi].triangles, color: 0xa855f7, opacity: 0.35 });
   for (const it of C.interference?.items ?? []) out.push({ type: 'ring', pos: it.pos, color: it.kind === 'potted' ? 0xffa000 : 0xff3b30, size: size('interference') });   // 포팅 LED(투과 부품 안) = 주황 경고
   for (const it of C.reach?.items ?? []) {
     const col = 0x4cd964;   // LED 방향 화살표만(도달 경고 고리는 뺌 — 직진만 봐서 도광 구조에서 잘못 경고, 2026-10-29)
@@ -450,7 +453,7 @@ function adSel(k, v) {
   if (k === 'position') { const av = stageAvailability(A.store.mspec, adInfo()); st.sel.leds = !!v && !!av.leds?.ok; st.sel.height = !!v && !!av.height?.ok; }   // ② 기구 위치 = LED 배치 + 높이
   else st.sel[k] = k === 'milkyMax' ? clampCap(v) : v;
   st.sel.housing = false; st.sel.boost = false;   // 반사율(④)·보완 자동 추가는 화면에서 뺌 — 부품 속성에서 직접
-  renderAuto();
+  renderAuto(); renderMarkers();   // ③ 대상 부품 강조 갱신
 }
 // 설계 인자 현황판의 '지금 설계' 값 — Milky(① 대상 부품) · LED 개수 · 형상 변경 여부 · 지금 균일도
 function factorNow() {
@@ -554,7 +557,7 @@ function ledSW(M, line) {
   ledSWCache = { key, line, v };
   return v;
 }
-// 3D 광경로 화살표 — 주광경로 1개(실제 광자 경로, 굵기·숫자 = 비중)만. 이름표 없음(관측면 글씨는 관측면 화살표 하나). 보기 메뉴로 켜고 끔(uds.m3.paths)
+// 3D 광경로 화살표 — 주광경로 1개(실제 광자 경로, 굵기·숫자 = 비중)만. 이름표 = 지나는 부품 이름만(관측면 글씨는 관측면 화살표 하나). 보기 메뉴로 켜고 끔(uds.m3.paths)
 let pathKey = '';
 export const pathsOn = () => { try { return localStorage.getItem('uds.m3.paths') !== '0'; } catch { return true; } };
 export function setPathsOn(v) { try { localStorage.setItem('uds.m3.paths', v ? '1' : '0'); } catch {} pathKey = ''; drawLightPaths(); syncViewBtns(); }
@@ -589,7 +592,8 @@ function drawLightPaths() {
   const base = P.map((p, i) => {
     const stops = [['LED', at(dotA(led))], ...p.parts.map((q) => [M.parts[q]?.name ?? `부품 ${q + 1}`, at(dotA(ctr(rt.parts[q])))]), ['관측면', at(0)]];
     const pts = stops.map(([, q]) => q.map((v, k) => v + (side[k] / sl) * gap * i)), last = pts[pts.length - 1];
-    return { pts: [...pts, last.map((v, k) => v + ax[k] * oa.len * 0.6)], names: null, axis: ax, side: side.map((v) => v / sl), share: p.share, label: `${(p.share * 100).toFixed(0)}%${p.refl ? ' 반사' : ''}`, offset: i };
+    const nm = p.parts.map((q) => M.parts[q]?.name ?? `부품 ${q + 1}`);   // 경로가 지나는 부품 이름표(LED·관측면 글씨는 빼서 중복 없음)
+    return { pts: [...pts, last.map((v, k) => v + ax[k] * oa.len * 0.6)], names: nm.length ? nm : null, namePts: nm.map((_, k) => k + 1), axis: ax, side: side.map((v) => v / sl), share: p.share, label: `${(p.share * 100).toFixed(0)}%${p.refl ? ' 반사' : ''}`, offset: i };
   });
   A.view.setLightPaths(base);   // 먼저 곧은 기둥(바로), 이어서 Worker 가 실제 광자 경로를 찾으면 바꿔 그림
   realLightPaths(P, base, ledE, key, oa, rt.parts.length);
@@ -604,7 +608,8 @@ async function realLightPaths(P, base, ledE, key, oa, nMech) {
     try { r = await port.send({ type: 'path', sceneKey, emitter: ledE, want: `${p.refl ? 'R' : ''}:${p.parts.join('>')}`, nMech }); } catch { return base[i]; }
     const g = r?.path; if (!g?.pts?.length) return base[i];
     const end = g.pts[g.pts.length - 1], tail = end.map((v, k) => v + g.dir[k] * oa.len * 0.6);
-    return { ...base[i], pts: [...g.pts, tail] };
+    const ok = base[i].names && g.enter?.length === base[i].names.length;   // 이름표 = 그 부품에 처음 들어간 점
+    return { ...base[i], pts: [...g.pts, tail], names: ok ? base[i].names : null, namePts: ok ? g.enter : null };
   }));
   if (key !== pathKey || !pathsOn()) return;   // 그사이 경로가 바뀜·꺼짐
   A.view.setLightPaths(out);
