@@ -482,7 +482,7 @@ function renderAuto() {
   A.optDash?.refresh();
   renderAutoPanel(el, { avail, sel, running: st.running, result: st.result, resultOpen: !!st.resultOpen, names: M.parts.map((p) => p.name), canRevert: !!st.undo, applied: st.undo ? st.applied ?? null : null, noLine: !A.store.session.line, milkyPart: mp, housingMat: hm ? { name: hm.name, max: hm.max } : null, catalog: reflCat() }, {
     onSel: (k, v) => adSel(k, v),
-    onAction: (k, v) => ({ applyMilky: () => adApplyMilky(+v), run: adRunBoost, stop: adStop, close: () => monitor?.close(), apply: adApply, applyAlt: adApplyAlt, cancel: adCancel, revert: adRevert, step: adStep, view: () => { st.resultOpen = true; renderAuto(); }, hide: () => { st.resultOpen = false; renderAuto(); } })[k]?.(),
+    onAction: (k, v) => ({ continue: adContinue, applyMilky: () => adApplyMilky(+v), run: adRunBoost, stop: adStop, close: () => monitor?.close(), apply: adApply, applyAlt: adApplyAlt, cancel: adCancel, revert: adRevert, step: adStep, view: () => { st.resultOpen = true; renderAuto(); }, hide: () => { st.resultOpen = false; renderAuto(); } })[k]?.(),
   });
 }
 function adStop() { const st = adState(); if (!st.running || !st.runner) return; st.runner.cancel(); setStatus('기구 최적화 중지됨'); A.optDash?.stop(); }
@@ -673,9 +673,9 @@ function adHeightInfo(M0, line, rt) {
 const BOOST_SETS = [['housing'], ['height'], ['housing', 'height'], ['leds'], ['leds', 'housing'], ['leds', 'housing', 'height']];
 const BOOST_LABEL = { housing: '④ 케이스 면', height: '⑤ LED 높이', leds: '② LED 배치' };
 // 최적화 대시보드 — 실행 시작 때 체크한 항목으로 초기화, 끝나면 결과 표시
-function dashReset() {
+function dashReset(only = null) {   // only = 이번에 돌릴 단계(이어서 최적화) — 없으면 체크 상태
   const st = adState(), avail = stageAvailability(A.store.mspec, adInfo()), O = A.store.mspec.observe;
-  const on = (k) => !!st.sel[k] && !!avail[k]?.ok;
+  const on = (k) => (only ? !!only[k] : !!st.sel[k] && !!avail[k]?.ok);
   A.optDash?.reset({ stages: { milky: on('milky'), position: on('leds') || on('height'), shape: on('shape') }, tgLen: O.targetLen, tgWid: O.targetWid });
 }
 // 검증 후보 이름(⑥) — 바뀐 항목만 짧게
@@ -827,7 +827,7 @@ async function adRun(opt = {}) {
   try {
     res = await runAutoDesign({
       stages, obs, G, line, current: cur, milkyMax: st.sel.milkyMax ?? null, housingProbe, finishText: (f) => finishText(f, reflCat()), nMax: Math.max(1, Math.min(60, Math.floor(line.length / 2))), pitchRange: null, stepMode: stp,
-      shapePart: sp, shapeRanges, ...(stages.shape ? (({ screen, schedule }) => ({ screen, schedule }))(shapeBudget(currentVerified?.eff ?? snap0.photometry?.eff)) : {}), currentVerified,   // ③ 광자 = 광 효율 반비례 heightRange: hInfo?.range ?? null, housingPart: hp, finishCands, ledsAtCurrentMilky: !!opt.added?.length,
+      shapePart: sp, shapeRanges, shapeStart: stages.shape && M0.parts[sp]?.shapeMod ? (({ dt, h, R, e, c, kL, kW }) => ({ dt, h, R, e, c, kL, kW }))(M0.parts[sp].shapeMod) : null,   // 이미 적용한 형상에서 이어서 ...(stages.shape ? (({ screen, schedule }) => ({ screen, schedule }))(shapeBudget(currentVerified?.eff ?? snap0.photometry?.eff)) : {}), currentVerified,   // ③ 광자 = 광 효율 반비례 heightRange: hInfo?.range ?? null, housingPart: hp, finishCands, ledsAtCurrentMilky: !!opt.added?.length,
     }, io);
   } catch (e) { if (A === a && !R.stopped) setStatus(`기구 최적화 실패: ${e.message}`); }
   if (A !== a) return;   // 그사이 이탈
@@ -890,6 +890,17 @@ function adApply() {
   renderAuto();
 }
 // [그래도 적용] — '현재안 유지'(차이가 잡음 수준)여도 찾은 후보로 바꿈
+// 이 안에서 이어서(2026-10-30) — 결과를 적용한 뒤, 체크했지만 이번 실행에서 돌리지 않은 항목만 그 위에서 최적화(예: ③ 형상 결과 → ② 위치·① Milky).
+// 적용한 형상·배치는 장면(getMech3d)에 들어가 다음 실행의 출발점이 됨. 적용은 [되돌리기] 로 취소 가능
+function adContinue() {
+  const st = adState(), r = st.result; if (!r || st.running) return;
+  const done = r.stages ?? {}, s = st.sel, av = stageAvailability(A.store.mspec, adInfo());
+  const next = { milky: !!(s.milky && !done.milky && av.milky.ok), leds: !!(s.leds && !done.leds && av.leds.ok), height: !!(s.height && !done.height && av.height.ok), housing: false,
+    shape: !!(s.shape && !done.shape && av.shape.ok && av.shape.parts.includes(s.shapePart)) };
+  if (!Object.values(next).some(Boolean)) { setStatus('이어서 최적화할 항목이 없음 — 설계 인자에서 위치·Milky 등을 더 체크하세요'); renderAuto(); return; }
+  if (!r.unchanged) adApply();   // 현재안 유지면 적용할 것 없이 그대로 이어서
+  dashReset(next); adRun({ stages: next });
+}
 // Milky 조정 표에서 고른 Milky 로 적용 — 최적안의 다른 인자는 그대로, Milky 와 그 추정 균일도·효율만 바꿈
 function adApplyMilky(v) {
   const r = adState().result, row = r?.milkyRows?.find((x) => Math.abs(x.milky - v) < 0.005);

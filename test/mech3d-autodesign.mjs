@@ -298,4 +298,12 @@ ok(halvingTotal(27) === 35 && halvingTotal(4) === 10 && halvingTotal(1) === 3, '
   const best = await halving([{ dt: 2 }, { dt: 0.5 }, { dt: 0 }], evalFn, obs, [[3, 1, 1]]);
   ok(best.cand.dt === 0.5 && Math.abs(shapeSize({ dt: -1, h: 0.5, kL: [0.2, -0.7], kW: [0.1] }) - 2.3) < 1e-12, `잡음 수준 차이면 작은 변경 dt ${best.cand.dt}`);
 }
+{ // 이미 적용한 형상(shapeStart)에서 이어서: ③ 를 다시 돌려도 적용 형상이 후보에 들어가 더 나으면 유지(원본에서 새로 시작해 잃지 않음)
+  const rg = shapeVarRanges({ t0: 2, pitch: 5, hasCenters: false }), start = { dt: 0, h: 0, R: 1, e: 0.7, c: 0 }, seen = [];
+  const good = (c) => Math.abs((c.e ?? 0) - 0.7) < 1e-9 && !(c.c ?? 0) && !(c.dt ?? 0);
+  const io = { evalShapes: async (d, cands) => { seen.push(...cands); return cands.map((c) => ({ cand: c, ok: true, eff: 0.5, stats: { Ulen: good(c) ? 0.85 : c.c > 0 ? 0.7 : 0.6, Uwid: 0.9 } })); },
+    verify: async (d) => ({ stats: { Ulen: good(d.shape ?? {}) ? 0.85 : 0.6, Uwid: 0.9 }, eff: 0.5 }), progress() {}, cancelled: () => false };
+  const r = await runAutoDesign({ stages: { shape: true }, obs: { targetLen: 0.8, targetWid: 0.8 }, current: { milky: 3, count: 5, pitch: 0, shape: null }, shapePart: 0, shapeRanges: rg, shapeStart: start, curve: false }, io);
+  ok(seen.some(good) && good(r.best.shape ?? {}), `적용 형상(끝단 +0.7) 후보 포함 → 최종 ${JSON.stringify(r.best.shape)}`);
+}
 done();

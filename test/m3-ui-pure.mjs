@@ -408,3 +408,7 @@ done();
 { const { shapeText } = await import('../src/ui/m3/autodesign-panel.js');
   const t = shapeText({ dt: 0, h: 0, e: 0, c: 0, kL: [0.6, -0.23, -0.14, -0.23, 0.6], kW: [0, 0, 0] });
   console.log(t === '길이 두께 곡선 −0.23~+0.60 mm' ? 'PASS 형상 문구: 길이 두께 곡선(제어점 최소~최대) · 0 곡선 생략' : (process.exitCode = 1, `FAIL 형상 문구 ${t}`)); }
+{ const { resultLineHtml } = await import('../src/ui/m3/autodesign-panel.js');
+  const base = { feasible: false, reason: '', targets: { len: 0.8, wid: 0.8 }, cur: { milky: 1, Ulen: 0.6, Uwid: 0.6, eff: 0.1 }, best: { milky: 2, Ulen: 0.7, Uwid: 0.6, eff: 0.09 } };
+  const a = resultLineHtml(base), b = resultLineHtml({ ...base, unchanged: true }), c = resultLineHtml({ ...base, clash: 2 });
+  console.log(a.includes('data-ad="continue"') && b.includes('지금 설계 그대로') && !c.includes('data-ad="continue"') ? 'PASS 결과 카드 [이 안에서 이어서] — 현재안 유지도(적용 없이), 겹침 = 없음' : (process.exitCode = 1, 'FAIL 이어서 단추')); }

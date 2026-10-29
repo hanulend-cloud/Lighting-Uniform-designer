@@ -246,7 +246,7 @@ export function resultLineHtml(r) {
     <table class="m3-cmp m3-cmp-s"><tr><th></th><th>지금</th><th>최적 후보</th></tr>${rows}</table>${clash}
     ${lim ? `<div class="m3-rlim">💡 한계: ${esc(lim)}</div>` : ''}
     ${milkyTableHtml(r.milkyRows, r.best?.milky, r.targets ?? {})}
-    <div class="m3-rbtn"><button type="button" data-ad="apply"${r.unchanged ? ' disabled title="현재안이 이미 최선(차이 없음)"' : r.clash > 0 ? ' disabled title="LED 몸체가 부품과 겹침"' : ''}>적용</button>${altBtn(r)}<button type="button" data-ad="cancel">취소</button><span class="m3-ad-sp"></span><button type="button" data-ad="view" title="프로파일 비교·사유 전문">자세히 ▸</button></div></div>`;
+    <div class="m3-rbtn"><button type="button" data-ad="apply"${r.unchanged ? ' disabled title="현재안이 이미 최선(차이 없음)"' : r.clash > 0 ? ' disabled title="LED 몸체가 부품과 겹침"' : ''}>적용</button>${altBtn(r)}<button type="button" data-ad="cancel">취소</button>${r.clash > 0 ? '' : `<button type="button" data-ad="continue" title="${r.unchanged ? '지금 설계 그대로' : '이 안을 적용한 뒤'}, 체크했지만 이번에 돌리지 않은 항목(예: 위치·Milky)을 그 위에서 이어서 최적화">이 안에서 이어서 ▸</button>`}<span class="m3-ad-sp"></span><button type="button" data-ad="view" title="프로파일 비교·사유 전문">자세히 ▸</button></div></div>`;
 }
 // el 에 그리고 이벤트를 h 로 넘김. state = { avail, sel, running, result, resultOpen, … } — 결과가 있으면 한 줄 + (열림) 결과 창
 export function renderAutoPanel(el, state, h) {

@@ -360,6 +360,14 @@ export async function runAutoDesign(cfg, io) {
     steps.push({ stage: 'shapeCurve', tried: r.tried.length, improved: r.best !== start });
     return r.best;
   }
+  // 이미 적용한 형상(cfg.shapeStart — 원본 기준 변수)에서 이어서: 압축 후보에 넣어 더 나으면 유지(③ 를 다시 돌려도 원본에서 새로 시작해 잃지 않음)
+  if (stages.shape && cfg.shapeRanges && cfg.shapeStart) {
+    const s0 = cfg.shapeStart, Rm = cfg.shapeRanges.R ? Math.round(((cfg.shapeRanges.R[0] + cfg.shapeRanges.R[1]) / 2) * 1e4) / 1e4 : 1;
+    const st = { dt: s0.dt ?? 0, h: s0.h ?? 0, R: s0.R ?? Rm, e: s0.e ?? 0, c: s0.c ?? 0, ...(s0.kL?.some((v) => v) ? { kL: [...s0.kL] } : {}), ...(s0.kW?.some((v) => v) ? { kW: [...s0.kW] } : {}) };
+    const key = (c) => JSON.stringify([c.dt ?? 0, c.h ?? 0, c.e ?? 0, c.c ?? 0, c.kL ?? null, c.kW ?? null, c.h ? c.R : null]);
+    if (shapeNone || !shapeCands?.length) { shapeNone = false; shapeCands = [{ dt: 0, h: 0, R: Rm, e: 0, c: 0 }, st]; }
+    else if (!shapeCands.some((c) => key(c) === key(st))) shapeCands = [...shapeCands, st];
+  }
   if (stages.shape && shapeNone && shapeZero && nCurve) {   // 선별 변수 효과가 잡음 수준이어도 곡선은 시도
     const best = await curveStage(shapeZero);
     if (best === undefined) return { cancelled: true };
