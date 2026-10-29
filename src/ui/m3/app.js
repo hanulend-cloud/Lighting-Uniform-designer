@@ -544,7 +544,7 @@ function ledSW(M, line) {
   ledSWCache = { key, line, v };
   return v;
 }
-// 3D 광경로 화살표 — 상위 경로 2개를 LED 중심 → 거친 부품 중심 → 관측면 중심으로(굵기·숫자 = 비중). 보기 메뉴로 켜고 끔(uds.m3.paths)
+// 3D 광경로 화살표 — 주광경로 1개(실제 광자 경로, 굵기·숫자 = 비중)만. 이름표 없음(관측면 글씨는 관측면 화살표 하나). 보기 메뉴로 켜고 끔(uds.m3.paths)
 let pathKey = '';
 export const pathsOn = () => { try { return localStorage.getItem('uds.m3.paths') !== '0'; } catch { return true; } };
 export function setPathsOn(v) { try { localStorage.setItem('uds.m3.paths', v ? '1' : '0'); } catch {} pathKey = ''; drawLightPaths(); syncViewBtns(); }
@@ -558,7 +558,7 @@ function syncViewBtns() {
 }
 function drawLightPaths() {
   if (!A?.view?.setLightPaths) return;
-  const M = A.store.mspec, S = A.store.session, rt = getMech3d(), P = pathsOn() ? (A.simDash?.paths() ?? []).slice(0, 2) : [];
+  const M = A.store.mspec, S = A.store.session, rt = getMech3d(), P = pathsOn() ? (A.simDash?.paths() ?? []).slice(0, 1) : [];   // 주광경로 1개만(2026-10-29: 두 경로·이름표가 헷갈림)
   const key = JSON.stringify(P.map((p) => [p.parts, p.refl, Math.round(p.share * 20)]));   // 5% 단위로 바뀔 때만 다시 그림
   if (key === pathKey) return;
   pathKey = key;
@@ -579,7 +579,7 @@ function drawLightPaths() {
   const base = P.map((p, i) => {
     const stops = [['LED', at(dotA(led))], ...p.parts.map((q) => [M.parts[q]?.name ?? `부품 ${q + 1}`, at(dotA(ctr(rt.parts[q])))]), ['관측면', at(0)]];
     const pts = stops.map(([, q]) => q.map((v, k) => v + (side[k] / sl) * gap * i)), last = pts[pts.length - 1];
-    return { pts: [...pts, last.map((v, k) => v + ax[k] * oa.len * 0.6)], names: i === 0 ? stops.map(([n]) => n) : null, axis: ax, side: side.map((v) => v / sl), share: p.share, label: `${(p.share * 100).toFixed(0)}%${p.refl ? ' 반사' : ''}`, offset: i };
+    return { pts: [...pts, last.map((v, k) => v + ax[k] * oa.len * 0.6)], names: null, axis: ax, side: side.map((v) => v / sl), share: p.share, label: `${(p.share * 100).toFixed(0)}%${p.refl ? ' 반사' : ''}`, offset: i };
   });
   A.view.setLightPaths(base);   // 먼저 곧은 기둥(바로), 이어서 Worker 가 실제 광자 경로를 찾으면 바꿔 그림
   realLightPaths(P, base, ledE, key, oa, rt.parts.length);
@@ -594,8 +594,7 @@ async function realLightPaths(P, base, ledE, key, oa, nMech) {
     try { r = await port.send({ type: 'path', sceneKey, emitter: ledE, want: `${p.refl ? 'R' : ''}:${p.parts.join('>')}`, nMech }); } catch { return base[i]; }
     const g = r?.path; if (!g?.pts?.length) return base[i];
     const end = g.pts[g.pts.length - 1], tail = end.map((v, k) => v + g.dir[k] * oa.len * 0.6);
-    const namePts = [0, ...g.enter, g.pts.length - 1];
-    return { ...base[i], pts: [...g.pts, tail], namePts: base[i].names ? namePts : null };
+    return { ...base[i], pts: [...g.pts, tail] };
   }));
   if (key !== pathKey || !pathsOn()) return;   // 그사이 경로가 바뀜·꺼짐
   A.view.setLightPaths(out);

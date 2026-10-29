@@ -203,6 +203,18 @@ export function mapTxt(G, map, { name = '', quality = '', photons = null, noise 
   }
   return head.join('\n') + '\n';
 }
+// 1D 프로파일 TXT(탭 구분) — 그림마다 '# 제목' + 머리줄(x 이름, 곡선 이름) + x 칸 중심과 곡선별 값(최대 대비 %, 원자료 raw 우선, 값 없음 = 빈칸).
+// list = [{ title, v: { curves, opt:{ x0, x1, xl } } | null }] — v 없는 그림은 건너뜀 — 순수
+export function profileTxt(list) {
+  const f = (v) => String(+v.toFixed(3)), out = ['# UDS 1D 프로파일 — 값 = 최대 대비 %(평활 전 원자료) · 빈칸 = 값 없음'];
+  for (const { title, v } of list) {
+    if (!v?.curves?.length) continue;
+    const { x0, x1, xl } = v.opt, n = v.curves[0].ys.length, dx = (x1 - x0) / n;
+    out.push('', `# ${title}`, [xl, ...v.curves.map((c) => c.name)].join('\t'));
+    for (let i = 0; i < n; i++) out.push([f(x0 + (i + 0.5) * dx), ...v.curves.map((c) => { const y = (c.raw ?? c.ys)[i]; return Number.isFinite(y) ? (y * 100).toFixed(2) : ''; })].join('\t'));
+  }
+  return out.join('\n') + '\n';
+}
 // 2D 에서 지정한 칸 (i, j) 을 지나는 1D 곡선 — along = 길이 방향(w 칸 j 고정), across = 폭 방향(s 칸 i 고정, 원형 라인이면 반경 방향).
 // 각 곡선은 자기 최대 = 1, 관측면 밖 칸 = NaN(끊김) — 순수
 export function pointProfiles(G, map, i, j) {
@@ -352,41 +364,67 @@ export function createResultsPanel(el, { onQuality = null, fileName = () => 'uds
   let smooth = true; try { smooth = localStorage.getItem('uds.m3.smooth') !== '0'; } catch {}
   q('smooth').checked = smooth;
   q('smooth').onchange = (e) => { smooth = e.target.checked; try { localStorage.setItem('uds.m3.smooth', smooth ? '1' : '0'); } catch {} if (last) update(last); };
-  q('txt').onclick = () => {
-    const sn = last?.snap, st = sn?.stats; if (!st || st.empty || !sn.G) return;
-    const nm = String(fileName() ?? 'uds'), txt = mapTxt(sn.G, st.map, { name: nm, quality: { low: '저', mid: '중', high: '고' }[last.observe?.quality ?? 'low'], photons: sn.photons, noise: st.relNoiseCell });
-    const a = document.createElement('a'), url = URL.createObjectURL(new Blob(['\ufeff' + txt], { type: 'text/plain;charset=utf-8' }));
-    a.href = url; a.download = `${nm.replace(/[\\/:*?"<>|]/g, '_')}-2D분포.txt`; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 1000);
+  const saveTxt = (txt, tag) => {
+    const nm = String(fileName() ?? 'uds'), a = document.createElement('a'), url = URL.createObjectURL(new Blob(['\ufeff' + txt], { type: 'text/plain;charset=utf-8' }));
+    a.href = url; a.download = `${nm.replace(/[\\/:*?"<>|]/g, '_')}-${tag}.txt`; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 1000);
   };
+  const txt2D = () => {
+    const sn = last?.snap, st = sn?.stats; if (!st || st.empty || !sn.G) return;
+    saveTxt(mapTxt(sn.G, st.map, { name: String(fileName() ?? 'uds'), quality: { low: '저', mid: '중', high: '고' }[last.observe?.quality ?? 'low'], photons: sn.photons, noise: st.relNoiseCell }), '2D분포');
+  };
+  const txt1D = () => { if (VIEW.prof) saveTxt(profileTxt([{ title: TITLE.prof, v: VIEW.prof }, { title: TITLE.wprof, v: VIEW.wprof }]), '1D프로파일'); };
+  q('txt').onclick = txt2D;
   // 1D 표시: 부드럽게면 평활 곡선(σ 1칸) + 원자료(raw), 가로축은 값이 있는 범위로
   const sm = (c) => (smooth ? { ...c, ys: smoothCurve(Array.from(c.ys), 1), raw: Array.from(c.ys) } : c);
   const plotView = (curves, tg, opt) => { const c = cropFinite(curves.map(sm), opt.x0, opt.x1); return { curves: c.curves, tg, opt: { ...opt, x0: c.x0, x1: c.x1 } }; };
-  // 큰 창(⤢) — 같은 그림을 화면 크기로. 계산이 이어지면 같이 갱신 · 2D 는 [실제 비율] 전환 · Esc·바깥 클릭·닫기
+  // 큰 창(⤢, 어느 그림에서 눌러도) — 2D(위) + 길이 1D·폭 1D(아래)를 한 화면에. 그림마다 [⤢ 이 그림만] ↔ [모두 보기], 2D·1D TXT 저장.
+  // 계산이 이어지면 같이 갱신 · 2D 는 [실제 비율] 전환 · 2D 클릭 = 지정 점 · Esc(한 그림만 → 모두 → 닫기)·바깥 클릭·닫기
+  const KINDS = ['map', 'prof', 'wprof'];
   const VIEW = { map: null, prof: null, wprof: null }, TITLE = { map: '2D 광량 분포 (관측면 펼침)', prof: '길이 방향 1D 프로파일', wprof: '폭 방향 1D 프로파일' };
   let big = null;
   const paint = (kind, cv, hover = null) => {
     const v = VIEW[kind], dpr = dprNow();
     if (!v) { clearCanvas(cv); return; }
-    if (kind === 'map') drawMap(cv, v, dpr, hover, cv === big?.cv ? big.equal : false);
+    if (kind === 'map') drawMap(cv, v, dpr, hover, cv === big?.cvs.map ? big.equal : false);
     else drawPlot(cv, v.curves, v.tg, v.opt, dpr, hover);
   };
-  const sizeBig = () => { const r = big.cv.getBoundingClientRect(), d = dprNow(); big.cv.width = Math.round(r.width * d); big.cv.height = Math.round(r.height * d); };
+  const paintBig = () => {
+    if (!big) return;
+    for (const k of KINDS) {
+      const cv = big.cvs[k]; if (!cv.offsetParent) continue;   // 숨긴 그림(한 그림만 보기)은 건너뜀
+      const r = cv.getBoundingClientRect(), d = dprNow(), W = Math.round(r.width * d), H = Math.round(r.height * d);
+      if (cv.width !== W || cv.height !== H) { cv.width = W; cv.height = H; }
+      paint(k, cv);
+    }
+  };
   const closeBig = () => { if (!big) return; big.el.remove(); document.removeEventListener('keydown', big.key); window.removeEventListener('resize', big.rs); big = null; };
-  function openBig(kind) {
+  const setFocus = (k) => {
+    big.focus = k; if (k) big.grid.dataset.focus = k; else delete big.grid.dataset.focus;   // 속성이 있으면(빈 값도) 한 그림 배치
+    big.grid.querySelectorAll('[data-big-one]').forEach((b) => { const on = b.dataset.bigOne === k; b.textContent = on ? '↙ 모두 보기' : '⤢ 이 그림만'; b.title = on ? '2D·1D 를 한 화면에' : '이 그림만 화면 가득'; });
+    paintBig();
+  };
+  function openBig() {
     closeBig();
     const ov = document.createElement('div');
-    ov.className = 'm3-big'; ov.setAttribute('role', 'dialog'); ov.setAttribute('aria-modal', 'true'); ov.setAttribute('aria-label', TITLE[kind]);
-    ov.innerHTML = `<div class="m3-big-in"><div class="m3-big-hd"><b>${TITLE[kind]}</b><span class="m3-big-sp"></span>${kind === 'map' ? '<label class="m3-big-eq"><input type="checkbox" data-big-eq> 실제 비율(가로·세로 같은 축척)</label>' : ''}<button type="button" data-big-close>닫기 (Esc)</button></div><canvas class="m3-big-cv"></canvas></div>`;
+    ov.className = 'm3-big'; ov.setAttribute('role', 'dialog'); ov.setAttribute('aria-modal', 'true'); ov.setAttribute('aria-label', '광량 분포 2D·1D');
+    const cell = (k) => `<div class="m3-big-c" data-k="${k}"><div class="m3-big-ct"><b>${TITLE[k]}</b><span class="m3-big-sp"></span>${k === 'map' ? '<label class="m3-big-eq"><input type="checkbox" data-big-eq> 실제 비율</label>' : ''}<button type="button" data-big-one="${k}">⤢ 이 그림만</button></div><canvas class="m3-big-cv" data-big-cv="${k}"></canvas></div>`;
+    ov.innerHTML = `<div class="m3-big-in"><div class="m3-big-hd"><b>광량 분포 — 2D · 1D</b><span class="mut" style="font-size:12px">2D 클릭 = 그 점 기준 1D 곡선(주황)</span><span class="m3-big-sp"></span><button type="button" data-big-txt="2d" title="2D 분포 표(탭 구분, 최대 대비 %)">2D TXT</button><button type="button" data-big-txt="1d" title="길이·폭 1D 프로파일 표(원자료 %, 지정 점 곡선 포함)">1D TXT</button><button type="button" data-big-close>닫기 (Esc)</button></div>
+      <div class="m3-big-grid">${KINDS.map(cell).join('')}</div></div>`;
     document.body.appendChild(ov);
-    big = { el: ov, kind, cv: ov.querySelector('canvas'), equal: false, key: (e) => { if (e.key === 'Escape') closeBig(); }, rs: () => { if (big) { sizeBig(); paint(big.kind, big.cv); } } };
+    const cvs = Object.fromEntries(KINDS.map((k) => [k, ov.querySelector(`[data-big-cv="${k}"]`)]));
+    big = { el: ov, cvs, grid: ov.querySelector('.m3-big-grid'), focus: null, equal: false, key: (e) => { if (e.key === 'Escape') { if (big.focus) setFocus(null); else closeBig(); } }, rs: () => paintBig() };
     document.addEventListener('keydown', big.key); window.addEventListener('resize', big.rs);
-    ov.addEventListener('click', (e) => { if (e.target === ov) closeBig(); });
+    ov.addEventListener('click', (e) => {
+      if (e.target === ov) { closeBig(); return; }
+      const one = e.target.closest('[data-big-one]'); if (one) { setFocus(big.focus === one.dataset.bigOne ? null : one.dataset.bigOne); return; }
+      const t = e.target.closest('[data-big-txt]'); if (t) (t.dataset.bigTxt === '2d' ? txt2D : txt1D)();
+    });
     ov.querySelector('[data-big-close]').onclick = closeBig;
-    const eq = ov.querySelector('[data-big-eq]'); if (eq) eq.onchange = () => { big.equal = eq.checked; paint('map', big.cv); };
-    if (kind === 'map') { wireMapHover(big.cv); big.cv._onPin = onPin; } else wireHover(big.cv);
-    sizeBig(); paint(kind, big.cv);
+    const eq = ov.querySelector('[data-big-eq]'); eq.onchange = () => { big.equal = eq.checked; paint('map', cvs.map); };
+    wireMapHover(cvs.map); cvs.map._onPin = onPin; wireHover(cvs.prof); wireHover(cvs.wprof);
+    setFocus(null);
   }
-  el.addEventListener('click', (e) => { const b = e.target.closest('[data-zoom]'); if (b) openBig(b.dataset.zoom); });
+  el.addEventListener('click', (e) => { const b = e.target.closest('[data-zoom]'); if (b) openBig(); });
   let last = null;
   const fill = (g, pct, ok, tgPct) => {
     const f = g.querySelector('.f'), w = `${Math.max(0, Math.min(100, pct)).toFixed(0)}%`;
@@ -402,7 +440,7 @@ export function createResultsPanel(el, { onQuality = null, fileName = () => 'uds
     fill(q(`${key}g`), Number.isFinite(v) ? v * 100 : 0, j.cls === 'ok', tg * 100);
   };
   function clear(message) {
-    VIEW.map = VIEW.prof = VIEW.wprof = null; if (big) clearCanvas(big.cv);
+    VIEW.map = VIEW.prof = VIEW.wprof = null; if (big) for (const k of KINDS) clearCanvas(big.cvs[k]);
     for (const k of ['map', 'prof', 'wprof']) clearCanvas(q(k));
     for (const k of ['avg', 'eff', 'ul', 'uw']) { q(k).textContent = '–'; q(k).className = 'v'; }
     for (const k of ['avgs', 'ulj', 'uwj', 'mapsub', 'wsub']) q(k).textContent = '';
@@ -452,7 +490,7 @@ export function createResultsPanel(el, { onQuality = null, fileName = () => 'uds
     if (lc.ratio != null) fill(q('avgg'), lc.ratio * 50, lc.pass, 50);   // 목표 = 가운데, 목표의 2배 = 가득
     const eff = snap.photometry?.eff;
     q('eff').textContent = Number.isFinite(eff) ? `${(eff * 100).toFixed(1)}%` : '–';
-    if (big) paint(big.kind, big.cv);   // 큰 창도 계산을 따라감
+    paintBig();   // 큰 창도 계산을 따라감
   }
   if (typeof ResizeObserver !== 'undefined') {
     let w0 = 0;

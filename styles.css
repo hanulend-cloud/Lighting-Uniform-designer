@@ -538,6 +538,17 @@ main:has(#m3-start:not([hidden])) { grid-template-rows: minmax(0, 1fr); }
 .m3-big-eq { font-size: 12.5px; display: flex; gap: 4px; align-items: center; }
 .m3-big-hd button { border: 1px solid #d3d8e0; background: #fff; border-radius: 6px; padding: 4px 10px; cursor: pointer; font: inherit; font-size: 12.5px; }
 .m3-big-cv { width: 100%; height: 100%; display: block; background: #fafbfc; border-radius: 6px; }
+.m3-big { grid-template: minmax(0, 1fr) / minmax(0, 1fr); }   /* 안쪽 창 높이 = 화면(내용 크기로 늘어나지 않게) */
+/* 큰 창 통합 — 2D(위, 전체 폭) + 길이 1D·폭 1D(아래 나란히). data-focus = 한 그림만 화면 가득 */
+.m3-big-grid { display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: minmax(0, 1.15fr) minmax(0, 1fr); gap: 10px; min-height: 0; }
+.m3-big-c { display: grid; grid-template-rows: auto minmax(0, 1fr); min-height: 0; min-width: 0; overflow: hidden; }
+.m3-big-c .m3-big-cv { min-height: 0; min-width: 0; }   /* 캔버스 고유 크기가 칸을 밀어내지 않게 */
+.m3-big-c[data-k="map"] { grid-column: 1 / -1; }
+.m3-big-ct { display: flex; align-items: center; gap: 8px; font-size: 13px; margin-bottom: 4px; }
+.m3-big-ct button, .m3-big-hd button { border: 1px solid #d3d8e0; background: #fff; border-radius: 6px; padding: 3px 9px; cursor: pointer; font: inherit; font-size: 12px; }
+.m3-big-grid[data-focus="map"], .m3-big-grid[data-focus="prof"], .m3-big-grid[data-focus="wprof"] { grid-template-columns: 1fr; grid-template-rows: minmax(0, 1fr); }
+.m3-big-grid[data-focus="map"] .m3-big-c:not([data-k="map"]), .m3-big-grid[data-focus="prof"] .m3-big-c:not([data-k="prof"]), .m3-big-grid[data-focus="wprof"] .m3-big-c:not([data-k="wprof"]) { display: none; }
+.m3-big-grid[data-focus] .m3-big-c { grid-column: 1 / -1; }
 
 /* 부품 속성 탭(기본 | 상세) */
 .m3-tabs { display: grid; grid-template-columns: 1fr 1fr; border-bottom: 1px solid var(--m3-line); margin: 4px 0 6px; }

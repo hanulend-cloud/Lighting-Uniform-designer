@@ -366,3 +366,8 @@ done();
 { const { mapViewG } = await import('../src/ui/m3/results-panel.js');
   const G = { ns: 2, nw: 4, cell: 1, w0: -2, valid: [0, 1, 1, 0, 0, 0, 1, 0] }, v = mapViewG(G), e = mapViewG({ ns: 1, nw: 2, cell: 1, w0: 0, valid: [0, 0] });
   console.log(v.w0 === -1 && v.nw === 2 && v.jA === 1 && v.jB === 2 && mapViewG(G) === v && e.nw === 2 && e.jA === 0 ? 'PASS 2D 표시 폭 = 값 있는 w 줄만' : (process.exitCode = 1, `FAIL 2D 폭 ${JSON.stringify(v)}`)); }
+{ const { profileTxt } = await import('../src/ui/m3/results-panel.js');
+  // 1D TXT: 그림마다 머리말 + x 칸 중심 · 곡선별 %(원자료 raw 우선, 없음 = 빈칸)
+  const t = profileTxt([{ title: '길이 방향 1D', v: { curves: [{ name: '폭 평균', ys: [0.9, 1], raw: [0.8, 1] }, { name: 'B', ys: [NaN, 0.5] }], opt: { x0: 0, x1: 10, xl: 's (mm)' } } }, { title: '폭', v: null }]);
+  const L = t.split('\n');
+  console.log(L.includes('# 길이 방향 1D') && L.includes('s (mm)\t폭 평균\tB') && L.includes('2.5\t80.00\t') && L.includes('7.5\t100.00\t50.00') && !t.includes('# 폭') ? 'PASS 1D 프로파일 TXT(원자료 %, 없는 그림 생략)' : (process.exitCode = 1, `FAIL 1D TXT ${JSON.stringify(L)}`)); }
