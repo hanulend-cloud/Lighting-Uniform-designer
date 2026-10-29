@@ -216,7 +216,7 @@ export function renderObserveProps(el, m, ui, h) {
     <div class="m3-row">관측 원뿔 ±<input type="number" min="2" max="90" step="1" value="${O.cone}" data-lp-obs="cone">° <span class="mut">90 = 확산면 밝기, 좁히면 정면 밝기(잡음 큼)</span></div>
     <div class="m3-row">가장자리 제외<input type="number" min="0" step="0.1" value="${O.edgeExcl}" data-lp-obs="edgeExcl">mm</div>
     <div class="m3-row">길이 칸<input type="number" min="0.2" step="0.5" value="${O.cellS ?? ''}" placeholder="${autoPh(ui.auto?.cellS)}" data-lp-obs="cellS" data-lp-auto>mm 폭 칸<input type="number" min="0.1" step="0.1" value="${O.cellW ?? ''}" placeholder="${autoPh(ui.auto?.cellW)}" data-lp-obs="cellW" data-lp-auto>mm 폭 판정 창<input type="number" min="1" step="1" value="${O.winS ?? ''}" placeholder="${autoPh(ui.auto?.winS)}" data-lp-obs="winS" data-lp-auto>mm <span class="mut">빈칸 = 자동</span></div>
-    <div class="m3-row">계산 오차 목표<input type="number" min="0.2" max="20" step="0.5" value="${num((O.targetNoise ?? 0.02) * 100, 1)}" data-lp-tgt="targetNoise" data-lp-pct>% <span class="mut">이하가 되면 계산 멈춤</span></div>`;
+    <div class="m3-row">계산 오차 목표<input type="number" min="0.2" max="20" step="0.5" value="${num((O.targetNoise ?? 0.01) * 100, 1)}" data-lp-tgt="targetNoise" data-lp-pct>% <span class="mut">이하가 되면 계산 멈춤</span></div>`;
   const dSum = [O.dir ? '방향 지정' : '', O.cone !== 90 ? `원뿔 ±${O.cone}°` : ''].filter(Boolean).join(' · ');
   el.innerHTML = `<div class="m3-h">속성 · 관측면</div>${tabsHtml('obs', dSum)}<div class="m3-edit" role="tabpanel">${tab === 'basic' ? basic : detail}</div>`;
   wireTabs(el, 'obs', () => renderObserveProps(el, m, ui, h));
@@ -266,7 +266,7 @@ export function renderTargetProps(el, m, h) {
       <div class="m3-row"><label>폭 방향</label><input type="number" min="0" max="100" step="5" value="${pc(O.targetWid)}" data-lp-tgt="targetWid" data-lp-pct aria-label="폭 방향 균일도 목표 %"> %</div></div>
     <div class="m3-card"><div class="m3-row"><label>밝기 목표</label><input type="number" min="0" step="10" value="${O.targetLum ?? ''}" placeholder="없음" data-lp-tgt="targetLum" data-lp-auto aria-label="평균 휘도 목표 cd/m²"> cd/m² <span class="mut">선택 · LED 밝기(lm) 입력 필요</span></div></div>
     ${secHtml('tgtadv', '계산 · 설계 점검 기준', '', `
-      <div class="m3-row"><label>계산 오차 목표</label><input type="number" min="0.2" max="20" step="0.5" value="${num((O.targetNoise ?? 0.02) * 100, 1)}" data-lp-tgt="targetNoise" data-lp-pct>% <span class="mut">이하가 되면 계산 멈춤</span></div>
+      <div class="m3-row"><label>계산 오차 목표</label><input type="number" min="0.2" max="20" step="0.5" value="${num((O.targetNoise ?? 0.01) * 100, 1)}" data-lp-tgt="targetNoise" data-lp-pct>% <span class="mut">이하가 되면 계산 멈춤</span></div>
       <div class="m3-row"><label>최소 살두께</label><input type="number" min="0.1" step="0.1" value="${C.minWall}" data-lp-chk="minWall"> mm</div>
       <div class="m3-row"><label>최소 도달률</label><input type="number" min="0" max="100" step="5" value="${num(C.minReach * 100, 0)}" data-lp-chk="minReach" data-lp-pct>%</div>
       <div class="m3-row"><label>새는 빛 한도</label><input type="number" min="0" max="100" step="5" value="${num(C.maxLeak * 100, 0)}" data-lp-chk="maxLeak" data-lp-pct>%</div>`)}`;

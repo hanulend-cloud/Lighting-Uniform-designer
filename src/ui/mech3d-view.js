@@ -265,7 +265,7 @@ export function createMech3dView(canvas, { onPick, gizmo = null }) {
     const d = Math.max(1e-6, pos.clone().sub(camera.position).dot(camera.getWorldDirection(new THREE.Vector3())));
     return (2 * d * Math.tan((camera.fov * Math.PI) / 360)) / h;
   }
-  // 광경로 화살표(app.drawLightPaths) — paths = [{ pts:[[x,y,z]…], share, label, offset, names?, axis?, side? }]
+  // 광경로 화살표(app.drawLightPaths) — paths = [{ pts:[[x,y,z]…], share, label, offset, names?, namePts?(이름마다 pts 번호 — 없으면 0,1,2…), axis?, side? }]
   // 선 = 화면 px 두께(굵기 ∝ 비중), 화살촉·점·이름표·% 글씨 = 화면 px 크기 — pathLayout() 이 render 마다 크기·위치를 맞춤
   const HEAD_PX = 11, DOT_PX = 4, NAME_PX = 15, PCT_PX = 18, LADDER_PX = 22, SIDE_PX = 70;
   function spriteText(text, w, h, font, fg, bg) {
@@ -320,13 +320,13 @@ export function createMech3dView(canvas, { onPick, gizmo = null }) {
         }
         // 첫 경로: 머무는 곳마다 점 + 이름표(옆으로 빼서 축 방향으로 고르게 — 얇은 적층에서도 안 겹침) + 가는 지시선
         if (p.names?.length) {
-          const n = p.names.length, lmat = new THREE.LineBasicMaterial({ color: 0x9aa7b8, depthTest: false, transparent: true, opacity: 0.8 }), labels = [], leaders = [];
+          const NV = p.namePts ? p.namePts.map((k) => V[k]) : V, n = p.names.length, lmat = new THREE.LineBasicMaterial({ color: 0x9aa7b8, depthTest: false, transparent: true, opacity: 0.8 }), labels = [], leaders = [];
           p.names.forEach((nm, j) => {
-            const dot = new THREE.Mesh(dotG, mat); dot.position.copy(V[j]); dot.renderOrder = 5; pathGroup.add(dot); it.dots.push({ mesh: dot, at: V[j] });
+            const dot = new THREE.Mesh(dotG, mat); dot.position.copy(NV[j]); dot.renderOrder = 5; pathGroup.add(dot); it.dots.push({ mesh: dot, at: NV[j] });
             const t3 = spriteText(nm, 128, 32, '20px sans-serif', '#e6ebf2', 'rgba(20,26,38,.78)'); pathGroup.add(t3); labels.push(t3);
-            const ln = new THREE.Line(new THREE.BufferGeometry().setFromPoints([V[j].clone(), V[j].clone()]), lmat); ln.renderOrder = 5; pathGroup.add(ln); leaders.push(ln);
+            const ln = new THREE.Line(new THREE.BufferGeometry().setFromPoints([NV[j].clone(), NV[j].clone()]), lmat); ln.renderOrder = 5; pathGroup.add(ln); leaders.push(ln);
           });
-          it.names = { V, n, ax: new THREE.Vector3(...(p.axis ?? [0, 0, 1])).normalize(), sd: new THREE.Vector3(...(p.side ?? [1, 0, 0])).normalize(), labels, leaders };
+          it.names = { V: NV, n, ax: new THREE.Vector3(...(p.axis ?? [0, 0, 1])).normalize(), sd: new THREE.Vector3(...(p.side ?? [1, 0, 0])).normalize(), labels, leaders };
         }
         it.pct = spriteText(p.label, 120, 36, 'bold 24px sans-serif', '#' + col.toString(16).padStart(6, '0'), 'rgba(20,26,38,.75)'); pathGroup.add(it.pct);
         pathItems.push(it);

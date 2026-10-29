@@ -1,5 +1,5 @@
 // 청크 실행·새는 빛·Worker 장면 캐시(Node 모의): node test/mech3d-chunk.mjs
-import { runJob, runChunk } from '../src/engine/mech3d/job.js';
+import { runJob, runChunk, samplePath } from '../src/engine/mech3d/job.js';
 import { makeChunkHost } from '../src/engine/mech3d/chunk-host.js';
 import { lightData } from '../src/engine/mech3d/line.js';
 import { loadTable } from './l2-util.mjs';
@@ -50,4 +50,14 @@ const same = (a, b) => a.length === b.length && a.every((v, k) => v === b[k]);
   ok(one.acc.some((v) => v > 0) && Math.abs(all.ledger.emitted / one.ledger.emitted - 5) < 1e-9 && mid(one.acc) / one.ledger.emitted > mid(all.acc) / all.ledger.emitted, 'chunk.emitters: 가운데 LED 1개만 — 방출 = LED 1개 몫(combineSources 는 광속 합), 가운데에 몰림');
 }
 
+{ // 대표 광경로(광경로 화살표): 원하는 경로(':0' = 판 하나 통과)로 관측면에 닿은 광자 하나의 면 적중점 — LED → 판 아랫면 → 윗면, 나가는 방향
+  const r = samplePath({ ...base, emitters: [fx.emitters[2]], want: ':0', nMech: 1, seed: 5 });
+  const z = r?.pts.map((q) => q[2]) ?? [];
+  ok(r && Math.abs(z[0] + 3) < 0.6 && z.some((v) => Math.abs(v) < 1e-6) && Math.abs(z[z.length - 1] - 2) < 1e-6 && r.dir[2] > 0 && r.enter.length === 1 && Math.abs(r.pts[r.enter[0]][2]) < 1e-6, `대표 광경로 z: ${z.map((v) => v.toFixed(2)).join(' → ')}`);
+  ok(samplePath({ ...base, emitters: [fx.emitters[2]], want: 'R:5', nMech: 1, seed: 5, batches: 1 }) === null, '없는 경로 → null');
+  const host = makeChunkHost({ getTable: () => table, getDb: () => null });
+  host.handle({ type: 'scene', sceneKey: 'p1', mechParts: [fx.plate], mspec: fx.mspec, ledParts: null, lineData: lightData(fx.line), G: fx.G, obs: fx.obs, emitters: fx.emitters });
+  const h = host.handle({ type: 'path', sceneKey: 'p1', emitter: fx.emitters[2], want: ':0', nMech: 1 }).reply;
+  ok(h.path?.pts?.length >= 3 && host.handle({ type: 'path', sceneKey: 'zz', want: ':0' }).reply.stale === true, 'Worker path 메시지 → 경로, 다른 장면 → stale');
+}
 done();

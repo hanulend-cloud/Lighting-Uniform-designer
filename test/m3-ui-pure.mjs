@@ -352,3 +352,17 @@ done();
   const p = pointProfiles(G, map, 2, 1), q0 = pointProfiles(G, map, 1, 0);
   const near = (a, b) => a.length === b.length && a.every((v, k) => (Number.isNaN(b[k]) ? Number.isNaN(v) : Math.abs(v - b[k]) < 1e-9));
   console.log(near(p.along, [4 / 8, 8 / 8, 6 / 8]) && near(p.across, [1 / 6, 1]) && near(q0.along, [2 / 2, NaN, 1 / 2]) && near(q0.across, [NaN, 1]) ? 'PASS 지정 점 프로파일: 길이(w 고정)·폭(s 고정) 곡선 · 관측면 밖 = 끊김' : (process.exitCode = 1, `FAIL 지정 점 프로파일 ${JSON.stringify([...p.along])} ${JSON.stringify([...q0.across])}`)); }
+{ const { cropFinite, smoothCurve, mapTxt } = await import('../src/ui/m3/results-panel.js');
+  // 폭 프로파일 가로축 = 값이 있는 칸 범위로(양끝 NaN 칸 잘라냄 — 모든 곡선 기준)
+  const c = cropFinite([{ ys: [NaN, 0.5, 1, NaN] }, { ys: [NaN, NaN, 0.8, NaN] }], -2, 2);
+  const okC = c.x0 === -1 && c.x1 === 1 && c.curves[0].ys.length === 2 && c.curves[1].ys[0] !== c.curves[1].ys[0] && c.curves[1].ys[1] === 0.8 && cropFinite([{ ys: [NaN, NaN] }], 0, 1).x1 === 1;
+  // 평활(표시용): 가우스 σ 칸, NaN 은 건너뛰고 자리 유지, 상수는 그대로, 튀는 점은 줄어듦
+  const sm = smoothCurve([1, 1, 1, 2, 1, 1, 1, NaN, 1], 1);
+  const okS = Math.abs(smoothCurve([0.7, 0.7, 0.7], 1)[1] - 0.7) < 1e-12 && sm[3] < 1.6 && sm[3] > 1 && Number.isNaN(sm[7]) && Math.abs(sm[8] - 1) < 1e-9;
+  // 2D TXT: 머리말 + w(위→아래) × s 표, 최대 = 100(%), 관측면 밖 = 빈칸
+  const G = { ns: 2, nw: 2, ds: 5, cell: 1, w0: -1, L: 10, valid: [1, 1, 0, 1] }, t = mapTxt(G, [1, 2, 9, 4], { name: 'x' }), rows = t.split('\n');
+  const okT = t.startsWith('#') && rows.some((r) => r === 'w\\s(mm)\t2.5\t7.5') && rows.some((r) => r === '0.5\t50.00\t100.00') && rows.some((r) => r === '-0.5\t25.00\t');
+  console.log(okC && okS && okT ? 'PASS 폭 범위 맞춤 · 표시 평활(σ칸, NaN 유지) · 2D 분포 TXT' : (process.exitCode = 1, `FAIL 폭/평활/TXT ${okC} ${okS} ${okT} ${JSON.stringify(sm)} ${JSON.stringify(rows)}`)); }
+{ const { mapViewG } = await import('../src/ui/m3/results-panel.js');
+  const G = { ns: 2, nw: 4, cell: 1, w0: -2, valid: [0, 1, 1, 0, 0, 0, 1, 0] }, v = mapViewG(G), e = mapViewG({ ns: 1, nw: 2, cell: 1, w0: 0, valid: [0, 0] });
+  console.log(v.w0 === -1 && v.nw === 2 && v.jA === 1 && v.jB === 2 && mapViewG(G) === v && e.nw === 2 && e.jA === 0 ? 'PASS 2D 표시 폭 = 값 있는 w 줄만' : (process.exitCode = 1, `FAIL 2D 폭 ${JSON.stringify(v)}`)); }

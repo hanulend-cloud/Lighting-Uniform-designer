@@ -12,7 +12,7 @@ export function defaultLight() {
   };
 }
 export function defaultObserve() {
-  return { faces: [], dir: null, cone: 90, cell: null, cellS: null, cellW: null, quality: 'low', winS: null, edgeExcl: 0.5, targetLen: 0.8, targetWid: 0.8, targetLum: null, targetNoise: 0.02 };
+  return { faces: [], dir: null, cone: 90, cell: null, cellS: null, cellW: null, quality: 'low', winS: null, edgeExcl: 0.5, targetLen: 0.8, targetWid: 0.8, targetLum: null, targetNoise: 0.01, noiseRev: 1 };
 }
 // 설계 점검 기준(spec 2026-10-15 §5): 최소 살두께 mm, 최소 도달률(0~1), 새는 빛 한도(0~1)
 export function defaultChecks() {
@@ -26,7 +26,8 @@ export function migrateMech3d(m) {
   const f = Number(m.light.spec.fluxLm);
   m.light.spec.fluxLm = Number.isFinite(f) && f > 0 ? f : 0;
   m.observe.targetLum ??= null;
-  m.observe.targetNoise ??= 0.02;
+  // 계산 오차 목표 기본 2% → 1%(2026-10-29: 1D 튐·2D 얼룩) — 예전 기본값(2%·없음)만 1% 로, 사용자가 고른 값은 그대로
+  if (m.observe.noiseRev !== 1) { if (m.observe.targetNoise == null || m.observe.targetNoise === 0.02) m.observe.targetNoise = 0.01; m.observe.noiseRev = 1; }
   m.checks = { ...defaultChecks(), ...(m.checks ?? {}) };
   // 열 배치(spec P4 §2.2b): rows 1|2(그 밖 = 1), rowGap 유한 ≥ 0(그 밖 = 0). 라인 반폭 제한은 배치 때
   const rowsOf = (o) => { const g = Number(o?.rowGap); return { rows: o?.rows === 2 ? 2 : 1, rowGap: Number.isFinite(g) && g > 0 ? g : 0 }; };

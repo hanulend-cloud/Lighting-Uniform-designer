@@ -64,6 +64,36 @@ export function runChunk({ S, line, obs, G, emitters, ledSpec, N, seed, rw = nul
   return { acc: a.acc, cnt: a.cnt, ledger: r.ledger, leak, escObs, paths, ms: r.ms, rw: a.rw };
 }
 
+// 대표 광경로(3D 광경로 화살표) — 실제 MC 광자 중 경로 want('R:2>1' 형식, 기구 부품 nMech 미만만)로 관측면에 집계된 것을 모아
+// 면 적중 횟수가 가운데(중앙값)인 광자 하나의 꺾인 길을 돌려준다: { pts:[발광점, 면 적중점…(마지막 = 관측면 출사점)], dir(나가는 방향), enter:[want 부품마다 처음 들어간 pts 번호] } | null.
+// 체적 산란 점은 넣지 않는다(면과 면 사이 = 곧은 선) — 면에서 꺾이는 굴절·반사·내부 전반사가 보이게. batches × N 광자까지(모이면 멈춤)
+export function samplePath({ S, line, obs, G, emitters, ledSpec, want, nMech = Infinity, N = 400, seed = 1, batches = 6, maxEvents = 4000, enough = 15 }) {
+  const src0 = ledSources(emitters, ledSpec), found = [];
+  for (let b = 0; b < batches && found.length < enough; b++) {
+    const a = makeAccumulator(G, line, obs);
+    let curP = -1, pts = [], seq = [], at = [], refl = false, start = null;
+    const source = { ...src0, sample: (rnd) => { const s0 = src0.sample(rnd); start = [s0[0], s0[1], s0[2]]; return s0; } };
+    runMC3D(S, {
+      source, N, seed: seed * 7919 + b, maxEvents,
+      onExit: a.onExit,
+      onHit(part, face, x, y, z, dx, dy, dz, w, p, entering) {
+        if (p !== curP) { curP = p; pts = [start]; seq = []; at = []; refl = false; }
+        const l = pts[pts.length - 1]; if (!l || Math.abs(l[0] - x) + Math.abs(l[1] - y) + Math.abs(l[2] - z) > 1e-9) pts.push([x, y, z]);   // 짝 면 두 번 = 한 점
+        if (!entering || part < 0) return;
+        if (S.optics[part]?.transmissive) { if (seq[seq.length - 1] !== part && seq.length < 5) { seq.push(part); at.push(pts.length - 1); } } else refl = true;
+      },
+      onEscape(x, y, z, dx, dy, dz, w, p) {
+        if (!a.onEscape(x, y, z, dx, dy, dz, w, p) || curP !== p) return;
+        const key = `${refl ? 'R' : ''}:${seq.filter((q) => q < nMech).join('>')}`;
+        if (key === want && found.length < enough) found.push({ pts, dir: [dx, dy, dz], enter: at.filter((_, k) => seq[k] < nMech) });
+      },
+    });
+  }
+  if (!found.length) return null;
+  found.sort((u, v) => u.pts.length - v.pts.length);
+  return found[Math.floor((found.length - 1) / 2)];
+}
+
 // GPU 청크 — runChunk 와 같은 결과 형식. 광원 표본은 CPU 가 뽑고(seed), GPU 가 추적한 광자별 기록(gpu-trace.js REC)을
 // 같은 집계기에 차례로 넣는다(마지막 출사 → 탈출). gpu = createGpuTracer() 결과
 export async function runChunkGpu(gpu, { S, line, obs, G, emitters, ledSpec, N, seed, rw = null }) {

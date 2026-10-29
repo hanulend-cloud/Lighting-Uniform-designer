@@ -169,8 +169,8 @@ export async function mount(ctx) {
     ctx.persist();
   }
   const a = A = { ctx, store, pool, view: null, meshShown: null, lineKey: '', Gc: null, obsShown: null, checks: {}, markKey: '', timing: { start: 0, first: null, noise5: null } };
-  a.prog = createProgressive({ ports: pool.ports(), onUpdate: onCalc, opts: { targetNoise: ctx.mspec.observe.targetNoise ?? 0.02 } });
-  a.results = createResultsPanel($('#m3-res'), { onQuality: (v) => A.store.update('observe', (m) => { m.observe.quality = v; }) });
+  a.prog = createProgressive({ ports: pool.ports(), onUpdate: onCalc, opts: { targetNoise: ctx.mspec.observe.targetNoise ?? 0.01 } });
+  a.results = createResultsPanel($('#m3-res'), { fileName: () => String(A?.store?.mspec?.name ?? 'uds').replace(/\.(stp|step)$/i, ''), onQuality: (v) => A.store.update('observe', (m) => { m.observe.quality = v; }) });
   a.optDash = createOptDash($('#m3-optdash'), { config: (k) => (A?.tileState ? tileConfigHtml(k, A.tileState) : { on: false, html: '' }), onSel: (k, v) => adSel(k, v), board: $('#m3-factor'), now: () => (A ? factorNow() : {}) }); a.simDash = createSimDash($('#m3-simdash'), { onCtl: () => cmdHandlers().onToggleCalc() });   // 아래 칸 = 자동설계 · 오른쪽 맨 위 = 현재 설계 계산(항상 보임, 계산 제어 단추)
   a.cmd = mountCommandBar($('#m3-cmd'), cmdHandlers());
   a.unsub = store.subscribe(onChange);
@@ -208,7 +208,7 @@ function onChange(tag) {
   if (tag === 'light') { const t = dropStaleAdjust(M.light); if (t) A.store.session.status = t; }   // 배치가 바뀌어 무효가 된 LED 개별 조정(spec §4a)
   if (tag === 'observe' || tag === 'material') refreshLine();   // material: 부품 크기·위치가 바뀌면 라인도 다시(키가 같으면 건너뜀)
   if (PHYSICS.has(tag)) restartCalc();
-  if (tag === 'target') A.prog.setJudge({ obs: M.observe, targetNoise: M.observe.targetNoise ?? 0.02, fluxLm: M.light.spec.fluxLm ?? 0 });
+  if (tag === 'target') A.prog.setJudge({ obs: M.observe, targetNoise: M.observe.targetNoise ?? 0.01, fluxLm: M.light.spec.fluxLm ?? 0 });
   if (GEOM_CHECK.has(tag)) rerunGeomChecks();
   renderAll(tag);
 }
@@ -261,7 +261,7 @@ export function jobFor(M, mechParts, { emitters = null, line = null, G = null, o
     ms.light.step = { ...ms.light.step, offset: [0, 0, 0], rot: [0, 0, 0], leds: lay.leds, pcb: lay.pcb, excluded: lay.excluded, emitters: JSON.parse(JSON.stringify(lay.emitters)), virtual: null };
   }
   return {
-    sceneKey: `s${++sceneSeq}`, G: g, obs: o, nLeds: em.length, fluxLm: M.light.spec.fluxLm ?? 0, maxPhotons: 1e8 * ({ mid: 2, high: 4 }[o.quality] ?? 1),   // 화질이 높을수록(칸 많음) 계산 한도도
+    sceneKey: `s${++sceneSeq}`, G: g, obs: o, nLeds: em.length, fluxLm: M.light.spec.fluxLm ?? 0, maxPhotons: 4e8 * ({ mid: 2, high: 4 }[o.quality] ?? 1),   // 화질이 높을수록(칸 많음) 계산 한도도 — 오차 목표 1%(2%의 4배 광자)에 맞춰 4억 기준
     scene: { mechParts: L.rawParts(mechParts), mspec: ms, ledParts, lineData: lightData(ln), G: g, obs: o, emitters: em },
   };
 }
@@ -298,7 +298,7 @@ function onCalc(snap) {
   if (T.start && snap.stats?.relNoise != null && snap.stats.relNoise <= 0.05 && T.noise5 == null) T.noise5 = (now - T.start) / 1000;
   updateLeakCheck(snap);
   A.results.update({ snap, observe: M.observe, message: guidance(snap), leds: ledSW(M, S.line) });
-  A.simDash?.sample(snap, M.observe.targetNoise ?? 0.02, M.observe, M.parts.map((p) => p.name), M.parts.length, !!adState().running);
+  A.simDash?.sample(snap, M.observe.targetNoise ?? 0.01, M.observe, M.parts.map((p) => p.name), M.parts.length, !!adState().running);
   drawLightPaths();
   paintObs(snap);
   A.cmd.update(S, M, snap.stats ?? null);
@@ -572,15 +572,33 @@ function drawLightPaths() {
   // (예전: LED 평균점에서 단계마다 옆으로 밀어 계단 → 화살표가 퍼져 판 가장자리 분포처럼 보임, 2026-10-27 의견)
   const ax = oa.axis, dotA = (q) => (q[0] - oa.pos[0]) * ax[0] + (q[1] - oa.pos[1]) * ax[1] + (q[2] - oa.pos[2]) * ax[2];
   const perp = (q) => { const t = dotA(q); return Math.hypot(...q.map((v, k) => v - oa.pos[k] - ax[k] * t)); };
-  const led = em.map((e) => e.pos).reduce((a, q) => (perp(q) < perp(a) ? q : a));
+  const ledE = em.reduce((a, e) => (perp(e.pos) < perp(a.pos) ? e : a)), led = ledE.pos;
   const at = (t) => led.map((v, k) => v + ax[k] * (t - dotA(led)));   // LED 를 지나는 축 위 깊이 t 의 점
   const up = Math.abs(ax[2]) < 0.9 ? [0, 0, 1] : [1, 0, 0], side = S.line?.frame?.u ?? [ax[1] * up[2] - ax[2] * up[1], ax[2] * up[0] - ax[0] * up[2], ax[0] * up[1] - ax[1] * up[0]], sl = Math.hypot(...side) || 1;
   const gap = Math.max(1.5, Math.min(6, oa.len * 0.2));   // 경로 2개는 나란히(살짝 옆)
-  A.view.setLightPaths(P.map((p, i) => {
+  const base = P.map((p, i) => {
     const stops = [['LED', at(dotA(led))], ...p.parts.map((q) => [M.parts[q]?.name ?? `부품 ${q + 1}`, at(dotA(ctr(rt.parts[q])))]), ['관측면', at(0)]];
     const pts = stops.map(([, q]) => q.map((v, k) => v + (side[k] / sl) * gap * i)), last = pts[pts.length - 1];
     return { pts: [...pts, last.map((v, k) => v + ax[k] * oa.len * 0.6)], names: i === 0 ? stops.map(([n]) => n) : null, axis: ax, side: side.map((v) => v / sl), share: p.share, label: `${(p.share * 100).toFixed(0)}%${p.refl ? ' 반사' : ''}`, offset: i };
+  });
+  A.view.setLightPaths(base);   // 먼저 곧은 기둥(바로), 이어서 Worker 가 실제 광자 경로를 찾으면 바꿔 그림
+  realLightPaths(P, base, ledE, key, oa, rt.parts.length);
+}
+// 실제 광경로 — 계산 중인 장면(Worker 0)에서 그 경로로 관측면에 닿은 MC 광자 하나(면 적중 수 중앙값)의 꺾인 길:
+// 부품 면에서 굴절·반사·내부 전반사로 꺾이는 모습. 이름표 = LED · 처음 들어간 부품 면 · 관측면 출사점. 못 찾으면 곧은 기둥 그대로
+async function realLightPaths(P, base, ledE, key, oa, nMech) {
+  const sceneKey = A.prog?.snapshot?.().sceneKey, port = A.pool?.ports?.()[0];
+  if (!sceneKey || !port) return;
+  const out = await Promise.all(P.map(async (p, i) => {
+    let r = null;
+    try { r = await port.send({ type: 'path', sceneKey, emitter: ledE, want: `${p.refl ? 'R' : ''}:${p.parts.join('>')}`, nMech }); } catch { return base[i]; }
+    const g = r?.path; if (!g?.pts?.length) return base[i];
+    const end = g.pts[g.pts.length - 1], tail = end.map((v, k) => v + g.dir[k] * oa.len * 0.6);
+    const namePts = [0, ...g.enter, g.pts.length - 1];
+    return { ...base[i], pts: [...g.pts, tail], namePts: base[i].names ? namePts : null };
   }));
+  if (key !== pathKey || !pathsOn()) return;   // 그사이 경로가 바뀜·꺼짐
+  A.view.setLightPaths(out);
 }
 // 관측면 빛 방향 화살표 — 고른 면들의 면적 가중 중심에서 관측 방향(d) 으로. 들어오는 빛(mode 'in') 이면 면을 향해 그림
 function obsArrow(M, line, rt) {
@@ -1365,7 +1383,7 @@ function renderAll(tag = 'all') {
 function renderStatus() {
   const S = A.store.session, M = A.store.mspec;
   const lt = S.ledSel != null && A.ledTotal ? `LED ${S.ledSel + 1}/${A.ledTotal}` : '';
-  renderStatusBar($('#m3-status'), { calc: S.calc, targetNoise: M.observe.targetNoise ?? 0.02, checks: A.checks, focus: S.focusCheck, text: lt && S.status ? `${lt} · ${S.status}` : lt || S.status }, {
+  renderStatusBar($('#m3-status'), { calc: S.calc, targetNoise: M.observe.targetNoise ?? 0.01, checks: A.checks, focus: S.focusCheck, text: lt && S.status ? `${lt} · ${S.status}` : lt || S.status }, {
     onCheck: (id) => A.store.update('session', (_, s) => { s.focusCheck = s.focusCheck === id ? null : id; }),
   });
 }
