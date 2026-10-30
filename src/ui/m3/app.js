@@ -1037,7 +1037,13 @@ function mechLightFromPick(s, auto = false) {
   if (!M.light.step?.fromMech) A.prevLight = { light: JSON.parse(JSON.stringify({ kind: M.light.kind, step: M.light.step ?? null })), mesh: getLedMesh() };   // 해제 때 되돌릴 이전 광원(LED STEP 메쉬 포함 — 이번 세션)
   setLedMesh(name, parts); L.resetLedCaches(); if (A.ctx.canSave?.() !== false) saveLedIDB().catch(() => {});
   st.update('light', (m, x) => {
-    m.parts = m.parts.map((p, i) => { const q = { ...p }; delete q.role; if (leds.includes(i)) q.role = 'light'; return q; });
+    // 광원이 된 부품 이름 = LED 1, LED 2 …(원래 이름은 nameOrig 에 — 해제하면 되돌림). 광원에서 빠진 부품은 원래 이름으로
+    m.parts = m.parts.map((p, i) => {
+      const q = { ...p }; delete q.role;
+      if (q.nameOrig != null && !leds.includes(i)) { q.name = q.nameOrig; delete q.nameOrig; }
+      if (leds.includes(i)) { q.role = 'light'; q.nameOrig ??= p.name; q.name = `LED ${leds.indexOf(i) + 1}`; }
+      return q;
+    });
     m.light.kind = 'step';
     m.light.step = { name, offset: [0, 0, 0], rot: [0, 0, 0], ref: null, leds: [], excluded: [], pcb: -1, emitters: [], fromMech: leds };
     try { L.applyStepRecognition(m, x, m.light.step, { part: leds.indexOf(s.part), face }); x.ledInfo = auto ? `LED ${leds.length}개 자동 인식(같은 모양 반복 부품 · PCB 반대쪽 발광) — 틀리면 [직접 고르기]` : `도면 부품 ${leds.length}개를 광원으로 — ${x.ledInfo}${face !== s.face ? ' (받침 부품 반대쪽 면에서 발광)' : ''}`; }
@@ -1055,7 +1061,7 @@ function mechLightClear() {
   const pv = A.prevLight; A.prevLight = null;
   if (pv?.mesh) { setLedMesh(pv.mesh.name, pv.mesh.parts); L.resetLedCaches(); if (A.ctx.canSave?.() !== false) saveLedIDB().catch(() => {}); }
   A.store.update('light', (m, x) => {
-    m.parts = m.parts.map((p) => { if (p.role !== 'light') return p; const q = { ...p }; delete q.role; return q; });
+    m.parts = m.parts.map((p) => { if (p.role !== 'light') return p; const q = { ...p }; delete q.role; if (q.nameOrig != null) { q.name = q.nameOrig; delete q.nameOrig; } return q; });   // 이름도 원래대로
     if (pv) { m.light.kind = pv.light.kind; m.light.step = pv.light.step; } else { m.light.kind = 'none'; m.light.step = null; }
     x.pick = null; x.ledInfo = pv ? '도면 광원 해제 — 이전 광원으로 되돌림' : '도면 광원 해제 — 부품을 다시 기구로 계산';
   });
