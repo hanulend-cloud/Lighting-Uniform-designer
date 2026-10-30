@@ -448,3 +448,14 @@ done();
   const m = monitorHtml(S, 130);
   const okMon = m.indexOf('① 위치') < m.indexOf('③ 형상') && m.includes('46%') && /고정/.test(m) && m.includes('0.84') && m.includes('▲0.29') && m.includes('1열 17개') && m.includes('od-plot');
   console.log(order === 'position,housing,shape,milky' && okLock && okMon ? 'PASS 기구 최적화 창: 계산 순서 · 고정 항목 · 모니터(진행 줄·지표·기록)' : (process.exitCode = 1, `FAIL 최적화 창: ${order} lock ${okLock} mon ${okMon}`)); }
+{ // 트리 우클릭 메뉴(2026-10-30): 고른 부품 수에 맞는 항목 · 그룹에서 빼기 · Shift 범위 선택
+  const { treeCtxItems, removeFromGroups, rangeSelect } = await import('../src/ui/m3/feature-tree.js');
+  const M = { parts: [{}, {}, {}, {}], groups: [{ id: 'g1', name: '그룹 1', parts: [1, 2] }] };
+  const a = treeCtxItems(M, { node: 'part:3', multi: ['part:0', 'part:3'] }, 'part:3').map((x) => x.k);
+  const b = treeCtxItems(M, { node: 'part:1', multi: [] }, 'part:1').map((x) => x.k);
+  const c = treeCtxItems(M, { node: 'group:g1', multi: [] }, 'group:g1').map((x) => x.k);
+  const lab = treeCtxItems(M, { node: 'part:3', multi: ['part:0', 'part:3'] }, 'part:3')[0].label;
+  const r = removeFromGroups(M.groups, [2]), r2 = removeFromGroups(M.groups, [1, 2]);
+  const rg = rangeSelect(['part:0', 'part:1', 'part:2', 'part:3'], 'part:1', 'part:3');
+  const ok = a.join() === 'group,rename,eye' && /2개/.test(lab) && b.join() === 'group,out,rename,eye' && c.join() === 'ungroup,rename,eye' && r[0].parts.join() === '1' && r2.length === 0 && rg.join() === 'part:1,part:2,part:3';
+  console.log(ok ? 'PASS 트리 우클릭 메뉴: 그룹 만들기(N개)·그룹에서 빼기·그룹 해제·이름·보기 · Shift 범위 선택' : (process.exitCode = 1, `FAIL 우클릭 메뉴 ${a} | ${b} | ${c} | ${lab} | ${JSON.stringify(r)} | ${rg}`)); }

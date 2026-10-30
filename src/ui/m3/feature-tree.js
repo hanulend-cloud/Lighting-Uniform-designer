@@ -56,6 +56,27 @@ export function makeGroup(groups = [], parts, name) {
   return { id, groups: [...rest, { id, name: name || `그룹 ${n}`, parts: [...set].sort((a, b) => a - b) }] };
 }
 export const ungroup = (groups = [], id) => groups.filter((g) => g.id !== id);
+// 고른 부품을 모든 그룹에서 뺌(빈 그룹은 지움)
+export const removeFromGroups = (groups = [], parts) => { const set = new Set(parts); return groups.map((g) => ({ ...g, parts: g.parts.filter((i) => !set.has(i)) })).filter((g) => g.parts.length); };
+// Shift+클릭 범위 선택(순수) — order = 화면에 보이는 부품 노드 순서, from(기준) ~ to 사이 전부
+export function rangeSelect(order, from, to) {
+  const i = order.indexOf(from), j = order.indexOf(to);
+  if (i < 0 || j < 0) return [to];
+  return order.slice(Math.min(i, j), Math.max(i, j) + 1);
+}
+// 트리 우클릭 메뉴 항목(순수) — S.multi·S.node(우클릭한 노드가 선택에 포함된 뒤) 기준. k: group | out | ungroup | rename | eye
+export function treeCtxItems(M, S, id) {
+  const parts = [...new Set([...(S.multi ?? []), ...(S.node?.startsWith('part:') ? [S.node] : [])])].filter((x) => x.startsWith('part:')).map((x) => +x.slice(5));
+  const inG = new Set((M.groups ?? []).flatMap((g) => g.parts)), out = [];
+  if (id.startsWith('part:') && parts.length) {
+    out.push({ k: 'group', label: parts.length > 1 ? `선택한 부품 ${parts.length}개 → 새 그룹` : '이 부품으로 새 그룹' });
+    if (parts.some((i) => inG.has(i))) out.push({ k: 'out', label: '그룹에서 빼기' });
+  }
+  if (id.startsWith('group:') && id !== 'group:_light') out.push({ k: 'ungroup', label: '그룹 해제(부품은 그대로)' });
+  if (id.startsWith('part:') || (id.startsWith('group:') && id !== 'group:_light')) out.push({ k: 'rename', label: '이름 바꾸기' });
+  if (id.startsWith('part:') || id.startsWith('group:')) out.push({ k: 'eye', label: '보이기 / 숨기기' });
+  return out;
+}
 // 그룹 부품 번호 — '_light' = 그룹 밖 광원으로 옮긴 부품(자동 묶음)
 export function groupMembers(M, id) {
   if (id === '_light') { const inG = new Set((M.groups ?? []).flatMap((g) => g.parts)); return M.parts.map((p, i) => i).filter((i) => M.parts[i].role === 'light' && !inG.has(i)); }
@@ -83,11 +104,24 @@ const eyeHtml = (n) => n.eye ? `<span class="m3-eye ${n.eye}" role="button" tabi
 // 노드: 접기 ▸/▾(data-fold) · 이름(data-lbl — 더블클릭 = 이름 바꾸기, 부품·사용자 그룹만) · 깊이(d1·d2 들여쓰기). 머리 = 그룹 단추
 const caret = (n) => (n.fold ? `<span class="m3-fold" role="button" tabindex="-1" data-fold="${esc(n.id)}" aria-label="${n.fold === 'open' ? '접기' : '펼치기'}" aria-expanded="${n.fold === 'open'}">${n.fold === 'open' ? '▾' : '▸'}</span>` : '');
 const renamable = (n) => n.id.startsWith('part:') || (n.id.startsWith('group:') && !n.auto);
-export function treeHead(M, S) {
-  const multi = (S.multi ?? []).filter((x) => x.startsWith('part:')), canG = multi.length > 0 || S.node?.startsWith('part:'), canU = S.node?.startsWith('group:') && S.node !== 'group:_light';
-  return `<div class="m3-h" title="목표·부품·광원·관측면 — 설계를 이루는 항목(클릭 = 속성 편집)">설계 트리 <span class="m3-tree-act"><button type="button" data-tact="group"${canG ? '' : ' disabled'} title="선택한 부품을 그룹으로 묶기 — Ctrl(또는 Shift)+클릭으로 여러 부품 선택">＋ 그룹</button><button type="button" data-tact="ungroup"${canU ? '' : ' disabled'} title="선택한 그룹 풀기(부품은 그대로)">그룹 해제</button></span></div>`;
+export function treeHead() {   // 그룹 단추는 우클릭 메뉴로 옮김(2026-10-30)
+  return '<div class="m3-h" title="클릭 = 속성 편집 · Ctrl+클릭 = 여러 개 · Shift+클릭 = 범위 · 우클릭 = 그룹 만들기·해제·이름 바꾸기">설계 트리 <span class="mut m3-tree-tip">우클릭 = 그룹</span></div>';
 }
 export const treeHtml = (M, S, lay) => `${treeHead(M, S)}${treeNodes(M, S, lay).map((n) => `<div class="m3-node ${n.child ? 'child' : ''} d${n.depth ?? 0}${n.id.startsWith('group:') ? ' grp' : ''} ${n.sel ? 'sel' : ''} ${n.eye === 'off' ? 'hid' : ''}" role="button" tabindex="0"${n.sel ? ' aria-current="true"' : ''} data-node="${esc(n.id)}">${caret(n)}${eyeHtml(n)}<span class="m3-lbl"${renamable(n) ? ' data-lbl title="더블클릭: 이름 바꾸기"' : ''}>${esc(n.label)}</span> <span class="${n.child && !n.id.startsWith('group:') ? `m3-badge k-${esc(n.kind)}` : 'b'}">${esc(n.badge)}</span></div>`).join('')}`;
+// 작은 우클릭 메뉴(화면 고정 위치) — 바깥 클릭·Esc·창 벗어남 = 닫기
+function ctxMenu(doc, x, y, items, onPick, host = doc.body) {   // host = 테마 변수를 물려받을 곳
+  doc.querySelector('.m3-ctx')?.remove();
+  const m = doc.createElement('div'); m.className = 'm3-ctx'; m.setAttribute('role', 'menu');
+  m.innerHTML = items.map((it) => `<button type="button" role="menuitem" data-k="${it.k}">${esc(it.label)}</button>`).join('');
+  host.appendChild(m);
+  const W = doc.defaultView, r = m.getBoundingClientRect();
+  m.style.left = `${Math.max(4, Math.min(x, W.innerWidth - r.width - 4))}px`; m.style.top = `${Math.max(4, Math.min(y, W.innerHeight - r.height - 4))}px`;
+  const close = () => { m.remove(); doc.removeEventListener('pointerdown', away, true); doc.removeEventListener('keydown', key, true); W.removeEventListener('blur', close); };
+  const away = (e) => { if (!m.contains(e.target)) close(); }, key = (e) => { if (e.key === 'Escape') { e.stopPropagation(); close(); } };
+  setTimeout(() => { doc.addEventListener('pointerdown', away, true); doc.addEventListener('keydown', key, true); W.addEventListener('blur', close); });
+  m.addEventListener('click', (e) => { const b = e.target.closest('[data-k]'); if (!b) return; close(); onPick(b.dataset.k); });
+  m.querySelector('button')?.focus();
+}
 export function renderFeatureTree(el, M, S, h, lay) {
   let B = BOUND.get(el);
   if (!B) {
@@ -98,23 +132,40 @@ export function renderFeatureTree(el, M, S, h, lay) {
       const f = e.target.closest?.('[data-fold]'); if (f?.dataset?.fold != null && el.contains(f)) { e.stopPropagation?.(); B.h?.onFold?.(f.dataset.fold); return; }   // 접기·펼치기
       const y = e.target.closest?.('[data-eye]');   // 눈 단추: 선택하지 않고 보기만 전환
       if (y && el.contains(y)) { e.stopPropagation?.(); B.h?.onEye?.(y.dataset.eye, !!e.shiftKey); return; }
-      const n = e.target.closest?.('[data-node]'); if (n && el.contains(n)) B.h?.onNode?.(n.dataset.node, { multi: !!(e.ctrlKey || e.metaKey || e.shiftKey) });   // Ctrl/Shift = 여러 부품 선택(그룹 만들기)
+      const n = e.target.closest?.('[data-node]'); if (n && el.contains(n)) B.h?.onNode?.(n.dataset.node, { multi: !!(e.ctrlKey || e.metaKey), range: !!e.shiftKey, order: partOrder() });   // Ctrl = 하나씩 더하기·빼기 · Shift = 범위
     };
+    const partOrder = () => [...el.querySelectorAll('[data-node^="part:"]')].map((x) => x.dataset.node);
     el.addEventListener('click', fire);
+    // 우클릭 메뉴 — 고르지 않은 노드면 그것만 고른 뒤, 고른 부품 수에 맞는 항목(새 그룹 · 그룹에서 빼기 · 그룹 해제 · 이름 · 보기)
+    el.addEventListener('contextmenu', (e) => {
+      const n = e.target.closest?.('[data-node]'); if (!n || !el.contains(n)) return;
+      const id = n.dataset.node; if (!id.startsWith('part:') && !id.startsWith('group:')) return;
+      e.preventDefault();
+      B.h?.onCtxSelect?.(id);
+      const items = treeCtxItems(B.M, B.S, id); if (!items.length) return;
+      ctxMenu(el.ownerDocument, e.clientX, e.clientY, items, (k) => {
+        if (k === 'rename') { const lb = [...el.querySelectorAll('[data-node]')].find((x) => x.dataset.node === id)?.querySelector('[data-lbl]'); if (lb) startRename(lb); }
+        else if (k === 'eye') B.h?.onEye?.(id, false);
+        else B.h?.onTreeAct?.(k);
+      }, el.closest('#mech3d-wrap') ?? el.ownerDocument.body);
+    });
     // 이름 더블클릭 → 그 자리 입력칸(Enter·바깥 클릭 = 저장, Esc = 취소) → h.onRename(id, 새 이름)
     el.addEventListener('dblclick', (e) => {
       const lb = e.target.closest?.('[data-lbl]'), n = lb?.closest('[data-node]'); if (!lb || !n || !el.contains(n)) return;
-      e.preventDefault(); B.editing = true;
+      e.preventDefault(); startRename(lb);
+    });
+    function startRename(lb) {
+      const n = lb.closest('[data-node]'); B.editing = true;
       const old = lb.textContent, inp = el.ownerDocument.createElement('input');
       inp.className = 'm3-ren'; inp.value = old; inp.setAttribute('aria-label', '이름'); lb.replaceWith(inp); inp.focus(); inp.select();
       let done = false;
       const end = (save) => { if (done) return; done = true; B.editing = false; const v = inp.value.trim(); B.html = null; if (save && v && v !== old) B.h?.onRename?.(n.dataset.node, v); else B.h?.onRedraw?.(); };
       inp.addEventListener('keydown', (k) => { k.stopPropagation(); if (k.key === 'Enter') end(true); else if (k.key === 'Escape') end(false); });
       inp.addEventListener('blur', () => end(true));
-    });
+    }
     el.addEventListener('keydown', (e) => { if ((e.key !== 'Enter' && e.key !== ' ' && e.key !== 'Spacebar') || !e.target.closest?.('[data-node]')) return; e.preventDefault(); fire(e); });
   }
-  B.h = h;
+  B.h = h; B.M = M; B.S = S;
   if (B.editing) return;   // 이름 고치는 중엔 다시 그리지 않음(입력칸 유지)
   const html = treeHtml(M, S, lay);
   if (html === B.html) return;

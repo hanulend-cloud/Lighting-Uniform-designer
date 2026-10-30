@@ -19,7 +19,7 @@ import { createPool } from './pool.js';
 import * as L from './leds.js';
 import { buildObsOverlay, cellColors, extractFaces } from './colormap.js';
 import { mountCommandBar } from './command-bar.js';
-import { renderFeatureTree, toggleVisibility, makeGroup, ungroup, groupMembers } from './feature-tree.js';
+import { renderFeatureTree, toggleVisibility, makeGroup, ungroup, groupMembers, rangeSelect, removeFromGroups } from './feature-tree.js';
 import { mountSplitter, mountDockSplitter, mountFacSplitter } from './splitter.js';
 import { createOptDash, createSimDash } from './opt-dash.js';
 import { geomQuery, geomLimit } from './geom-client.js';
@@ -1500,7 +1500,11 @@ function renderAll(tag = 'all') {
   const lay = M.light.kind === 'step' ? L.stepLayout(M, S.line) : undefined;   // LED STEP 실제 배치(가상 실패 표시용)
   renderFeatureTree($('#m3-tree'), M, S, {
     onNode: (id, o = {}) => st.update('session', (_, x) => {
-      if (o.multi && id.startsWith('part:')) {   // Ctrl/Shift+클릭 = 여러 부품 선택(지금 선택한 부품도 포함)
+      if (o.range && id.startsWith('part:')) {   // Shift+클릭 = 지금 고른 부품부터 여기까지 범위(화면 순서)
+        const from = x.node?.startsWith('part:') ? x.node : id;
+        x.multi = rangeSelect(o.order ?? [], from, id); x.node = id; x.sel = { part: +id.slice(5), face: null }; return;
+      }
+      if (o.multi && id.startsWith('part:')) {   // Ctrl+클릭 = 하나씩 더하기·빼기(지금 선택한 부품도 포함)
         const set = new Set(x.multi ?? []); if (!set.size && x.node?.startsWith('part:')) set.add(x.node);
         if (set.has(id)) set.delete(id); else set.add(id);
         x.multi = [...set]; x.node = id; x.sel = { part: +id.slice(5), face: null }; return;
@@ -1509,7 +1513,17 @@ function renderAll(tag = 'all') {
     }),
     onEye: (id, only) => st.update('view', (m, x) => Object.assign(x, toggleVisibility(id, only, m.parts.length, x.hidden, x.hideLeds, id.startsWith('group:') ? groupMembers(m, id.slice(6)) : []))),
     onFold: (id) => st.update('session', (_, x) => { const k = id === 'parts' ? 'parts' : id.slice(6), def = k === '_light'; x.fold = { ...x.fold, [k]: !(x.fold?.[k] ?? def) }; }),   // 접기·펼치기(세션)
-    onTreeAct: (k) => {   // ＋ 그룹(선택한 부품들) · 그룹 해제
+    // 우클릭: 고른 것에 없으면 그것만 고름(고른 것 위에서 우클릭하면 여러 개 그대로)
+    onCtxSelect: (id) => st.update('session', (_, x) => {
+      if (id === x.node || (x.multi ?? []).includes(id)) return;
+      x.multi = []; x.node = id; x.sel = id.startsWith('part:') ? { part: +id.slice(5), face: null } : null;
+    }),
+    onTreeAct: (k) => {   // 우클릭 메뉴: 새 그룹(선택한 부품들) · 그룹에서 빼기 · 그룹 해제
+      if (k === 'out') {
+        const ps = [...new Set([...(S.multi ?? []), ...(S.node?.startsWith('part:') ? [S.node] : [])])].filter((x) => x.startsWith('part:')).map((x) => +x.slice(5));
+        st.update('meta', (m) => { m.groups = removeFromGroups(m.groups, ps); }); st.update('session', (_, x) => { x.multi = []; });
+        return;
+      }
       if (k === 'group') {
         const ps = [...new Set([...(S.multi ?? []), ...(S.node?.startsWith('part:') ? [S.node] : [])])].filter((x) => x.startsWith('part:')).map((x) => +x.slice(5));
         if (!ps.length) return;
