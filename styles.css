@@ -880,3 +880,4 @@ body.booting::after { content: "불러오는 중…"; position: fixed; left: 50%
 .m3-obs-t { width: 100%; font-size: 12px; }
 .m3-obs-t input[type=number] { width: 58px; }
 .m3-obs-t th:first-child { text-align: left; font-weight: 500; }
+.m3-pintxt { font: inherit; font-size: 11px; padding: 0 6px; margin-left: 4px; border: 1px solid var(--m3-line); border-radius: 5px; background: transparent; color: inherit; cursor: pointer; }

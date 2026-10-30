@@ -462,3 +462,12 @@ done();
   const rg = rangeSelect(['part:0', 'part:1', 'part:2', 'part:3'], 'part:1', 'part:3');
   const ok = a.join() === 'group,rename,eye' && /2개/.test(lab) && b.join() === 'group,out,rename,eye' && c.join() === 'ungroup,rename,eye' && r[0].parts.join() === '1' && r2.length === 0 && rg.join() === 'part:1,part:2,part:3';
   console.log(ok ? 'PASS 트리 우클릭 메뉴: 그룹 만들기(N개)·그룹에서 빼기·그룹 해제·이름·보기 · Shift 범위 선택' : (process.exitCode = 1, `FAIL 우클릭 메뉴 ${a} | ${b} | ${c} | ${lab} | ${JSON.stringify(r)} | ${rg}`)); }
+{ // 선택 선 TXT(2026-10-30): 지정 점을 지나는 길이·폭 방향 원자료(평활 없음), 값 = 2D 최대 대비 %(2D TXT 와 같은 기준), 관측면 밖 = 빈칸·빈 줄 뺌
+  const { lineTxt } = await import('../src/ui/m3/results-panel.js');
+  const G = { ns: 3, nw: 4, ds: 2, cell: 1, w0: -2, L: 6, valid: [0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0] };
+  const map = [0, 1, 2, 0, 0, 3, 4, 0, 0, 5, 8, 0];   // 2D 최대 8
+  const t = lineTxt(G, map, { s: 3, w: 0.5 }).split(String.fromCharCode(10)).filter((r) => r && !r.startsWith('#'));
+  const tab = String.fromCharCode(9);
+  const ok1 = t[0] === `s (mm)${tab}값 (%)` && t[1] === `1${tab}25.00` && t[2] === `3${tab}50.00` && t[3] === `5${tab}100.00`;   // w=0.5 줄(j=2): 2,4,8
+  const ok2 = t[4] === `w (mm)${tab}값 (%)` && t[5] === `0.5${tab}50.00` && t[6] === `-0.5${tab}37.50` && t.length === 7;   // s=3 칸(i=1): 위 = +w, 빈 줄(±1.5) 뺌
+  console.log(ok1 && ok2 ? 'PASS 선택 선 TXT: 길이·폭 원자료 · 2D 최대 대비 % · 관측면 밖 뺌' : (process.exitCode = 1, `FAIL 선택 선 TXT ${JSON.stringify(t)}`)); }
