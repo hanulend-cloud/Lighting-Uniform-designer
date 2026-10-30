@@ -173,21 +173,30 @@ const ledTotal = (x) => (x?.positions?.length ? x.positions.length : Number.isFi
 // 비교표 줄(현재 → 최적/적용 후) — compareHtml 과 적용 뒤 요약(appliedHtml)이 같이 씀
 const passMark = (v, t) => (Number.isFinite(v) && Number.isFinite(t) ? (v + 1e-9 >= t ? ' <b class="ok">✓</b>' : ' <b class="bad">✕</b>') : '');
 // targets = { len, wid } — 균일도 줄에 목표·통과(✓/✕)
-function cmpRows({ cur, best, shape, stepLeds = null, finish = null, height = null, catalog = DEFAULT_FINISH_CATALOG, targets: tg = null }) {
+function cmpParts({ cur, best, shape, stepLeds = null, finish = null, height = null, catalog = DEFAULT_FINISH_CATALOG, targets: tg = null }) {
   const tr = (label, a, b, d = '') => `<tr><th>${label}</th><td>${a}</td><td class="${a !== b ? 'chg' : ''}">${b}${d}</td></tr>`;
   const lay = (x) => `${x.rows === 2 ? '2열 × ' : ''}${x.count}개 ${x.pitch > 0 ? `피치 ${x.pitch}` : '균등'}${x.rows === 2 ? ` (열 간격 ±${(x.rowGap ?? 0).toFixed(1)} mm)` : ''}`;   // 2열 = 열당 개수(spec P4 §2.2b)
   const led = (x) => (x.layoutText ? x.layoutText : stepLeds == null ? lay(x) : x.stepOrig === false ? `${lay(x)}` : `LED STEP 현재 ${x.count ?? stepLeds}개`);   // layoutText = ② 배치 Solver 문구(같은 피치/끝 압축/자유 배치) · STEP: stepOrig = 원래 STEP 위치
   const curShape = cur.shape ? `적용된 형상 · ${shapeText(cur.shape)}` : '원본';
   const tc = stepLeds != null && cur.stepOrig !== false ? stepLeds : ledTotal(cur), tb = best.stepOrig === true ? tc : ledTotal(best);
   const tot = Number.isFinite(tc) && Number.isFinite(tb) && tb !== tc ? ` <b class="m3-tot">· 총 ${tb}개 (${tb > tc ? '+' : ''}${tb - tc})</b>` : '';
-  return `${tr('LED', led(cur), led(best), tot)}
-      ${tr('Milky', f2(cur.milky), f2(best.milky), dl(cur.milky, best.milky))}
-      ${tr(`길이 균일도${tg?.len != null ? ` <span class="mut">목표 ${f2(tg.len)}</span>` : ''}`, f2(cur.Ulen), f2(best.Ulen), `${dl(cur.Ulen, best.Ulen)}${passMark(best.Ulen, tg?.len)}`)}${tr(`폭 균일도${tg?.wid != null ? ` <span class="mut">목표 ${f2(tg.wid)}</span>` : ''}`, f2(cur.Uwid), f2(best.Uwid), `${dl(cur.Uwid, best.Uwid)}${passMark(best.Uwid, tg?.wid)}`)}
-      ${tr('광 효율', `${f2(cur.eff * 100)}%`, `${f2(best.eff * 100)}%`, dl(cur.eff, best.eff, 100, '%p'))}
-      ${shape || cur.shape ? tr('형상', curShape, shape ? shapeText(shape) : curShape) : ''}
-      ${finish ? tr('케이스 면', finishText(finish.cur, catalog), finishText(finish.best ?? finish.cur, catalog)) : ''}
-      ${height ? (() => { const now = Number.isFinite(height.gap) ? `현재 (커버까지 ${height.gap.toFixed(1)} mm)` : '현재'; return tr('LED 높이', now, nz(height.dz) ? `${sg(height.dz)} mm${Number.isFinite(height.gap) ? ` (커버까지 ${(height.gap - height.dz).toFixed(1)} mm)` : ''}` : now); })() : ''}`;
+  const metric = [
+    tr(`길이 균일도${tg?.len != null ? ` <span class="mut">목표 ${f2(tg.len)}</span>` : ''}`, f2(cur.Ulen), f2(best.Ulen), `${dl(cur.Ulen, best.Ulen)}${passMark(best.Ulen, tg?.len)}`),
+    tr(`폭 균일도${tg?.wid != null ? ` <span class="mut">목표 ${f2(tg.wid)}</span>` : ''}`, f2(cur.Uwid), f2(best.Uwid), `${dl(cur.Uwid, best.Uwid)}${passMark(best.Uwid, tg?.wid)}`),
+    tr('광 효율', `${f2(cur.eff * 100)}%`, `${f2(best.eff * 100)}%`, dl(cur.eff, best.eff, 100, '%p')),
+  ];
+  const design = [
+    tr('LED', led(cur), led(best), tot),
+    tr('Milky', f2(cur.milky), f2(best.milky), dl(cur.milky, best.milky)),
+    shape || cur.shape ? tr('형상', curShape, shape ? shapeText(shape) : curShape) : '',
+    finish ? tr('케이스 면', finishText(finish.cur, catalog), finishText(finish.best ?? finish.cur, catalog)) : '',
+    height ? (() => { const now = Number.isFinite(height.gap) ? `현재 (커버까지 ${height.gap.toFixed(1)} mm)` : '현재'; return tr('LED 높이', now, nz(height.dz) ? `${sg(height.dz)} mm${Number.isFinite(height.gap) ? ` (커버까지 ${(height.gap - height.dz).toFixed(1)} mm)` : ''}` : now); })() : '',
+  ].filter(Boolean);
+  return { metric, design };
 }
+// 비교표 구역 머리(목표 지표 | 설계 최적화 항목) — 표 안에서 두 묶음을 나눔(2026-10-30)
+export const secRow = (t, n = 3) => `<tr class="m3-sec"><td colspan="${n}">${t}</td></tr>`;
+function cmpRows(r) { const { metric, design } = cmpParts(r); return `${secRow('목표 지표')}${metric.join('')}${secRow('설계 최적화 항목')}${design.join('')}`; }
 export function compareHtml(r) {
   const { cur, best, feasible, reason, shape, canRevert = false, unchanged = false, screen = null } = r;
   const bs = r.base, boost = r.added?.length ? `<div class="m3-boost">체크한 항목만으로는 목표 미달${bs ? ` (길이 균일도 ${f2(bs.Ulen)} · 폭 균일도 ${f2(bs.Uwid)}${bs.reason ? ` — ${esc(bs.reason)}` : ''})` : ''} → 보완 자동 추가: <b>${r.added.map(esc).join(' · ')}</b></div>` : '';
@@ -237,11 +246,11 @@ export function milkyTableHtml(rows, chosen, tg = {}) {
 }
 // 결과 카드(2026-10-29: 같은 내용이 여러 번 반복되던 것을 하나로) — 판정 한 단어 · 작은 비교표(바뀐 사양 + 길이 균일도·폭 균일도·광 효율) ·
 // 한계 한 줄 · [적용] [그래도 적용] [취소] [자세히](프로파일·사유 전문 = 결과 창)
-const KEEP_ROW = /<th>(길이 균일도|폭 균일도|광 효율)/;
 export const limitText = (reason) => { const m = /한계:\s*([^·)]+)/.exec(String(reason ?? '')); return m ? m[1].trim() : ''; };
 export function resultLineHtml(r) {
   const verdict = r.unchanged ? ['keep', '현재안 유지', '더 나은 안 없음'] : r.feasible ? ['ok', '목표 통과', '최적안을 찾음'] : ['bad', '목표 미달', '가장 가까운 안'];
-  const rows = cmpRows(r).split('</tr>').filter((x) => x.includes('<tr>') && (x.includes('class="chg"') || KEEP_ROW.test(x))).map((x) => `${x}</tr>`).join('');
+  const P = cmpParts(r), chg = P.design.filter((x) => x.includes('class="chg"'));   // 설계 항목 = 바뀐 것만, 목표 지표 = 늘
+  const rows = `${secRow('목표 지표')}${P.metric.join('')}${secRow('설계 최적화 항목')}${chg.length ? chg.join('') : '<tr><td colspan="3" class="mut">바뀐 항목 없음</td></tr>'}`;
   const lim = limitText(r.reason), clash = r.clash > 0 ? `<div class="m3-clash" role="alert">LED 몸체가 부품과 겹침(${r.clash}개) — 적용 불가</div>` : '';
   return `<div class="m3-rcard ${verdict[0]}"><div class="m3-rcard-hd"><b class="m3-rv">${verdict[1]}</b><span class="mut">${verdict[2]}</span></div>
     <table class="m3-cmp m3-cmp-s"><tr><th></th><th>지금</th><th>최적 후보</th></tr>${rows}</table>${clash}

@@ -869,3 +869,10 @@ body.booting::after { content: "불러오는 중…"; position: fixed; left: 50%
 /* 실행 줄·결과 카드 = 왼쪽 설계 인자 아래(2026-10-30) */
 .m3-faccard > #m3-auto { order: 9; flex: none; border: 0; border-top: 1px solid var(--m3-line); max-height: none; overflow: visible; padding: 8px 0 0; margin-top: 8px; }
 .m3-mon.min .m3-faccard > #m3-auto { border-top: 0; margin-top: 0; padding-top: 0; }
+/* 비교표 구역 머리 — 목표 지표 | 설계 최적화 항목 */
+.m3-cmp tr.m3-sec td { font-size: 11px; font-weight: 700; color: var(--m3-acc); background: var(--m3-accbg); padding: 3px 6px; letter-spacing: .02em; }
+.m3-cmp tr.m3-sec + tr th, .m3-cmp tr.m3-sec + tr td { border-top: 0; }
+/* 광분포 시뮬레이션 칸 높이 조절(경계선) */
+.m3-right > .m3-simcard { overflow: auto; }
+.m3-right > .m3-psplit.col { margin: -6px 0; }
+@media (max-width: 1024px) { .m3-right > .m3-psplit { display: none; } .m3-right > .m3-simcard, .m3-right > .m3-res { flex: none !important; } }

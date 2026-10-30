@@ -1,13 +1,14 @@
 // 칸 크기 조절 막대(2026-10-30) — 나란한 칸들(items) 사이에 끌기 막대를 넣어 비율을 바꿈.
 // dir 'col' = 위아래로 쌓인 칸의 높이(가로 막대), 'row' = 좌우로 놓인 칸의 폭(세로 막대). 비율 = flex-grow — 전체 크기는 그대로(부모를 꽉 채움).
 // 두 번 클릭 = 같은 크기. 비율은 보는 사람별(localStorage key). onChange = 크기가 바뀐 뒤(캔버스 다시 그리기 등)
-export function mountSplit(items, { key, dir = 'col', min = 60, onChange = () => {} } = {}) {
+export function mountSplit(items, { key, dir = 'col', min = 60, init = null, onChange = () => {} } = {}) {   // init = 처음 비율(없으면 같은 크기)
   const els = items.filter(Boolean);
   if (els.length < 2 || els[0].dataset.split2) return null;
   els[0].dataset.split2 = '1';
   const load = () => { try { const v = JSON.parse(localStorage.getItem(key)); return Array.isArray(v) && v.length === els.length && v.every((x) => x > 0) ? v : null; } catch { return null; } };
   const save = () => { try { localStorage.setItem(key, JSON.stringify(w)); } catch {} };
-  let w = load() ?? els.map(() => 1);
+  const def = () => (Array.isArray(init) && init.length === els.length ? init.slice() : els.map(() => 1));
+  let w = load() ?? def();
   const size = (e) => (dir === 'col' ? e.getBoundingClientRect().height : e.getBoundingClientRect().width);
   const apply = () => els.forEach((e, i) => { e.style.flex = `${w[i]} 1 0`; if (dir === 'col') e.style.minHeight = '0'; else e.style.minWidth = '0'; });
   els.slice(0, -1).forEach((e, i) => {
@@ -22,9 +23,9 @@ export function mountSplit(items, { key, dir = 'col', min = 60, onChange = () =>
       const up = () => { h.removeEventListener('pointermove', mv); h.removeEventListener('pointerup', up); h.removeEventListener('pointercancel', up); h.classList.remove('on'); save(); onChange(); };
       h.addEventListener('pointermove', mv); h.addEventListener('pointerup', up); h.addEventListener('pointercancel', up);
     });
-    h.addEventListener('dblclick', () => { w = els.map(() => 1); apply(); save(); onChange(); });
+    h.addEventListener('dblclick', () => { w = def(); apply(); save(); onChange(); });
     e.after(h);
   });
   apply();
-  return { reset: () => { w = els.map(() => 1); apply(); save(); onChange(); } };
+  return { reset: () => { w = def(); apply(); save(); onChange(); } };
 }
