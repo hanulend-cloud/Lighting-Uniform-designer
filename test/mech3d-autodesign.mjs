@@ -311,12 +311,20 @@ ok(halvingTotal(27) === 35 && halvingTotal(4) === 10 && halvingTotal(1) === 3, '
   const G = { ns: 100, nw: 1, ds: 1, cell: 1, w0: -0.5, L: 100, closed: false, winS: 10, area: new Float64Array(100).fill(1), valid: new Uint8Array(100).fill(1) }, line = { length: 100, closed: false };
   const gain = { 0: 0.55, '-6': 0.6, '-12': 0.9, '-14': 0.895 }, seenW = [];
   const io = { progress() {}, cancelled: () => false, verify: async (d) => ({ stats: { Ulen: d.wCenter === -12 ? 0.9 : 0.55, Uwid: 0.9 }, eff: 0.2 }),
-    evalLateral: async (d, cs) => cs.map((c) => ({ cand: { wCenter: c }, ok: true, eff: 0.2, stats: { Ulen: gain[c], Uwid: 0.9 } })),
+    evalLateral: async (d, cs) => cs.map((c) => ({ cand: { wCenter: c }, ok: true, eff: 0.2, stats: { Ulen: 0.5, Uwid: gain[c] } })),   // 폭 위치 = 폭 균일도로 고름
     basis: async (d) => { seenW.push(d.wCenter); const cand = candidateGrid(line, { sStep: 2, wOffsets: [d.wCenter ?? 0] }); return { cand, emitted: 1, gaps: [], sMargin: 0, maps: cand.map(({ s }) => Float32Array.from({ length: 100 }, (_, i) => Math.exp(-((i + 0.5 - s) ** 2) / 72))) }; } };
   const r = await runAutoDesign({ stages: { leds: true }, obs: { targetLen: 0.7, targetWid: 0 }, current: { milky: 1, count: 5, pitch: 0 }, G, line, nMax: 20, lateral: [0, -6, -12, -14] }, io);
   const lat = r.steps.find((x) => x.stage === 'ledsLateral');
   ok(lat?.pick === -12 && seenW[0] === -12 && r.best.positions?.every((q) => q.w === -12) && r.best.wCenter === -12, `폭 위치: 고름 ${lat?.pick} (−14 는 잡음 수준이라 덜 옮긴 −12) · 배치 w ${[...new Set(r.best.positions?.map((q) => q.w))]}`);
   const r0 = await runAutoDesign({ stages: { leds: true }, obs: { targetLen: 0.7, targetWid: 0 }, current: { milky: 1, count: 5, pitch: 0 }, G, line, nMax: 20 }, { ...io, basis: async (d) => io.basis({ ...d, wCenter: 0 }) });
   ok(!r0.steps.some((x) => x.stage === 'ledsLateral'), '이동 후보가 없으면 폭 위치 단계 없음(기존과 같음)');
+}
+{ // ② 1열만(cfg.rowsOptions [1], 재료비) — 2열이 더 나아도 1열 배치만
+  const G = { ns: 100, nw: 1, ds: 1, cell: 1, w0: -0.5, L: 100, closed: false, winS: 10, area: new Float64Array(100).fill(1), valid: new Uint8Array(100).fill(1) }, line = { length: 100, closed: false };
+  const ws = [0, -3, 3], cand = candidateGrid(line, { sStep: 2, wOffsets: ws }), maps = cand.map(({ s, w }) => Float32Array.from({ length: 100 }, (_, i) => (w ? 1.3 : 1) * Math.exp(-((i + 0.5 - s) ** 2) / 72)));
+  const io = { progress() {}, cancelled: () => false, verify: async (d) => ({ stats: { Ulen: d.positions ? 0.95 : 0.6, Uwid: 0.9 }, eff: 0.2 }), basis: async () => ({ cand, maps, emitted: 1, gaps: [3], sMargin: 0 }) };
+  const run = (ro) => runAutoDesign({ stages: { leds: true }, obs: { targetLen: 0.7, targetWid: 0 }, current: { milky: 1, count: 3, pitch: 0 }, G, line, nMax: 20, rowsOptions: ro }, io);
+  const r1 = await run([1]);
+  ok(r1.best.rows === 1 && r1.best.positions.every((q) => q.w === 0), `1열만: rows ${r1.best.rows}`);
 }
 done();

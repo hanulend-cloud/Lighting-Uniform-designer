@@ -297,8 +297,11 @@ export async function runAutoDesign(cfg, io) {
       io.progress?.('leds', 0, `LED 폭 위치 후보 ${cfg.lateral.length}개 비교`);
       const res = await io.evalLateral(d, cfg.lateral);
       if (stop()) return { cancelled: true };
-      const okR = (res ?? []).filter((x) => x.ok), top = okR.reduce((a, x) => (!a || shapeScore(x, obs) > shapeScore(a, obs) ? x : a), null);
-      const pick = top ? okR.filter((x) => shapeScore(x, obs) >= shapeScore(top, obs) - SCORE_EPS).reduce((a, x) => (Math.abs(x.cand.wCenter) < Math.abs(a.cand.wCenter) ? x : a)).cand.wCenter : null;
+      // 점수 = 폭 균일도(폭 판정 없으면 길이) — 폭 위치는 주로 폭 분포를 바꾸고 길이는 아래 개수·간격이 맞춤. 길이·폭 중 낮은 쪽으로 고르면
+      // 지금 배치의 길이 한계(끝단)에 묻혀 폭에 유리한 위치를 놓쳤음(1열: −10 대신 −12 가 폭 0.74 → 0.85, 2026-10-30)
+      const sc = (x) => (x.stats?.Uwid ?? x.stats?.Ulen ?? -Infinity);
+      const okR = (res ?? []).filter((x) => x.ok), top = okR.reduce((a, x) => (!a || sc(x) > sc(a) ? x : a), null);
+      const pick = top ? okR.filter((x) => sc(x) >= sc(top) - SCORE_EPS).reduce((a, x) => (Math.abs(x.cand.wCenter) < Math.abs(a.cand.wCenter) ? x : a)).cand.wCenter : null;
       steps.push({ stage: 'ledsLateral', pick, results: (res ?? []).map((x) => ({ wCenter: x.cand.wCenter, ok: x.ok, Ulen: x.stats?.Ulen ?? null, Uwid: x.stats?.Uwid ?? null, eff: x.eff })) });
       if (pick != null) d = { ...d, wCenter: pick };
     }
@@ -308,7 +311,8 @@ export async function runAutoDesign(cfg, io) {
     // 후보가 {s, w} 면 (s, w) 격자 — 열 수·열 간격까지(searchLeds2, nMax = 총수 상한), 숫자면 1열(기존)
     const two = typeof B.cand[0] === 'object', a = { G: cfg.G, obs, line: cfg.line, cand: B.cand, maps: B.maps, pitchRange: cfg.pitchRange ?? null, nMax: cfg.nMax, emitted: B.emitted };
     // (s, w) 격자 = 배치 Solver(같은 피치+끝 여백 → 끝 압축 → 자유 위치, spec 2026-10-20 led-layout-solver) · 숫자 격자 = 1열 기존 탐색
-    const r = two ? solveLayout({ ...a, wCenter: d.wCenter ?? 0, gaps: B.gaps ?? [], sMargin: B.sMargin ?? 0, timeBudget: cfg.layoutBudget ?? 20000, safety: cfg.layoutSafety ?? 0.02 }) : searchLeds({ ...a, spare: 1 });
+    const r = two ? solveLayout({ ...a, wCenter: d.wCenter ?? 0, rowsOptions: cfg.rowsOptions ?? [1, 2], gaps: cfg.rowsOptions && !cfg.rowsOptions.includes(2) ? [] : B.gaps ?? [],   // rowsOptions [1] = 1열만(재료비)
+       sMargin: B.sMargin ?? 0, timeBudget: cfg.layoutBudget ?? 20000, safety: cfg.layoutSafety ?? 0.02 }) : searchLeds({ ...a, spare: 1 });
     steps.push({ stage: 'leds', ...r });
     if (two) io.trace?.('leds', [r, ...(r.alts ?? [])].filter((e) => e.positions?.length).map((e, i) => ({ label: `${i ? '대안 ' : ''}${layoutText(e)}`, Ulen: e.stats?.Ulen, Uwid: e.stats?.Uwid, ok: true })));   // 대시보드: 배치 Solver 최선안·대안(기저 추정)
     const lay = (e) => two

@@ -118,7 +118,8 @@ export function tileConfigHtml(k, { avail, sel, running, names = [], milkyPart =
     const okL = !!avail.leds?.ok, okH = !!avail.height?.ok;
     if (!okL && !okH) { const why = avail.leds?.why ?? avail.height?.why ?? ''; return { on: false, box: '<input type="checkbox" data-ad="position" disabled aria-label="② 기구 위치 사용">', opt: '', why, html: `<label class="od-sw off"><input type="checkbox" data-ad="position" disabled> 사용 안 함</label><div class="od-why mut">${esc(why)}</div>` }; }
     const on = !!(sel.leds || sel.height), why = `${okL ? 'LED 개수·피치·열' : ''}${okL && okH ? ' + ' : ''}${okH ? 'LED–커버 거리(높이)' : ''}${okL && avail.leds.note ? ` · ${avail.leds.note}` : ''}`;
-    return { on, box: `<input type="checkbox" data-ad="position"${on ? ' checked' : ''}${dis} aria-label="② 기구 위치 사용">`, opt: '', why, html: `<label class="od-sw"><input type="checkbox" data-ad="position"${on ? ' checked' : ''}${dis}> ${on ? '사용' : '사용 안 함'}</label><div class="od-why mut">${esc(why)}</div>` };
+    const opt = okL ? `<label class="od-opt" title="LED 를 한 줄로만 배치(PCB·LED 재료비 ↓) — 폭 균일도는 마지막 Milky 단계가 올려 맞춤"><input type="checkbox" data-ad="oneRow"${sel.oneRow !== false ? ' checked' : ''}${dis}> 1열만(재료비 ↓)</label>` : '';
+    return { on, box: `<input type="checkbox" data-ad="position"${on ? ' checked' : ''}${dis} aria-label="② 기구 위치 사용">`, opt, why, html: `<label class="od-sw"><input type="checkbox" data-ad="position"${on ? ' checked' : ''}${dis}> ${on ? '사용' : '사용 안 함'}</label><div class="od-why mut">${esc(why)}</div>` };
   }
   const a = avail[k];
   if (!a) return { on: false, box: '', opt: '', why: '', html: '' };
