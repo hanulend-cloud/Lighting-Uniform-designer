@@ -135,6 +135,6 @@ export function solveLayout({ G, obs, line, cand, maps, rowsOptions = [1, 2], ga
   if (b0.nRow == null) return { feasible: false, n: nMax, rows: 1, rowGap: 0, total: nMax, positions: [], kind: 'uniform', pitch: 0, stats: null, eff: NaN, margin: -Infinity, reason: '평가할 수 있는 배치가 없음 — 관측면·LED 를 확인하세요', alts: [], evals };
   const b = strip({ ...b0, n: b0.nRow }); delete b.nRow; delete b.j;
   const st = b.stats, wid = st?.Uwid != null && st.Uwid - obs.targetWid < st.Ulen - obs.targetLen;
-  const reason = `${timedOut ? '시간 제한 안에서' : `LED 총 ${nMax}개까지`} 배치를 바꿔도 목표 미달 — 가장 가까운 ${layoutText(b)}: 길이 U ${st.Ulen.toFixed(2)}${st.Uwid == null ? '' : ` · 폭 U ${st.Uwid.toFixed(2)}`} — ${wid ? '폭 방향 확산 부족: ③ 형상 또는 Milky 상향 권장' : '길이 방향 리플·끝 어두움: Milky 상향 또는 LED–커버 거리 확대 권장'}`;
+  const reason = `${timedOut ? '시간 제한 안에서' : `LED 총 ${nMax}개까지`} 배치를 바꿔도 목표 미달 — 가장 가까운 ${layoutText(b)}: 길이 균일도 ${st.Ulen.toFixed(2)}${st.Uwid == null ? '' : ` · 폭 균일도 ${st.Uwid.toFixed(2)}`} — ${wid ? '폭 방향 확산 부족: ③ 형상 또는 Milky 상향 권장' : '길이 방향 리플·끝 어두움: Milky 상향 또는 LED–커버 거리 확대 권장'}`;
   return { feasible: false, ...b, reason, alts: [], evals };
 }

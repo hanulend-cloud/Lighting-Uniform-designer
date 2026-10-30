@@ -63,7 +63,7 @@ const peakRows = (ms, top, { len = 0.5, wid = 0.5, Uw = () => 0.9 } = {}) => ms.
   const r = await runAutoDesign({ stages: { milky: true }, obs, current: { milky: 1 }, housingProbe: probe, finishText: (f) => `백색 ${Math.round(f.R * 100)}%` }, io);
   ok(!r.feasible && /LED 리플/.test(r.reason) && /폭/.test(r.reason) && !/가장자리 감쇠/.test(r.reason), `폭 한계 · 리플: ${r.reason}`);
   ok(calls.length === 1 && calls[0].cs[0].finish === probe && calls[0].N === 3e5 && Math.abs(calls[0].milky - r.best.milky) < 1e-9 && r.hint?.Ulen === 0.93 && r.hint?.Uwid === 0.62 && r.hint.finish === probe
-    && /④ 케이스 백색 90% 를 함께 쓰면 나아짐/.test(r.reason) && !/와 함께 쓰면 길이 U/.test(r.reason), `보완 계산 1회 → ${r.reason}`); }
+    && /④ 케이스 백색 90% 를 함께 쓰면 나아짐/.test(r.reason) && !/와 함께 쓰면 길이 균일도/.test(r.reason), `보완 계산 1회 → ${r.reason}`); }
 { // ① 만 · 상한 입력 없음 → 9.9 까지(U 가 계속 오름) · ②+① 이면 ② 기준은 5, ① 은 그대로 9.9 까지
   const seen = [], U = (m) => 0.5 + 0.02 * m;
   const io = { milkyRows: async (d, ms) => { seen.push(...ms); return rowsOf(ms, U); }, verify: async (d) => ({ stats: st(U(d.milky ?? 1), 0.9), eff: 1 }), progress() {}, cancelled: () => false };
@@ -87,13 +87,13 @@ const peakRows = (ms, top, { len = 0.5, wid = 0.5, Uw = () => 0.9 } = {}) => ms.
   const best = await halving(Array.from({ length: 27 }, (_, k) => ({ k })), evalFn2, obs, [[27, 6e4, 2500], [6, 2e5, 4000], [2, 6e5, 6000]]);
   ok(seen.map((x) => x.join(':')).join(',') === '27:60000:2500,6:200000:4000,2:600000:6000' && best.cand.k === 25, `압축 27→6→2(광자·시간 제한 단계별): 최고 k=${best.cand.k}(제약 위반 26 제외)`);
   ok(shapeScore({ stats: st(0.85, 0.7), eff: 0.4, ok: true }, obs) > shapeScore({ stats: st(0.79, 0.9), eff: 0.9, ok: true }, obs), '점수: 목표 만족이 우선, 그다음 효율'); }
-{ // 평활 길이 U: 3행 이동평균 — 한 칸 잡음 골짜기에 덜 민감, profile 없으면 Ulen
+{ // 평활 길이 균일도: 3행 이동평균 — 한 칸 잡음 골짜기에 덜 민감, profile 없으면 Ulen
   const prof = Float64Array.from([1, 1, 1, 0.4, 1, 1, NaN, 1]);
   const u = smoothU({ profile: prof, Ulen: 0.4 });
   ok(Math.abs(u - 0.8) < 1e-9, `smoothU: 골짜기 0.4 → 이동평균 ${u.toFixed(3)} (= 0.8)`);
   ok(smoothU({ Ulen: 0.55 }) === 0.55, 'profile 없음 → Ulen');
   const noisy = { stats: { Ulen: 0.4, Uwid: 0.9, profile: prof }, eff: 0.5, ok: true };
-  ok(Math.abs(shapeScore(noisy, obs) - 0.8 / 0.8) < 1e-9, '미달안 점수 = 평활 길이 U / 목표'); }
+  ok(Math.abs(shapeScore(noisy, obs) - 0.8 / 0.8) < 1e-9, '미달안 점수 = 평활 길이 균일도 / 목표'); }
 { // ③ 최적 후보가 전부 0(R 무관) → shape = null(빈 shapeMod 없음) → 현재안 그대로
   const cur = { milky: 3, count: 5, pitch: 0, shape: null }, calls = [];
   const cands = [{ dt: 0, h: 0, R: 2.75, e: 0, c: 0 }, { dt: 0.2, h: 0, R: 2.75, e: 0, c: 0 }];
@@ -230,7 +230,7 @@ ok(halvingTotal(27) === 35 && halvingTotal(4) === 10 && halvingTotal(1) === 3, '
   const io = { evalVariants: async (d, cs) => cs.map((c) => ({ cand: c, ok: true, stats: st(0.85 + c.dz / 100, 0.9), eff: 0.5 + c.dz / 100 })),
     verify: async (d) => ({ stats: st(d.dz ? 0.77 : 0.5, 0.92), eff: 0.5 }), progress() {}, cancelled: () => false };
   const r = await runAutoDesign({ stages: { height: true }, obs, current: { milky: 3, count: 5, pitch: 0, dz: 0 }, heightRange: [0, 3] }, io);
-  ok(!r.unchanged && !r.feasible && /최종 정밀 재계산에서 목표 미달 — 길이 U 0\.77 · 폭 U 0\.92/.test(r.reason), `정밀 재계산 미달 → 불가: ${r.reason}`); }
+  ok(!r.unchanged && !r.feasible && /최종 정밀 재계산에서 목표 미달 — 길이 균일도 0\.77 · 폭 균일도 0\.92/.test(r.reason), `정밀 재계산 미달 → 불가: ${r.reason}`); }
 { // ② 재확인: 첫 후보(±1) 검증 미달 → 같은 총수 다른 열 간격(±2) 검증 통과 → 그것
   const G = { ns: 2, nw: 1, ds: 1, cell: 1, w0: -0.5, L: 2, closed: false, winS: 5, area: new Float64Array([1, 1]), valid: new Uint8Array([1, 1]) };
   const cand = [0, -1, 1, -2, 2].flatMap((w) => [0, 1, 2].map((s) => ({ s, w }))), maps = cand.map(({ w }) => Float32Array.from(w === 0 ? [1, 0.1] : [1, 1]));
@@ -246,7 +246,7 @@ ok(halvingTotal(27) === 35 && halvingTotal(4) === 10 && halvingTotal(1) === 3, '
   ok(a.r.feasible && a.r.best.rows === 2 && a.r.best.rowGap === 2 && a.calls.length === 2 && sv?.tried.length === 2 && sv.tried[1].verified.stats.Ulen === 0.95 && a.prog.includes('② 후보 재확인 (2/3)'),
     `② 첫 후보 미달 → 두 번째(±${a.r.best.rowGap}) 통과 (verify ${a.calls.length}회)`);
   const b = await run((d) => (d.rows === 2 && d.rowGap === 2 ? 0.75 : d.rows === 2 ? 0.7 : 0.6));
-  ok(!b.r.feasible && b.r.best.rows === 2 && b.r.best.rowGap === 2 && b.calls.length <= 3 && /최종 정밀 재계산에서 목표 미달 — 길이 U 0\.75/.test(b.r.reason),
+  ok(!b.r.feasible && b.r.best.rows === 2 && b.r.best.rowGap === 2 && b.calls.length <= 3 && /최종 정밀 재계산에서 목표 미달 — 길이 균일도 0\.75/.test(b.r.reason),
     `② 모두 미달 → 검증 최고(±${b.r.best.rowGap}) 유지 · verify ${b.calls.length}회: ${b.r.reason}`); }
 { // ②+④+① (spec §2.2c): ② 기준 = 거친 최고점 Milky(상한 아님) · 케이스 최고 등급 → 개수 확정 뒤 ④ 최저 통과 등급 · ① 최소 Milky
   const G = { ns: 2, nw: 1, ds: 1, cell: 1, w0: -0.5, L: 2, closed: false, winS: 5, area: new Float64Array([1, 1]), valid: new Uint8Array([1, 1]) };

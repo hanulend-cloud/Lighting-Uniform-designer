@@ -11,7 +11,7 @@ export const clampCap = (v) => (Number.isFinite(v) && v > 0 ? Math.min(9.9, Math
 export const capDefault = (sel, avail, curMilky = 0) => (sel.leds && avail.leds?.ok ? Math.max(curMilky ?? 0, 5) : 9.9);
 // ④ 보완 계산 후보 — 현재보다 높은 등급 중 가장 낮은 것(없으면 null)
 // ④ 보완 안내용 면 처리: 같은 종류(없으면 백색)에서 반사율 +0.10 이상 중 가장 낮은 것, 없으면 그 종류 최고(현재보다 높을 때만).
-//   실측: 백색 85 → 95 % 가 길이·폭 모두 개선, 경면 88 % 는 폭 U 를 낮춤 — 종류를 바꾸지 않는다
+//   실측: 백색 85 → 95 % 가 길이·폭 모두 개선, 경면 88 % 는 폭 균일도 를 낮춤 — 종류를 바꾸지 않는다
 //   pool = 고를 수 있는 등급(소재 상한 안 · 특수 허용 시 특수 포함 — finishCandidatesFor), 기본 = 전체 등급
 export const nextFinish = (cur, pool = FINISH_GRADES) => {
   const kind = cur?.kind === 'metal' ? 'metal' : 'whiteDiffuse', R = cur?.R ?? 0;
@@ -182,7 +182,7 @@ function cmpRows({ cur, best, shape, stepLeds = null, finish = null, height = nu
   const tot = Number.isFinite(tc) && Number.isFinite(tb) && tb !== tc ? ` <b class="m3-tot">· 총 ${tb}개 (${tb > tc ? '+' : ''}${tb - tc})</b>` : '';
   return `${tr('LED', led(cur), led(best), tot)}
       ${tr('Milky', f2(cur.milky), f2(best.milky), dl(cur.milky, best.milky))}
-      ${tr(`길이 U${tg?.len != null ? ` <span class="mut">목표 ${f2(tg.len)}</span>` : ''}`, f2(cur.Ulen), f2(best.Ulen), `${dl(cur.Ulen, best.Ulen)}${passMark(best.Ulen, tg?.len)}`)}${tr(`폭 U${tg?.wid != null ? ` <span class="mut">목표 ${f2(tg.wid)}</span>` : ''}`, f2(cur.Uwid), f2(best.Uwid), `${dl(cur.Uwid, best.Uwid)}${passMark(best.Uwid, tg?.wid)}`)}
+      ${tr(`길이 균일도${tg?.len != null ? ` <span class="mut">목표 ${f2(tg.len)}</span>` : ''}`, f2(cur.Ulen), f2(best.Ulen), `${dl(cur.Ulen, best.Ulen)}${passMark(best.Ulen, tg?.len)}`)}${tr(`폭 균일도${tg?.wid != null ? ` <span class="mut">목표 ${f2(tg.wid)}</span>` : ''}`, f2(cur.Uwid), f2(best.Uwid), `${dl(cur.Uwid, best.Uwid)}${passMark(best.Uwid, tg?.wid)}`)}
       ${tr('광 효율', `${f2(cur.eff * 100)}%`, `${f2(best.eff * 100)}%`, dl(cur.eff, best.eff, 100, '%p'))}
       ${shape || cur.shape ? tr('형상', curShape, shape ? shapeText(shape) : curShape) : ''}
       ${finish ? tr('케이스 면', finishText(finish.cur, catalog), finishText(finish.best ?? finish.cur, catalog)) : ''}
@@ -190,7 +190,7 @@ function cmpRows({ cur, best, shape, stepLeds = null, finish = null, height = nu
 }
 export function compareHtml(r) {
   const { cur, best, feasible, reason, shape, canRevert = false, unchanged = false, screen = null } = r;
-  const bs = r.base, boost = r.added?.length ? `<div class="m3-boost">체크한 항목만으로는 목표 미달${bs ? ` (길이 U ${f2(bs.Ulen)} · 폭 U ${f2(bs.Uwid)}${bs.reason ? ` — ${esc(bs.reason)}` : ''})` : ''} → 보완 자동 추가: <b>${r.added.map(esc).join(' · ')}</b></div>` : '';
+  const bs = r.base, boost = r.added?.length ? `<div class="m3-boost">체크한 항목만으로는 목표 미달${bs ? ` (길이 균일도 ${f2(bs.Ulen)} · 폭 균일도 ${f2(bs.Uwid)}${bs.reason ? ` — ${esc(bs.reason)}` : ''})` : ''} → 보완 자동 추가: <b>${r.added.map(esc).join(' · ')}</b></div>` : '';
   const twoRow = best.rows === 2 && cur.rows !== 2 ? '<div class="m3-warn">2열 배치 = LED PCB 를 새로 설계해야 함</div>' : '';
   const effDrop = Number.isFinite(cur.eff) && Number.isFinite(best.eff) && best.eff - cur.eff <= -0.02 ? `<div class="m3-warn">광 효율 ${((cur.eff - best.eff) * 100).toFixed(1)}%p 감소 — 같은 LED 광속이면 그만큼 어두워짐</div>` : '';
   const clash = r.clash > 0 ? `<div class="m3-clash" role="alert">이 안은 LED 몸체가 부품과 겹침(${r.clash}개) — 조립 불가라 적용하지 않음</div>` : '';
@@ -212,7 +212,7 @@ export function appliedHtml(applied) {
 // 실행 중 카드 구조가 같으면 진행 막대·문구만 바꿈(갱신마다 innerHTML 을 다시 만들지 않게)
 // '현재안 유지'인데 시험한 후보가 있으면(차이가 잡음 수준) [그래도 적용] — 후보 값을 함께 보임
 const altBtn = (r) => (r.unchanged && r.alt ? `<button type="button" data-ad="applyAlt" title="찾은 후보가 현재안보다 계산 잡음 수준만큼만 나아 '현재안 유지'로 판정됨 — 그래도 바꾸려면">그래도 적용${r.alt.milky != null ? ` (Milky ${(+r.alt.milky).toFixed(2)})` : ''} · ${f2(r.alt.Ulen)}/${f2(r.alt.Uwid)}</button>` : '');
-// Milky 조정 표(2026-10-29) — 마지막 ① Milky 단계 기록(뒤에서부터 연속 'milky' 단계, ② 기준 'ledsRef' 제외)의 Milky 별 길이 U·폭 U·광 효율.
+// Milky 조정 표(2026-10-29) — 마지막 ① Milky 단계 기록(뒤에서부터 연속 'milky' 단계, ② 기준 'ledsRef' 제외)의 Milky 별 길이 균일도·폭 균일도·광 효율.
 // 같은 Milky 는 나중(정밀) 값 · 믿는(trusted) 행만 · Milky 오름차순. Milky 가 마지막 단계라 최종안의 다른 인자 그대로의 추정 — 순수
 export function milkyTable(steps = []) {
   const m = new Map();
@@ -233,11 +233,11 @@ export function milkyTableHtml(rows, chosen, tg = {}) {
   const tr = (r) => { const sel = Math.abs(r.milky - chosen) < 0.005;
     return `<tr${sel ? ' class="sel"' : ''}><td>${r.milky.toFixed(2)}${sel ? ' <span class="mut">최적</span>' : ''}</td><td>${f2(r.Ulen)}${pm(r.Ulen, tg.len)}</td><td>${f2(r.Uwid)}${pm(r.Uwid, tg.wid)}</td><td>${Number.isFinite(r.eff) ? `${(r.eff * 100).toFixed(1)}%` : '–'}</td><td>${sel ? '' : `<button type="button" data-ad="applyMilky" data-v="${+r.milky.toFixed(2)}">적용</button>`}</td></tr>`; };
   return `<details class="m3-mtab"><summary>Milky 조정 <span class="mut">— 낮추면 광 효율↑ · 균일도↓ (다른 인자는 최적안 그대로의 추정)</span></summary>
-    <table class="m3-cmp m3-cmp-s"><tr><th>Milky</th><th>길이 U</th><th>폭 U</th><th>광 효율</th><th></th></tr>${rows.map(tr).join('')}</table></details>`;
+    <table class="m3-cmp m3-cmp-s"><tr><th>Milky</th><th>길이 균일도</th><th>폭 균일도</th><th>광 효율</th><th></th></tr>${rows.map(tr).join('')}</table></details>`;
 }
-// 결과 카드(2026-10-29: 같은 내용이 여러 번 반복되던 것을 하나로) — 판정 한 단어 · 작은 비교표(바뀐 사양 + 길이 U·폭 U·광 효율) ·
+// 결과 카드(2026-10-29: 같은 내용이 여러 번 반복되던 것을 하나로) — 판정 한 단어 · 작은 비교표(바뀐 사양 + 길이 균일도·폭 균일도·광 효율) ·
 // 한계 한 줄 · [적용] [그래도 적용] [취소] [자세히](프로파일·사유 전문 = 결과 창)
-const KEEP_ROW = /<th>(길이 U|폭 U|광 효율)/;
+const KEEP_ROW = /<th>(길이 균일도|폭 균일도|광 효율)/;
 export const limitText = (reason) => { const m = /한계:\s*([^·)]+)/.exec(String(reason ?? '')); return m ? m[1].trim() : ''; };
 export function resultLineHtml(r) {
   const verdict = r.unchanged ? ['keep', '현재안 유지', '더 나은 안 없음'] : r.feasible ? ['ok', '목표 통과', '최적안을 찾음'] : ['bad', '목표 미달', '가장 가까운 안'];

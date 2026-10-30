@@ -43,7 +43,7 @@ export const NEAR_TOL = 0.01;
 export function nearestRow(rows, obs, nMax) {
   // 가장 가까운 안: 여유가 최고값에서 NEAR_TOL 안인 것 중 LED 가 가장 적은 것(우선순위 = 개수 최소) → 효율
   //   여유가 같으면(다른 쪽 — 보통 폭 — 이 막음) 길이 목표를 넘는 가장 적은 개수, 길이도 못 넘으면 길이 여유가 최고에 가까운 가장 적은 개수
-  //   여유·길이 U 가 NaN 인 행은 뺌(비교가 모두 거짓이라 순위를 흐림) · 같은 개수면 낮은 Milky(j) → 효율
+  //   여유·길이 균일도 가 NaN 인 행은 뺌(비교가 모두 거짓이라 순위를 흐림) · 같은 개수면 낮은 Milky(j) → 효율
   const R = rows.filter((r) => Number.isFinite(r.margin) && Number.isFinite(r.stats?.Ulen));
   const top = R.reduce((m, r) => Math.max(m, r.margin), -Infinity), C = R.filter((r) => r.margin >= top - NEAR_TOL);
   const mL = (r) => r.stats.Ulen - obs.targetLen, bestL = C.reduce((m, r) => Math.max(m, mL(r)), -Infinity), needL = bestL >= 0 ? 0 : bestL - NEAR_TOL;
@@ -78,7 +78,7 @@ export function searchLeds({ G, obs, line, cand, maps, pitches = [0], pitchRange
   if (found) return { feasible: true, ...found, reason: '', tried };
   const b = nearestRow(rows, obs, nMax);
   const st = b.stats;
-  return { feasible: false, ...b, tried, reason: `LED ${nMax}개까지 늘려도 목표 미달 — 가장 가까운 ${b.n}개: 길이 U ${st ? st.Ulen.toFixed(2) : '–'}${st?.Uwid == null ? '' : ` · 폭 U ${st.Uwid.toFixed(2)}`} — ${st && st.Uwid != null && st.Uwid - obs.targetWid < st.Ulen - obs.targetLen ? '폭 방향 확산 부족: ③ 형상 또는 Milky 상향 권장' : '길이 방향 리플: Milky 상향 또는 LED–커버 거리 확대 권장'}` };
+  return { feasible: false, ...b, tried, reason: `LED ${nMax}개까지 늘려도 목표 미달 — 가장 가까운 ${b.n}개: 길이 균일도 ${st ? st.Ulen.toFixed(2) : '–'}${st?.Uwid == null ? '' : ` · 폭 균일도 ${st.Uwid.toFixed(2)}`} — ${st && st.Uwid != null && st.Uwid - obs.targetWid < st.Ulen - obs.targetLen ? '폭 방향 확산 부족: ③ 형상 또는 Milky 상향 권장' : '길이 방향 리플: Milky 상향 또는 LED–커버 거리 확대 권장'}` };
 }
 
 // ── 폭 방향 열(spec P4 §2.2b): 후보 = (s, w) 격자, 보간은 같은 w 줄 안 s 방향만 ──
@@ -144,5 +144,5 @@ export function searchLeds2({ G, obs, line, cand, maps, rowsOptions = [1, 2], ga
   const b = b0.nRow == null ? { ...b0, n: nMax, rows: 1, rowGap: 0, total: nMax } : { ...b0, n: b0.nRow };
   delete b.nRow; delete b.j;
   const st = b.stats, lay = b.rows === 2 ? `2열 × ${b.n}개(±${b.rowGap.toFixed(1)}mm)` : `${b.total}개`;
-  return { feasible: false, ...b, tried, reason: `LED 총 ${nMax}개까지 늘려도 목표 미달 — 가장 가까운 ${lay}: 길이 U ${st ? st.Ulen.toFixed(2) : '–'}${st?.Uwid == null ? '' : ` · 폭 U ${st.Uwid.toFixed(2)}`} — ${st && st.Uwid != null && st.Uwid - obs.targetWid < st.Ulen - obs.targetLen ? '폭 방향 확산 부족: ③ 형상 또는 Milky 상향 권장' : '길이 방향 리플: Milky 상향 또는 LED–커버 거리 확대 권장'}` };
+  return { feasible: false, ...b, tried, reason: `LED 총 ${nMax}개까지 늘려도 목표 미달 — 가장 가까운 ${lay}: 길이 균일도 ${st ? st.Ulen.toFixed(2) : '–'}${st?.Uwid == null ? '' : ` · 폭 균일도 ${st.Uwid.toFixed(2)}`} — ${st && st.Uwid != null && st.Uwid - obs.targetWid < st.Ulen - obs.targetLen ? '폭 방향 확산 부족: ③ 형상 또는 Milky 상향 권장' : '길이 방향 리플: Milky 상향 또는 LED–커버 거리 확대 권장'}` };
 }

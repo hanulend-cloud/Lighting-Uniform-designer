@@ -10,7 +10,7 @@ import { gridCandidates } from './shape-opt.js';
 import { gradeOf, heightCandidates } from './housing-led.js';
 
 export const MILKY_STEP = 0.025, MILKY_ITERS = 8;
-// 평활 길이 U — 길이 프로파일 3행 이동평균(NaN 행 제외)의 min/max. 한 칸 잡음 골짜기(min 통계 편향)에 덜 민감. profile 없으면 Ulen
+// 평활 길이 균일도 — 길이 프로파일 3행 이동평균(NaN 행 제외)의 min/max. 한 칸 잡음 골짜기(min 통계 편향)에 덜 민감. profile 없으면 Ulen
 export function smoothU(stats) {
   const p = stats?.profile;
   if (!p || !p.length) return stats?.Ulen ?? 0;
@@ -23,7 +23,7 @@ export function smoothU(stats) {
   }
   return mx > 0 ? mn / mx : stats.Ulen ?? 0;
 }
-// 통과 판정은 margin(원래 Ulen) 그대로, 미달안 순위만 평활 길이 U
+// 통과 판정은 margin(원래 Ulen) 그대로, 미달안 순위만 평활 길이 균일도
 export const shapeScore = (r, obs) => (!r.ok ? -Infinity : margin(r.stats, obs) >= 0 ? 1 + r.eff : Math.min(smoothU(r.stats) / obs.targetLen, r.stats.Uwid == null ? Infinity : r.stats.Uwid / obs.targetWid));
 export const SCORE_EPS = 0.01;   // 최종안이 현재안보다 이만큼은 나아야 추천
 // stepVirt = LED STEP 가상 배치 여부(② 가 STEP 에서 돌면 true, current 는 현재 배치가 가상인지) — 개수가 같아도 원래 ↔ 가상은 다른 설계
@@ -39,7 +39,7 @@ export const sameDesign = (a, b) => ['count', 'pitch', 'milky'].every((k) => (a?
 // 단계적 압축: schedule = [[남길 수(첫 단계는 전체), 광자 수, 후보당 시간 제한 ms?]…]. 각 단계 결과 점수로 다음 단계 후보를 줄임
 export const SHAPE_SCHEDULE = [[27, 6e4, 2500], [6, 2e5, 4000], [2, 6e5, 6000]];
 // ③ 평가 광자 예산 — 광 효율(관측면 도달 / 방출)이 낮으면 관측면에 닿는 광자가 적어 균일도(최저÷최고)가 잡음으로 크게 낮아짐
-// (효율 10%·6만 광자 → '변경 없음' 후보 길이 U 0.36 vs 정밀 0.60, 2026-10-29). 기준 효율 50% 대비 부족한 만큼(최대 10배) 광자·시간을 늘림
+// (효율 10%·6만 광자 → '변경 없음' 후보 길이 균일도 0.36 vs 정밀 0.60, 2026-10-29). 기준 효율 50% 대비 부족한 만큼(최대 10배) 광자·시간을 늘림
 export function shapeBudget(eff) {
   const k = Number.isFinite(eff) && eff > 0 ? Math.min(10, Math.max(1, 0.5 / eff)) : 1;
   return { k, screen: { N: Math.round(6e4 * k), maxMs: Math.round(2500 * Math.min(k, 4)) }, schedule: SHAPE_SCHEDULE.map(([keep, N, ms]) => [keep, Math.round(N * k), Math.round(ms * Math.min(k, 4))]) };
@@ -322,7 +322,7 @@ export async function runAutoDesign(cfg, io) {
     ledAlts = (two ? r.alts ?? [] : ledAlternatives(r, false)).map(lay);   // cfg.stepMode = LED STEP(② 는 기준 LED 복사 배치를 점수 매김)
     if (!r.feasible) { feasible = false; reason = r.reason; }
   }
-  const evalV = (cands, N, ms) => io.evalVariants(d, cands, N, ms), uText = (s) => `길이 U ${s.Ulen.toFixed(2)}${s.Uwid == null ? '' : ` · 폭 U ${s.Uwid.toFixed(2)}`}`;
+  const evalV = (cands, N, ms) => io.evalVariants(d, cands, N, ms), uText = (s) => `길이 균일도 ${s.Ulen.toFixed(2)}${s.Uwid == null ? '' : ` · 폭 균일도 ${s.Uwid.toFixed(2)}`}`;
   if (stages.height && cfg.heightRange) {   // ⑤ LED 높이 — 후보 { dz }(0 = 현재), 점수 최고
     const cands = heightCandidates(cfg.heightRange, 7).map((dz) => ({ dz }));
     io.progress?.('height', 0, `LED 높이 후보 ${cands.length}개 평가`);
@@ -389,7 +389,7 @@ export async function runAutoDesign(cfg, io) {
     if (best !== shapeZero) {
       d = { ...d, shape: { part: cfg.shapePart, ...best.cand } };
       steps.push({ stage: 'shape', best });
-      if (margin(best.stats, obs) < 0) { feasible = false; reason = `형상 최적안도 목표 미달 — 길이 U ${best.stats.Ulen.toFixed(2)}${best.stats.Uwid == null ? '' : ` · 폭 U ${best.stats.Uwid.toFixed(2)}`}`; }
+      if (margin(best.stats, obs) < 0) { feasible = false; reason = `형상 최적안도 목표 미달 — 길이 균일도 ${best.stats.Ulen.toFixed(2)}${best.stats.Uwid == null ? '' : ` · 폭 균일도 ${best.stats.Uwid.toFixed(2)}`}`; }
       else { feasible = true; reason = ''; }
     }
   }
@@ -403,7 +403,7 @@ export async function runAutoDesign(cfg, io) {
     if (best) {
       const c = best.cand, zero = ['dt', 'h', 'e', 'c'].every((k) => !(c[k] ?? 0)) && !hasCurve(c);   // 전부 0 이면 R 무관 — 빈 shapeMod 안 만듦
       d = { ...d, shape: zero ? null : { part: cfg.shapePart, ...c } };
-      if (margin(best.stats, obs) < 0) { feasible = false; reason = `형상 최적안도 목표 미달 — 길이 U ${best.stats.Ulen.toFixed(2)}${best.stats.Uwid == null ? '' : ` · 폭 U ${best.stats.Uwid.toFixed(2)}`}`; }
+      if (margin(best.stats, obs) < 0) { feasible = false; reason = `형상 최적안도 목표 미달 — 길이 균일도 ${best.stats.Ulen.toFixed(2)}${best.stats.Uwid == null ? '' : ` · 폭 균일도 ${best.stats.Uwid.toFixed(2)}`}`; }
       else { feasible = true; reason = ''; }
     } else { feasible = false; reason = '제약(살두께·간섭)을 만족하는 형상 후보가 없음 — 범위를 줄이세요'; }
   }
@@ -432,7 +432,7 @@ export async function runAutoDesign(cfg, io) {
   io.progress?.('verify', 0, '최종안 정밀 재계산');
   if (sameDesign(d, cfg.current)) {   // 현재안이 최선 — 현재안이 목표 미달이면 이유를 비워 두지 않음
     const okCur = margin(currentVerified.stats, obs) >= 0, cs = currentVerified.stats;
-    const why = reason || (okCur ? '' : `현재 설계가 최선 — 목표 미달(길이 U ${cs.Ulen.toFixed(2)}${cs.Uwid == null ? '' : ` · 폭 U ${cs.Uwid.toFixed(2)}`})`);
+    const why = reason || (okCur ? '' : `현재 설계가 최선 — 목표 미달(길이 균일도 ${cs.Ulen.toFixed(2)}${cs.Uwid == null ? '' : ` · 폭 균일도 ${cs.Uwid.toFixed(2)}`})`);
     return { feasible: feasible && okCur, best: { ...cfg.current }, steps, reason: why, verified: currentVerified, current: currentVerified, unchanged: true, cancelled: false, hint };
   }
   let verified = await io.verify(d);
@@ -465,8 +465,8 @@ export async function runAutoDesign(cfg, io) {
     if (reason.startsWith('형상 최적안도')) reason = `형상 최적안도 목표 미달 — ${vt}`;
     else if (!reason) reason = `최종 정밀 재계산에서 목표 미달 — ${vt} (후보 평가와 차이: 잡음·LED 몸체 영향)`;
     else {   // 문구 속 균일도는 정밀 재계산 값 하나만(후보 선별값·④ 함께 쓰기 선별값은 뺌 — 두 숫자가 섞이면 헷갈림)
-      reason = reason.replace(/( · ④ 케이스 .*?) 와 함께 쓰면 길이 U [\d.]+( · 폭 U [\d.]+)?/, '$1 를 함께 쓰면 나아짐');
-      reason = /길이 U [\d.]+( · 폭 U [\d.]+)?/.test(reason) ? reason.replace(/길이 U [\d.]+( · 폭 U [\d.]+)?/, vt) : `${reason} — ${vt}`;
+      reason = reason.replace(/( · ④ 케이스 .*?) 와 함께 쓰면 길이 균일도 [\d.]+( · 폭 균일도 [\d.]+)?/, '$1 를 함께 쓰면 나아짐');
+      reason = /길이 균일도 [\d.]+( · 폭 균일도 [\d.]+)?/.test(reason) ? reason.replace(/길이 균일도 [\d.]+( · 폭 균일도 [\d.]+)?/, vt) : `${reason} — ${vt}`;
     }
   }
   return { feasible, best: d, steps, reason, verified, current: currentVerified, cancelled: false, hint };

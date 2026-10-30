@@ -60,7 +60,7 @@ ok(S.counted === nV && S.noiseWarn === false, `집계 셀 ${S.counted}, 잡음 �
   }
   const SR = tallyStats(GR, accs2, ob, cn);
   const cols = []; for (let j = 0; j < GR.nw; j++) { let s = 0, c = 0; for (let i = 0; i < GR.ns; i++) if (GR.valid[i * GR.nw + j]) { s += SR.map[i * GR.nw + j]; c++; } if (c > GR.ns / 2) cols.push(s / c); }
-  ok(SR.Uwid >= 0.95 && Math.abs(cols[0] / cols[cols.length - 1] - 1) < 0.02, `링 균일 발광: 창 평균 폭 U ${SR.Uwid.toFixed(3)} @ ${SR.sWorst.toFixed(0)}mm, 안/바깥 열 비 ${(cols[0] / cols[cols.length - 1]).toFixed(4)} (열 ${cols.length}개)`);
+  ok(SR.Uwid >= 0.95 && Math.abs(cols[0] / cols[cols.length - 1] - 1) < 0.02, `링 균일 발광: 창 평균 폭 균일도 ${SR.Uwid.toFixed(3)} @ ${SR.sWorst.toFixed(0)}mm, 안/바깥 열 비 ${(cols[0] / cols[cols.length - 1]).toFixed(4)} (열 ${cols.length}개)`);
 }
 {   // 테이퍼 4→12: 영역 안 모든 픽셀이 w 격자 안
   const tap = recognizeLine([topFaceMesh([[[0, -2], [100, -6], [100, 6]], [[0, -2], [100, 6], [0, 2]]], 2)], [{ part: 0, face: 1 }], [0, 0, 1]);
@@ -101,7 +101,7 @@ ok(S.counted === nV && S.noiseWarn === false, `집계 셀 ${S.counted}, 잡음 �
   const sum = A.acc.reduce((x, y) => x + y, 0);
   ok(sum > 0 && A.acc.every((v, k) => v === Bq.acc[k]) && A.cnt.every((v, k) => v === Bq.cnt[k]), `lightData 선 집계 = 전체 선 집계(합 ${sum.toFixed(1)})`);
 }
-{   // 폭 판정 창 프로파일: 최저 창의 min/max = tallyStats 의 폭 U
+{   // 폭 판정 창 프로파일: 최저 창의 min/max = tallyStats 의 폭 균일도
   const sum = new Float64Array(G.ns * G.nw); for (const a of accs) for (let k = 0; k < sum.length; k++) sum[k] += a[k];
   const wp = windowProfile(G, sum, S.win[0], S.win[1]), f = Array.from(wp).filter(Number.isFinite);
   ok(Array.isArray(S.win) && wp.length === G.nw && f.length >= 2 && Math.abs(Math.min(...f) / Math.max(...f) - S.Uwid) < 1e-12,

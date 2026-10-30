@@ -14,7 +14,7 @@ const G = { ns: 4, nw: 2, ds: 1, cell: 1, w0: -1, valid: new Uint8Array(8).fill(
 const obs = { faces: [], cone: 90, targetLen: 0.8, targetWid: 0.8 };
 const job = (k) => ({ sceneKey: `s${k}`, scene: { tag: k }, G, obs, nLeds: 2, fluxLm: 0 });
 const LED = { emitted: 1, escaped: 0.5, absSurf: 0.5, absVol: 0, lost: 0, rrLoss: 0, rrGain: 0 };
-// 응답: 첫 s 칸(셀 0,1) = 0.85, 나머지 1 — 시드마다 ±0.2% 흔들림 → 길이 U ≈ 0.85, 잡음 ≪ 2%
+// 응답: 첫 s 칸(셀 0,1) = 0.85, 나머지 1 — 시드마다 ±0.2% 흔들림 → 길이 균일도 ≈ 0.85, 잡음 ≪ 2%
 const make = (msg) => ({ sceneKey: msg.sceneKey, acc: Float64Array.from({ length: 8 }, (_, k) => (k < 2 ? 0.85 : 1) * (1 + 0.002 * Math.sin(msg.seed * 7 + k))), cnt: new Uint32Array(8).fill(10), ledger: { ...LED }, leak: { '0|0': 0.1 } });
 // 수동 포트: 청크 응답을 시험이 직접 보냄
 function manualPort() {
@@ -62,7 +62,7 @@ const OPT = { chunkN: 1000, fixedChunk: true, bins: 10, debounceMs: 500, tickMs:
   P.restart(job(1)); await T.advance(3000);
   const s = P.snapshot();
   ok(s.state === 'done' && s.reason === 'converged' && s.chunks >= 10 && s.chunks <= 25 && s.stats.relNoise <= 0.02 && s.stats.passLen === true,
-    `수렴: 청크 ${s.chunks}, 잡음 ${(s.stats.relNoise * 100).toFixed(3)}%, 길이 U ${s.stats.Ulen.toFixed(3)} 합격`);
+    `수렴: 청크 ${s.chunks}, 잡음 ${(s.stats.relNoise * 100).toFixed(3)}%, 길이 균일도 ${s.stats.Ulen.toFixed(3)} 합격`);
   const nScene = scenes(p).length, nCh = chunks(p).length;
   P.setJudge({ obs: { ...obs, targetLen: 0.9 } });
   const j = P.snapshot();
@@ -115,7 +115,7 @@ const OPT = { chunkN: 1000, fixedChunk: true, bins: 10, debounceMs: 500, tickMs:
   ok(s.state === 'done' && s.reason === 'max' && s.chunks === 10, `점진 계산 끝: 청크 ${s.chunks}개`);
   ok(s.bins.every((b, i) => b.n === 1 && b.acc.every((v, k) => v === J.accs[i][k])), '배치 10개 = runJob 배치(비트 일치)');
   ok(s.stats.Ulen === ref.Ulen && s.stats.Uwid === ref.Uwid && s.stats.relNoise === ref.relNoise && s.stats.sWorst === ref.sWorst,
-    `판정 일치: 길이 U ${ref.Ulen.toFixed(4)}, 폭 U ${ref.Uwid?.toFixed(4)}, 잡음 ${(ref.relNoise * 100).toFixed(2)}%`);
+    `판정 일치: 길이 균일도 ${ref.Ulen.toFixed(4)}, 폭 균일도 ${ref.Uwid?.toFixed(4)}, 잡음 ${(ref.relNoise * 100).toFixed(2)}%`);
   ok(Object.keys(J.ledger).every((k) => Math.abs(s.ledger[k] - J.ledger[k]) <= 1e-12 * Math.max(1, J.ledger[k])), '원장 합 일치(도착 순서 차이만)');
 }
 {   // 응답 없는 포트 → 제한 시간 뒤 error (장면 · 청크)
@@ -232,7 +232,7 @@ const perPhoton = (s) => Array.from(s.sum, (v) => v / (s.photons / 25000));   //
   const mF = perPhoton(F), mA = perPhoton(A_), tol = 3 * sig * Math.sqrt(2 / 400000);
   ok(mA.every((v, k) => Math.abs(v - mF[k]) <= tol && Math.abs(v - mu[k]) <= tol), `셀 평균 일치(3σ = ${tol.toExponential(1)}): 최대 차 ${Math.max(...mA.map((v, k) => Math.abs(v - mF[k]))).toExponential(1)}`);
   const se = Math.hypot(F.stats.seLen ?? 0, A_.stats.seLen ?? 0);
-  ok(Math.abs(A_.stats.Ulen - F.stats.Ulen) <= 3 * se && Math.abs(A_.stats.Ulen - 0.85) <= 3 * (A_.stats.seLen ?? 0) + 1e-3, `길이 U 일치: 적응 ${A_.stats.Ulen.toFixed(4)} · 고정 ${F.stats.Ulen.toFixed(4)} (3σ ${(3 * se).toFixed(4)})`);
+  ok(Math.abs(A_.stats.Ulen - F.stats.Ulen) <= 3 * se && Math.abs(A_.stats.Ulen - 0.85) <= 3 * (A_.stats.seLen ?? 0) + 1e-3, `길이 균일도 일치: 적응 ${A_.stats.Ulen.toFixed(4)} · 고정 ${F.stats.Ulen.toFixed(4)} (3σ ${(3 * se).toFixed(4)})`);
   ok(Math.abs(A_.stats.relNoise / F.stats.relNoise - 1) < 0.5, `잡음 추정 비슷: 적응 ${(A_.stats.relNoise * 100).toFixed(3)}% · 고정 ${(F.stats.relNoise * 100).toFixed(3)}%`);
 }
 {   // 포트별 시작: 장면이 늦은 포트가 있어도 준비된 포트는 바로 청크 · 늦은 포트는 준비되면 합류 · 청크는 포트당 1개만 진행

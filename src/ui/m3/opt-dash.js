@@ -1,7 +1,7 @@
 // 아래 칸 대시보드 — ① 기구 최적화 진행(6 항목 타일) ② 시뮬레이션 진행현황(수렴 그래프).
 // 최적화: app.js 의 기구 최적화 io 가 progress(stage, frac, text) · evals(stage, [{label, Ulen, Uwid, ok, why}]) 를 부른다.
-// 타일마다 상태(대기·진행 %·완료·건너뜀) · 시험 중 값 → 지금까지 최고 · 후보별 길이/폭 U 점 그래프(목표선) · 진행 막대.
-// 시뮬레이션: 점진 계산 스냅숏마다 sample(snap, targetNoise) — 광자 수에 따른 잡음 %·길이/폭 U 추정과 진행률 %(잡음이 목표에 닿으면 100%).
+// 타일마다 상태(대기·진행 %·완료·건너뜀) · 시험 중 값 → 지금까지 최고 · 후보별 길이/폭 균일도 점 그래프(목표선) · 진행 막대.
+// 시뮬레이션: 점진 계산 스냅숏마다 sample(snap, targetNoise) — 광자 수에 따른 잡음 %·길이/폭 균일도 추정과 진행률 %(잡음이 목표에 닿으면 100%).
 import { calcLabel } from './command-bar.js';
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
 // 계산 순서대로(엔진: 위치 → 케이스 면 → 형상 → Milky, 2026-10-30) — 번호도 이 순서
@@ -10,7 +10,7 @@ export const STAGES = [['position', '① 위치'], ['housing', '② 케이스 �
 export const tileOf = (stage) => (stage === 'milky' || stage === 'shape' || stage === 'housing' ? stage : stage === 'leds' || stage === 'height' ? 'position' : null);
 const f2 = (v) => (Number.isFinite(v) ? v.toFixed(2) : '–');
 
-// 후보 점 그래프(인라인 SVG, 순수) — 길이 U(파랑)·폭 U(초록) · 목표선(빨강 점선) · 최고 후보(동그라미)
+// 후보 점 그래프(인라인 SVG, 순수) — 길이 균일도(파랑)·폭 균일도(초록) · 목표선(빨강 점선) · 최고 후보(동그라미)
 export function evalSparkSvg(evals, tgLen, tgWid, bestIdx = -1, w = 220, h = 70) {
   const pts = evals.filter((e) => e.ok !== false && Number.isFinite(e.Ulen));
   if (!pts.length) return `<svg class="od-spark" viewBox="0 0 ${w} ${h}"><text x="${w / 2}" y="${h / 2 + 4}" text-anchor="middle" class="od-none">후보 결과 없음</text></svg>`;
@@ -25,7 +25,7 @@ export function evalSparkSvg(evals, tgLen, tgWid, bestIdx = -1, w = 220, h = 70)
     <text class="od-ax" x="2" y="10">${hi.toFixed(2)}</text><text class="od-ax" x="2" y="${h - 2}">${lo.toFixed(2)}</text></svg>`;
 }
 // 설계 인자 현황판(순수, 왼쪽 창 맨 아래) — S = 최적화 상태(null = 실행 전), nw = 지금 설계 { milky, milkyCap, leds, shape, on:{milky,position,shape}, Ulen, Uwid, tgLen, tgWid }
-// 그래프 1개에 인자 3개: 시험 순서대로 후보의 길이 U(실선)·폭 U(점선)를 인자 색으로 · 목표선(빨강) · 지금 설계(회색) · 최고 후보(노란 원)
+// 그래프 1개에 인자 3개: 시험 순서대로 후보의 길이 균일도(실선)·폭 균일도(점선)를 인자 색으로 · 목표선(빨강) · 지금 설계(회색) · 최고 후보(노란 원)
 // 아래 인자별 한 줄(상태 · 지금 → 최고). 그래프는 .fb-plot 자리의 실제 크기로 factorChartSvg 가 그림(스크롤 없이 칸에 맞춤)
 const FB_COL = { milky: '#3b82f6', position: '#f59e0b', shape: '#a855f7', housing: '#10b981' };
 // cfg(k) → { on, box(체크 상자), opt(설정 html), why } — 줄 앞에서 바로 켜고 끔(2026-10-29, 최적화 타일에서 옮김). 없으면 표시만
@@ -71,7 +71,7 @@ export function factorChartSvg(S, nw = {}, W = 240, H = 100) {
       body += pl('Ulen', false) + pl('Uwid', true) + idx.map((i) => `<circle cx="${X(i).toFixed(1)}" cy="${Y(seq[i].Ulen).toFixed(1)}" r="2" fill="${FB_COL[k]}"/>`).join('');
     }
     let bb = null; const run = []; seq.forEach((e, i) => { if (okE(e) && (!bb || scoreOf(e, tl, tw) > scoreOf(bb, tl, tw))) bb = e; if (bb) run.push(`${X(i).toFixed(1)},${Y(bb.Ulen).toFixed(1)}`); });
-    if (run.length > 1) body += `<polyline class="od-run" points="${run.join(' ')}" fill="none"/>`;   // 지금까지 최고(길이 U) — 계단처럼 오르는 선
+    if (run.length > 1) body += `<polyline class="od-run" points="${run.join(' ')}" fill="none"/>`;   // 지금까지 최고(길이 균일도) — 계단처럼 오르는 선
     if (best >= 0) body += `<circle class="od-best" cx="${X(best).toFixed(1)}" cy="${Y(seq[best].Ulen).toFixed(1)}" r="5"><title>최고 ${esc(seq[best].label)} (${f2(seq[best].Ulen)}/${f2(seq[best].Uwid)})</title></circle>`;
     body += `<text class="od-ax" x="${x0}" y="${H - 2}">후보 1</text><text class="od-ax" x="${x1}" y="${H - 2}" text-anchor="end">${n}</text>`;
   } else body += hl(tl, 'od-tg') + hl(tw, 'od-tg od-tg2') + hl(nw.Ulen, 'od-now') + `<text class="od-none" x="${(x0 + x1) / 2}" y="${(y0 + y1) / 2 + 4}" text-anchor="middle">기구 최적화를 실행하면 후보 균일도가 그려짐</text>`;
@@ -85,8 +85,8 @@ export function beforeAfterHtml(k, b0, best, tl, tw, n = 0) {
   const row = (name, a, b, extra = '') => `<tr><th>${name}</th><td>${a}</td><td class="${a !== b ? 'chg' : ''}">${b}${extra}</td></tr>`;
   return `<table class="od-ba"><tr><th></th><th>전</th><th>후</th></tr>
     ${row('사양', esc(SPEC_NOW[k]?.(b0) ?? '–'), esc(best.label))}
-    ${row('길이 U', f2(b0.Ulen), f2(best.Ulen), pass(best.Ulen, tl))}
-    ${row('폭 U', f2(b0.Uwid), f2(best.Uwid), pass(best.Uwid, tw))}</table><div class="mut od-tx">후보 ${n}개 중 최고 · 적용은 위 [적용]</div>`;
+    ${row('길이 균일도', f2(b0.Ulen), f2(best.Ulen), pass(best.Ulen, tl))}
+    ${row('폭 균일도', f2(b0.Uwid), f2(best.Uwid), pass(best.Uwid, tw))}</table><div class="mut od-tx">후보 ${n}개 중 최고 · 적용은 위 [적용]</div>`;
 }
 // 오른쪽 모니터(순수, 2026-10-30) — 진행 줄(계산 순서 · 고정/완료/진행/대기) · 지표 3개(지금까지 최고, 시작 대비) · 그래프 자리(.od-plot) · 기록(최고 갱신만)
 // S = createOptDash 상태, sec = 걸린 초. 그래프는 자리 크기로 factorChartSvg 가 나중에 그림
@@ -118,8 +118,8 @@ export function monitorHtml(S, sec = 0) {
   const nEval = (S.seq ?? []).length;
   return `<div class="od-h">${busy ? `진행 ${mmss(sec)}` : S.stopped ? '중지됨' : '끝남'} <span class="mut">· 시험한 후보 ${nEval}개${S.note ? ` · ${esc(S.note)}` : ''}</span></div>
     <div class="om-steps">${steps.join('<i class="om-ar">→</i>')}</div>
-    <div class="om-kpi">${kpi('길이 U', tl, best?.Ulen ?? b0.Ulen, b0.Ulen)}${kpi('폭 U', tw, best?.Uwid ?? b0.Uwid, b0.Uwid)}${effK}</div>
-    <div class="od-legend">색 = 항목 · 점 = 각 후보(길이 U) · 굵은 선 = 지금까지 최고 <i class="od-kt"></i>목표 <i style="border-color:#8a96a8"></i>시작</div>
+    <div class="om-kpi">${kpi('길이 균일도', tl, best?.Ulen ?? b0.Ulen, b0.Ulen)}${kpi('폭 균일도', tw, best?.Uwid ?? b0.Uwid, b0.Uwid)}${effK}</div>
+    <div class="od-legend">색 = 항목 · 점 = 각 후보(길이 균일도) · 굵은 선 = 지금까지 최고 <i class="od-kt"></i>목표 <i style="border-color:#8a96a8"></i>시작</div>
     <div class="od-plot"></div>
     <div class="om-log"><div class="mut om-lh">기록 — 최고가 바뀐 순간</div>${log || '<div class="mut">아직 없음</div>'}</div>`;
 }
@@ -255,7 +255,7 @@ export function createSimDash(el, { onCtl = null } = {}) {
     set('st', busy ? '기구 최적화 중 — 일시정지(끝나면 이어서)' : esc(sTxt));
     const btn = el.querySelector('[data-sim-ctl]'); if (btn) { if (btn.textContent !== ctl) btn.textContent = ctl; btn.disabled = busy; }
     set('pct', `${pct.toFixed(0)}%`); el.querySelector('[data-s="bar"]').style.width = `${pct.toFixed(0)}%`;
-    set('row', `오차 ${last && Number.isFinite(last.noise) ? `±${(last.noise * 100).toFixed(1)}%` : '–'} → 목표 ±${(tgt * 100).toFixed(1)}% · 광자 ${last ? last.ph.toLocaleString() : 0}${last ? ` · 길이 U ${f2(last.Ulen)} · 폭 U ${f2(last.Uwid)}` : ''}${state === 'running' ? etaText(H, tgt) : ''}`);
+    set('row', `오차 ${last && Number.isFinite(last.noise) ? `±${(last.noise * 100).toFixed(1)}%` : '–'} → 목표 ±${(tgt * 100).toFixed(1)}% · 광자 ${last ? last.ph.toLocaleString() : 0}${last ? ` · 길이 균일도 ${f2(last.Ulen)} · 폭 균일도 ${f2(last.Uwid)}` : ''}${state === 'running' ? etaText(H, tgt) : ''}`);
     const dg = el.querySelector('[data-s="diag"]'); if (dg) { dg.hidden = !diag; set('diag', diag?.html ?? ''); }
     set('svg', svg);
     // 접힌 줄에는 주 광경로 한 줄 요약, 펼치면 정확도(오차) 그래프 + 광경로 목록

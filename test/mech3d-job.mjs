@@ -44,7 +44,7 @@ ok(S.optics.length === mech.length + ledParts.length && !S.optics[mech.length].t
 const obs = { ...ms.observe, dir }, G = tallyGeometry(line, obs);
 const t0 = Date.now(), r = runJob({ S, line, obs, G, emitters: em, ledSpec: ms.light.spec, N: 150000, seed: 1, batches: 10 });
 const st = tallyStats(G, r.accs, obs, r.cnts);
-ok(r.ledger.lost === 0 && st.counted > 300 && st.Ulen > 0 && st.Ulen < 1 && st.Uwid > 0, `계산: ${((Date.now() - t0) / 1000).toFixed(1)}s, 길이 U ${st.Ulen.toFixed(3)}±${st.seLen.toFixed(3)}, 폭 최저 U ${st.Uwid.toFixed(3)} @ ${st.sWorst.toFixed(1)}mm, lost ${r.ledger.lost}, relNoise ${st.relNoise?.toFixed(3)}, nbar ${st.nbar.toFixed(0)}, noiseWarn ${st.noiseWarn}`);
+ok(r.ledger.lost === 0 && st.counted > 300 && st.Ulen > 0 && st.Ulen < 1 && st.Uwid > 0, `계산: ${((Date.now() - t0) / 1000).toFixed(1)}s, 길이 균일도 ${st.Ulen.toFixed(3)}±${st.seLen.toFixed(3)}, 폭 최저 U ${st.Uwid.toFixed(3)} @ ${st.sWorst.toFixed(1)}mm, lost ${r.ledger.lost}, relNoise ${st.relNoise?.toFixed(3)}, nbar ${st.nbar.toFixed(0)}, noiseWarn ${st.noiseWarn}`);
 // 대칭 점검: 기구·LED 가 x=60 대칭 → 길이 프로파일 좌·우 절반 합이 같아야 함(잡음 ~1%)
 const p = st.profile, n = p.length; let lh = 0, rh = 0;
 for (let i = 0; i < n; i++) if (Number.isFinite(p[i])) { if (i < n / 2) lh += p[i]; else rh += p[i]; }

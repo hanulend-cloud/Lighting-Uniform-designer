@@ -32,7 +32,7 @@ const line = { length: 100, closed: false };
   const w = searchLeds({ G: G2, obs: { targetLen: 0.5, targetWid: 0.8 }, line, cand, maps: maps2, pitches: [0], nMax: 20, emitted: 1 });
   let wantN = 1; for (; wantN <= 20; wantN++) { const t = searchLeds({ G: G2, obs: { targetLen: 0.5, targetWid: 0 }, line, cand, maps: maps2, pitches: [0], nMax: wantN, emitted: 1 }); if (t.feasible) break; }
   ok(!w.feasible && w.n === wantN && w.stats.Ulen >= 0.5, `폭이 막으면 길이 목표를 넘는 가장 적은 개수: ${w.n}개(길이만 보면 ${wantN}개) · ${w.reason}`); }
-{ // 가장 가까운 안: NaN 여유·길이 U 행은 뺌 · 같은 개수면 낮은 Milky(j) → 효율
+{ // 가장 가까운 안: NaN 여유·길이 균일도 행은 뺌 · 같은 개수면 낮은 Milky(j) → 효율
   const o = { targetLen: 0.8, targetWid: 0.6 }, row = (n, j, Ulen, margin, eff = 0.5) => ({ n, pitch: 0, j, stats: { Ulen, Uwid: 0.5 }, eff, margin });
   const b = nearestRow([row(1, 0, NaN, NaN), row(2, 0, 0.7, NaN), row(3, 1, 0.75, -0.05, 0.9), row(3, 0, 0.75, -0.05, 0.4), row(4, 0, 0.75, -0.055)], o, 5);
   ok(b.n === 3 && b.j === 0, `NaN 행 제외 → 3개 · 낮은 j 우선: n ${b.n} j ${b.j}`);
@@ -66,7 +66,7 @@ const line = { length: 100, closed: false };
   ok([0, 1, 2].every((k) => Math.abs(m[k] - (maps[a][k] + 0.5 * maps[b0][k] + 0.5 * maps[b1][k])) < 1e-9), 'layoutMap2 = 같은 w 줄 안 s 보간 합');
   let thr = false; try { layoutMap2(g, maps, [{ s: 10, w: 1 }]); } catch { thr = true; }
   ok(thr, '격자에 없는 w → 오류'); }
-{ // 합성 2열: 폭 4칸(w 중심 −3·−1·1·3), LED 지도 = 가우시안(s σ6) × 가우시안(w σw). 분리형이라 폭 U = 폭 분포 비, 길이 U = 1열 n 의 U
+{ // 합성 2열: 폭 4칸(w 중심 −3·−1·1·3), LED 지도 = 가우시안(s σ6) × 가우시안(w σw). 분리형이라 폭 균일도 = 폭 분포 비, 길이 균일도 = 1열 n 의 U
   const nw = 4, G = { ns: 100, nw, ds: 1, cell: 2, w0: -4, L: 100, closed: false, winS: 10, area: new Float64Array(100 * nw).fill(1), valid: new Uint8Array(100 * nw).fill(1) };
   const sig = 6, wc = [-3, -1, 1, 3], gaps = [1, 2, 3], wOffsets = [0, ...gaps.flatMap((d) => [-d, d])];
   const mk = (sw) => { const cand = candidateGrid(line, { sStep: 1, wOffsets }); return { cand, maps: cand.map(({ s, w }) => Float32Array.from({ length: 100 * nw }, (_, k) => Math.exp(-(((k / nw | 0) + 0.5 - s) ** 2) / (2 * sig * sig)) * Math.exp(-((wc[k % nw] - w) ** 2) / (2 * sw * sw)))) }; };
@@ -75,7 +75,7 @@ const line = { length: 100, closed: false };
   const Uw = (sw, ws) => { const f = wc.map((x) => ws.reduce((a, w) => a + Math.exp(-((x - w) ** 2) / (2 * sw * sw)), 0)); return Math.min(...f) / Math.max(...f); };
   const obs = { targetLen: 0.5, targetWid: 0.8 }, sw = 1.5;
   const passG = gaps.filter((d) => Uw(sw, [-d, d]) >= 0.8);
-  ok(Uw(sw, [0]) < 0.8 && passG.length >= 1, `해석: 1열 폭 U ${Uw(sw, [0]).toFixed(2)} · 2열 통과 δ ${passG}`);
+  ok(Uw(sw, [0]) < 0.8 && passG.length >= 1, `해석: 1열 폭 균일도 ${Uw(sw, [0]).toFixed(2)} · 2열 통과 δ ${passG}`);
   const A = mk(sw), r = searchLeds2({ G, obs, line, cand: A.cand, maps: A.maps, rowsOptions: [1, 2], gaps, pitches: [0], nMax: 40, emitted: 1 });
   const bestG = passG.reduce((a, d) => (Uw(sw, [-d, d]) > Uw(sw, [-a, a]) ? d : a));
   ok(r.feasible && r.rows === 2 && r.n === want && r.total === 2 * want && r.rowGap === bestG && Math.abs(r.stats.Uwid - Uw(sw, [-bestG, bestG])) < 1e-6,

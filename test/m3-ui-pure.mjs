@@ -379,7 +379,7 @@ done();
   const cfg = (k) => ({ milky: { on: true, box: '<input type="checkbox" data-ad="milky" checked>', opt: '<div class="od-opt">상한</div>', why: 'Milky' }, position: { on: false, box: '<input type="checkbox" data-ad="position">', opt: '', why: '' }, shape: { on: false, box: '<input type="checkbox" data-ad="shape" disabled>', opt: '', why: '확산 부품 없음' } })[k];
   const h = factorBoardHtml(null, { milky: 2 }, cfg);
   const okB = h.includes('data-ad="milky" checked') && h.includes('data-ad="position"') && h.includes('data-ad="shape" disabled') && (h.match(/class="fb-opt"/g) ?? []).length === 1 && h.includes('title="확산 부품 없음"');
-  // 최적화 타일 전후: 사양·길이 U·폭 U, 바뀐 칸 강조, 목표 통과 ✓/✕
+  // 최적화 타일 전후: 사양·길이 균일도·폭 균일도, 바뀐 칸 강조, 목표 통과 ✓/✕
   const t = beforeAfterHtml('milky', { milky: 2, Ulen: 0.58, Uwid: 0.64 }, { label: 'Milky 3.50', Ulen: 0.82, Uwid: 0.71 }, 0.8, 0.8, 7);
   const okT = t.includes('Milky 2.00') && t.includes('<td class="chg">Milky 3.50') && /0\.82 <b class="od-ok">✓/.test(t) && /0\.71 <b class="od-bad">✕/.test(t) && t.includes('후보 7개') && beforeAfterHtml('shape', {}, null).includes('후보 없음');
   console.log(okB && okT ? 'PASS 설계 인자 현황 체크(켜기·설정) · 최적화 타일 전후 사양표' : (process.exitCode = 1, `FAIL 인자 체크/전후 ${okB} ${okT} ${t}`)); }
@@ -390,11 +390,11 @@ done();
   console.log(r1.sim.text === '계산 중 50% · 58% / 64%' && r1.opt.text === '시뮬레이션 뒤' && r2.sim.cls === 'bad' && r2.sim.done && r2.opt.cls === 'need' && r3.sim.cls === 'ok' && r3.opt.done && r4.opt.text === '진행 중' && flowState(null, null, M).sim.text === '–'
     ? 'PASS 흐름 4 광분포 시뮬레이션 · 5 기구 최적화 상태' : (process.exitCode = 1, `FAIL 흐름 ${JSON.stringify([r1, r2, r3, r4])}`)); }
 { const { resultLineHtml, limitText } = await import('../src/ui/m3/autodesign-panel.js');
-  // 결과 카드: 판정 한 단어 · 비교표 = 바뀐 사양 + 길이 U·폭 U·광 효율(안 바뀐 LED 줄 없음) · 한계 한 줄 · [자세히]
+  // 결과 카드: 판정 한 단어 · 비교표 = 바뀐 사양 + 길이 균일도·폭 균일도·광 효율(안 바뀐 LED 줄 없음) · 한계 한 줄 · [자세히]
   const r = { unchanged: false, feasible: false, reason: '목표 미달 (균일도 최고 … · 한계: 길이 방향 — 끝단이 가장 어두움 · ④ 케이스)', targets: { len: 0.8, wid: 0.8 },
     cur: { count: 40, pitch: 10, milky: 1.43, Ulen: 0.61, Uwid: 0.6, eff: 0.107 }, best: { count: 40, pitch: 10, milky: 1.8, Ulen: 0.66, Uwid: 0.62, eff: 0.1 } };
   const h = resultLineHtml(r);
-  console.log(h.includes('m3-rcard bad') && h.includes('목표 미달') && h.includes('<th>Milky') && !h.includes('<th>LED') && h.includes('<th>길이 U') && h.includes('<th>광 효율') && h.includes('💡 한계: 길이 방향 — 끝단이 가장 어두움') && h.includes('data-ad="view"') && limitText('없음') === ''
+  console.log(h.includes('m3-rcard bad') && h.includes('목표 미달') && h.includes('<th>Milky') && !h.includes('<th>LED') && h.includes('<th>길이 균일도') && h.includes('<th>광 효율') && h.includes('💡 한계: 길이 방향 — 끝단이 가장 어두움') && h.includes('data-ad="view"') && limitText('없음') === ''
     ? 'PASS 기구 최적화 결과 카드(판정·바뀐 사양만·한계 한 줄)' : (process.exitCode = 1, `FAIL 결과 카드 ${h}`)); }
 { const { milkyTable, milkyTableHtml } = await import('../src/ui/m3/autodesign-panel.js');
   // Milky 조정 표: 마지막 Milky 단계 기록(뒤에서부터 연속 'milky', ② 기준 'ledsRef' 제외)만 · 같은 Milky 는 정밀(나중) 값 · 믿는 행만 · Milky 오름차순

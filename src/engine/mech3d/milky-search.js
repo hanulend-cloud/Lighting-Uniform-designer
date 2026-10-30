@@ -32,7 +32,7 @@ export function pickMilky(rows, obs) {
   const i = R.findIndex((r, k) => r.margin >= 0 && (k + 1 >= R.length || R[k + 1].margin >= 0));   // 통과가 이어져야 함(단발 잡음 무시)
   if (i < 0) {
     const best = R.reduce((a, b) => (b.margin > a.margin ? b : a));
-    return { feasible: false, best, milky: best.milky, edge: 'high', reason: `Milky ${best.milky}에서도 길이 U ${best.Ulen.toFixed(2)}${best.Uwid == null ? '' : ` · 폭 U ${best.Uwid.toFixed(2)}`} — 목표 ${obs.targetLen.toFixed(2)}${best.Uwid == null ? '' : ` / ${obs.targetWid.toFixed(2)}`} 미달` };
+    return { feasible: false, best, milky: best.milky, edge: 'high', reason: `Milky ${best.milky}에서도 길이 균일도 ${best.Ulen.toFixed(2)}${best.Uwid == null ? '' : ` · 폭 균일도 ${best.Uwid.toFixed(2)}`} — 목표 ${obs.targetLen.toFixed(2)}${best.Uwid == null ? '' : ` / ${obs.targetWid.toFixed(2)}`} 미달` };
   }
   if (i === 0) return { feasible: true, best: R[0], milky: R[0].milky, edge: 'low', reason: '' };
   if (ix[i] - ix[i - 1] !== 1) return { feasible: true, best: R[i], milky: R[i].milky, edge: null, reason: '' };   // 원 격자에서 이웃이 아니면 보간 안 함
