@@ -892,14 +892,20 @@ function adApply() {
 // [그래도 적용] — '현재안 유지'(차이가 잡음 수준)여도 찾은 후보로 바꿈
 // 이 안에서 이어서(2026-10-30) — 결과를 적용한 뒤, 체크했지만 이번 실행에서 돌리지 않은 항목만 그 위에서 최적화(예: ③ 형상 결과 → ② 위치·① Milky).
 // 적용한 형상·배치는 장면(getMech3d)에 들어가 다음 실행의 출발점이 됨. 적용은 [되돌리기] 로 취소 가능
-function adContinue() {
+async function adContinue() {
   const st = adState(), r = st.result; if (!r || st.running) return;
   const done = r.stages ?? {}, s = st.sel, av = stageAvailability(A.store.mspec, adInfo());
   const next = { milky: !!(s.milky && !done.milky && av.milky.ok), leds: !!(s.leds && !done.leds && av.leds.ok), height: !!(s.height && !done.height && av.height.ok), housing: false,
     shape: !!(s.shape && !done.shape && av.shape.ok && av.shape.parts.includes(s.shapePart)) };
   if (!Object.values(next).some(Boolean)) { setStatus('이어서 최적화할 항목이 없음 — 설계 인자에서 위치·Milky 등을 더 체크하세요'); renderAuto(); return; }
   if (!r.unchanged) adApply();   // 현재안 유지면 적용할 것 없이 그대로 이어서
-  dashReset(next); adRun({ stages: next });
+  dashReset(next);
+  // 적용(형상·크기 변경)이면 관측 라인을 다시 인식함 — 그동안 S.line 이 비어 실행이 바로 빠져나가던 것(2026-10-30). 라인이 생길 때까지 기다림(최대 30초)
+  const a = A;
+  for (let k = 0; k < 150 && A === a && !A.store.session.line; k++) await new Promise((res) => setTimeout(res, 200));
+  if (A !== a) return;
+  if (!A.store.session.line) { setStatus('관측 라인을 다시 인식하지 못해 이어서 최적화를 시작하지 못함'); return; }
+  adRun({ stages: next });
 }
 // Milky 조정 표에서 고른 Milky 로 적용 — 최적안의 다른 인자는 그대로, Milky 와 그 추정 균일도·효율만 바꿈
 function adApplyMilky(v) {

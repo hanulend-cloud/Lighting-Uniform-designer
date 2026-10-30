@@ -33,10 +33,14 @@ export function migrateMech3d(m) {
   // 열 배치(spec P4 §2.2b): rows 1|2(그 밖 = 1), rowGap 유한 ≥ 0(그 밖 = 0). 라인 반폭 제한은 배치 때
   const rowsOf = (o) => { const g = Number(o?.rowGap); return { rows: o?.rows === 2 ? 2 : 1, rowGap: Number.isFinite(g) && g > 0 ? g : 0 }; };
   if (m.light.manual && typeof m.light.manual === 'object') Object.assign(m.light.manual, rowsOf(m.light.manual));
-  const st = m.light.step;   // LED STEP 가상 배치(spec P4 §2.2a): { count 정수 ≥ 1, pitch ≥ 0, rows, rowGap } | null
+  const st = m.light.step;   // LED STEP 가상 배치(spec P4 §2.2a): { count 정수 ≥ 1, pitch ≥ 0, rows, rowGap } | { positions } | null
   if (st) {
     const v = st.virtual, c = Math.round(Number(v?.count)), p = Number(v?.pitch);
-    st.virtual = v && typeof v === 'object' ? { count: Number.isFinite(c) && c >= 1 ? c : 1, pitch: Number.isFinite(p) && p > 0 ? p : 0, ...rowsOf(v) } : null;
+    const num = (x, d = 0) => (Number.isFinite(+x) ? +x : d);
+    // 위치 목록 배치(STEP 편집·기구 최적화 자유 배치 = { positions:[{ s, w, dz }] }) 는 그대로 — s 가 수인 항목만(w·dz 없으면 0).
+    // 전에는 균등 배치로 정리돼 { count: 1 } 이 되어 다시 불러오면 LED 1개만 남았음(2026-10-30)
+    if (Array.isArray(v?.positions)) st.virtual = { positions: v.positions.filter((q) => q && Number.isFinite(+q.s)).map((q) => ({ s: +q.s, w: num(q.w), dz: num(q.dz) })) };
+    else st.virtual = v && typeof v === 'object' ? { count: Number.isFinite(c) && c >= 1 ? c : 1, pitch: Number.isFinite(p) && p > 0 ? p : 0, ...rowsOf(v) } : null;
   }
   // LED 개별 조정(spec m3-cad-ui §4a): { layoutKey 문자열, items: { 정수 ≥ 0: { ds, dz 유한 } } } 만 유지(배치가 맞는지는 validAdjust 가 봄)
   if (m.light.ledAdjust != null && !isAdjustWellFormed(m.light.ledAdjust)) delete m.light.ledAdjust;

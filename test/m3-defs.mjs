@@ -47,4 +47,11 @@ ok(old.light.spec.fluxLm === 0 && old.observe.targetNoise === 0.01 && old.observ
   const m = (o) => { const x = { light: {}, observe: o }; migrateMech3d(x); return x.observe.targetNoise; };
   ok(m({ targetNoise: 0.02 }) === 0.01 && m({}) === 0.01 && m({ targetNoise: 0.03 }) === 0.03 && m({ targetNoise: 0.02, noiseRev: 1 }) === 0.02, '오차 목표 1% 이전(예전 기본값만)');
 }
+{ // LED STEP 편집·자유 배치(virtual.positions)는 다시 불러와도 유지 — 전에는 { count: 1 } 로 바뀌어 LED 1개만 남음(2026-10-30)
+  const pos = [{ s: 6.5, w: -2.8, dz: 0 }, { s: 6.5, w: 2.8, dz: 0 }, { s: 38.75, w: -2.8 }];
+  const m = { light: { kind: 'step', step: { virtual: { positions: pos } } }, observe: {} }; migrateMech3d(m);
+  const bad = { light: { kind: 'step', step: { virtual: { positions: [{ s: 'x' }, { s: 3, w: NaN }] } } }, observe: {} }; migrateMech3d(bad);
+  ok(m.light.step.virtual.positions.length === 3 && m.light.step.virtual.positions[2].w === -2.8 && m.light.step.virtual.positions[2].dz === 0 && m.light.step.virtual.count === undefined
+    && bad.light.step.virtual.positions.length === 1 && bad.light.step.virtual.positions[0].w === 0, `가상 배치 위치 목록 유지(${m.light.step.virtual.positions.length}개) · 잘못된 항목만 뺌`);
+}
 done();
