@@ -837,3 +837,26 @@ body.booting::after { content: "불러오는 중…"; position: fixed; left: 50%
 .m3-tree > .m3-h { margin: -10px -10px 8px; padding: 7px 10px; background: var(--m3-head, #f3f5f9); border-bottom: 1px solid var(--m3-line); color: var(--m3-headtx, #3b4658); font-size: 12px; font-weight: 700; }
 /* 광원·LED 속성의 [LED 자동 선택] — 기본 방법이라 강조 */
 .m3-primary { font-weight: 600; background: var(--m3-acc, #1f6fd1) !important; color: #fff !important; border-color: var(--m3-acc, #1f6fd1) !important; }
+/* 기구 최적화 모니터(오른쪽, 2026-10-30) — 진행 줄 · 지표 3개 · 그래프 · 기록 */
+.om-steps { display: flex; align-items: stretch; gap: 3px; margin: 4px 0 8px; flex-wrap: wrap; }
+.om-st { flex: 1 1 0; min-width: 64px; border-radius: 6px; padding: 4px 6px; text-align: center; font-size: 11.5px; border: 1px solid var(--m3-line); color: var(--m3-mut); display: flex; flex-direction: column; line-height: 1.3; }
+.om-st b { font-weight: 600; white-space: nowrap; }
+.om-done { background: rgba(46,139,87,.12); border-color: rgba(46,139,87,.4); color: var(--m3-ok); }
+.om-run { background: var(--m3-accbg); border-color: var(--m3-acc); color: var(--m3-acc); box-shadow: 0 0 0 1px var(--m3-acc) inset; }
+.om-lock { background: rgba(128,128,128,.12); color: var(--m3-mut); }
+.om-ar { align-self: center; font-style: normal; color: var(--m3-mut); font-size: 11px; }
+.om-kpi { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; margin-bottom: 6px; }
+.om-k { background: rgba(128,128,128,.08); border-radius: 6px; padding: 5px 8px; font-size: 11px; min-width: 0; }
+.om-v { display: block; font-size: 22px; line-height: 1.2; }
+.om-v.ok { color: var(--m3-ok); } .om-v.bad { color: var(--m3-bad); }
+.od-plot { height: 170px; overflow: hidden; }
+.od-run { stroke: #5b6b80; stroke-width: 2.4; vector-effect: non-scaling-stroke; }
+.om-log { margin-top: 6px; font-size: 11.5px; line-height: 1.6; border-top: 1px solid var(--m3-line); padding-top: 4px; }
+.om-lh { font-size: 11px; }
+.om-l { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fb-lock { opacity: 1; }
+.fb-lk { font-size: 11px; text-align: center; }
+.od-lockc { background: rgba(128,128,128,.15) !important; color: var(--m3-mut) !important; }
+.fb-redo { font: inherit; font-size: 11px; padding: 0 6px; margin-left: 6px; border: 1px solid var(--m3-line); border-radius: 5px; background: transparent; color: inherit; cursor: pointer; }
+.fb-hint { font-size: 11px; margin-top: 6px; }
+.m3-mon #m3-optdash { padding: 6px 8px; }

@@ -438,3 +438,13 @@ done();
   const okMm = hi * 1.1 > 1 && lo * 4.4 <= 23 / 8 + 1e-9;   // 고화질은 1 mm 넘게(전: 1.1 mm 고정 1칸), 저화질은 피치/8 이하(전: 4.4 mm — 리플 절반 깎음)
   console.log(hi * 1.1 <= 23 / 8 + 1e-9 && hi > 1 && lo >= 0.5 && smoothSigma({ relNoise: 0.002, ds: 1, pitch: 23 }) === 0.5 && smoothSigma({ relNoise: 0.05, ds: 1, pitch: null }) === 3 && okMm
     ? `PASS 1D 평활 폭: 고화질 ${(hi * 1.1).toFixed(2)} mm · 저화질 ${(lo * 4.4).toFixed(2)} mm (피치 23 → 상한 2.9 mm)` : (process.exitCode = 1, `FAIL 평활 폭 ${lo} ${hi}`)); }
+{ // 기구 최적화 창(2026-10-30): 계산 순서(위치 → 케이스 면 → 형상 → Milky) · 적용한 항목 = 고정(다시 최적화 단추) · 오른쪽 모니터(진행 줄·지표·기록)
+  const { STAGES, factorBoardHtml, monitorHtml } = await import('../src/ui/m3/opt-dash.js');
+  const order = STAGES.map(([k]) => k).join();
+  const b = factorBoardHtml(null, { locked: { position: { txt: 'LED 17개' } }, leds: 'LED 17개', on: {} }, (k) => ({ on: false, box: `<input type="checkbox" data-ad="${k}">`, opt: '', why: '' }));
+  const okLock = /✓ 고정/.test(b) && b.includes('data-adunlock="position"') && !b.includes('data-ad="position"') && b.includes('data-ad="shape"');
+  const S = { tgLen: 0.8, tgWid: 0.8, t0: 0, tiles: { position: { status: 'done', frac: 1, evals: [] }, housing: { status: 'off', evals: [] }, shape: { status: 'run', frac: 0.46, evals: [] }, milky: { status: 'off', evals: [] } },
+    seq: [{ k: 'position', label: '1열 17개', Ulen: 0.84, Uwid: 0.81 }], before: { Ulen: 0.55, Uwid: 0.62 }, log: [{ sec: 92, k: 'position', label: '1열 17개', Ulen: 0.84, Uwid: 0.81 }], locked: { milky: true } };
+  const m = monitorHtml(S, 130);
+  const okMon = m.indexOf('① 위치') < m.indexOf('③ 형상') && m.includes('46%') && /고정/.test(m) && m.includes('0.84') && m.includes('▲0.29') && m.includes('1열 17개') && m.includes('od-plot');
+  console.log(order === 'position,housing,shape,milky' && okLock && okMon ? 'PASS 기구 최적화 창: 계산 순서 · 고정 항목 · 모니터(진행 줄·지표·기록)' : (process.exitCode = 1, `FAIL 최적화 창: ${order} lock ${okLock} mon ${okMon}`)); }

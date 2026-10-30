@@ -4,7 +4,8 @@
 // 시뮬레이션: 점진 계산 스냅숏마다 sample(snap, targetNoise) — 광자 수에 따른 잡음 %·길이/폭 U 추정과 진행률 %(잡음이 목표에 닿으면 100%).
 import { calcLabel } from './command-bar.js';
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
-export const STAGES = [['milky', '① Milky'], ['position', '② 기구 위치 (LED 배치 · 높이)'], ['shape', '③ 기구 형상'], ['housing', '④ 케이스 면 (반사율)']];
+// 계산 순서대로(엔진: 위치 → 케이스 면 → 형상 → Milky, 2026-10-30) — 번호도 이 순서
+export const STAGES = [['position', '① 위치'], ['housing', '② 케이스 면'], ['shape', '③ 형상'], ['milky', '④ Milky']];
 // 기구 최적화 진행 단계 이름 → 타일(LED 배치·높이 = ② 기구 위치). 현재안·기준·검증 = 타일 없음(머리 줄 문구로만)
 export const tileOf = (stage) => (stage === 'milky' || stage === 'shape' || stage === 'housing' ? stage : stage === 'leds' || stage === 'height' ? 'position' : null);
 const f2 = (v) => (Number.isFinite(v) ? v.toFixed(2) : '–');
@@ -31,6 +32,8 @@ const FB_COL = { milky: '#3b82f6', position: '#f59e0b', shape: '#a855f7', housin
 export function factorBoardHtml(S, nw = {}, cfg = null) {
   const tl = S?.tgLen ?? nw.tgLen, tw = S?.tgWid ?? nw.tgWid;
   const row = (k, name, nowTxt) => {
+    // 고정 = 적용까지 마친 항목 — 다음 실행에서 건드리지 않음. [다시 최적화] = 고정 풀고 다시 체크
+    if (nw.locked?.[k]) return `<div class="fb-row fb-lock" title="최적화 결과를 적용함 — 다음 실행에서 이 값 그대로 씀"><span class="fb-lk">🔒</span><i class="fb-dot" style="background:${FB_COL[k]}"></i><b>${name}</b><span class="od-chip od-lockc">✓ 고정</span><span class="fb-val">${esc(nowTxt)} <button type="button" class="fb-redo" data-adunlock="${k}">다시 최적화</button></span></div>`;
     const c = cfg?.(k), t = S?.tiles?.[k], on = c ? !!c.on : t ? t.status !== 'off' : !!nw.on?.[k];
     const ev = (t?.evals ?? []).filter((e) => e.ok !== false && Number.isFinite(e.Ulen)); let b = null;
     for (const e of ev) if (!b || scoreOf(e, tl, tw) > scoreOf(b, tl, tw)) b = e;
@@ -39,10 +42,11 @@ export function factorBoardHtml(S, nw = {}, cfg = null) {
     const box = c?.box ? `<label class="fb-sw" title="${esc(c.why || '최적화에 사용')}">${c.box}</label>` : '<span></span>';   // 빈 칸도 자리 유지(격자 5칸)
     return `<div class="fb-row${on ? '' : ' fb-off'}" title="${esc(txt)}">${box}<i class="fb-dot" style="background:${FB_COL[k]}"></i><b>${name}</b><span class="od-chip">${chip}</span><span class="fb-val"><span class="mut">지금</span> ${esc(nowTxt)}${b ? ` → <b>${esc(b.label)}</b> <span class="mut">(${f2(b.Ulen)}/${f2(b.Uwid)})</span>` : ''}</span></div>${c?.opt ? `<div class="fb-opt">${c.opt}</div>` : ''}`;   // 설정(① 대상 · ③ 형상 바꿀 부품 — 체크 전에도 골라 둠)
   };
-  return `<div class="od-h">설계 인자 <span class="mut">체크 = 최적화에 사용</span> <span class="mut">${Number.isFinite(nw.Ulen) ? `지금 ${f2(nw.Ulen)}/${f2(nw.Uwid)}` : ''}</span></div>
-    <div class="od-legend">색 = 인자 · 실선 길이 U · 점선 폭 U <i class="od-kt"></i>목표 <i style="border-color:#8a96a8"></i>지금 <span style="color:#f0b400">○</span>최고</div>
-    <div class="fb-plot"></div>
-    ${row('milky', '① Milky', Number.isFinite(nw.milky) ? f2(nw.milky) : '확산 부품 없음')}${row('position', '② 위치', nw.leds ?? '–')}${row('shape', '③ 형상', nw.shape ?? '원래 형상')}${row('housing', '④ 케이스 면', nw.housing ?? '–')}`;
+  // 그래프는 오른쪽 모니터로(2026-10-30) — 여기는 입력(체크·옵션)과 상태만
+  const nowOf = { position: nw.leds ?? '–', housing: nw.housing ?? '–', shape: nw.shape ?? '원래 형상', milky: Number.isFinite(nw.milky) ? `Milky ${f2(nw.milky)}` : '확산 부품 없음' };
+  return `<div class="od-h">설계 인자 <span class="mut">체크 = 이번에 최적화 · 🔒 = 적용해서 고정</span> <span class="mut">${Number.isFinite(nw.Ulen) ? `지금 ${f2(nw.Ulen)}/${f2(nw.Uwid)}` : ''}</span></div>
+    ${STAGES.map(([k, name]) => row(k, name, nowOf[k])).join('')}
+    <div class="mut fb-hint">한 항목씩: 체크 → ▶ 실행 → [적용] = 🔒 고정 → 다음 항목 체크 → ▶ 실행</div>`;
 }
 // 인자 3개를 한 그래프로(순수) — W×H = 실제 px(글자가 늘어나지 않게). 가로 = 시험 순서(S.seq), 세로 = 균일도 U(목표·지금 포함 범위)
 export function factorChartSvg(S, nw = {}, W = 240, H = 100) {
@@ -66,6 +70,8 @@ export function factorChartSvg(S, nw = {}, W = 240, H = 100) {
       const pl = (key, dash) => { const d = idx.filter((i) => Number.isFinite(seq[i][key])).map((i) => `${X(i).toFixed(1)},${Y(seq[i][key]).toFixed(1)}`); return d.length > 1 ? `<polyline points="${d.join(' ')}" fill="none" stroke="${FB_COL[k]}" stroke-width="1.6"${dash ? ' stroke-dasharray="3 2"' : ''}/>` : ''; };
       body += pl('Ulen', false) + pl('Uwid', true) + idx.map((i) => `<circle cx="${X(i).toFixed(1)}" cy="${Y(seq[i].Ulen).toFixed(1)}" r="2" fill="${FB_COL[k]}"/>`).join('');
     }
+    let bb = null; const run = []; seq.forEach((e, i) => { if (okE(e) && (!bb || scoreOf(e, tl, tw) > scoreOf(bb, tl, tw))) bb = e; if (bb) run.push(`${X(i).toFixed(1)},${Y(bb.Ulen).toFixed(1)}`); });
+    if (run.length > 1) body += `<polyline class="od-run" points="${run.join(' ')}" fill="none"/>`;   // 지금까지 최고(길이 U) — 계단처럼 오르는 선
     if (best >= 0) body += `<circle class="od-best" cx="${X(best).toFixed(1)}" cy="${Y(seq[best].Ulen).toFixed(1)}" r="5"><title>최고 ${esc(seq[best].label)} (${f2(seq[best].Ulen)}/${f2(seq[best].Uwid)})</title></circle>`;
     body += `<text class="od-ax" x="${x0}" y="${H - 2}">후보 1</text><text class="od-ax" x="${x1}" y="${H - 2}" text-anchor="end">${n}</text>`;
   } else body += hl(tl, 'od-tg') + hl(tw, 'od-tg od-tg2') + hl(nw.Ulen, 'od-now') + `<text class="od-none" x="${(x0 + x1) / 2}" y="${(y0 + y1) / 2 + 4}" text-anchor="middle">기구 최적화를 실행하면 후보 균일도가 그려짐</text>`;
@@ -82,6 +88,41 @@ export function beforeAfterHtml(k, b0, best, tl, tw, n = 0) {
     ${row('길이 U', f2(b0.Ulen), f2(best.Ulen), pass(best.Ulen, tl))}
     ${row('폭 U', f2(b0.Uwid), f2(best.Uwid), pass(best.Uwid, tw))}</table><div class="mut od-tx">후보 ${n}개 중 최고 · 적용은 위 [적용]</div>`;
 }
+// 오른쪽 모니터(순수, 2026-10-30) — 진행 줄(계산 순서 · 고정/완료/진행/대기) · 지표 3개(지금까지 최고, 시작 대비) · 그래프 자리(.od-plot) · 기록(최고 갱신만)
+// S = createOptDash 상태, sec = 걸린 초. 그래프는 자리 크기로 factorChartSvg 가 나중에 그림
+export function monitorHtml(S, sec = 0) {
+  const tl = S.tgLen, tw = S.tgWid, ok = (e) => e.ok !== false && Number.isFinite(e.Ulen);
+  let best = null; for (const e of S.seq ?? []) if (ok(e) && (!best || scoreOf(e, tl, tw) > scoreOf(best, tl, tw))) best = e;
+  const busy = S.ended == null && !S.stopped;
+  const step = (cls, name, sub) => `<div class="om-st om-${cls}"><b>${name}</b><span>${sub}</span></div>`;
+  const steps = [step(S.seq?.length || !busy ? 'done' : 'run', '현재안', S.seq?.length || !busy ? '✓' : '계산')];
+  for (const [k, name] of STAGES) {
+    const t = S.tiles[k];
+    if (S.locked?.[k] && t.status === 'off') steps.push(step('lock', name, '고정 ✓'));
+    else if (t.status === 'run') steps.push(step('run', name, `${Math.round(t.frac * 100)}%`));
+    else if (t.status === 'done') steps.push(step('done', name, '✓'));
+    else if (t.status === 'wait') steps.push(step('wait', name, '대기'));
+  }
+  steps.push(step(S.ended != null ? 'done' : 'wait', '검증', S.ended != null ? '✓' : ''));
+  const b0 = S.before ?? {};
+  const kpi = (label, tg, v, v0) => {
+    const pass = Number.isFinite(v) && Number.isFinite(tg) ? (v + 1e-9 >= tg ? 'ok' : 'bad') : '';
+    const d = Number.isFinite(v) && Number.isFinite(v0) ? v - v0 : NaN;
+    return `<div class="om-k"><div class="mut">${label}${Number.isFinite(tg) ? ` · 목표 ${f2(tg)}` : ''}</div><b class="om-v ${pass}">${f2(v)}</b><div class="mut">시작 ${f2(v0)}${Number.isFinite(d) && Math.abs(d) >= 0.005 ? ` → ${d > 0 ? '▲' : '▼'}${f2(Math.abs(d))}` : ''}</div></div>`;
+  };
+  const effB = S.effBest, eff0 = b0.eff;
+  const effK = `<div class="om-k"><div class="mut">광 효율</div><b class="om-v">${Number.isFinite(effB) ? `${(effB * 100).toFixed(1)}%` : Number.isFinite(eff0) ? `${(eff0 * 100).toFixed(1)}%` : '–'}</b><div class="mut">${Number.isFinite(effB) && Number.isFinite(eff0) ? `시작 ${(eff0 * 100).toFixed(1)}%` : Number.isFinite(eff0) ? '시작값 · 최적안은 끝나면' : ''}</div></div>`;
+  const nm = Object.fromEntries(STAGES);
+  const mmss = (t) => `${String((t / 60) | 0).padStart(2, '0')}:${String(t % 60 | 0).padStart(2, '0')}`;
+  const log = (S.log ?? []).slice(-8).reverse().map((l) => `<div class="om-l"><span class="mut">${mmss(l.sec)}</span> ${esc(nm[l.k] ?? '')} ${esc(l.label)} → <b>${f2(l.Ulen)}/${f2(l.Uwid)}</b> <span class="od-ok">최고 갱신</span></div>`).join('');
+  const nEval = (S.seq ?? []).length;
+  return `<div class="od-h">${busy ? `진행 ${mmss(sec)}` : S.stopped ? '중지됨' : '끝남'} <span class="mut">· 시험한 후보 ${nEval}개${S.note ? ` · ${esc(S.note)}` : ''}</span></div>
+    <div class="om-steps">${steps.join('<i class="om-ar">→</i>')}</div>
+    <div class="om-kpi">${kpi('길이 U', tl, best?.Ulen ?? b0.Ulen, b0.Ulen)}${kpi('폭 U', tw, best?.Uwid ?? b0.Uwid, b0.Uwid)}${effK}</div>
+    <div class="od-legend">색 = 항목 · 점 = 각 후보(길이 U) · 굵은 선 = 지금까지 최고 <i class="od-kt"></i>목표 <i style="border-color:#8a96a8"></i>시작</div>
+    <div class="od-plot"></div>
+    <div class="om-log"><div class="mut om-lh">기록 — 최고가 바뀐 순간</div>${log || '<div class="mut">아직 없음</div>'}</div>`;
+}
 // 후보의 점수(목표 대비 여유 — 둘 다 있으면 작은 쪽)
 const scoreOf = (e, tl, tw) => (e.ok === false || !Number.isFinite(e.Ulen) ? -Infinity : Math.min(e.Ulen - tl, Number.isFinite(e.Uwid) && Number.isFinite(tw) ? e.Uwid - tw : Infinity));
 
@@ -89,10 +130,11 @@ const scoreOf = (e, tl, tw) => (e.ok === false || !Number.isFinite(e.Ulen) ? -In
 export function createOptDash(el, h = {}) {
   let S = null, raf = 0;
   const onChange = (e) => { const x = e.target.closest('[data-ad]'); if (!x || !h.onSel) return; const k = x.dataset.ad; h.onSel(k, x.type === 'checkbox' ? x.checked : x.tagName === 'SELECT' ? +x.value : x.value === '' ? NaN : +x.value); };
-  el.addEventListener('change', onChange); h.board?.addEventListener('change', onChange);   // 켜기·설정 = 설계 인자 현황 줄
+  el.addEventListener('change', onChange); h.board?.addEventListener('change', onChange);
+  h.board?.addEventListener('click', (e) => { const b = e.target.closest('[data-adunlock]'); if (b) h.onUnlock?.(b.dataset.adunlock); });   // 🔒 고정 → [다시 최적화]   // 켜기·설정 = 설계 인자 현황 줄
   const blank = () => Object.fromEntries(STAGES.map(([k]) => [k, { status: 'off', frac: 0, text: '', evals: [] }]));
-  function reset({ stages = {}, tgLen, tgWid } = {}) {
-    S = { tiles: blank(), tgLen, tgWid, t0: performance.now(), cur: null, note: '', seq: [], before: h.now?.() ?? {} };   // before = 실행 전 사양(타일 전후 비교)
+  function reset({ stages = {}, tgLen, tgWid, locked = {} } = {}) {
+    S = { tiles: blank(), tgLen, tgWid, t0: performance.now(), cur: null, note: '', seq: [], log: [], locked, before: h.now?.() ?? {} };   // before = 실행 전 사양(타일 전후 비교) · locked = 고정 항목(진행 줄 표시)
     for (const [k] of STAGES) S.tiles[k].status = stages[k] ? 'wait' : 'off';
     draw();
   }
@@ -107,36 +149,21 @@ export function createOptDash(el, h = {}) {
     S.cur = k; t.status = 'run'; t.frac = Math.max(0, Math.min(1, frac ?? 0)); t.text = text ?? '';
     draw();
   }
-  function evals(stage, list) { if (!S) return; const k = tileOf(stage); if (!k) { S.verify = list[list.length - 1] ?? S.verify; draw(); return; } const t = S.tiles[k]; t.evals.push(...list); S.seq.push(...list.map((e) => ({ ...e, k }))); if (t.status === 'off' || t.status === 'wait') t.status = 'run'; draw(); }
-  function finish(ok, text = '') { if (!S) return; for (const [k] of STAGES) if (S.tiles[k].status === 'run') { S.tiles[k].status = 'done'; S.tiles[k].frac = 1; } S.note = text; S.ended = ok; draw(); }
+  function evals(stage, list) { if (!S) return; const k = tileOf(stage); if (!k) { S.verify = list[list.length - 1] ?? S.verify; draw(); return; } const t = S.tiles[k]; t.evals.push(...list); for (const e of list) { const q = { ...e, k }; S.seq.push(q); if (q.ok !== false && Number.isFinite(q.Ulen) && (!S.bestE || scoreOf(q, S.tgLen, S.tgWid) > scoreOf(S.bestE, S.tgLen, S.tgWid))) { S.bestE = q; S.log.push({ sec: (performance.now() - S.t0) / 1000, k, label: q.label, Ulen: q.Ulen, Uwid: q.Uwid }); } } if (t.status === 'off' || t.status === 'wait') t.status = 'run'; draw(); }
+  function finish(ok, text = '', effBest = NaN) { if (!S) return; S.effBest = effBest; for (const [k] of STAGES) if (S.tiles[k].status === 'run') { S.tiles[k].status = 'done'; S.tiles[k].frac = 1; } S.note = text; S.ended = ok; draw(); }
   function draw() { if (raf) return; raf = setTimeout(() => { raf = 0; render(); renderBoard(); }, 40); }   // setTimeout: 화면이 숨겨져도(다른 탭) 갱신 — rAF 는 멈춤
   // 높이 조절 손잡이(.m3-fac-split)는 남기고 내용만 바꿈
-  function renderBoard() { if (!h.board) return; let c = h.board.querySelector('.fb-body'); if (!c) { c = document.createElement('div'); c.className = 'fb-body'; h.board.appendChild(c); } const nw = h.now?.() ?? {}; c.innerHTML = factorBoardHtml(S, nw, h.config); const p = c.querySelector('.fb-plot'); if (p && p.clientWidth > 40 && p.clientHeight > 30) p.innerHTML = factorChartSvg(S, nw, p.clientWidth, p.clientHeight); }
+  function renderBoard() { if (!h.board) return; let c = h.board.querySelector('.fb-body'); if (!c) { c = document.createElement('div'); c.className = 'fb-body'; h.board.appendChild(c); } const nw = h.now?.() ?? {}; c.innerHTML = factorBoardHtml(S, nw, h.config); }
   if (h.board && typeof ResizeObserver !== 'undefined') { let w0 = 0, h0 = 0; new ResizeObserver(() => { const b = h.board; if (b.clientWidth === w0 && b.clientHeight === h0) return; w0 = b.clientWidth; h0 = b.clientHeight; renderBoard(); }).observe(h.board); }   // 칸 크기가 바뀌면 그래프를 그 크기로 다시
+  // 오른쪽 모니터 — 진행 줄 · 지표 · 그래프(자리 크기로) · 기록. 끝나도 그대로 남김(결과 카드는 위 #m3-auto)
   function render() {
-    const idle = !S || S.ended != null || S.stopped;
-    if (!S) { el.innerHTML = ''; return; }   // 실행 전 = 비움(항목 켜기는 위 설계 인자 체크)
-    const sec = ((performance.now() - S.t0) / 1000) | 0, nEval = STAGES.reduce((a, [k]) => a + S.tiles[k].evals.length, 0);
-    const tile = ([k, name]) => {
-      const t = S.tiles[k], ev = t.evals;
-      let bi = -1, bs = -Infinity; ev.forEach((e, i) => { const s = scoreOf(e, S.tgLen, S.tgWid); if (s > bs) { bs = s; bi = i; } });
-      const last = ev[ev.length - 1], best = bi >= 0 ? ev[bi] : null;
-      const chip = { off: '미사용', wait: '대기', run: `진행 ${Math.round(t.frac * 100)}%`, done: '완료' }[t.status];
-      // 끝난 타일 = 최적화 전 → 후 사양(사양 · 길이 U · 폭 U), 진행 중 = 시험·최고·진행 막대. 켜기·설정은 설계 인자 현황에서
-      const done = t.status === 'done' || (idle && t.status !== 'off');
-      return `<div class="od-tile od-${t.status}"><div class="od-th"><b>${name}</b><span class="od-chip">${chip}</span></div>
-        ${t.status === 'off' ? '<div class="mut od-off">이번 실행에서 쓰지 않음</div>' : done ? beforeAfterHtml(k, S.before ?? {}, best, S.tgLen, S.tgWid, ev.length) : `
-        <div class="od-row"><span class="mut">시험</span> ${last ? `${esc(last.label)} → ${f2(last.Ulen)}/${f2(last.Uwid)}${last.ok === false ? ` <span class="od-bad">${esc(last.why ?? '탈락')}</span>` : ''}` : '<span class="mut">–</span>'}</div>
-        <div class="od-row"><span class="mut">최고</span> ${best ? `<b>${esc(best.label)}</b> → <b class="${bs >= 0 ? 'od-ok' : ''}">${f2(best.Ulen)}/${f2(best.Uwid)}</b>` : '<span class="mut">–</span>'} <span class="mut">· 후보 ${ev.length}개</span></div>
-        ${evalSparkSvg(ev, S.tgLen, S.tgWid, bi)}
-        <div class="od-bar"><i style="width:${Math.round(t.frac * 100)}%"></i></div><div class="od-tx mut">${esc(t.text)}</div>`}</div>`;
-    };
-    // 진행 중 = 항목 타일(시험·최고·진행) 펼침, 끝나면 '진행 기록' 한 줄로 접음(결과는 위 결과 카드 하나로 — 반복 없이)
-    const body = `<div class="od-legend"><i class="od-k1"></i>길이 U <i class="od-k2"></i>폭 U <i class="od-kt"></i>목표 <i class="od-kb"></i>최고 <span class="mut">· 값 = 길이 U / 폭 U</span></div><div class="od-grid">${STAGES.map(tile).join('')}</div>`;
-    const busy = S.ended == null && !S.stopped;
-    el.innerHTML = busy ? `<div class="od-h">진행 ${sec}초 <span class="mut">· 시험한 후보 ${nEval}개${S.note ? ` · ${esc(S.note)}` : ''}</span></div>${body}`
-      : `<details class="od-log"><summary>진행 기록 <span class="mut">· 후보 ${nEval}개 · 항목별 전 → 후</span></summary>${body}</details>`;
+    if (!S) { el.innerHTML = ''; return; }   // 실행 전 = 비움(항목 켜기는 왼쪽 설계 인자 체크)
+    el.innerHTML = monitorHtml(S, (performance.now() - S.t0) / 1000);
+    const p = el.querySelector('.od-plot');
+    if (p && p.clientWidth > 40 && p.clientHeight > 30) p.innerHTML = factorChartSvg(S, { ...(S.before ?? {}), tgLen: S.tgLen, tgWid: S.tgWid }, p.clientWidth, p.clientHeight);
   }
+  if (typeof ResizeObserver !== 'undefined') { let w0 = 0; new ResizeObserver(() => { if (el.clientWidth !== w0) { w0 = el.clientWidth; draw(); } }).observe(el); }
+  if (typeof setInterval !== 'undefined') setInterval(() => { if (S && S.ended == null && !S.stopped && el.isConnected && el.offsetParent) draw(); }, 1000);   // 걸린 시간 갱신
   render(); renderBoard();
   function stop() { if (S) { S.stopped = true; draw(); } }
   // 고르기만 바뀜(실행 전) — 다시 그림. 실행 결과가 남아 있으면 그대로 두고 스위치만 갱신
