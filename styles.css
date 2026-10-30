@@ -737,9 +737,9 @@ body.booting::after { content: "불러오는 중…"; position: fixed; left: 50%
 .m3-mon-hd { display: flex; align-items: center; gap: 6px; padding: 6px 8px 6px 12px; background: #f3f6fa; border-bottom: 1px solid var(--m3-line); cursor: move; user-select: none; touch-action: none; }
 .m3-mon-sp { flex: 1; }
 .m3-mon-hd button { border: 1px solid var(--m3-line); background: #fff; border-radius: 6px; padding: 3px 8px; cursor: pointer; font: inherit; font-size: 12px; }
-.m3-mon-body { overflow: auto; min-height: 0; display: flex; flex-direction: column; }
+.m3-mon-body { overflow: hidden; min-height: 0; display: flex; flex-direction: row; }   /* 왼쪽 설계 인자 | 오른쪽 실행·진행 */
 .m3-mon-body > * { flex: none; border-left: 0 !important; }
-.m3-mon-body > * + * { border-top: 1px solid var(--m3-line); }
+.m3-mon-body > #m3-factor, .m3-mon-body > #m3-dock { min-height: 0; }
 .m3-mon .m3-faccard { height: auto; min-height: 220px; overflow: visible; }
 .m3-mon .m3-dock { height: auto; }
 .m3-mon .m3-dock .od-grid { grid-template-columns: 1fr; }
@@ -832,6 +832,7 @@ body.booting::after { content: "불러오는 중…"; position: fixed; left: 50%
 .m3-mon-body > #m3-factor, .m3-mon-body > #m3-dock { overflow: auto; }
 .m3-mon .m3-faccard { min-height: 0; }
 .m3-mon.min .m3-mon-body > .m3-psplit { display: none; }
+.m3-mon.min #m3-dock { flex: 1 1 auto !important; }   /* 접기 = 실행 줄이 창 폭 전체 */
 /* 왼쪽 트리 제목 띠(결과 칸과 같은 모양) */
 .m3-tree > .m3-h { margin: -10px -10px 8px; padding: 7px 10px; background: var(--m3-head, #f3f5f9); border-bottom: 1px solid var(--m3-line); color: var(--m3-headtx, #3b4658); font-size: 12px; font-weight: 700; }
 /* 광원·LED 속성의 [LED 자동 선택] — 기본 방법이라 강조 */

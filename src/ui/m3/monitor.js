@@ -3,7 +3,8 @@
 // 명령줄 [5 기구 최적화] 로 열고 닫음(닫으면 숨김 — 기본 화면으로 돌아가지 않음). 끌어서 옮기기(머리) · 크기 조절(오른쪽 아래) · 접기(실행 줄만).
 // 열림·위치·크기·접힘 = 보는 사람별(uds.m3.opt)
 const KEY = 'uds.m3.opt', MIN_W = 320, MIN_H = 160;
-export const DEF_RECT = { x: null, y: 90, w: 540, h: 640 };   // x null = 오른쪽에 붙임
+export const DEF_RECT = { x: null, y: 80, w: 1040, h: 680 };   // x null = 오른쪽에 붙임 · 넓게(왼쪽 설계 인자 | 오른쪽 실행·진행, 2026-10-30)
+const LAY = 2;   // 창 배치 판 — 예전(세로 쌓기, 폭 540) 저장값은 위치·크기를 새 기본으로
 
 // 창이 화면 밖으로 나가지 않게(머리 줄은 늘 보이게) 위치·크기를 맞춤 — 순수
 export function clampRect(r, vw, vh) {
@@ -16,8 +17,9 @@ const save = (s) => { try { localStorage.setItem(KEY, JSON.stringify(s)); } catc
 
 // host = 창을 붙일 곳(#mech3d-wrap — CSS 변수 상속), items = 창에 담을 칸들(차례대로), onChange(open) = 단추 표시 갱신
 export function createMonitor({ host, items, onChange = () => {} }) {
-  let st = { open: false, min: false, ...DEF_RECT, ...load() };
-  const persist = () => save({ open: st.open, min: st.min, x: st.x, y: st.y, w: st.w, h: st.h });
+  const sv = load(), old = sv.lay !== LAY;
+  let st = { open: false, min: false, ...DEF_RECT, ...(old ? { open: sv.open, min: sv.min } : sv) };
+  const persist = () => save({ lay: LAY, open: st.open, min: st.min, x: st.x, y: st.y, w: st.w, h: st.h });
   const el = document.createElement('div');
   const place = () => { const r = clampRect(st, innerWidth, innerHeight); Object.assign(st, r); el.style.left = `${r.x}px`; el.style.top = `${r.y}px`; el.style.width = `${r.w}px`; el.style.height = st.min ? 'auto' : `${r.h}px`; };
   const kick = () => window.dispatchEvent(new Event('resize'));   // 담은 칸의 그래프·캔버스 크기 다시

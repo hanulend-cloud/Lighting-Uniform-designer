@@ -156,8 +156,8 @@ export async function mount(ctx) {
   mountDockSplitter(document.querySelector('#m3-dock'), document.querySelector('#mech3d-wrap'));   // 아래 칸 높이 조절
   // ⑤ 기구 최적화 창(떠 있는 창) — 설계 인자 현황·기구 최적화 칸을 기본 화면에서 빼서 담음. 여닫기 = 명령줄 [5 기구 최적화]
   monitor ??= createMonitor({ host: $('#mech3d-wrap'), items: [$('#m3-factor'), $('#m3-dock')], onChange: (on) => { const b = document.querySelector('#m3-cmd [data-c="opt"]'); if (b) { b.classList.toggle('on', on); b.setAttribute('aria-pressed', String(on)); } if (on && A && !adState().open) adSetOpen(true); if (A) renderMarkers(); } });
-  // 기구 최적화 창 안: 설계 인자 ↕ 실행·결과 높이 조절(끌기 막대, 보는 사람별)
-  mountSplit([$('#m3-factor'), $('#m3-dock')], { key: 'uds.m3.monSplit', dir: 'col', min: 100, onChange: () => window.dispatchEvent(new Event('resize')) });
+  // 기구 최적화 창 안: 왼쪽 설계 인자 ↔ 오른쪽 실행·진행 폭 조절(가운데 세로 경계선 끌기, 보는 사람별)
+  mountSplit([$('#m3-factor'), $('#m3-dock')], { key: 'uds.m3.monSplitH', dir: 'row', min: 280, onChange: () => window.dispatchEvent(new Event('resize')) });
   mountFacSplitter(document.querySelector('#m3-factor'), document.querySelector('.m3-left'));   // 왼쪽 맨 아래(부품 속성 밑) 설계 인자 현황 높이 조절
   if (A && A.ctx.mspec === ctx.mspec) { A.ctx = ctx; return; }   // 같은 기구 — 그대로
   unmount();
