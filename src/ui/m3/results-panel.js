@@ -356,12 +356,12 @@ function sizeCanvas(cv, ratio) {
   return true;
 }
 
-const QUALITY_OPTS = [['low', '저화질 2 mm'], ['mid', '중화질 1 mm'], ['high', '고화질 0.5 mm']];   // 정사각 칸 크기(2026-10-30) — 작을수록 계산 오래(중 ≈2배 · 고 ≈4배 광자)
+const QUALITY_OPTS = [['low', '저화질 1.5 mm'], ['mid', '중화질 1 mm'], ['high', '고화질 0.5 mm']];   // 정사각 칸 크기(2026-10-30) — 작을수록 계산 오래(중 ≈2배 · 고 ≈4배 광자)
 export function createResultsPanel(el, { onQuality = null, fileName = () => 'uds', onLeak = null } = {}) {
   const gaugeHtml = (k) => `<div class="m3-gauge" data-r="${k}"><div class="f"></div><div class="tg"></div></div>`;
   el.innerHTML = `
     <div class="m3-msg" data-r="msg" hidden></div>
-    <div class="m3-blk"><div class="m3-t">2D 광량 분포 (관측면 펼침) <span><span data-r="mapsub"></span> <select data-r="quality" title="2D 분포·1D 프로파일 칸 크기(정사각) — 저 2.0 mm(빠름) · 중 1.0 mm(광자 ≈2배) · 고 0.5 mm(광자 ≈4배) · 짧거나 좁은 면은 그 방향만 더 잘게" aria-label="분포 화질">${QUALITY_OPTS.map(([v, t]) => `<option value="${v}">${t}</option>`).join('')}</select>  <button type="button" class="m3-zoom" data-zoom="map" title="큰 창으로 보기" aria-label="2D 광량 분포 확대">⤢</button></span></div>
+    <div class="m3-blk"><div class="m3-t">2D 광량 분포 (관측면 펼침) <span><span data-r="mapsub"></span> <select data-r="quality" title="2D 분포·1D 프로파일 칸 크기(정사각) — 저 1.5 mm(빠름) · 중 1.0 mm(광자 ≈2배) · 고 0.5 mm(광자 ≈4배) · 짧거나 좁은 면은 그 방향만 더 잘게" aria-label="분포 화질">${QUALITY_OPTS.map(([v, t]) => `<option value="${v}">${t}</option>`).join('')}</select>  <button type="button" class="m3-zoom" data-zoom="map" title="큰 창으로 보기" aria-label="2D 광량 분포 확대">⤢</button></span></div>
       <div class="m3-withm"><canvas class="m3-g" data-r="map" width="600" height="200"></canvas>
         <div class="m3-m"><div class="l">평균 광량</div><div class="v" data-r="avg">–</div><div class="s" data-r="avgs"></div>${gaugeHtml('avgg')}
           <div class="l" style="margin-top:6px">광 효율</div><div class="v sm" data-r="eff">–</div><div class="s">관측면 원뿔 안 / LED 총 방출</div><button type="button" class="m3-leak" data-r="leak" hidden title="누르면 3D 에서 가장 많이 새는 면을 강조"></button></div></div></div>

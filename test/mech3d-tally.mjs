@@ -112,12 +112,12 @@ ok(S.counted === nV && S.noiseWarn === false, `집계 셀 ${S.counted}, 잡음 �
   const S3 = tallyStats(G, accs3, obs);
   ok(S3.relNoise > 0 && S3.relNoiseCell > 0 && S3.relNoise < S3.relNoiseCell * 0.8, `잡음: 줄·열 ${(S3.relNoise * 100).toFixed(2)}% < 칸 ${(S3.relNoiseCell * 100).toFixed(2)}%`);
 }
-// 화질(2026-10-30) = 정사각 칸 크기: 저 2.0 · 중 1.0 · 고 0.5 mm. 짧은 면은 길이 10칸 이상, 좁은 면은 폭 4칸 이상이 되게 더 잘게
+// 화질(2026-10-30) = 정사각 칸 크기: 저 1.5 · 중 1.0 · 고 0.5 mm. 짧은 면은 길이 10칸 이상, 좁은 면은 폭 4칸 이상이 되게 더 잘게
 {
   const c = (q) => autoCells(440, 16, q), lo = c('low'), mi = c('mid'), hi = c('high');
-  ok(lo.cellS === 2 && lo.cellW === 2 && mi.cellS === 1 && mi.cellW === 1 && hi.cellS === 0.5 && hi.cellW === 0.5, `화질 칸: 저 ${lo.cellS}×${lo.cellW} · 중 ${mi.cellS}×${mi.cellW} · 고 ${hi.cellS}×${hi.cellW} mm`);
+  ok(lo.cellS === 1.5 && lo.cellW === 1.5 && mi.cellS === 1 && mi.cellW === 1 && hi.cellS === 0.5 && hi.cellW === 0.5, `화질 칸: 저 ${lo.cellS}×${lo.cellW} · 중 ${mi.cellS}×${mi.cellW} · 고 ${hi.cellS}×${hi.cellW} mm`);
   const sh = autoCells(10, 5.5, 'low');
-  ok(sh.cellS === 1 && sh.cellW === 1.375 && autoCells(40, 16, undefined).cellS === 2, `짧은·좁은 면: ${sh.cellS}×${sh.cellW} mm · 화질 없음 = 저화질(기존 저장 설계)`);
+  ok(sh.cellS === 1 && sh.cellW === 1.375 && autoCells(40, 16, undefined).cellS === 1.5, `짧은·좁은 면: ${sh.cellS}×${sh.cellW} mm · 화질 없음 = 저화질(기존 저장 설계)`);
   const GA = tallyGeometry(line, { ...obs, cellS: null, cellW: null, quality: 'mid' });
   ok(GA.ds === 1 && GA.cell === 1, `자동 격자(중): 칸 ${GA.ds}×${GA.cell} mm`);
 }
