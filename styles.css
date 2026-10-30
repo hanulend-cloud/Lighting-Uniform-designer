@@ -549,7 +549,7 @@ main:has(#m3-start:not([hidden])) { grid-template-rows: minmax(0, 1fr); }
 .m3-big-ct { display: flex; align-items: center; gap: 8px; font-size: 13px; margin-bottom: 4px; }
 .m3-big-ct button, .m3-big-hd button { border: 1px solid #d3d8e0; background: #fff; border-radius: 6px; padding: 3px 9px; cursor: pointer; font: inherit; font-size: 12px; }
 /* 한 그림만: 나머지 칸·막대 숨김(보이는 칸이 남은 자리를 채움) */
-.m3-big-grid[data-focus="map"] .m3-big-c:not([data-k="map"]), .m3-big-grid[data-focus="prof"] .m3-big-c:not([data-k="prof"]), .m3-big-grid[data-focus="wprof"] .m3-big-c:not([data-k="wprof"]), .m3-big-grid[data-focus] .m3-split, .m3-big-grid[data-focus="map"] > .m3-big-row { display: none; }
+.m3-big-grid[data-focus="map"] .m3-big-c:not([data-k="map"]), .m3-big-grid[data-focus="prof"] .m3-big-c:not([data-k="prof"]), .m3-big-grid[data-focus="wprof"] .m3-big-c:not([data-k="wprof"]), .m3-big-grid[data-focus] .m3-psplit, .m3-big-grid[data-focus="map"] > .m3-big-row { display: none; }
 
 
 /* 부품 속성 탭(기본 | 상세) */
@@ -814,19 +814,23 @@ body.booting::after { content: "불러오는 중…"; position: fixed; left: 50%
 .m3-simcard { background: var(--m3-simbg); }
 .m3-simcard .od-simh { font-weight: 700; }
 
-/* 칸 크기 조절 막대(pane-split.js) — 위아래(col) = 가로 막대, 좌우(row) = 세로 막대 */
-.m3-split { flex: none; position: relative; z-index: 2; touch-action: none; }
-.m3-split.col { height: 8px; margin: -1px 0; cursor: row-resize; }
-.m3-split.row { width: 8px; margin: 0 1px; cursor: col-resize; }
-.m3-split::after { content: ""; position: absolute; border-radius: 2px; background: transparent; transition: background .15s; }
-.m3-split.col::after { left: 30%; right: 30%; top: 3px; height: 2px; background: var(--m3-line, #d3d8e0); }
-.m3-split.row::after { top: 30%; bottom: 30%; left: 3px; width: 2px; background: #d3d8e0; }
-.m3-split:hover::after, .m3-split.on::after { background: var(--m3-acc, #1f6fd1); }
-.m3-res > .m3-split.col { margin: -5px 0; }   /* 결과 칸 사이 간격(gap) 안에 */
-@media (max-width: 1024px) { .m3-res > .m3-split { display: none; } }
+/* 칸 크기 조절 막대(pane-split.js) — 칸 사이 경계선 자체를 끌어 크기 조절: 폭 전체에 걸친 선 + 가운데 손잡이(⋯), 마우스를 올리면 파랗게.
+   위아래(col) = 가로 경계선(row-resize), 좌우(row) = 세로 경계선(col-resize). 잡는 범위 12px */
+.m3-psplit { flex: none; align-self: stretch; position: relative; z-index: 3; touch-action: none; }
+.m3-psplit.col { height: 12px; cursor: row-resize; }
+.m3-psplit.row { width: 12px; cursor: col-resize; }
+.m3-psplit::after { content: ""; position: absolute; background: var(--m3-line, #cdd3dd); transition: background .15s; }
+.m3-psplit.col::after { left: 0; right: 0; top: 5px; height: 2px; }
+.m3-psplit.row::after { top: 0; bottom: 0; left: 5px; width: 2px; }
+.m3-psplit::before { content: ""; position: absolute; z-index: 1; border-radius: 3px; background: var(--m3-mut, #8a96a8); opacity: .75; }
+.m3-psplit.col::before { left: calc(50% - 18px); width: 36px; top: 3px; height: 6px; }
+.m3-psplit.row::before { top: calc(50% - 18px); height: 36px; left: 3px; width: 6px; }
+.m3-psplit:hover::after, .m3-psplit.on::after, .m3-psplit:hover::before, .m3-psplit.on::before { background: var(--m3-acc, #1f6fd1); opacity: 1; }
+.m3-res > .m3-psplit.col { margin: -9px 0; }   /* 결과 칸 사이 틈(6px) 위에 겹쳐 — 칸과 칸의 경계선 자체가 손잡이 */
+@media (max-width: 1024px) { .m3-res > .m3-psplit { display: none; } }
 /* 기구 최적화 창: 설계 인자 ↕ 실행·결과 — 각 칸 안에서 스크롤 */
 .m3-mon-body > #m3-factor, .m3-mon-body > #m3-dock { overflow: auto; }
 .m3-mon .m3-faccard { min-height: 0; }
-.m3-mon.min .m3-mon-body > .m3-split { display: none; }
+.m3-mon.min .m3-mon-body > .m3-psplit { display: none; }
 /* 왼쪽 트리 제목 띠(결과 칸과 같은 모양) */
 .m3-tree > .m3-h { margin: -10px -10px 8px; padding: 7px 10px; background: var(--m3-head, #f3f5f9); border-bottom: 1px solid var(--m3-line); color: var(--m3-headtx, #3b4658); font-size: 12px; font-weight: 700; }

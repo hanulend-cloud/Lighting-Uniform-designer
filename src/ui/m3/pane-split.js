@@ -12,7 +12,7 @@ export function mountSplit(items, { key, dir = 'col', min = 60, onChange = () =>
   const apply = () => els.forEach((e, i) => { e.style.flex = `${w[i]} 1 0`; if (dir === 'col') e.style.minHeight = '0'; else e.style.minWidth = '0'; });
   els.slice(0, -1).forEach((e, i) => {
     const h = document.createElement('div');
-    h.className = `m3-split ${dir}`; h.setAttribute('role', 'separator'); h.setAttribute('aria-orientation', dir === 'col' ? 'horizontal' : 'vertical');
+    h.className = `m3-psplit ${dir}`; h.setAttribute('role', 'separator'); h.setAttribute('aria-orientation', dir === 'col' ? 'horizontal' : 'vertical');
     h.title = `${dir === 'col' ? '위아래' : '좌우'}로 끌어 크기 조절 · 두 번 클릭 = 같은 크기`;
     h.addEventListener('pointerdown', (ev) => {
       const a0 = size(els[i]), b0 = size(els[i + 1]), s = w[i] + w[i + 1], p0 = dir === 'col' ? ev.clientY : ev.clientX;
