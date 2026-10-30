@@ -12,6 +12,13 @@ export function rotateAbout(p, c, k, a) {
   return [0, 1, 2].map((i) => c[i] + v[i] * cs + x[i] * sn + k[i] * kd * (1 - cs));
 }
 const rotDir = (d, k, a) => rotateAbout(d, [0, 0, 0], k, a);
+// 점 P 에서 방향 d 로 기준 발광점 em 의 PCB 면(법선 = em.axis)까지 옮긴 점 — d 가 면과 거의 나란하면(|d·n| < 0.2) 그대로
+function onPcb(P, d, em) {
+  const al = Math.hypot(...em.axis) || 1, n = em.axis.map((v) => v / al), dn = dot(d, n);
+  if (Math.abs(dn) < 0.2) return P;
+  const t = dot([em.pos[0] - P[0], em.pos[1] - P[1], em.pos[2] - P[2]], n) / dn;
+  return [P[0] + t * d[0], P[1] + t * d[1], P[2] + t * d[2]];
+}
 const angle = (line, s) => { const [tx, ty] = line.tangentAt(s); return Math.atan2(ty, tx); };
 
 // 가상 배치 기준 발광점 — 확인 필요·제외가 아닌 첫 발광점(엔진·UI 공통 규칙). 없으면 null
@@ -35,7 +42,9 @@ export function virtualLayout({ parts, step, line, count, pitch = 0, positions =
   const P0 = positions ? positions.map((q) => (typeof q === 'number' ? { s: q, w: 0 } : q)) : count === 0 ? [] : ledSPositions(line, count, pitch).flatMap((s) => ws.map((w) => ({ s, w })));
   for (const [k0, q] of P0.entries()) {
     const it = adjust?.[k0], s = it ? wrapS(line, q.s + it.ds) : q.s, dw = q.w;
-    const [x, y] = line.fromSW(s, w0 + dw), p = line.to3D(x, y, h0 + (q.dz ?? 0) + (it ? it.dz : 0)),da = angle(line, s) - a0, e = { s, pos: p, axis: rotDir(em.axis, F.d, da), xAxis: em.xAxis ? rotDir(em.xAxis, F.d, da) : em.xAxis };
+    // 관측 라인 점에서 관측 방향 d 로 기준 LED 의 PCB 면(LED 축 ⟂, 기준 발광점을 지남)까지 → 높이 조정(dz)은 d 방향. 관측면과 PCB 가 평행이면 전과 같음.
+    // 기울어 있으면(꺾인 확산판) 전에는 관측 좌표 높이 h0 를 그대로 써서 LED 가 PCB 면에서 위아래로 벗어났음(2열 한쪽이 PCB 속 — 간섭, 2026-10-30)
+    const [x, y] = line.fromSW(s, w0 + dw), pp = onPcb(line.to3D(x, y, h0), F.d, em), dz = (q.dz ?? 0) + (it ? it.dz : 0), p = [0, 1, 2].map((i) => pp[i] + dz * F.d[i]), da = angle(line, s) - a0, e = { s, pos: p, axis: rotDir(em.axis, F.d, da), xAxis: em.xAxis ? rotDir(em.xAxis, F.d, da) : em.xAxis };
     if (!bodies) { out.emitters.push({ part: null, ...e }); continue; }
     const P = body.positions, Q = new Float32Array(P.length);
     for (let i = 0; i < P.length; i += 3) {

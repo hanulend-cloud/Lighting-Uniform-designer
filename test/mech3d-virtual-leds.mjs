@@ -73,4 +73,19 @@ ok(stepRefEmitter({ excluded: [1], emitters: [{ part: 0, needsCheck: true }, { p
   ok(one.emitters.length === 3 && one.emitters.every((e) => Math.abs(e.pos[1] - 4.5) < 1e-6), '1열이면 열 간격 무시');
   const L = stepLayoutOf({ parts: P, step: { ...stp, virtual: { count: 3, pitch: 20, rows: 2, rowGap: 1 } }, line: strip });
   ok(L.emitters.length === 6 && L.leds.length === 6 && L.virtual.rows === 2, 'stepLayoutOf: virtual.rows·rowGap 전달'); }
+{ // 관측 좌표가 PCB 와 기울어 있을 때(꺾인 확산판 — 14.5°) 2열의 폭 오프셋은 PCB 면(LED 축 ⟂) 안으로: 두 열 높이 같음 · 간격 = 2δ
+  // (전에는 관측 u 축을 따라가 한 열은 PCB 속 0.6 mm, 다른 열은 0.6 mm 위 — 간섭 13건, 2026-10-30)
+  const a = 0.2531, tilt = recognizeLine([topFaceMesh(rectTris(0, 0, 100, 6), 12)], faces, [-Math.sin(a), 0, Math.cos(a)]);
+  const v = virtualLayout({ parts, step, line: tilt, count: 2, pitch: 40, rows: 2, rowGap: 2 });
+  const z = v.emitters.map((e) => e.pos[2]), same = v.emitters.filter((e) => Math.abs(e.s - v.emitters[0].s) < 1e-9);
+  const gap = Math.hypot(...same[0].pos.map((c, k) => c - same[1].pos[k]));
+  // 관측 라인 점에서 관측 방향 d 로 PCB 면까지 — 길이 방향이 기울면 피치는 40/cos, 폭(열)은 그대로 2δ(여기서는 폭 축이 수평)
+  const pitch = Math.abs(v.emitters[2].pos[0] - v.emitters[0].pos[0]);
+  ok(z.every((x) => Math.abs(x - 2.5) < 1e-6) && same.length === 2 && Math.abs(gap - 4) < 1e-6 && Math.abs(pitch - 40 / Math.cos(a)) < 1e-6, `기울어진 관측 좌표: 높이 ${z.map((x) => x.toFixed(3))} · 열 간격 ${gap.toFixed(3)} · 피치 ${pitch.toFixed(3)}`);
+  const tw = recognizeLine([topFaceMesh(rectTris(0, 0, 100, 6), 12)], faces, [0, -Math.sin(a), Math.cos(a)]), w2 = virtualLayout({ parts, step, line: tw, count: 2, pitch: 40, rows: 2, rowGap: 2 });
+  const sw = w2.emitters.filter((e) => Math.abs(e.s - w2.emitters[0].s) < 1e-9), gw = Math.hypot(...sw[0].pos.map((c, k) => c - sw[1].pos[k]));
+  ok(w2.emitters.every((e) => Math.abs(e.pos[2] - 2.5) < 1e-6) && Math.abs(gw - 4 / Math.cos(a)) < 1e-6, `폭 방향이 기운 경우(실제 도면): 두 열 높이 같음 · 열 간격 ${gw.toFixed(3)} = 2δ/cos`);
+  const v0 = virtualLayout({ parts, step, line: strip, count: 2, pitch: 40, rows: 2, rowGap: 2 }), g0 = Math.hypot(...v0.emitters[0].pos.map((c, k) => c - v0.emitters[1].pos[k]));
+  ok(v0.emitters.every((e) => Math.abs(e.pos[2] - 2.5) < 1e-6) && Math.abs(g0 - 4) < 1e-6, '평행(기울지 않음) = 기존과 같음');
+}
 done();
