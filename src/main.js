@@ -370,7 +370,7 @@ async function loadSampleProject(ask = true) {
     try { if (P.theme && !localStorage.getItem('uds.m3.theme')) localStorage.setItem('uds.m3.theme', P.theme); } catch {}
     const file = async (url) => new File([await (await get(url)).text()], url.split('/').pop());
     const mech = await file(P.mech), led = await file(P.led);
-    spec.mech3dPending = P.mech3d; spec.mech3d = null; spec.mode = 'mech3d';
+    spec.mech3dPending = migrateMech3d(P.mech3d) ?? P.mech3d; spec.mech3d = null; spec.mode = 'mech3d';   // 예제도 저장 프로젝트처럼 옛 값 갱신(오차 목표 2% → 1% 등)
     importMech3d(mech, async () => {
       for (let i = 0; i < 200 && !m3app.isMounted(); i++) await new Promise((r) => setTimeout(r, 100));
       m3app.importLed(led);

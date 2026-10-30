@@ -89,6 +89,16 @@ function drawPlot(cv, curves, tg, { x0, x1, xl, leds = [] }, dpr = 1, hover = nu
   // 곡선(칸 가운데)
   for (const c of curves) {
     const n = c.ys.length, X = (i) => pl + ((i + 0.5) / n) * PW;
+    if (c.band > 0) {   // 계산 잡음 범위(±2σ, 옅은 띠) — 원자료가 이 안에서 흔들리면 잡음, 띠 밖이면 실제 밝기 차(2026-10-30)
+      const k = 2 * c.band, seg = [];
+      c.ys.forEach((v, i) => { if (Number.isFinite(v)) seg.push(i); });
+      if (seg.length > 1) {
+        x.fillStyle = c.color; x.globalAlpha = 0.13; x.beginPath();
+        seg.forEach((i, m) => { const px = X(i), py = Y(Math.min(c.ys[i] * (1 + k), 1.2)); if (m) x.lineTo(px, py); else x.moveTo(px, py); });
+        for (let m = seg.length - 1; m >= 0; m--) { const i = seg[m]; x.lineTo(X(i), Y(c.ys[i] * (1 - k))); }
+        x.closePath(); x.fill(); x.globalAlpha = 1;
+      }
+    }
     if (c.raw) {   // 원자료(흐린 가는 선) 위에 평활 곡선
       x.globalAlpha = 0.35; x.strokeStyle = c.color; x.lineWidth = dpr; x.setLineDash([]);
       x.beginPath(); let pn = false;
@@ -479,8 +489,8 @@ export function createResultsPanel(el, { onQuality = null, fileName = () => 'uds
     // 평활 폭: 길이 = 잡음·LED 피치(중앙 간격)에 맞춤, 폭 = 잡음·관측 폭/8 에 맞춤
     const ls = [...new Set(leds.map((p) => +(+p.s).toFixed(2)))].sort((a, b) => a - b), gp = ls.slice(1).map((v, i) => v - ls[i]).sort((a, b) => a - b), pitch = gp.length ? gp[Math.floor(gp.length / 2)] : null;
     const sigL = smoothSigma({ relNoise: st.relNoise, ds: G.ds, pitch }), sigW = smoothSigma({ relNoise: st.relNoise, ds: G.cell, pitch: G.nw * G.cell });
-    VIEW.prof = plotView([{ ys: Array.from(st.profile, (v) => v / pm), color: '#1f6fd1', name: '폭 평균' }, ...(pp ? [{ ys: Array.from(pp.along), color: PIN_COLOR, name: `지정 점 w=${pin.w.toFixed(1)}` }] : [])], observe.targetLen, { x0: 0, x1: G.L, xl: 's (mm)', leds: leds.map((p) => p.s) }, sigL);
-    q('psub').textContent = pin ? `폭 평균 + 지정 점(주황, ${ring} 방향) · 같은 점 다시 클릭 = 해제` : '폭 평균 · 2D 클릭 = 그 점 기준 곡선 추가';
+    VIEW.prof = plotView([{ ys: Array.from(st.profile, (v) => v / pm), color: '#1f6fd1', name: '폭 평균', band: st.relNoise ?? 0 }, ...(pp ? [{ ys: Array.from(pp.along), color: PIN_COLOR, name: `지정 점 w=${pin.w.toFixed(1)}` }] : [])], observe.targetLen, { x0: 0, x1: G.L, xl: 's (mm)', leds: leds.map((p) => p.s) }, sigL);
+    q('psub').textContent = `${pin ? `폭 평균 + 지정 점(주황, ${ring} 방향) · 같은 점 다시 클릭 = 해제` : '폭 평균 · 2D 클릭 = 그 점 기준 곡선 추가'} · 옅은 띠 = 계산 잡음 범위`;
     paint('map', q('map')); paint('prof', q('prof'));
     gauge('ul', st.Ulen, observe.targetLen);
     if (pp && (st.Uwid == null || !st.win)) {   // 폭 판정이 없어도 지정 점의 폭(원형 = 반경) 방향 곡선은 보여 줌
@@ -493,7 +503,7 @@ export function createResultsPanel(el, { onQuality = null, fileName = () => 'uds
     } else {
       // 판정 = 최저 창(실선), 비교 = 길이 전체 평균(점선) — 각자 최대 = 100%
       const wp = windowProfile(G, snap.sum, st.win[0], st.win[1]), wm = finiteMax(wp), wa = windowProfile(G, snap.sum, 0, G.ns), wam = finiteMax(wa);
-      VIEW.wprof = plotView([{ ys: Array.from(wp, (v) => v / wm), color: '#1f6fd1', name: `최저 창 s=${st.sWorst.toFixed(0)}` }, { ys: Array.from(wa, (v) => v / wam), color: '#3fae7a', dash: [4, 3], name: '길이 전체 평균' }, ...(pp ? [{ ys: Array.from(pp.across), color: PIN_COLOR, name: `지정 점 s=${pin.s.toFixed(1)}` }] : [])],
+      VIEW.wprof = plotView([{ ys: Array.from(wp, (v) => v / wm), color: '#1f6fd1', name: `최저 창 s=${st.sWorst.toFixed(0)}`, band: st.relNoise ?? 0 }, { ys: Array.from(wa, (v) => v / wam), color: '#3fae7a', dash: [4, 3], name: '길이 전체 평균' }, ...(pp ? [{ ys: Array.from(pp.across), color: PIN_COLOR, name: `지정 점 s=${pin.s.toFixed(1)}` }] : [])],
         observe.targetWid, { x0: G.w0, x1: G.w0 + G.nw * G.cell, xl: 'w (mm)', leds: [...new Set(leds.map((p) => +p.w.toFixed(2)))] }, sigW);
       paint('wprof', q('wprof'));
       gauge('uw', st.Uwid, observe.targetWid);
