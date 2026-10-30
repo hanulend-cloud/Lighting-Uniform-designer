@@ -452,7 +452,7 @@ function adSel(k, v) {
   const st = adState(); if (st.running) return;
   if (k === 'position') { const av = stageAvailability(A.store.mspec, adInfo()); st.sel.leds = !!v && !!av.leds?.ok; st.sel.height = !!v && !!av.height?.ok; }   // ② 기구 위치 = LED 배치 + 높이
   else st.sel[k] = k === 'milkyMax' ? clampCap(v) : v;
-  st.sel.housing = false; st.sel.boost = false;   // 반사율(④)·보완 자동 추가는 화면에서 뺌 — 부품 속성에서 직접
+  st.sel.boost = false;   // 보완 자동 추가는 화면에서 뺌(④ 케이스 면은 2026-10-30 다시 켬 — 설계 인자 ④ 줄)
   renderAuto(); renderMarkers();   // ③ 대상 부품 강조 갱신
 }
 // 설계 인자 현황판의 '지금 설계' 값 — Milky(① 대상 부품) · LED 개수 · 형상 변경 여부 · 지금 균일도
@@ -461,7 +461,8 @@ function factorNow() {
   let n = null; try { n = ledsNow(M, S.line).list.length; } catch { n = null; }
   const stt = A.prog?.snapshot()?.stats, on = (k) => !!st.sel?.[k];
   return { milky: mp != null ? +M.parts[mp].material.milky : null, milkyCap: Number.isFinite(sel.milkyMax) ? sel.milkyMax : null, leds: n != null ? `LED ${n}개 · 높이 그대로` : '–', shape: M.parts.some((p) => p.shapeMod) ? '형상 변경됨' : '원래 형상',
-    on: { milky: on('milky'), position: on('leds') || on('height') || on('position'), shape: on('shape') }, Ulen: stt?.Ulen, Uwid: stt?.Uwid, tgLen: M.observe.targetLen, tgWid: M.observe.targetWid };
+    housing: (() => { const hp = sel.housingPart; if (!(hp >= 0) || !M.parts[hp]) return '–'; const f = M.parts[hp].finish; return `${M.parts[hp].name} · ${f ? finishText({ ...f, ...(M.parts[hp].coating ? { coating: M.parts[hp].coating } : {}) }, reflCat()) : '–'}`; })(),
+    on: { milky: on('milky'), position: on('leds') || on('height') || on('position'), shape: on('shape'), housing: on('housing') }, Ulen: stt?.Ulen, Uwid: stt?.Uwid, tgLen: M.observe.targetLen, tgWid: M.observe.targetWid };
 }
 function renderAuto() {
   const el = $('#m3-auto'), st = adState();
@@ -676,7 +677,7 @@ const BOOST_LABEL = { housing: '④ 케이스 면', height: '⑤ LED 높이', le
 function dashReset(only = null) {   // only = 이번에 돌릴 단계(이어서 최적화) — 없으면 체크 상태
   const st = adState(), avail = stageAvailability(A.store.mspec, adInfo()), O = A.store.mspec.observe;
   const on = (k) => (only ? !!only[k] : !!st.sel[k] && !!avail[k]?.ok);
-  A.optDash?.reset({ stages: { milky: on('milky'), position: on('leds') || on('height'), shape: on('shape') }, tgLen: O.targetLen, tgWid: O.targetWid });
+  A.optDash?.reset({ stages: { milky: on('milky'), position: on('leds') || on('height'), shape: on('shape'), housing: on('housing') }, tgLen: O.targetLen, tgWid: O.targetWid });
 }
 // 검증 후보 이름(⑥) — 바뀐 항목만 짧게
 function verifyLabel(d) {
@@ -827,7 +828,10 @@ async function adRun(opt = {}) {
   try {
     res = await runAutoDesign({
       stages, obs, G, line, current: cur, milkyMax: st.sel.milkyMax ?? null, housingProbe, finishText: (f) => finishText(f, reflCat()), nMax: Math.max(1, Math.min(60, Math.floor(line.length / 2))), pitchRange: null, stepMode: stp,
-      shapePart: sp, shapeRanges, shapeStart: stages.shape && M0.parts[sp]?.shapeMod ? (({ dt, h, R, e, c, kL, kW }) => ({ dt, h, R, e, c, kL, kW }))(M0.parts[sp].shapeMod) : null,   // 이미 적용한 형상에서 이어서 ...(stages.shape ? (({ screen, schedule }) => ({ screen, schedule }))(shapeBudget(currentVerified?.eff ?? snap0.photometry?.eff)) : {}), currentVerified,   // ③ 광자 = 광 효율 반비례 heightRange: hInfo?.range ?? null, housingPart: hp, finishCands, ledsAtCurrentMilky: !!opt.added?.length,
+      shapePart: sp, shapeRanges,
+      shapeStart: stages.shape && M0.parts[sp]?.shapeMod ? (({ dt, h, R, e, c, kL, kW }) => ({ dt, h, R, e, c, kL, kW }))(M0.parts[sp].shapeMod) : null,   // 이미 적용한 형상에서 이어서
+      ...(stages.shape ? (({ screen, schedule }) => ({ screen, schedule }))(shapeBudget(currentVerified?.eff ?? snap0.photometry?.eff)) : {}),   // ③ 광자 = 광 효율 반비례
+      currentVerified, heightRange: hInfo?.range ?? null, housingPart: hp, finishCands, ledsAtCurrentMilky: !!opt.added?.length,
     }, io);
   } catch (e) { if (A === a && !R.stopped) setStatus(`기구 최적화 실패: ${e.message}`); }
   if (A !== a) return;   // 그사이 이탈
@@ -895,7 +899,7 @@ function adApply() {
 async function adContinue() {
   const st = adState(), r = st.result; if (!r || st.running) return;
   const done = r.stages ?? {}, s = st.sel, av = stageAvailability(A.store.mspec, adInfo());
-  const next = { milky: !!(s.milky && !done.milky && av.milky.ok), leds: !!(s.leds && !done.leds && av.leds.ok), height: !!(s.height && !done.height && av.height.ok), housing: false,
+  const next = { milky: !!(s.milky && !done.milky && av.milky.ok), leds: !!(s.leds && !done.leds && av.leds.ok), height: !!(s.height && !done.height && av.height.ok), housing: !!(s.housing && !done.housing && av.housing.ok && av.housing.parts.includes(s.housingPart)),
     shape: !!(s.shape && !done.shape && av.shape.ok && av.shape.parts.includes(s.shapePart)) };
   if (!Object.values(next).some(Boolean)) { setStatus('이어서 최적화할 항목이 없음 — 설계 인자에서 위치·Milky 등을 더 체크하세요'); renderAuto(); return; }
   if (!r.unchanged) adApply();   // 현재안 유지면 적용할 것 없이 그대로 이어서

@@ -231,7 +231,7 @@ ok(clampCap(12) === 9.9 && clampCap(0.1) === 0.5 && clampCap(3) === 3 && clampCa
   const h1 = card({ avail: a, sel: { housing: true, housingPart: 1, housingSpecial: true }, running: null, names: ['LGP', '케이스'], housingMat: { name: '백색 PC(일반 착색)', max: 0.9 } });
   const h0 = card({ avail: a, sel: { housing: true, housingPart: 1 }, running: null, names: ['LGP', '케이스'], housingMat: null });
   ok(h1.includes('백색 PC(일반 착색) · 최대 90%') && /data-ad="housingSpecial" checked/.test(h1) && h1.includes('특수 표면처리 허용'), '카드 ④: 소재·상한 · 특수 허용 체크');
-  ok(h0.includes('소재 미지정') && /data-ad="housingSpecial"(?! checked)/.test(h0) && !card({ avail: a, sel: { housing: false }, running: null }).includes('housingSpecial'), '카드 ④: 소재 미지정 안내 · ④ 끄면 없음');
+  ok(h0.includes('소재 미지정') && /data-ad="housingSpecial"(?! checked)/.test(h0) && card({ avail: a, sel: { housing: false, housingPart: 1 }, running: null, names: ['LGP', '케이스'] }).includes('housingSpecial'), '카드 ④: 소재 미지정 안내 · 체크 전에도 대상·특수 설정(③ 형상과 같게)');
   { const { materialGroups } = await import('../src/engine/mech3d/material-pick.js');
     const G = materialGroups({ milky: [{ id: 'm1', name: 'DQ5122', n: 1.586 }], clear: [{ id: 'u:A', name: 'A', n: 1.58, T: 0.9, tRef: 2 }], refl: C });
     const r = materialPickHtml({ material: { kind: 'opaque' }, reflMaterial: 'pc-white' }, G), r0 = materialPickHtml({ material: { kind: 'milky', dbId: 'm1' } }, G);
@@ -307,7 +307,7 @@ ok(clampCap(12) === 9.9 && clampCap(0.1) === 0.5 && clampCap(3) === 3 && clampCa
   ok(a.y0 === 70 && a.y1 === 102 && b.y0 === 20 && c.y0 === 90, `plotRange: ${[a.y0, b.y0, c.y0]}`); }
 { // 최적화·시뮬레이션 대시보드(순수)
   const { tileOf, evalSparkSvg, simPct, STAGES } = await import('../src/ui/m3/opt-dash.js');
-  ok(STAGES.length === 3 && tileOf('milky') === 'milky' && tileOf('leds') === 'position' && tileOf('height') === 'position' && tileOf('shape') === 'shape' && tileOf('verify') === null && tileOf('housing') === null, `3 타일(Milky · 기구 위치 · 기구 형상) · 단계 → 타일`);
+  ok(STAGES.length === 4 && tileOf('milky') === 'milky' && tileOf('leds') === 'position' && tileOf('height') === 'position' && tileOf('shape') === 'shape' && tileOf('verify') === null && tileOf('housing') === 'housing', `4 타일(Milky · 기구 위치 · 기구 형상 · 케이스 면) · 단계 → 타일`);
   const sv = evalSparkSvg([{ label: 'a', Ulen: 0.7, Uwid: 0.6 }, { label: 'b', ok: false, why: '간섭' }, { label: 'c', Ulen: 0.82, Uwid: 0.81 }], 0.8, 0.8, 2);
   ok(sv.includes('od-l1') && sv.includes('od-d1') && sv.includes('od-best') && sv.includes('od-tg') && sv.includes('×'), '후보 그래프: 점·최고·목표·탈락(×)');
   ok(evalSparkSvg([], 0.8, 0.8).includes('후보 결과 없음'), '후보 없음');
@@ -428,3 +428,7 @@ done();
   const v1 = toggleVisibility('group:g1', false, 6, [1], false, [1, 2]), v2 = toggleVisibility('group:g1', false, 6, [1, 2, 3], false, [1, 2]);
   const okV = v1.hidden.join() === '1,2' && v2.hidden.join() === '3';
   console.log(okT && okG && okV ? 'PASS 부품 그룹: 트리(펼침·접힘·자동 광원 묶음) · 만들기·풀기 · 그룹 보기 전환' : (process.exitCode = 1, `FAIL 부품 그룹 ${okT} ${okG} ${okV} ${ids({})}`)); }
+{ const { stageAvailability } = await import('../src/ui/m3/autodesign-panel.js');
+  const P = (role, untrace) => ({ ...setPartMaterial(defaultPart(0, 'x', 1), 'opaque'), ...(role ? { role } : {}), ...(untrace ? { untrace } : {}) });
+  const a = stageAvailability({ parts: [P(), P('light'), P(null, true), P()], light: { kind: 'manual' }, observe: { faces: [] } }, { non25: [0, 0, 0, 0] });
+  console.log(a.housing.parts.join() === '0,3' ? 'PASS ④ 대상 부품: 광원으로 옮긴 LED·추적 제외 부품 빼고' : (process.exitCode = 1, `FAIL ④ 대상 ${a.housing.parts}`)); }
