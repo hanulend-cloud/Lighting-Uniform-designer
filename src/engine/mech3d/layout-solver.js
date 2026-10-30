@@ -9,6 +9,8 @@ export const SNAP = 0.25;   // 라인 가운데 기준 격자(대칭 쌍 간격 
 const KIND_ORDER = { uniform: 0, endCompress: 1, free: 2 };
 const RATIOS = [0.15, 0.3, 0.45, 0.6], HOPELESS = -0.12, FREE_STEPS = [2, 1, 0.5], FREE_ROUNDS = 6;
 
+// 폭 위치 반올림(0.1 µm) — 후보 격자 w 와 정확히 같은 값으로(격자 쪽도 같은 함수로 만듦)
+export const rw4 = (x) => Math.round(x * 1e4) / 1e4;
 const snapS = (s, L) => L / 2 + Math.round((s - L / 2) / SNAP) * SNAP;
 const better = (a, b) => !b || a.margin > b.margin + 1e-9 || (Math.abs(a.margin - b.margin) <= 1e-9 && a.eff > b.eff);
 // m = 라인 양 끝 여유(LED 몸체 반폭 + 틈 — 끝벽 간섭 방지)
@@ -30,6 +32,10 @@ export function compressedPositions(L, n, e, a) {
 const gapsText = (ss) => { if (ss.length < 2) return ''; const g = ss.slice(1).map((s, i) => s - ss[i]); return [g[Math.floor((g.length - 1) / 2)], g[0]].map((x) => x.toFixed(1)); };
 // 결과 한 줄 문구(비교표·이유)
 export function layoutText(r) {
+  const lat = r.wCenter ? ` · 폭 위치 ${r.wCenter > 0 ? '+' : '−'}${Math.abs(r.wCenter).toFixed(1)} mm` : '';   // LED 전체 폭 방향 이동
+  return layoutText0(r) + lat;
+}
+function layoutText0(r) {
   const head = r.rows === 2 ? `2열 × ${r.n}개` : `${r.n}개`, ss = [...new Set(r.positions.map((q) => q.s))].sort((a, b) => a - b);
   if (r.kind === 'uniform') return `${head} 같은 피치 ${ss.length > 1 ? (ss[1] - ss[0]).toFixed(1) : '–'} mm${r.rows === 2 ? ` (열 간격 ±${r.rowGap.toFixed(1)} mm)` : ''}`;
   const [c, e] = gapsText(ss);
@@ -38,19 +44,20 @@ export function layoutText(r) {
 
 // 반환 { feasible, n, rows, rowGap, total, positions:[{s,w}], kind, pitch, endMargin, ratio, stats, eff, margin, reason, alts:[…], evals }
 // safety = 통과 판정 여유(기저 추정은 광자 잡음이 있어 검증에서 0 근처 통과가 뒤집힘 — 이만큼 넘는 배치만 통과로 봄)
-export function solveLayout({ G, obs, line, cand, maps, rowsOptions = [1, 2], gaps = [], nMax, emitted = 1, minGap = 2, pitchRange = null, timeBudget = 20000, now = () => Date.now(), safety = 0, sMargin = 0 }) {
+// wCenter = 열 배치 기준 폭 위치(기준 LED 대비 mm, 2026-10-30) — 1열 = wCenter, 2열 = wCenter ± g. 후보 격자에 그 w 줄들이 있어야 함
+export function solveLayout({ G, obs, line, cand, maps, rowsOptions = [1, 2], gaps = [], nMax, emitted = 1, minGap = 2, pitchRange = null, timeBudget = 20000, now = () => Date.now(), safety = 0, sMargin = 0, wCenter = 0 }) {
   const sm = line.closed ? 0 : Math.max(0, sMargin);   // 끝 여유: 첫·끝 LED 중심 ≥ sm(몸체가 끝벽에 닿지 않게)
   const L = line.length, closed = !!line.closed, nCell = G.ns * G.nw, t0 = now(), RO = [...new Set(rowsOptions)].sort((a, b) => a - b);
   const gMin = Math.max(minGap, pitchRange?.min ?? 0);
   let evals = 0;
   const ev = (ss, rows, g, kind, extra = {}) => {
-    const ws = rows === 2 ? [-g, g] : [0], pos = ss.flatMap((s) => ws.map((w) => ({ s, w })));
+    const ws = rows === 2 ? [rw4(wCenter - g), rw4(wCenter + g)] : [rw4(wCenter)], pos = ss.flatMap((s) => ws.map((w) => ({ s, w })));
     const sum = layoutMap2(cand, maps, pos, { closed, L, len: nCell }), st = tallyStats(G, [sum], obs);
     evals++;
     if (st.empty) return null;
     let tot = 0; for (let k = 0; k < nCell; k++) tot += sum[k];
     const ss2 = [...ss];
-    return { n: ss.length, rows, rowGap: rows === 2 ? g : 0, total: pos.length, positions: pos, ss: ss2, kind, stats: st, eff: tot / (emitted * pos.length), margin: margin(st, obs), pitch: 0, endMargin: null, ratio: null, ...extra };
+    return { n: ss.length, rows, rowGap: rows === 2 ? g : 0, wCenter: rw4(wCenter), total: pos.length, positions: pos, ss: ss2, kind, stats: st, eff: tot / (emitted * pos.length), margin: margin(st, obs), pitch: 0, endMargin: null, ratio: null, ...extra };
   };
   // 단계 1: 같은 피치(끝 여백 격자 1 mm → 최고점 ±1 mm 를 0.25 mm) · 닫힌 라인 = L/n 균등(시작 위치 4개)
   function stage1(n, rows, g) {

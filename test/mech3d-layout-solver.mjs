@@ -44,4 +44,12 @@ const gapsOk = (r, g) => ss(r).every((x, i, a) => i === 0 || x - a[i - 1] >= g -
 { // 끝 여유(sMargin): LED 몸체가 끝벽에 닿지 않게 첫·끝 LED 중심 ≥ 여유
   const r = solveLayout({ G, obs: { targetLen: 0.7, targetWid: 0 }, line, cand, maps: mk(0.4), rowsOptions: [1], nMax: 30, sMargin: 4 }), s = r.positions.map((q) => q.s);
   ok(r.positions.length > 0 && Math.min(...s) >= 4 - 1e-9 && Math.max(...s) <= 96 + 1e-9, `끝 여유 4 mm: ${Math.min(...s)}~${Math.max(...s)} (${r.feasible ? '통과' : '미달'})`); }
+{ // 폭 위치 이동(wCenter, 2026-10-30): 후보 격자 w = c, c±g 에서 1열 = c, 2열 = c ± g 로 배치 · 문구에 폭 위치
+  const c = -12, cg = candidateGrid(line, { sStep: 2, wOffsets: [c, c - 3, c + 3] }), maps = cg.map(({ s }) => Float32Array.from({ length: 100 }, (_, i) => Math.exp(-((i + 0.5 - s) ** 2) / 72)));
+  const r1 = solveLayout({ G, obs: { targetLen: 0.7, targetWid: 0 }, line, cand: cg, maps, rowsOptions: [1], nMax: 30, wCenter: c });
+  const r2 = solveLayout({ G, obs: { targetLen: 0.7, targetWid: 0 }, line, cand: cg, maps, rowsOptions: [2], gaps: [3], nMax: 30, wCenter: c });
+  ok(r1.feasible && r1.positions.every((q) => q.w === c) && r1.wCenter === c && layoutText(r1).includes('폭 위치 −12.0 mm')
+    && r2.feasible && r2.positions.every((q) => q.w === c - 3 || q.w === c + 3) && layoutText(r2).includes('폭 위치 −12.0 mm') && !layoutText({ ...r1, wCenter: 0 }).includes('폭 위치'),
+    `폭 위치 이동: ${layoutText(r1)} / ${layoutText(r2)}`);
+}
 done();

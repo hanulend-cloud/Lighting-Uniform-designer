@@ -40,6 +40,7 @@ import { milkyRows } from '../../engine/mech3d/milky-search.js';
 import { candidateGrid } from '../../engine/mech3d/basis.js';
 import { ledAtS, clampRowGap, rowGapOptions } from '../../engine/mech3d/placement.js';
 import { virtualEmittersAt, stepRefEmitter } from '../../engine/mech3d/virtual-leds.js';
+import { rw4 } from '../../engine/mech3d/layout-solver.js';
 import { heightsFor, deformPart, refinedFor, minThickness, shapeVarRanges, pathFromLine, swOnPath, ledEll, lineVarH, splineInput, partFrame, bumpCenters } from '../../engine/mech3d/shape-opt.js';
 import { interferenceKeys, newInterference, travelDistance } from '../../engine/mech3d/clearance.js';
 import { scaleMoveMesh, isIdentityXform } from '../../engine/mech3d/xform.js';
@@ -548,6 +549,34 @@ function designClash(d, ctx, M0, rt, line) {
     return Math.max(0, cnt(M, parts) - cnt(M0, rt.parts));
   } catch { return 0; }
 }
+// ② LED 폭 위치 이동 후보(2026-10-30) — LED STEP 만. 지금 배치(s 목록)를 폭 c(기준 LED 대비 mm)로 옮겨 봄: −16~+16 mm, 2 mm 간격.
+// 받는 조건: (1) LED 몸체가 기구 부품과 새로 겹치지 않음 (2) 몸체 양쪽 가장자리 아래가 원래와 같은 높이의 면(PCB 위 — 가장자리 밖으로 떠 있지 않음).
+// 광원으로 옮긴 원래 LED·추적 제외 부품은 검사에서 뺌. 반환 { cs:[0 포함], ss } | null
+function lateralCandidates(M0, line, rt, ctx) {
+  if (M0.light.kind !== 'step' || !line) return null;
+  let em = []; try { em = L.currentEmitters(M0, line); } catch { return null; }
+  const ref = stepRefEmitter(M0.light.step); if (!em.length || !ref) return null;
+  const ss = [...new Set(em.map((e) => rw4(line.toSW(...line.to2D(e.pos))[0])))].sort((a, b) => a - b);
+  const off = M0.parts.map((p) => p.role === 'light' || !!p.untrace), mech = rt.parts.map((p, j) => (off[j] ? null : p));
+  const { partOf } = rt.combined, mask = new Uint8Array(partOf.length); for (let t = 0; t < partOf.length; t++) if (off[partOf[t]]) mask[t] = 1;
+  const al = Math.hypot(...ref.axis) || 1, n = ref.axis.map((v) => v / al), F = line.frame, uu = F.u.map((v, k) => v - (F.u[0] * n[0] + F.u[1] * n[1] + F.u[2] * n[2]) * n[k]), ul = Math.hypot(...uu) || 1, lat = uu.map((v) => v / ul);
+  const half = ledHalfWidth(M0, line) * 0.9, down = (p) => { const h = intersectRay(rt.bvh, p[0], p[1], p[2], -n[0], -n[1], -n[2], 1e-6, Infinity, -1, -1, mask); return h ? h.t : Infinity; };
+  const t0 = down(ref.pos), cs = [0];
+  const clashN = (c) => { const { M, parts } = designScene({ ...ctx.cur, positions: ss.map((s) => ({ s, w: c })), count: ss.length, rows: 1, rowGap: 0, stepVirt: true }, ctx); const lay = L.stepLayout(M, line);
+    return { lay, n: (lay?.leds ?? []).filter((k) => lay.parts[k] && C_interf(lay.parts[k], mech)).length }; };
+  let base = 0; try { base = clashN(0).n; } catch { return null; }
+  for (let c = -16; c <= 16; c += 2) {
+    if (!c) continue;
+    try {
+      const { lay, n: nc } = clashN(c); if (nc > base) continue;
+      const es = lay.emitters ?? [], pick = [es[0], es[Math.floor(es.length / 2)], es.at(-1)].filter(Boolean);
+      const okSup = pick.every((e) => [-1, 0, 1].every((sg) => Math.abs(down(e.pos.map((v, k) => v + sg * half * lat[k])) - t0) < 0.3));
+      if (okSup) cs.push(c);
+    } catch { /* 배치 실패 = 후보 아님 */ }
+  }
+  return cs.length > 1 ? { cs, ss } : null;
+}
+const C_interf = (m, mech) => interferenceKeys(m, mech, [], []).size > 0;
 // 결과 프로파일 아래에 찍을 LED 위치(라인 좌표 s, w) — 배치·라인이 같으면 캐시
 let ledSWCache = null;
 function ledSW(M, line) {
@@ -710,6 +739,7 @@ async function adRunBoost() {
     if (r.feasible) return;
   }
 }
+const progress0 = (t) => { const st = A?.ad; if (st?.running) { st.running = { ...st.running, text: t }; renderAuto(); } };
 async function adRun(opt = {}) {
   const a = A, st = adState(), S = A.store.session;
   if (!S.line || st.running) return null;
@@ -734,6 +764,9 @@ async function adRun(opt = {}) {
   const rsrc = stp ? sv : M0.light.manual, rows = rsrc?.rows === 2 ? 2 : 1;   // 열 배치 — STEP 원래 위치 = 1열
   const cur = { milky: ctx.mp != null ? M0.parts[ctx.mp].material.milky : null, count: stp ? (sv ? sv.count : nOrig) : M0.light.manual?.count ?? 0, pitch: stp ? sv?.pitch ?? 0 : M0.light.manual?.pitch ?? 0, rows, rowGap: rows === 2 ? rsrc.rowGap ?? 0 : 0, shape: null, finish: null, dz: 0, ...(stp ? { stepOrig: !sv, stepVirt: !!sv } : {}) };
   ctx.cur = cur;
+  // ② LED 폭 위치 이동 후보(PCB 위·간섭 없음) — 위치 단계를 켰고 LED STEP 일 때만
+  let latS = null, lateral = null;
+  if (stages.leds) { progress0('LED 폭 위치 후보 찾는 중'); try { const lc = lateralCandidates(M0, line, rt, ctx); if (lc) { lateral = lc.cs; latS = lc.ss; } } catch { lateral = null; } }
   // ④ 후보 = 반사 소재 상한 안(+ 특수 허용 시 특수 처리) — 소재 미지정 = 전체 등급(spec P4 §2.3d)
   const finCands = (k) => finishCandidatesFor({ catalog: reflCat(), materialId: M0.parts[k].reflMaterial, current: M0.parts[k].finish, allowSpecial: !!st.sel.housingSpecial });
   const finishCands = stages.housing ? finCands(hp) : null;
@@ -763,7 +796,7 @@ async function adRun(opt = {}) {
     },
     // ② 후보 = (s, w) 격자(spec P4 §2.2b): s 2 mm × w ∈ {0, ±δk}, δk = 0.2/0.27/0.33·W(반폭 − 0.5 로 자름) — 후보 수 ≈ (L/2+1)·7, 후보당 ≤ 1.2만 광자(60 s 예산)
     async basis(d) {   // ①·④ 를 함께 켜면 실행기가 d.milky = 거친 최고점 · d.finish = 최고 등급으로 넘김(§2.2c)
-      const gaps = rowGapOptions(line), cand = candidateGrid(line, { sStep: 2, wOffsets: [0, ...gaps.flatMap((g) => [-g, g])] });
+      const gaps = rowGapOptions(line), wc = rw4(d.wCenter ?? 0), cand = candidateGrid(line, { sStep: 2, wOffsets: [wc, ...gaps.flatMap((g) => [rw4(wc - g), rw4(wc + g)])] });   // 폭 위치(wc) 중심
       const { M: Md, parts } = designScene({ ...d, rows: 1, rowGap: 0 }, ctx), ledHalf = ledHalfWidth(Md, line);
       let sets;
       if (Md.light.kind === 'step') {   // 기준 LED 발광점을 후보 위치로 · 장면은 LED 몸체 없이(PCB·기타만 = 가상 0개)
@@ -794,6 +827,18 @@ async function adRun(opt = {}) {
         const r = await R.trace(adJob(Md, parts, ctx), { N, batches: 4, crn: SHAPE_CRN }), stt = tallyStats(G, r.batches, obs);
         out.push({ cand: c, ok: !stt.empty, stats: stt, eff: adEff(r) });
         A.optDash?.evals('shape', [{ label: shapeText(c), Ulen: stt.Ulen, Uwid: stt.Uwid, ok: !stt.empty }]);
+      }
+      return out;
+    },
+    async evalLateral(d, cs) {   // ② LED 폭 위치 후보 — 지금 배치(s)를 폭 c 로 옮긴 설계를 같은 난수로 짧게 비교
+      const ss = latS ?? [], out = [], { N } = shapeBudget(currentVerified?.eff ?? snap0.photometry?.eff).screen;
+      for (const [i, c] of cs.entries()) {
+        if (R.stopped) break;
+        progress('leds', (0.3 * i) / cs.length, `LED 폭 위치 ${c > 0 ? '+' : ''}${c} mm (${i + 1}/${cs.length})`);
+        const dd = { ...d, positions: ss.map((s) => ({ s, w: c })), count: ss.length, rows: 1, rowGap: 0, stepVirt: true }, { M: Md, parts } = designScene(dd, ctx);
+        const r = await R.trace(adJob(Md, parts, ctx), { N, batches: 4, crn: SHAPE_CRN }), stt = tallyStats(G, r.batches, obs);
+        out.push({ cand: { wCenter: c }, ok: !stt.empty, stats: stt, eff: adEff(r) });
+        A.optDash?.evals('leds', [{ label: `폭 위치 ${c > 0 ? '+' : ''}${c} mm`, Ulen: stt.Ulen, Uwid: stt.Uwid, ok: !stt.empty }]);
       }
       return out;
     },
@@ -831,7 +876,7 @@ async function adRun(opt = {}) {
       shapePart: sp, shapeRanges,
       shapeStart: stages.shape && M0.parts[sp]?.shapeMod ? (({ dt, h, R, e, c, kL, kW }) => ({ dt, h, R, e, c, kL, kW }))(M0.parts[sp].shapeMod) : null,   // 이미 적용한 형상에서 이어서
       ...(stages.shape ? (({ screen, schedule }) => ({ screen, schedule }))(shapeBudget(currentVerified?.eff ?? snap0.photometry?.eff)) : {}),   // ③ 광자 = 광 효율 반비례
-      currentVerified, heightRange: hInfo?.range ?? null, housingPart: hp, finishCands, ledsAtCurrentMilky: !!opt.added?.length,
+      lateral, currentVerified, heightRange: hInfo?.range ?? null, housingPart: hp, finishCands, ledsAtCurrentMilky: !!opt.added?.length,
     }, io);
   } catch (e) { if (A === a && !R.stopped) setStatus(`기구 최적화 실패: ${e.message}`); }
   if (A !== a) return;   // 그사이 이탈

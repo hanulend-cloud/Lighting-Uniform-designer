@@ -291,13 +291,24 @@ export async function runAutoDesign(cfg, io) {
       d = { ...d, milky: Math.min(mCap, mRef ?? mCap) };
     }
     if (ref) steps.push({ stage: 'ledsRef', milky: mRef, finish: d.finish ?? null });
+    // LED 전체 폭 방향 이동(2026-10-30) — cfg.lateral = 이동량 후보(mm, 기준 LED 대비 · 앱이 PCB 위·간섭 없음만 넘김). 지금 배치를 그대로 옮겨 빠르게 비교 →
+    // 최고 점수(SCORE_EPS 안이면 덜 옮긴 쪽) 를 중심으로 아래 배치 탐색. 관측면이 광원에서 비켜 있으면(꺾인 확산판) 이것이 가장 큰 효과
+    if (cfg.lateral?.length > 1 && io.evalLateral) {
+      io.progress?.('leds', 0, `LED 폭 위치 후보 ${cfg.lateral.length}개 비교`);
+      const res = await io.evalLateral(d, cfg.lateral);
+      if (stop()) return { cancelled: true };
+      const okR = (res ?? []).filter((x) => x.ok), top = okR.reduce((a, x) => (!a || shapeScore(x, obs) > shapeScore(a, obs) ? x : a), null);
+      const pick = top ? okR.filter((x) => shapeScore(x, obs) >= shapeScore(top, obs) - SCORE_EPS).reduce((a, x) => (Math.abs(x.cand.wCenter) < Math.abs(a.cand.wCenter) ? x : a)).cand.wCenter : null;
+      steps.push({ stage: 'ledsLateral', pick, results: (res ?? []).map((x) => ({ wCenter: x.cand.wCenter, ok: x.ok, Ulen: x.stats?.Ulen ?? null, Uwid: x.stats?.Uwid ?? null, eff: x.eff })) });
+      if (pick != null) d = { ...d, wCenter: pick };
+    }
     io.progress?.('leds', 0, 'LED 후보 위치 추적');
     const B = await io.basis(d);
     if (stop()) return { cancelled: true };
     // 후보가 {s, w} 면 (s, w) 격자 — 열 수·열 간격까지(searchLeds2, nMax = 총수 상한), 숫자면 1열(기존)
     const two = typeof B.cand[0] === 'object', a = { G: cfg.G, obs, line: cfg.line, cand: B.cand, maps: B.maps, pitchRange: cfg.pitchRange ?? null, nMax: cfg.nMax, emitted: B.emitted };
     // (s, w) 격자 = 배치 Solver(같은 피치+끝 여백 → 끝 압축 → 자유 위치, spec 2026-10-20 led-layout-solver) · 숫자 격자 = 1열 기존 탐색
-    const r = two ? solveLayout({ ...a, gaps: B.gaps ?? [], sMargin: B.sMargin ?? 0, timeBudget: cfg.layoutBudget ?? 20000, safety: cfg.layoutSafety ?? 0.02 }) : searchLeds({ ...a, spare: 1 });
+    const r = two ? solveLayout({ ...a, wCenter: d.wCenter ?? 0, gaps: B.gaps ?? [], sMargin: B.sMargin ?? 0, timeBudget: cfg.layoutBudget ?? 20000, safety: cfg.layoutSafety ?? 0.02 }) : searchLeds({ ...a, spare: 1 });
     steps.push({ stage: 'leds', ...r });
     if (two) io.trace?.('leds', [r, ...(r.alts ?? [])].filter((e) => e.positions?.length).map((e, i) => ({ label: `${i ? '대안 ' : ''}${layoutText(e)}`, Ulen: e.stats?.Ulen, Uwid: e.stats?.Uwid, ok: true })));   // 대시보드: 배치 Solver 최선안·대안(기저 추정)
     const lay = (e) => two
