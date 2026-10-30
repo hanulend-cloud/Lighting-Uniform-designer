@@ -1017,9 +1017,12 @@ export function autoMechLight(force = false) {
   const M = A.store.mspec, rt = getMech3d();
   if (!rt || (!force && M.light.kind && M.light.kind !== 'none')) return null;
   const cand = rt.parts.map((p, i) => ({ positions: p.positions, triangles: p.triangles, faceIds: p.faceIds, faceCount: rt.raw.parts[i]?.faceCount }));
-  const g = autoLedGroup(cand, { skip: new Set(M.observe.faces.map((f) => f.part)) });
+  const why = [], g = autoLedGroup(cand, { skip: new Set(M.observe.faces.map((f) => f.part)), why });
+  const whyTxt = (rs) => rs.slice(0, 3).map((r) => `같은 부품 ${r.count}개: ${r.why}`).join(' · ');
+  A.autoWhy = g ? '' : whyTxt(why);   // 못 찾은 이유(onMechAuto 안내)
   if (!g) return null;
   mechLightFromPick({ part: g.ref, face: g.face }, true);
+  if (g.rejected?.length) A.store.update('session', (_, x) => { x.ledInfo = `${x.ledInfo ?? ''} — 더 많은 후보를 뺀 이유: ${whyTxt(g.rejected)}`; });
   return g.leds.length;
 }
 function mechLightFromPick(s, auto = false) {
@@ -1232,7 +1235,7 @@ function propHandlers() {
     // [자동 선택] — 같은 모양이 반복되는 작은 부품(LED)을 찾아 광원으로(발광면 = PCB 반대쪽). 못 찾으면 LED 하나를 직접 클릭하게
     onMechAuto: () => {
       const n = autoMechLight(true);
-      if (!n) st.update('light', (_, x) => { x.pick = 'mled'; x.ledInfo = '자동 선택: 반복되는 LED 모양 부품을 못 찾음 — 3D 도면에서 LED 하나의 발광면을 직접 클릭하세요'; });
+      if (!n) st.update('light', (_, x) => { x.pick = 'mled'; x.node = 'light'; x.ledInfo = `자동 선택: LED 를 못 찾음${A.autoWhy ? `(${A.autoWhy})` : '(같은 모양 부품 2개 이상이 없음)'} — 3D 도면에서 LED 하나의 빛 나오는 면을 직접 클릭하세요`; });
     },
     onLedFile: (f) => importLedStep(f),
     onPick: (mode) => st.update('session', (_, x) => { x.pick = mode; }),

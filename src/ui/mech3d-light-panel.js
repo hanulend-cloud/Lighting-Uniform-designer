@@ -136,7 +136,9 @@ function ledBasicHtml(m, ui, nav) {
   const seg = BEAM_PRESETS.map(([a, t]) => `<button type="button" data-lp-beam="${a}" aria-pressed="${pre === a ? 'true' : 'false'}">${t} ${a}°</button>`).join('');
   const ready = st ? !!st.emitters?.length : true;
   return `<div class="m3-card"><div class="m3-row"><b>LED ${n}개</b>${nav ? ` <span class="m3-ledsel">${nav}</span> <span class="mut">하나씩 보기 · 3D 에서 LED 클릭도 됨</span>` : ''}</div>
-      ${!ready ? '<div class="m3-row warn">LED 빛 나오는 면을 아직 모름 — <button type="button" class="m3-primary" data-lp-mauto title="같은 모양 부품 2개 이상 · PCB 위에 올라간 것 = LED, 발광면 = PCB 반대쪽">LED 자동 선택</button></div>' : ''}</div>
+      ${!ready ? '<div class="m3-row warn">LED 빛 나오는 면을 아직 모름</div>' : ''}
+      <div class="m3-row"><button type="button" class="${ready ? '' : 'm3-primary'}" data-lp-mauto title="같은 모양 부품 2개 이상 · PCB 위에 올라간 것 = LED, 발광면 = PCB 반대쪽">LED 자동 선택</button> <span class="mut">개수가 맞지 않으면 다시 찾기</span></div>
+      ${ui.ledInfo ? `<div class="m3-row mut">${esc(ui.ledInfo)}</div>` : ''}</div>
     <div class="m3-card"><div class="m3-sub">빛 퍼짐</div><div class="m3-seg m3-seg3" role="group" aria-label="빛 퍼짐">${seg}</div></div>
     <div class="m3-card"><div class="m3-row"><label>밝기</label><input type="number" min="0" step="1" value="${L.spec.fluxLm ?? 0}" data-lp-spec="fluxLm" aria-label="LED 1개 광속 lm"> lm/개 <span class="mut">0 = 상대값(%)</span></div></div>
     <div class="m3-card"><div class="m3-sub">배치</div>${st ? stepLayoutRowHtml(st, ui.line ?? null, n) : `<div class="m3-row">개수<input type="number" min="1" step="1" value="${L.manual.count}" data-lp-man="count" aria-label="LED 개수"> 피치<input type="number" min="0" step="0.5" value="${L.manual.pitch}" data-lp-man="pitch" aria-label="LED 피치 mm">mm <span class="mut">(0 = 균등)</span></div>`}</div>`;

@@ -293,31 +293,36 @@ function rayHitsBox(o, d, { lo, hi }) {
   }
   return true;
 }
-// LED 메쉬의 꼭짓점 중 하나라도 받침 메쉬 표면에서 tol mm 이내 = 닿아 있음(키 큰 LED 도 바닥면으로 판정)
-function touches(led, sup, tol = 0.3) {
+// LED 메쉬의 꼭짓점 중 하나라도 받침 메쉬 표면에서 tol 이내 = PCB 위에 올라가 있음.
+// tol = max(0.5 mm, LED 반경 × 0.3) — 실제 도면은 패드·솔더를 안 그려 LED 가 PCB 위에 조금 떠 있는 일이 흔함
+function touches(led, sup, tol = Math.max(0.5, 0.3 * meshStats(led).rmax)) {
   const P = led.positions;
   for (let k = 0; k < P.length; k += 3) if (closestOnMesh(sup, [P[k], P[k + 1], P[k + 2]]).d2 <= tol * tol) return true;
   return false;
 }
-export function autoLedGroup(parts, { skip = new Set(), minCount = 2, maxDiag = 20 } = {}) {
-  const seen = new Set(), groups = [];
+// 반환 { leds, ref, face, support, rejected:[{ count, why }] } — rejected = 더 많은데 뺀 반복 부품 무리와 이유(사용자 안내용). 못 찾으면 null
+// why(선택) = 배열을 넘기면 못 찾았을 때도 뺀 후보·이유를 채워 줌
+export function autoLedGroup(parts, { skip = new Set(), minCount = 2, maxDiag = 20, why = null } = {}) {
+  const seen = new Set(), groups = [], rejected = why ?? [];
   parts.forEach((p, i) => {
     if (!p || seen.has(i) || skip.has(i)) return;
     const st = meshStats(p);
-    if (2 * st.rmax > maxDiag) return;
     const g = findLeds(parts, i).filter((k) => !skip.has(k));
     g.forEach((k) => seen.add(k));
-    if (g.length >= minCount) groups.push({ g, vol: st.volume });
+    if (g.length < minCount) return;
+    if (2 * st.rmax > maxDiag) { rejected.push({ count: g.length, why: `크기 ${(2 * st.rmax).toFixed(0)} mm — LED 로 보기엔 큼(≤ ${maxDiag} mm)` }); return; }
+    groups.push({ g, vol: st.volume });
   });
   groups.sort((a, b) => b.g.length - a.g.length || a.vol - b.vol);
   for (const { g } of groups) {
     const ref = g[0], sup = supportPart(parts, parts[ref], new Set(g));
-    if (sup < 0 || !touches(parts[ref], parts[sup])) continue;   // 받침이 LED 에 닿아 있지 않음(떠 있는 반복 부품)
+    if (sup < 0 || !touches(parts[ref], parts[sup])) { rejected.push({ count: g.length, why: 'PCB 위에 닿아 있지 않음(떠 있음)' }); continue; }
     const c = meshStats(parts[ref]).center, v = towardLed(parts[sup], c), face = v ? faceAlong(parts[ref], v) : -1;
-    if (face < 0) continue;
+    if (face < 0) { rejected.push({ count: g.length, why: 'PCB 반대쪽 면을 못 찾음' }); continue; }
     // 발광 방향 앞에 다른 부품(커버·확산판)이 있어야 LED — PCB 뒤에 붙은 나사·보스 등은 앞이 비어 있음
     const own = new Set([...g, sup]);
-    if (parts.some((p, i) => p && !own.has(i) && rayHitsBox(c, v, bbox(p)))) return { leds: g, ref, face, support: sup };
+    if (parts.some((p, i) => p && !own.has(i) && rayHitsBox(c, v, bbox(p)))) return { leds: g, ref, face, support: sup, rejected: rejected.filter((r) => r.count > g.length) };
+    rejected.push({ count: g.length, why: 'PCB 반대쪽(발광 방향) 앞에 커버·확산판이 없음' });
   }
   return null;
 }
