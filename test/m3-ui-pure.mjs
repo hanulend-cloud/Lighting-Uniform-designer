@@ -432,3 +432,9 @@ done();
   const P = (role, untrace) => ({ ...setPartMaterial(defaultPart(0, 'x', 1), 'opaque'), ...(role ? { role } : {}), ...(untrace ? { untrace } : {}) });
   const a = stageAvailability({ parts: [P(), P('light'), P(null, true), P()], light: { kind: 'manual' }, observe: { faces: [] } }, { non25: [0, 0, 0, 0] });
   console.log(a.housing.parts.join() === '0,3' ? 'PASS ④ 대상 부품: 광원으로 옮긴 LED·추적 제외 부품 빼고' : (process.exitCode = 1, `FAIL ④ 대상 ${a.housing.parts}`)); }
+{ const { smoothSigma } = await import('../src/ui/m3/results-panel.js');
+  // 평활 폭(칸) = 잡음에 맞춰(잡음 1% → 평활 후 ≈ 0.4%) · 상한 = LED 피치/8 · 3 mm · 하한 0.5칸 — 화질(칸 크기)이 달라도 mm 로는 같게
+  const lo = smoothSigma({ relNoise: 0.01, ds: 4.4, pitch: 23 }), hi = smoothSigma({ relNoise: 0.01, ds: 1.1, pitch: 23 });
+  const okMm = hi * 1.1 > 1 && lo * 4.4 <= 23 / 8 + 1e-9;   // 고화질은 1 mm 넘게(전: 1.1 mm 고정 1칸), 저화질은 피치/8 이하(전: 4.4 mm — 리플 절반 깎음)
+  console.log(hi * 1.1 <= 23 / 8 + 1e-9 && hi > 1 && lo >= 0.5 && smoothSigma({ relNoise: 0.002, ds: 1, pitch: 23 }) === 0.5 && smoothSigma({ relNoise: 0.05, ds: 1, pitch: null }) === 3 && okMm
+    ? `PASS 1D 평활 폭: 고화질 ${(hi * 1.1).toFixed(2)} mm · 저화질 ${(lo * 4.4).toFixed(2)} mm (피치 23 → 상한 2.9 mm)` : (process.exitCode = 1, `FAIL 평활 폭 ${lo} ${hi}`)); }

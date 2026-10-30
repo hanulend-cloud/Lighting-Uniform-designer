@@ -793,3 +793,21 @@ body.booting::after { content: "불러오는 중…"; position: fixed; left: 50%
 .m3-tree-act button:disabled { opacity: .45; cursor: default; }
 .m3-ren { font: inherit; font-size: 12.5px; padding: 0 4px; border: 1px solid var(--m3-acc); border-radius: 4px; min-width: 0; flex: 1; }
 .m3-grp-list { margin-top: 6px; font-size: 12px; max-height: 240px; overflow: auto; }
+/* 화면 영역 경계(2026-10-30) — 큰 영역(트리·속성 | 3D 뷰 | 계산·결과)을 카드로 나눔: 바탕 위 카드 · 테두리 · 둥근 모서리 · 간격.
+   결과 칸 제목 = 머리 띠. 색은 테마 변수(밝게/어둡게). 좁은 화면(≤ 1024px)은 기존 쌓기 배치 그대로 */
+#mech3d-wrap { --m3-shell: #eceff4; --m3-panel: #fff; --m3-edge: #cdd3dd; --m3-head: #f3f5f9; --m3-headtx: #3b4658; --m3-simbg: #f8fafc; }
+#mech3d-wrap[data-theme="dark"] { --m3-shell: #0f141d; --m3-panel: #161c28; --m3-edge: #2f3a4d; --m3-head: #1f2736; --m3-headtx: #c9d1de; --m3-simbg: #1a2130; }
+@media (min-width: 1025px) {
+  .m3-main { gap: 8px; padding: 8px; background: var(--m3-shell); }
+  .m3-left, .m3-vp, .m3-right { border: 1px solid var(--m3-edge); border-radius: 10px; overflow: hidden; box-shadow: 0 1px 3px rgba(16,24,40,.07); }
+  .m3-left, .m3-right { background: var(--m3-panel); }
+  .m3-left { border-right: 1px solid var(--m3-edge); }
+  .m3-right > .m3-res, .m3-simcard { border-left: 0; }
+  .m3-tree { border-bottom: 1px solid var(--m3-edge); }
+  .m3-faccard { border-top: 1px solid var(--m3-edge); }
+}
+.m3-tree > .m3-h { font-size: 11.5px; font-weight: 700; color: var(--m3-headtx); letter-spacing: .02em; }
+.m3-blk { background: var(--m3-panel); }
+.m3-blk > .m3-t { margin: -8px -8px 6px; padding: 6px 8px; background: var(--m3-head); color: var(--m3-headtx); border-bottom: 1px solid var(--m3-line); border-radius: 8px 8px 0 0; }
+.m3-simcard { background: var(--m3-simbg); }
+.m3-simcard .od-simh { font-weight: 700; }
