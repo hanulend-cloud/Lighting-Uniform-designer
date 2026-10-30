@@ -209,12 +209,13 @@ export function smoothSigma({ relNoise, ds, pitch = null }) {
 // 2D 분포 TXT(탭 구분) — 머리말(#) + 첫 줄 s 칸 중심(mm), 다음 줄부터 w 칸 중심(위 = +w 부터)과 값(최대 대비 %, 관측면 밖 = 빈칸) — 순수
 export function mapTxt(G, map, { name = '', quality = '', photons = null, noise = null } = {}) {
   let mx = 0; for (let k = 0; k < map.length; k++) if (G.valid[k] && map[k] > mx) mx = map[k];
+  const V = mapViewG(G);   // 그림과 같은 w 범위(관측면 밖 빈 줄 뺌)
   const f = (v) => String(+v.toFixed(3)), head = [
     '# UDS 2D 광량 분포 (관측면 펼침) — 값 = 최대 대비 % · 빈칸 = 관측면 밖',
-    `# ${name ? `이름 ${name} · ` : ''}길이 s 0–${f(G.L)} mm · 폭 w ${f(G.w0)}–${f(G.w0 + G.nw * G.cell)} mm · 칸 ${G.ns} × ${G.nw} (${f(G.ds)} × ${f(G.cell)} mm)${quality ? ` · 화질 ${quality}` : ''}${photons ? ` · 광자 ${photons}` : ''}${Number.isFinite(noise) ? ` · 오차 ±${(noise * 100).toFixed(2)}%` : ''}`,
+    `# ${name ? `이름 ${name} · ` : ''}길이 s 0–${f(G.L)} mm · 폭 w ${f(V.w0)}–${f(V.w0 + V.nw * G.cell)} mm · 칸 ${G.ns} × ${V.nw} (${f(G.ds)} × ${f(G.cell)} mm)${quality ? ` · 화질 ${quality}` : ''}${photons ? ` · 광자 ${photons}` : ''}${Number.isFinite(noise) ? ` · 오차 ±${(noise * 100).toFixed(2)}%` : ''}`,
     ['w\\s(mm)', ...Array.from({ length: G.ns }, (_, i) => f((i + 0.5) * G.ds))].join('\t'),
   ];
-  for (let j = G.nw - 1; j >= 0; j--) {
+  for (let j = V.jB; j >= V.jA; j--) {
     const row = [f(G.w0 + (j + 0.5) * G.cell)];
     for (let i = 0; i < G.ns; i++) { const k = i * G.nw + j; row.push(G.valid[k] && mx > 0 ? ((map[k] / mx) * 100).toFixed(2) : ''); }
     head.push(row.join('\t'));
@@ -355,12 +356,12 @@ function sizeCanvas(cv, ratio) {
   return true;
 }
 
-const QUALITY_OPTS = [['low', '저화질'], ['mid', '중화질'], ['high', '고화질']];   // 칸 수 100×8 · 200×12 · 400×16 — 높을수록 계산 오래(중 ≈2배 · 고 ≈4배 광자)
+const QUALITY_OPTS = [['low', '저화질 2 mm'], ['mid', '중화질 1 mm'], ['high', '고화질 0.5 mm']];   // 정사각 칸 크기(2026-10-30) — 작을수록 계산 오래(중 ≈2배 · 고 ≈4배 광자)
 export function createResultsPanel(el, { onQuality = null, fileName = () => 'uds', onLeak = null } = {}) {
   const gaugeHtml = (k) => `<div class="m3-gauge" data-r="${k}"><div class="f"></div><div class="tg"></div></div>`;
   el.innerHTML = `
     <div class="m3-msg" data-r="msg" hidden></div>
-    <div class="m3-blk"><div class="m3-t">2D 광량 분포 (관측면 펼침) <span><span data-r="mapsub"></span> <select data-r="quality" title="2D 분포·1D 프로파일 해상도 — 저 100×8칸(빠름) · 중 200×12칸(광자 ≈2배) · 고 400×16칸(광자 ≈4배)" aria-label="분포 화질">${QUALITY_OPTS.map(([v, t]) => `<option value="${v}">${t}</option>`).join('')}</select>  <button type="button" class="m3-zoom" data-zoom="map" title="큰 창으로 보기" aria-label="2D 광량 분포 확대">⤢</button></span></div>
+    <div class="m3-blk"><div class="m3-t">2D 광량 분포 (관측면 펼침) <span><span data-r="mapsub"></span> <select data-r="quality" title="2D 분포·1D 프로파일 칸 크기(정사각) — 저 2.0 mm(빠름) · 중 1.0 mm(광자 ≈2배) · 고 0.5 mm(광자 ≈4배) · 짧거나 좁은 면은 그 방향만 더 잘게" aria-label="분포 화질">${QUALITY_OPTS.map(([v, t]) => `<option value="${v}">${t}</option>`).join('')}</select>  <button type="button" class="m3-zoom" data-zoom="map" title="큰 창으로 보기" aria-label="2D 광량 분포 확대">⤢</button></span></div>
       <div class="m3-withm"><canvas class="m3-g" data-r="map" width="600" height="200"></canvas>
         <div class="m3-m"><div class="l">평균 광량</div><div class="v" data-r="avg">–</div><div class="s" data-r="avgs"></div>${gaugeHtml('avgg')}
           <div class="l" style="margin-top:6px">광 효율</div><div class="v sm" data-r="eff">–</div><div class="s">관측면 원뿔 안 / LED 총 방출</div><button type="button" class="m3-leak" data-r="leak" hidden title="누르면 3D 에서 가장 많이 새는 면을 강조"></button></div></div></div>

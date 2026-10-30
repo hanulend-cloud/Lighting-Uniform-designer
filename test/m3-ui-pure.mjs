@@ -361,7 +361,10 @@ done();
   // 2D TXT: 머리말 + w(위→아래) × s 표, 최대 = 100(%), 관측면 밖 = 빈칸
   const G = { ns: 2, nw: 2, ds: 5, cell: 1, w0: -1, L: 10, valid: [1, 1, 0, 1] }, t = mapTxt(G, [1, 2, 9, 4], { name: 'x' }), rows = t.split('\n');
   const okT = t.startsWith('#') && rows.some((r) => r === 'w\\s(mm)\t2.5\t7.5') && rows.some((r) => r === '0.5\t50.00\t100.00') && rows.some((r) => r === '-0.5\t25.00\t');
-  console.log(okC && okS && okT ? 'PASS 폭 범위 맞춤 · 표시 평활(σ칸, NaN 유지) · 2D 분포 TXT' : (process.exitCode = 1, `FAIL 폭/평활/TXT ${okC} ${okS} ${okT} ${JSON.stringify(sm)} ${JSON.stringify(rows)}`)); }
+  // 2D TXT = 그림과 같은 범위(관측면 밖 빈 줄 뺌, 2026-10-30): 4줄 중 가운데 2줄만 유효 → 2줄만
+  const G4 = { ns: 2, nw: 4, ds: 5, cell: 1, w0: -2, L: 10, valid: [0, 1, 1, 0, 0, 1, 1, 0] }, t4 = mapTxt(G4, [0, 1, 2, 0, 0, 3, 4, 0]).split(String.fromCharCode(10)).filter((r) => r && !r.startsWith('#')).slice(1);
+  const okCrop = t4.length === 2 && t4[0].startsWith('0.5' + String.fromCharCode(9)) && t4[1].startsWith('-0.5' + String.fromCharCode(9));
+  console.log(okC && okS && okT && okCrop ? 'PASS 폭 범위 맞춤 · 표시 평활(σ칸, NaN 유지) · 2D 분포 TXT(그림과 같은 범위)' : (process.exitCode = 1, `FAIL 폭/평활/TXT ${okC} ${okS} ${okT} crop ${okCrop} ${JSON.stringify(t4)} ${JSON.stringify(sm)} ${JSON.stringify(rows)}`)); }
 { const { mapViewG } = await import('../src/ui/m3/results-panel.js');
   const G = { ns: 2, nw: 4, cell: 1, w0: -2, valid: [0, 1, 1, 0, 0, 0, 1, 0] }, v = mapViewG(G), e = mapViewG({ ns: 1, nw: 2, cell: 1, w0: 0, valid: [0, 0] });
   console.log(v.w0 === -1 && v.nw === 2 && v.jA === 1 && v.jB === 2 && mapViewG(G) === v && e.nw === 2 && e.jA === 0 ? 'PASS 2D 표시 폭 = 값 있는 w 줄만' : (process.exitCode = 1, `FAIL 2D 폭 ${JSON.stringify(v)}`)); }

@@ -5,11 +5,12 @@
 // 격자: s 칸 = obs.cellS ?? max(1, L/100), w 칸 = obs.cellW ?? max(0.5, 최대폭/8). obs.cell 이 있으면 둘 다 그 값(구버전 호환).
 // 셀 면적은 래스터 마스크를 걸으며 구한다(곡선·테이퍼·꺾인 영역에서 (s,w) 셀의 실제 면적은 ds·cw 가 아님).
 // w 격자 폭은 영역의 최대 국소 폭(래스터 거리장 최댓값) + 2칸. 유효 = 면적 ≥ 0.5·ds·cw.
-// 2D 분포·1D 프로파일 화질(집계 격자 칸 수) — 길이 칸 수 s · 폭 칸 수 w · 최소 칸(mm). 칸이 많을수록 칸당 광자가 줄어 같은 정확도까지 광자가 더 필요(중 ≈ 2배, 고 ≈ 4배)
-export const GRID_QUALITY = { low: { s: 100, w: 8, minS: 1, minW: 0.5 }, mid: { s: 200, w: 12, minS: 0.5, minW: 0.35 }, high: { s: 400, w: 16, minS: 0.25, minW: 0.25 } };
+// 2D 분포·1D 프로파일 화질 = 정사각 칸 크기(2026-10-30): 저 2.0 · 중 1.0 · 고 0.5 mm — 칸이 작을수록 칸당 광자가 줄어 같은 정확도까지 광자가 더 필요.
+// 짧은 면은 길이 10칸 이상, 좁은 면은 폭 4칸 이상이 되게 그 방향만 더 잘게(판정에 칸 수가 모자라지 않게)
+export const GRID_QUALITY = { low: { cell: 2 }, mid: { cell: 1 }, high: { cell: 0.5 } };
 export function autoCells(L, width, quality) {
-  const q = GRID_QUALITY[quality] ?? GRID_QUALITY.low;
-  return { cellS: Math.max(q.minS, L / q.s), cellW: Math.max(q.minW, width / q.w) };
+  const c = (GRID_QUALITY[quality] ?? GRID_QUALITY.low).cell;
+  return { cellS: Math.min(c, L / 10), cellW: Math.min(c, width / 4) };
 }
 export function tallyGeometry(line, obs) {
   const edge = obs.edgeExcl ?? 0.5, L = line.length, R = line.data.raster;

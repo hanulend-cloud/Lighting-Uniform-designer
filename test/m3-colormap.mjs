@@ -5,7 +5,7 @@ import { ramp, NO_DATA, extractFaces, subdivide, cellIndex, vertexCells, cellCol
 import { topFaceMesh, rectTris, boxMesh, ok, done } from './mech3d-util.mjs';
 
 const top = topFaceMesh(rectTris(0, 0, 100, 6), 2), faces = [{ part: 0, face: 1 }];
-const line = recognizeLine([top], faces, [0, 0, 1]), obs = { faces, dir: [0, 0, 1], cone: 90, edgeExcl: 0.5, targetLen: 0.8, targetWid: 0.8 };
+const line = recognizeLine([top], faces, [0, 0, 1]), obs = { faces, dir: [0, 0, 1], cone: 90, edgeExcl: 0.5, targetLen: 0.8, targetWid: 0.8, cellS: 1, cellW: 0.75 };   // 격자 직접 지정(아래 행·칸 번호 = 1 mm 칸 기준)
 const G = tallyGeometry(line, obs);
 const area = (m) => {
   let a = 0; const P = m.positions, T = m.triangles, p = (i) => [P[3 * i], P[3 * i + 1], P[3 * i + 2]];

@@ -10,10 +10,10 @@ import { loadTable } from './l2-util.mjs';
 import { topFaceMesh, rectTris, annulusTris, boxMesh, ok, done } from './mech3d-util.mjs';
 
 const line = recognizeLine([topFaceMesh(rectTris(0, 0, 100, 6), 2)], [{ part: 0, face: 1 }], [0, 0, 1]);
-const obs = { faces: [{ part: 0, face: 1 }], dir: [0, 0, 1], cone: 10, edgeExcl: 0.5, targetLen: 0.8, targetWid: 0.5 };
+const obs = { faces: [{ part: 0, face: 1 }], dir: [0, 0, 1], cone: 10, edgeExcl: 0.5, targetLen: 0.8, targetWid: 0.5, cellS: 1, cellW: 0.75 };   // 격자 직접 지정(아래 값 검증이 1 mm 칸 기준)
 const G = tallyGeometry(line, obs);
 const nV = G.valid.reduce((a, b) => a + b, 0);
-ok(G.ns === 100 && Math.abs(G.cell - 0.75) < 1e-9 && G.nw === 12 && nV === 100 * 6, `자동 격자: s ${G.ns}칸(1mm), w 칸 ${G.cell}mm ×${G.nw}, 유효 셀 ${nV} (끝 칸도 면적 ≥ 50% → 100×6)`);
+ok(G.ns === 100 && Math.abs(G.cell - 0.75) < 1e-9 && G.nw === 12 && nV === 100 * 6, `지정 격자: s ${G.ns}칸(1mm), w 칸 ${G.cell}mm ×${G.nw}, 유효 셀 ${nV} (끝 칸도 면적 ≥ 50% → 100×6)`);
 // 합성 출사: 밝기 ∝ (20 + x) — 길이 방향 선형 경사, 폭 방향 균일
 const r = rng(1), B = 10, accs = [];
 for (let b = 0; b < B; b++) {
@@ -87,7 +87,7 @@ ok(S.counted === nV && S.noiseWarn === false, `집계 셀 ${S.counted}, 잡음 �
   const noDir = makeAccumulator(G, line, { ...obs, dir: null }); noDir.onExit(0, 1, 50, 3, 2, 0, 0, 1, 1, 0); noDir.onEscape(50, 3, 5, 0, 0, 1, 1, 0);
   ok(noDir.acc.some((v) => v > 0), 'obs.dir null → 라인 관측 방향 사용');
   const nar = recognizeLine([topFaceMesh(rectTris(0, 0, 100, 1.4), 2)], [{ part: 0, face: 1 }], [0, 0, 1]);
-  const GN = tallyGeometry(nar, obs), sn = tallyStats(GN, [new Float64Array(GN.ns * GN.nw).fill(1), new Float64Array(GN.ns * GN.nw).fill(1)], obs);
+  const GN = tallyGeometry(nar, { ...obs, cellW: 0.5 }), sn = tallyStats(GN, [new Float64Array(GN.ns * GN.nw).fill(1), new Float64Array(GN.ns * GN.nw).fill(1)], obs);
   ok(sn.narrow === true && sn.Uwid === null, `좁은 띠(유효 열 <2): narrow, Uwid null`);
   const emptyG = tallyGeometry(nar, { ...obs, edgeExcl: 1 }), se = tallyStats(emptyG, [new Float64Array(emptyG.ns * emptyG.nw), new Float64Array(emptyG.ns * emptyG.nw)], obs);
   ok(se.empty === true && se.sWorst === null, '유효 셀 없음 → empty');
@@ -112,10 +112,13 @@ ok(S.counted === nV && S.noiseWarn === false, `집계 셀 ${S.counted}, 잡음 �
   const S3 = tallyStats(G, accs3, obs);
   ok(S3.relNoise > 0 && S3.relNoiseCell > 0 && S3.relNoise < S3.relNoiseCell * 0.8, `잡음: 줄·열 ${(S3.relNoise * 100).toFixed(2)}% < 칸 ${(S3.relNoiseCell * 100).toFixed(2)}%`);
 }
-// 화질: 440×5.5 mm 관측면 — 저 100×8 칸(4.4×0.69 mm) · 중 200×12 · 고 400×16(1.1×0.34 mm), 짧은 면은 최소 칸에서 멈춤
+// 화질(2026-10-30) = 정사각 칸 크기: 저 2.0 · 중 1.0 · 고 0.5 mm. 짧은 면은 길이 10칸 이상, 좁은 면은 폭 4칸 이상이 되게 더 잘게
 {
-  const c = (q) => autoCells(440, 5.5, q), lo = c('low'), mi = c('mid'), hi = c('high');
-  ok(Math.abs(lo.cellS - 4.4) < 1e-9 && Math.abs(lo.cellW - 5.5 / 8) < 1e-9 && Math.abs(mi.cellS - 2.2) < 1e-9 && Math.abs(hi.cellS - 1.1) < 1e-9 && Math.abs(hi.cellW - 0.34375) < 1e-9, `화질 칸: 저 ${lo.cellS}×${lo.cellW.toFixed(2)} · 중 ${mi.cellS}×${mi.cellW.toFixed(2)} · 고 ${hi.cellS}×${hi.cellW.toFixed(2)} mm`);
-  ok(autoCells(40, 2, 'high').cellS === 0.25 && autoCells(40, 2, 'high').cellW === 0.25 && autoCells(40, 2, undefined).cellS === 1, '짧은 면: 최소 칸 · 화질 없음 = 저화질(기존 저장 설계)');
+  const c = (q) => autoCells(440, 16, q), lo = c('low'), mi = c('mid'), hi = c('high');
+  ok(lo.cellS === 2 && lo.cellW === 2 && mi.cellS === 1 && mi.cellW === 1 && hi.cellS === 0.5 && hi.cellW === 0.5, `화질 칸: 저 ${lo.cellS}×${lo.cellW} · 중 ${mi.cellS}×${mi.cellW} · 고 ${hi.cellS}×${hi.cellW} mm`);
+  const sh = autoCells(10, 5.5, 'low');
+  ok(sh.cellS === 1 && sh.cellW === 1.375 && autoCells(40, 16, undefined).cellS === 2, `짧은·좁은 면: ${sh.cellS}×${sh.cellW} mm · 화질 없음 = 저화질(기존 저장 설계)`);
+  const GA = tallyGeometry(line, { ...obs, cellS: null, cellW: null, quality: 'mid' });
+  ok(GA.ds === 1 && GA.cell === 1, `자동 격자(중): 칸 ${GA.ds}×${GA.cell} mm`);
 }
 done();
