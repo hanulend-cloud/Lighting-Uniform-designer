@@ -132,7 +132,8 @@ function getView() {
   viewP ??= import('../mech3d-view.js').then(({ createMech3dView }) => {
     const v = createMech3dView($('#mech3d-canvas'), { onPick: (s) => { if (A) onPick(s); }, gizmo: $('#m3-axes') });
     const el = $('#m3-views');
-    el.innerHTML = VIEWS.map(([k, t]) => `<button data-view="${k}">${t}</button>`).join('') + '<button type="button" data-xray aria-pressed="false" title="전체 부품 반투명 — 속 구조를 봄">투시</button><button type="button" data-paths aria-pressed="false" title="광경로 화살표 켜기/끄기">광경로</button><button type="button" data-theme-toggle aria-pressed="false"></button>';
+    el.innerHTML = VIEWS.map(([k, t]) => `<button data-view="${k}">${t}</button>`).join('') + '<button type="button" data-fit title="지금 보이는 도면 전체를 창에 맞춤 — 보는 방향은 그대로 (F)">⤢ 맞춤</button><button type="button" data-xray aria-pressed="false" title="전체 부품 반투명 — 속 구조를 봄">투시</button><button type="button" data-paths aria-pressed="false" title="광경로 화살표 켜기/끄기">광경로</button><button type="button" data-theme-toggle aria-pressed="false"></button>';
+    el.querySelector('[data-fit]').onclick = () => v.fitAll();
     el.querySelectorAll('[data-view]').forEach((b) => { b.onclick = () => { v.setView(b.dataset.view); A?.store.update('view', (_, s) => { s.view = b.dataset.view; }); }; });
     // 3D 배경 밝게/어둡게 — 보는 사람별 편의 설정(새로고침해도 유지)
     const tb = el.querySelector('[data-theme-toggle]'), vp = $('#mech3d-canvas').parentElement;
@@ -224,7 +225,7 @@ function onChange(tag) {
 function onKey(e) {
   if (!A || e.target.closest?.('input, select, textarea')) return;
   if (e.key === 'Escape') A.store.update('session', (_, s) => { s.sel = null; s.ledSel = null; s.pick = null; s.focusCheck = null; });
-  else if (e.key === 'f' || e.key === 'F') A.view?.fit();
+  else if (e.key === 'f' || e.key === 'F') A.view?.fitAll();   // 맞춤(보는 방향 그대로)
 }
 
 // ---- 관측 라인 (main.js:266-282) — 관측면·방향이 바뀌면 Worker 0 에서 다시 인식 ----
@@ -1405,7 +1406,7 @@ function cmdHandlers() {
       const b = bounds(getMech3d().combined.positions);
       x.section = { axis: 'x', pos: (b[0] + b[3]) / 2, box: b };
     }),
-    onFit: () => A.view?.fit(),
+    onFit: () => A.view?.fitAll(),   // 맞춤 = 보이는 부품 전체를 창에 꽉 차게(보는 방향은 그대로)
     onToggleCalc: () => {   // '⏸ 계산 중'(대기·장면 준비 포함) → 일시정지, 일시정지 → 재개, 그 밖(완료·오류·대기) → 다시 계산
       // 기구 최적화 중: 계산이 끝났거나 대기였으면(미룬 계산 없음) = 다시 계산 요청, 아니면 일시정지 여부를 뒤집음
       if (A.ad?.running) { const st = A.ad; st.userPaused = st.deferred ? !st.userPaused : false; st.deferred = true; setStatus(st.userPaused ? '기구 최적화가 끝나도 계산은 멈춰 둠' : '기구 최적화가 끝나면 계산 재개'); return; }

@@ -130,6 +130,35 @@ export function createMech3dView(canvas, { onPick, gizmo = null }) {
     resize(); controls.update(); render();
   }
   const fit = () => setView(viewName);
+  // 맞춤(2026-10-30): 지금 보이는(숨기지 않은) 부품 전체를 창에 꽉 차게 — 보는 방향(회전)은 그대로, 중심·거리·확대만.
+  // 정투영 = 보이는 외곽 상자 8꼭짓점을 화면 축에 투영한 크기에 맞춤, 원근 = 외곽 구에 맞춤
+  function fitAll() {
+    const box = new THREE.Box3(); meshes.forEach((m) => { if (m.visible) box.expandByObject(m); });
+    if (box.isEmpty()) meshes.forEach((m) => box.expandByObject(m));
+    if (box.isEmpty()) return;
+    const c = box.getCenter(new THREE.Vector3()), r = box.getSize(new THREE.Vector3()).length() / 2 || 10;
+    const d = camera.position.clone().sub(controls.target); if (d.lengthSq() < 1e-12) d.set(...VIEW_DIR[viewName] ?? [1, 1, 1]); d.normalize();
+    const a = aspect();
+    if (camera.isOrthographicCamera) {
+      camera.updateMatrixWorld();   // 화면 가로·세로 축 = 카메라 행렬 열(평면 보기처럼 up ∥ 보는 방향이어도 됨 — 회전은 바꾸지 않으므로 그대로)
+      const rt = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 0), up = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 1);
+      let ex = 0, ey = 0;
+      for (let k = 0; k < 8; k++) { const p = new THREE.Vector3(k & 1 ? box.max.x : box.min.x, k & 2 ? box.max.y : box.min.y, k & 4 ? box.max.z : box.min.z).sub(c); ex = Math.max(ex, Math.abs(p.dot(rt))); ey = Math.max(ey, Math.abs(p.dot(up))); }
+      orthoHalf = Math.max(ey, ex / a, r * 0.02) * Math.min(1, a) * 1.12; camera.zoom = 1;
+      camera.position.copy(c).addScaledVector(d, r * 4); camera.near = Math.max(1e-3, r / 100); camera.far = r * 104;
+      controls.target.copy(c); camera.updateProjectionMatrix(); resize(); controls.update(); render(); return;   // lookAt 다시 안 함(평면 보기 회전 유지)
+    } else {
+      // 원근: 상자 8꼭짓점이 화각 안에 들도록 하는 가장 가까운 거리(꼭짓점의 화면 가로·세로 / tan 반화각 + 앞뒤 깊이)
+      camera.updateMatrixWorld();
+      const rt = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 0), up = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 1);
+      const tv = Math.tan((camera.fov * Math.PI) / 360) / 1.15, th = tv * a;   // 1.15 = 여백(오른쪽 보기 단추 자리 포함)
+      let dist = 0;
+      for (let k = 0; k < 8; k++) { const p = new THREE.Vector3(k & 1 ? box.max.x : box.min.x, k & 2 ? box.max.y : box.min.y, k & 4 ? box.max.z : box.min.z).sub(c); const z = p.dot(d); dist = Math.max(dist, z + Math.abs(p.dot(rt)) / th, z + Math.abs(p.dot(up)) / tv); }
+      camera.position.copy(c).addScaledVector(d, Math.max(dist, r * 0.05));
+    }
+    controls.target.copy(c); camera.lookAt(c);
+    fitDepth(); camera.updateProjectionMatrix(); resize(); controls.update(); render();
+  }
 
   // parts: 런타임 scene.parts, kindsOf: 부품별 소재 종류 배열, keepCamera: 카메라를 다시 맞추지 않음(LED 위치 보정 등)
   function setParts(parts, kindsOf, { keepCamera = false } = {}) {
@@ -499,5 +528,5 @@ export function createMech3dView(canvas, { onPick, gizmo = null }) {
     onPick({ part, face: partsRef[part].faceIds[h.faceIndex], ray: rr, worldPerPixel: wpp });
   });
 
-  return { setTheme, theme: () => theme, setLightPaths, setXray, xray: () => xray, setDim, setParts, setKinds, setHidden, setSelection, setOverlay, setPickMode, render, setView, fit, viewName: () => viewName, setSection, setObsSurface, setObsColors, setCheckMarkers };
+  return { setTheme, theme: () => theme, setLightPaths, setXray, xray: () => xray, setDim, setParts, setKinds, setHidden, setSelection, setOverlay, setPickMode, render, setView, fit, fitAll, viewName: () => viewName, setSection, setObsSurface, setObsColors, setCheckMarkers };
 }
