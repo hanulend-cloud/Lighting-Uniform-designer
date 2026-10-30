@@ -1010,10 +1010,12 @@ function adStep() {
 // 클릭한 면 = 발광면(렌즈 윗면으로 보정). PCB 는 기구 부품 그대로 남김(면 처리 그대로 계산)
 // 새 기구 STEP 을 불러온 직후: 같은 모양이 반복되는 작은 부품(LED)을 찾아 바로 도면 광원으로(발광면 = PCB 반대쪽).
 // 광원이 이미 지정돼 있거나 못 찾으면 그대로. 틀렸으면 광원 노드의 [다른 LED 로 다시 지정]·[도면 광원 해제]로 고친다
-export function autoMechLight() {
+// force = 광원 속성의 [자동 선택] — 이미 지정된 광원이 있어도 다시 찾음(도면 광원은 먼저 해제)
+export function autoMechLight(force = false) {
   if (!A) return null;
+  if (force && A.store.mspec.light.step?.fromMech) mechLightClear();
   const M = A.store.mspec, rt = getMech3d();
-  if (!rt || (M.light.kind && M.light.kind !== 'none')) return null;
+  if (!rt || (!force && M.light.kind && M.light.kind !== 'none')) return null;
   const cand = rt.parts.map((p, i) => ({ positions: p.positions, triangles: p.triangles, faceIds: p.faceIds, faceCount: rt.raw.parts[i]?.faceCount }));
   const g = autoLedGroup(cand, { skip: new Set(M.observe.faces.map((f) => f.part)) });
   if (!g) return null;
@@ -1220,12 +1222,18 @@ function propHandlers() {
       });
     },
     onContact: (i, mode) => st.update('contacts', (m) => { m.contacts[i] = { ...m.contacts[i], mode }; }),
-    // 'mech' = 3D 도면에서 지정: 도면 LED 의 발광면 클릭 대기(pick 'mled'). 다른 방식으로 바꾸면 도면 광원 원본을 기구로 되돌림
+    // 'mech' = 3D 도면에서 지정: 자동 선택(반복되는 LED 모양 부품) → 못 찾으면 도면 LED 의 발광면 클릭 대기(pick 'mled'). 다른 방식으로 바꾸면 도면 광원 원본을 기구로 되돌림
     onLightKind: (k) => {
+      if (k === 'mech' && autoMechLight(true)) return;   // 먼저 자동 선택 — 못 찾으면 LED 발광면 클릭 대기
       if (k !== 'mech' && A.store.mspec.light.step?.fromMech) mechLightClear();
       st.update('light', (m, x) => { if (k === 'mech') { x.pick = 'mled'; x.ledInfo = '3D 도면에서 LED 하나의 발광면(빛이 나오는 면)을 클릭하세요 — 같은 모양 부품을 모두 광원으로'; } else { m.light.kind = k; x.pick = null; } });
     },
     onMechLightClear: () => mechLightClear(),
+    // [자동 선택] — 같은 모양이 반복되는 작은 부품(LED)을 찾아 광원으로(발광면 = PCB 반대쪽). 못 찾으면 LED 하나를 직접 클릭하게
+    onMechAuto: () => {
+      const n = autoMechLight(true);
+      if (!n) st.update('light', (_, x) => { x.pick = 'mled'; x.ledInfo = '자동 선택: 반복되는 LED 모양 부품을 못 찾음 — 3D 도면에서 LED 하나의 발광면을 직접 클릭하세요'; });
+    },
     onLedFile: (f) => importLedStep(f),
     onPick: (mode) => st.update('session', (_, x) => { x.pick = mode; }),
     onStep: (key, v) => st.update('light', (m, x) => {
