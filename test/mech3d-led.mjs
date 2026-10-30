@@ -105,6 +105,11 @@ ok(emitterFaceAway(domeLed, 2, sup) === 6, '돔 LED 옆면 클릭 → 돔(6)');
 const scene = [boxMesh(-40, -5, -1, 80, 10, 1), boxMesh(-40, -5, 6, 80, 10, 3), ...[-25, -15, -5, 5, 15, 25].map((x) => transformMesh(domeLed, [x, 0, 0], [0, 0, 0])), boxMesh(-39, -4, -3, 1, 1, 2), boxMesh(38, -4, -3, 1, 1, 2)];
 const au = autoLedGroup(scene);
 ok(au && au.leds.join() === '2,3,4,5,6,7' && au.face === 6 && au.support === 0, `자동 인식: LED ${au?.leds.join()} · 면 ${au?.face} · 받침 ${au?.support}`);
-ok(autoLedGroup(scene, { skip: new Set([2, 3, 4]) }) === null, '관측면 등으로 빠져 3개만 남으면 → 인식 안 함');
+ok(autoLedGroup(scene, { skip: new Set([2, 3, 4, 5, 6]) }) === null, '관측면 등으로 빠져 1개만 남으면 → 인식 안 함(같은 부품 2개 이상)');
+// 같은 부품 2개 이상 + PCB 위 → LED. 2개만 있어도 인식, 키 큰 LED(높이 6 mm)도 PCB 에 닿아 있으면 인식
+const two = autoLedGroup([scene[0], scene[1], transformMesh(domeLed, [-10, 0, 0], [0, 0, 0]), transformMesh(domeLed, [10, 0, 0], [0, 0, 0])]);
+ok(two && two.leds.join() === '2,3' && two.face === 6 && two.support === 0, `PCB 위 같은 LED 2개 → 인식(${two?.leds.join()} · 면 ${two?.face})`);
+const tall = boxMesh(-1.5, -1.5, 0, 3, 3, 6), tl = autoLedGroup([scene[0], scene[1], ...[-10, 0, 10].map((x) => transformMesh(tall, [x, 0, 0], [0, 0, 0]))]);
+ok(tl && tl.leds.join() === '2,3,4' && tl.support === 0, `키 큰 LED(3×3×6) → 인식(${tl?.leds.join()} · 받침 ${tl?.support})`);
 ok(autoLedGroup([scene[0], scene[1], ...[-25, -15, -5, 5].map((x) => transformMesh(domeLed, [x, 0, 2], [0, 0, 0]))]) === null, '떠 있는 반복 부품(받침 없음) → 인식 안 함');
 done();

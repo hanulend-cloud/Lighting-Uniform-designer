@@ -273,10 +273,33 @@ function faceAlong(m, v) {
   return face >= 0 ? refineEmitterFace(m, face) : -1;
 }
 
-// 도면 광원 자동 인식(STEP 불러온 직후): 같은 모양이 minCount 개 이상 반복되는 작은 부품(크기 ≤ maxDiag mm) 무리 중 가장 많은 것.
-// 받침 부품(LED 가 닿아 있는 가장 가까운 부품 — 보통 PCB)이 있어야 하고, 발광면 = 받침 반대쪽 면. 못 찾으면 null.
+// 도면 광원 자동 인식(STEP 불러온 직후·[자동 선택]): 같은 모양이 2개 이상 반복되는 작은 부품(크기 ≤ maxDiag mm) 무리 중 가장 많은 것.
+// 받침 부품(LED 에 닿아 있는 가장 가까운 부품 — PCB)이 있어야 하고, 발광면 = 받침 반대쪽 면. 못 찾으면 null.
 // skip = 후보에서 뺄 부품 번호(관측면 부품 등). 반환 { leds, ref, face, support }
-export function autoLedGroup(parts, { skip = new Set(), minCount = 4, maxDiag = 20 } = {}) {
+function bbox(m) {
+  const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity], P = m.positions;
+  for (let k = 0; k < P.length; k += 3) for (let a = 0; a < 3; a++) { lo[a] = Math.min(lo[a], P[k + a]); hi[a] = Math.max(hi[a], P[k + a]); }
+  return { lo, hi };
+}
+// 반직선 o + t·d (t > 0) 이 상자 b 를 지나는지(slab)
+function rayHitsBox(o, d, { lo, hi }) {
+  let t0 = 1e-6, t1 = Infinity;
+  for (let a = 0; a < 3; a++) {
+    if (Math.abs(d[a]) < 1e-12) { if (o[a] < lo[a] || o[a] > hi[a]) return false; continue; }
+    let ta = (lo[a] - o[a]) / d[a], tb = (hi[a] - o[a]) / d[a];
+    if (ta > tb) [ta, tb] = [tb, ta];
+    t0 = Math.max(t0, ta); t1 = Math.min(t1, tb);
+    if (t0 > t1) return false;
+  }
+  return true;
+}
+// LED 메쉬의 꼭짓점 중 하나라도 받침 메쉬 표면에서 tol mm 이내 = 닿아 있음(키 큰 LED 도 바닥면으로 판정)
+function touches(led, sup, tol = 0.3) {
+  const P = led.positions;
+  for (let k = 0; k < P.length; k += 3) if (closestOnMesh(sup, [P[k], P[k + 1], P[k + 2]]).d2 <= tol * tol) return true;
+  return false;
+}
+export function autoLedGroup(parts, { skip = new Set(), minCount = 2, maxDiag = 20 } = {}) {
   const seen = new Set(), groups = [];
   parts.forEach((p, i) => {
     if (!p || seen.has(i) || skip.has(i)) return;
@@ -289,9 +312,12 @@ export function autoLedGroup(parts, { skip = new Set(), minCount = 4, maxDiag = 
   groups.sort((a, b) => b.g.length - a.g.length || a.vol - b.vol);
   for (const { g } of groups) {
     const ref = g[0], sup = supportPart(parts, parts[ref], new Set(g));
-    if (sup < 0 || closestOnMesh(parts[sup], meshStats(parts[ref]).center).d2 > (meshStats(parts[ref]).rmax / 2) ** 2) continue;   // 받침이 LED 에 닿아 있지 않음(중심 거리 > 반경의 반)
-    const v = towardLed(parts[sup], meshStats(parts[ref]).center), face = v ? faceAlong(parts[ref], v) : -1;
-    if (face >= 0) return { leds: g, ref, face, support: sup };
+    if (sup < 0 || !touches(parts[ref], parts[sup])) continue;   // 받침이 LED 에 닿아 있지 않음(떠 있는 반복 부품)
+    const c = meshStats(parts[ref]).center, v = towardLed(parts[sup], c), face = v ? faceAlong(parts[ref], v) : -1;
+    if (face < 0) continue;
+    // 발광 방향 앞에 다른 부품(커버·확산판)이 있어야 LED — PCB 뒤에 붙은 나사·보스 등은 앞이 비어 있음
+    const own = new Set([...g, sup]);
+    if (parts.some((p, i) => p && !own.has(i) && rayHitsBox(c, v, bbox(p)))) return { leds: g, ref, face, support: sup };
   }
   return null;
 }
