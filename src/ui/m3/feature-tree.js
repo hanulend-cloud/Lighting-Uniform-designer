@@ -85,7 +85,7 @@ const caret = (n) => (n.fold ? `<span class="m3-fold" role="button" tabindex="-1
 const renamable = (n) => n.id.startsWith('part:') || (n.id.startsWith('group:') && !n.auto);
 export function treeHead(M, S) {
   const multi = (S.multi ?? []).filter((x) => x.startsWith('part:')), canG = multi.length > 0 || S.node?.startsWith('part:'), canU = S.node?.startsWith('group:') && S.node !== 'group:_light';
-  return `<div class="m3-h">피처 트리 <span class="m3-tree-act"><button type="button" data-tact="group"${canG ? '' : ' disabled'} title="선택한 부품을 그룹으로 묶기 — Ctrl(또는 Shift)+클릭으로 여러 부품 선택">＋ 그룹</button><button type="button" data-tact="ungroup"${canU ? '' : ' disabled'} title="선택한 그룹 풀기(부품은 그대로)">그룹 해제</button></span></div>`;
+  return `<div class="m3-h" title="목표·부품·광원·관측면 — 설계를 이루는 항목(클릭 = 속성 편집)">설계 트리 <span class="m3-tree-act"><button type="button" data-tact="group"${canG ? '' : ' disabled'} title="선택한 부품을 그룹으로 묶기 — Ctrl(또는 Shift)+클릭으로 여러 부품 선택">＋ 그룹</button><button type="button" data-tact="ungroup"${canU ? '' : ' disabled'} title="선택한 그룹 풀기(부품은 그대로)">그룹 해제</button></span></div>`;
 }
 export const treeHtml = (M, S, lay) => `${treeHead(M, S)}${treeNodes(M, S, lay).map((n) => `<div class="m3-node ${n.child ? 'child' : ''} d${n.depth ?? 0}${n.id.startsWith('group:') ? ' grp' : ''} ${n.sel ? 'sel' : ''} ${n.eye === 'off' ? 'hid' : ''}" role="button" tabindex="0"${n.sel ? ' aria-current="true"' : ''} data-node="${esc(n.id)}">${caret(n)}${eyeHtml(n)}<span class="m3-lbl"${renamable(n) ? ' data-lbl title="더블클릭: 이름 바꾸기"' : ''}>${esc(n.label)}</span> <span class="${n.child && !n.id.startsWith('group:') ? `m3-badge k-${esc(n.kind)}` : 'b'}">${esc(n.badge)}</span></div>`).join('')}`;
 export function renderFeatureTree(el, M, S, h, lay) {

@@ -532,7 +532,8 @@ main:has(#m3-start:not([hidden])) { grid-template-rows: minmax(0, 1fr); }
 .m3-zoom { border: 1px solid var(--m3-line); background: transparent; color: var(--m3-mut); border-radius: 4px; padding: 0 5px; font-size: 12px; line-height: 16px; cursor: pointer; margin-left: 4px; }
 .m3-zoom:hover { color: var(--m3-acc); border-color: var(--m3-acc); }
 .m3-big { position: fixed; inset: 0; z-index: 100; background: rgba(10,14,22,.55); display: grid; place-items: center; padding: 3vh 3vw; }
-.m3-big-in { width: 100%; height: 100%; max-width: 1600px; background: #fff; color: #20262f; border-radius: 10px; display: grid; grid-template-rows: auto minmax(0, 1fr); padding: 10px 14px 14px; box-shadow: 0 10px 40px rgba(0,0,0,.3); }
+.m3-big-in { width: min(1600px, 94vw); height: 92vh; max-width: 100%; max-height: 100%; min-width: 480px; min-height: 360px; resize: both; overflow: hidden;   /* 오른쪽 아래 모서리 = 창 크기 조절 */
+   background: #fff; color: #20262f; border-radius: 10px; display: grid; grid-template-rows: auto minmax(0, 1fr); padding: 10px 14px 14px; box-shadow: 0 10px 40px rgba(0,0,0,.3); }
 .m3-big-hd { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; font-size: 14px; }
 .m3-big-sp { flex: 1; }
 .m3-big-eq { font-size: 12.5px; display: flex; gap: 4px; align-items: center; }
@@ -540,15 +541,16 @@ main:has(#m3-start:not([hidden])) { grid-template-rows: minmax(0, 1fr); }
 .m3-big-cv { width: 100%; height: 100%; display: block; background: #fafbfc; border-radius: 6px; }
 .m3-big { grid-template: minmax(0, 1fr) / minmax(0, 1fr); }   /* 안쪽 창 높이 = 화면(내용 크기로 늘어나지 않게) */
 /* 큰 창 통합 — 2D(위, 전체 폭) + 길이 1D·폭 1D(아래 나란히). data-focus = 한 그림만 화면 가득 */
-.m3-big-grid { display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: minmax(0, 1.15fr) minmax(0, 1fr); gap: 10px; min-height: 0; }
+.m3-big-grid { display: flex; flex-direction: column; min-height: 0; }   /* 2D(위) ↕ 1D 줄(아래) — 끌기 막대로 높이 조절 */
+.m3-big-row { display: flex; min-height: 0; }   /* 길이 1D ↔ 폭 1D — 끌기 막대로 폭 조절 */
 .m3-big-c { display: grid; grid-template-rows: auto minmax(0, 1fr); min-height: 0; min-width: 0; overflow: hidden; }
 .m3-big-c .m3-big-cv { min-height: 0; min-width: 0; }   /* 캔버스 고유 크기가 칸을 밀어내지 않게 */
 .m3-big-c[data-k="map"] { grid-column: 1 / -1; }
 .m3-big-ct { display: flex; align-items: center; gap: 8px; font-size: 13px; margin-bottom: 4px; }
 .m3-big-ct button, .m3-big-hd button { border: 1px solid #d3d8e0; background: #fff; border-radius: 6px; padding: 3px 9px; cursor: pointer; font: inherit; font-size: 12px; }
-.m3-big-grid[data-focus="map"], .m3-big-grid[data-focus="prof"], .m3-big-grid[data-focus="wprof"] { grid-template-columns: 1fr; grid-template-rows: minmax(0, 1fr); }
-.m3-big-grid[data-focus="map"] .m3-big-c:not([data-k="map"]), .m3-big-grid[data-focus="prof"] .m3-big-c:not([data-k="prof"]), .m3-big-grid[data-focus="wprof"] .m3-big-c:not([data-k="wprof"]) { display: none; }
-.m3-big-grid[data-focus] .m3-big-c { grid-column: 1 / -1; }
+/* 한 그림만: 나머지 칸·막대 숨김(보이는 칸이 남은 자리를 채움) */
+.m3-big-grid[data-focus="map"] .m3-big-c:not([data-k="map"]), .m3-big-grid[data-focus="prof"] .m3-big-c:not([data-k="prof"]), .m3-big-grid[data-focus="wprof"] .m3-big-c:not([data-k="wprof"]), .m3-big-grid[data-focus] .m3-split, .m3-big-grid[data-focus="map"] > .m3-big-row { display: none; }
+
 
 /* 부품 속성 탭(기본 | 상세) */
 .m3-tabs { display: grid; grid-template-columns: 1fr 1fr; border-bottom: 1px solid var(--m3-line); margin: 4px 0 6px; }
@@ -811,3 +813,20 @@ body.booting::after { content: "불러오는 중…"; position: fixed; left: 50%
 .m3-blk > .m3-t { margin: -8px -8px 6px; padding: 6px 8px; background: var(--m3-head); color: var(--m3-headtx); border-bottom: 1px solid var(--m3-line); border-radius: 8px 8px 0 0; }
 .m3-simcard { background: var(--m3-simbg); }
 .m3-simcard .od-simh { font-weight: 700; }
+
+/* 칸 크기 조절 막대(pane-split.js) — 위아래(col) = 가로 막대, 좌우(row) = 세로 막대 */
+.m3-split { flex: none; position: relative; z-index: 2; touch-action: none; }
+.m3-split.col { height: 8px; margin: -1px 0; cursor: row-resize; }
+.m3-split.row { width: 8px; margin: 0 1px; cursor: col-resize; }
+.m3-split::after { content: ""; position: absolute; border-radius: 2px; background: transparent; transition: background .15s; }
+.m3-split.col::after { left: 30%; right: 30%; top: 3px; height: 2px; background: var(--m3-line, #d3d8e0); }
+.m3-split.row::after { top: 30%; bottom: 30%; left: 3px; width: 2px; background: #d3d8e0; }
+.m3-split:hover::after, .m3-split.on::after { background: var(--m3-acc, #1f6fd1); }
+.m3-res > .m3-split.col { margin: -5px 0; }   /* 결과 칸 사이 간격(gap) 안에 */
+@media (max-width: 1024px) { .m3-res > .m3-split { display: none; } }
+/* 기구 최적화 창: 설계 인자 ↕ 실행·결과 — 각 칸 안에서 스크롤 */
+.m3-mon-body > #m3-factor, .m3-mon-body > #m3-dock { overflow: auto; }
+.m3-mon .m3-faccard { min-height: 0; }
+.m3-mon.min .m3-mon-body > .m3-split { display: none; }
+/* 왼쪽 트리 제목 띠(결과 칸과 같은 모양) */
+.m3-tree > .m3-h { margin: -10px -10px 8px; padding: 7px 10px; background: var(--m3-head, #f3f5f9); border-bottom: 1px solid var(--m3-line); color: var(--m3-headtx, #3b4658); font-size: 12px; font-weight: 700; }

@@ -5,6 +5,7 @@
 // 점진 계산 갱신(1초마다)은 store 알림 없이 결과 패널·상태 띠·색지도만 다시 그린다(입력 중 속성 패널이 다시 그려지지 않게).
 import { getMech3d, getLedMesh, setLedMesh, saveLedIDB, applyPartMods, redetectContacts } from '../../engine/mech3d/runtime.js';
 import { createMonitor } from './monitor.js';
+import { mountSplit } from './pane-split.js';
 import { findLeds, supportPart, emitterFaceAway, autoLedGroup } from '../../engine/mech3d/led-detect.js';
 import { loadClear, saveClear, clearExportJson, clearImport, parseMaterialFile } from '../../model/material-io.js';
 import { setPartMaterial, setPartMaterialParam, CLEAR_BASE, applyClearEntry, clearEntryFromForm, editClearEntry, syncClearParts } from '../../engine/mech3d/materials.js';
@@ -155,6 +156,8 @@ export async function mount(ctx) {
   mountDockSplitter(document.querySelector('#m3-dock'), document.querySelector('#mech3d-wrap'));   // 아래 칸 높이 조절
   // ⑤ 기구 최적화 창(떠 있는 창) — 설계 인자 현황·기구 최적화 칸을 기본 화면에서 빼서 담음. 여닫기 = 명령줄 [5 기구 최적화]
   monitor ??= createMonitor({ host: $('#mech3d-wrap'), items: [$('#m3-factor'), $('#m3-dock')], onChange: (on) => { const b = document.querySelector('#m3-cmd [data-c="opt"]'); if (b) { b.classList.toggle('on', on); b.setAttribute('aria-pressed', String(on)); } if (on && A && !adState().open) adSetOpen(true); if (A) renderMarkers(); } });
+  // 기구 최적화 창 안: 설계 인자 ↕ 실행·결과 높이 조절(끌기 막대, 보는 사람별)
+  mountSplit([$('#m3-factor'), $('#m3-dock')], { key: 'uds.m3.monSplit', dir: 'col', min: 100, onChange: () => window.dispatchEvent(new Event('resize')) });
   mountFacSplitter(document.querySelector('#m3-factor'), document.querySelector('.m3-left'));   // 왼쪽 맨 아래(부품 속성 밑) 설계 인자 현황 높이 조절
   if (A && A.ctx.mspec === ctx.mspec) { A.ctx = ctx; return; }   // 같은 기구 — 그대로
   unmount();

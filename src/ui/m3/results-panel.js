@@ -1,3 +1,4 @@
+import { mountSplit } from './pane-split.js';
 // 결과 패널 — spec 2026-10-15 m3-cad-ui §2(시안 m3-ui-mockup 오른쪽):
 // ① 2D 광량 분포(관측면 펼침 s×w) + 평균 광량(목표 대비)·광 효율 ② 길이 1D 프로파일(목표선) + 길이 U ③ 폭 1D 프로파일(최저 창) + 폭 U.
 // update({ snap(progressive snapshot), observe(spec.mech3d.observe), message(안내 | ''), leds?: [{s, w}](LED 위치 — 프로파일 아래 표시) })
@@ -349,7 +350,7 @@ export function createResultsPanel(el, { onQuality = null, fileName = () => 'uds
   const gaugeHtml = (k) => `<div class="m3-gauge" data-r="${k}"><div class="f"></div><div class="tg"></div></div>`;
   el.innerHTML = `
     <div class="m3-msg" data-r="msg" hidden></div>
-    <div class="m3-blk"><div class="m3-t">2D 광량 분포 (관측면 펼침) <span><span data-r="mapsub"></span> <select data-r="quality" title="2D 분포·1D 프로파일 해상도 — 저 100×8칸(빠름) · 중 200×12칸(광자 ≈2배) · 고 400×16칸(광자 ≈4배)" aria-label="분포 화질">${QUALITY_OPTS.map(([v, t]) => `<option value="${v}">${t}</option>`).join('')}</select>  <button type="button" data-r="txt" title="2D 분포를 TXT(탭 구분, 최대 대비 %)로 저장">TXT</button> <button type="button" class="m3-zoom" data-zoom="map" title="큰 창으로 보기" aria-label="2D 광량 분포 확대">⤢</button></span></div>
+    <div class="m3-blk"><div class="m3-t">2D 광량 분포 (관측면 펼침) <span><span data-r="mapsub"></span> <select data-r="quality" title="2D 분포·1D 프로파일 해상도 — 저 100×8칸(빠름) · 중 200×12칸(광자 ≈2배) · 고 400×16칸(광자 ≈4배)" aria-label="분포 화질">${QUALITY_OPTS.map(([v, t]) => `<option value="${v}">${t}</option>`).join('')}</select>  <button type="button" class="m3-zoom" data-zoom="map" title="큰 창으로 보기" aria-label="2D 광량 분포 확대">⤢</button></span></div>
       <div class="m3-withm"><canvas class="m3-g" data-r="map" width="600" height="200"></canvas>
         <div class="m3-m"><div class="l">평균 광량</div><div class="v" data-r="avg">–</div><div class="s" data-r="avgs"></div>${gaugeHtml('avgg')}
           <div class="l" style="margin-top:6px">광 효율</div><div class="v sm" data-r="eff">–</div><div class="s">관측면 원뿔 안 / LED 총 방출</div><button type="button" class="m3-leak" data-r="leak" hidden title="누르면 3D 에서 가장 많이 새는 면을 강조"></button></div></div></div>
@@ -378,7 +379,6 @@ export function createResultsPanel(el, { onQuality = null, fileName = () => 'uds
     saveTxt(mapTxt(sn.G, st.map, { name: String(fileName() ?? 'uds'), quality: { low: '저', mid: '중', high: '고' }[last.observe?.quality ?? 'low'], photons: sn.photons, noise: st.relNoiseCell }), '2D분포');
   };
   const txt1D = (k = null) => { const ks = k ? [k] : ['prof', 'wprof'], L = ks.filter((x) => VIEW[x]); if (L.length) saveTxt(profileTxt(L.map((x) => ({ title: TITLE[x], v: VIEW[x] }))), k === 'wprof' ? '폭1D' : k === 'prof' ? '길이1D' : '1D프로파일'); };   // k = 그 그림만
-  q('txt').onclick = txt2D;
   // 1D 표시: 부드럽게면 평활 곡선(σ 1칸) + 원자료(raw), 가로축은 값이 있는 범위로
   const sm = (c, sig) => ({ ...c, ys: smoothCurve(Array.from(c.ys), sig), raw: Array.from(c.ys) });
   const plotView = (curves, tg, opt, sig = 1) => { const c = cropFinite(curves.map((x) => sm(x, sig)), opt.x0, opt.x1); return { curves: c.curves, tg, opt: { ...opt, x0: c.x0, x1: c.x1 } }; };
@@ -402,7 +402,7 @@ export function createResultsPanel(el, { onQuality = null, fileName = () => 'uds
       paint(k, cv);
     }
   };
-  const closeBig = () => { if (!big) return; big.el.remove(); document.removeEventListener('keydown', big.key); window.removeEventListener('resize', big.rs); big = null; };
+  const closeBig = () => { if (!big) return; big.ro?.disconnect(); big.el.remove(); document.removeEventListener('keydown', big.key); window.removeEventListener('resize', big.rs); big = null; };
   const setFocus = (k) => {
     big.focus = k; if (k) big.grid.dataset.focus = k; else delete big.grid.dataset.focus;   // 속성이 있으면(빈 값도) 한 그림 배치
     big.grid.querySelectorAll('[data-big-one]').forEach((b) => { const on = b.dataset.bigOne === k; b.textContent = on ? '↙ 모두 보기' : '⤢ 이 그림만'; b.title = on ? '2D·1D 를 한 화면에' : '이 그림만 화면 가득'; });
@@ -414,7 +414,7 @@ export function createResultsPanel(el, { onQuality = null, fileName = () => 'uds
     ov.className = 'm3-big'; ov.setAttribute('role', 'dialog'); ov.setAttribute('aria-modal', 'true'); ov.setAttribute('aria-label', '광량 분포 2D·1D');
     const cell = (k) => `<div class="m3-big-c" data-k="${k}"><div class="m3-big-ct"><b>${TITLE[k]}</b><span class="m3-big-sp"></span>${k === 'map' ? '<label class="m3-big-eq"><input type="checkbox" data-big-eq> 실제 비율</label>' : ''}<button type="button" data-big-txt="${k}" title="${k === 'map' ? '2D 분포 표(탭 구분, 최대 대비 %)' : `${TITLE[k]} 표(원자료 %, 지정 점 곡선 포함)`}">TXT</button><button type="button" data-big-one="${k}">⤢ 이 그림만</button></div><canvas class="m3-big-cv" data-big-cv="${k}"></canvas></div>`;
     ov.innerHTML = `<div class="m3-big-in"><div class="m3-big-hd"><b>광량 분포 — 2D · 1D</b><span class="mut" style="font-size:12px">2D 클릭 = 그 점 기준 1D 곡선(주황)</span><span class="m3-big-sp"></span><button type="button" data-big-close>닫기 (Esc)</button></div>
-      <div class="m3-big-grid">${KINDS.map(cell).join('')}</div></div>`;
+      <div class="m3-big-grid">${cell('map')}<div class="m3-big-row">${cell('prof')}${cell('wprof')}</div></div></div>`;
     document.body.appendChild(ov);
     const cvs = Object.fromEntries(KINDS.map((k) => [k, ov.querySelector(`[data-big-cv="${k}"]`)]));
     big = { el: ov, cvs, grid: ov.querySelector('.m3-big-grid'), focus: null, equal: false, key: (e) => { if (e.key === 'Escape') { if (big.focus) setFocus(null); else closeBig(); } }, rs: () => paintBig() };
@@ -427,9 +427,16 @@ export function createResultsPanel(el, { onQuality = null, fileName = () => 'uds
     ov.querySelector('[data-big-close]').onclick = closeBig;
     const eq = ov.querySelector('[data-big-eq]'); eq.onchange = () => { big.equal = eq.checked; paint('map', cvs.map); };
     wireMapHover(cvs.map); cvs.map._onPin = onPin; wireHover(cvs.prof); wireHover(cvs.wprof);
+    // 창 안 크기 조절: 2D ↕ 1D(높이) · 길이 1D ↔ 폭 1D(폭) — 끌기 막대(비율 기억). 창 자체 = 오른쪽 아래 모서리(CSS resize)
+    const C = (k) => ov.querySelector(`.m3-big-c[data-k="${k}"]`);
+    mountSplit([C('map'), ov.querySelector('.m3-big-row')], { key: 'uds.m3.bigV', dir: 'col', min: 120, onChange: () => paintBig() });
+    mountSplit([C('prof'), C('wprof')], { key: 'uds.m3.bigH', dir: 'row', min: 160, onChange: () => paintBig() });
+    if (typeof ResizeObserver !== 'undefined') { big.ro = new ResizeObserver(() => paintBig()); big.ro.observe(ov.querySelector('.m3-big-in')); }
     setFocus(null);
   }
   el.addEventListener('click', (e) => { const b = e.target.closest('[data-zoom]'); if (b) openBig(); });
+  // 메인 결과 칸 높이 조절(2D · 길이 1D · 폭 1D 사이 끌기 막대) — 전체 높이는 그대로, 비율만(보는 사람별)
+  mountSplit([...el.querySelectorAll(':scope > .m3-blk')], { key: 'uds.m3.resSplit', dir: 'col', min: 110, onChange: () => { if (last) update(last); } });
   let last = null;
   const fill = (g, pct, ok, tgPct) => {
     const f = g.querySelector('.f'), w = `${Math.max(0, Math.min(100, pct)).toFixed(0)}%`;
