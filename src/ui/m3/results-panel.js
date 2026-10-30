@@ -39,12 +39,12 @@ const lutIndex = (t) => Math.max(0, Math.min(255, Math.round(t * 255)));
 
 // 1D 프로파일(v2 평판 화면 수준) — 세로 = 최대 대비 %(최저·목표 아래까지 자동 확대, 10% 격자), 가로 = mm 눈금 격자,
 // 목표 하한(빨간 점선 + 값), LED 위치(아래 노란 삼각형), 최저점 표시(값·위치), 마우스 위치 읽기(hover = 칸 번호).
-// curves = [{ ys(0~1, NaN = 끊김), color, dash?, name, raw?(평활 전 원자료 — 흐린 가는 선, 최저점·마우스 값은 원자료) }] — 첫 곡선이 판정 대상(최저점 표시). 모든 치수는 dpr 배
+// curves = [{ ys(0~1 원자료, NaN = 끊김), color, dash?, name, band?(잡음 띠) }] — 첫 곡선이 판정 대상(최저점 표시). 모든 치수는 dpr 배
 const niceStep = (span, want) => { const raw = span / want, p = 10 ** Math.floor(Math.log10(raw)); for (const m of [1, 2, 5, 10]) if (m * p >= raw) return m * p; return 10 * p; };
 // 세로 범위(%): 최저·목표보다 5% 아래를 10% 단위로 내림, 위 = 102 — 순수
 export function plotRange(curves, tg) {
   let mn = 100;
-  for (const c of curves) for (const v of c.raw ?? c.ys) if (Number.isFinite(v)) mn = Math.min(mn, v * 100);
+  for (const c of curves) for (const v of c.ys) if (Number.isFinite(v)) mn = Math.min(mn, v * 100);
   if (Number.isFinite(tg)) mn = Math.min(mn, tg * 100);
   return { y0: Math.max(0, Math.floor((mn - 5) / 10) * 10), y1: 102 };
 }
@@ -99,19 +99,13 @@ function drawPlot(cv, curves, tg, { x0, x1, xl, leds = [] }, dpr = 1, hover = nu
         x.closePath(); x.fill(); x.globalAlpha = 1;
       }
     }
-    if (c.raw) {   // 원자료(흐린 가는 선) 위에 평활 곡선
-      x.globalAlpha = 0.35; x.strokeStyle = c.color; x.lineWidth = dpr; x.setLineDash([]);
-      x.beginPath(); let pn = false;
-      c.raw.forEach((v, i) => { if (!Number.isFinite(v)) { pn = false; return; } if (pn) x.lineTo(X(i), Y(v)); else { x.moveTo(X(i), Y(v)); pn = true; } });
-      x.stroke(); x.globalAlpha = 1;
-    }
     x.strokeStyle = c.color; x.lineWidth = (c.dash ? 1.2 : 1.8) * dpr; x.setLineDash(c.dash ? c.dash.map((d) => d * dpr) : []);
     x.beginPath(); let pen = false;
     c.ys.forEach((v, i) => { if (!Number.isFinite(v)) { pen = false; return; } if (pen) x.lineTo(X(i), Y(v)); else { x.moveTo(X(i), Y(v)); pen = true; } });
     x.stroke(); x.setLineDash([]);
   }
   // 최저점(첫 곡선)
-  const main = curves[0], mys = main.raw ?? main.ys, n = mys.length, Xm = (i) => pl + ((i + 0.5) / n) * PW, at = (i) => x0 + ((i + 0.5) / n) * (x1 - x0);
+  const main = curves[0], mys = main.ys, n = mys.length, Xm = (i) => pl + ((i + 0.5) / n) * PW, at = (i) => x0 + ((i + 0.5) / n) * (x1 - x0);
   let im = -1; mys.forEach((v, i) => { if (Number.isFinite(v) && (im < 0 || v < mys[im])) im = i; });
   if (im >= 0) {   // 최저점 = 원자료(판정과 같은 값)
     x.fillStyle = '#d9473a'; x.beginPath(); x.arc(Xm(im), Y(mys[im]), 3.5 * dpr, 0, 2 * Math.PI); x.fill();
@@ -133,7 +127,7 @@ function drawPlot(cv, curves, tg, { x0, x1, xl, leds = [] }, dpr = 1, hover = nu
   if (hover != null && hover >= 0 && hover < n) {
     const hx = Xm(hover);
     x.strokeStyle = 'rgba(128,140,160,.8)'; x.lineWidth = dpr; x.setLineDash([2 * dpr, 2 * dpr]); x.beginPath(); x.moveTo(hx, pt); x.lineTo(hx, pt + PH); x.stroke(); x.setLineDash([]);
-    const lines = [`${xl.split(' ')[0]} = ${at(hover).toFixed(1)} mm`, ...curves.map((c) => `${c.name}: ${Number.isFinite(c.ys[hover]) ? `${(c.ys[hover] * 100).toFixed(1)}%${c.raw && Number.isFinite(c.raw[hover]) ? ` (원자료 ${(c.raw[hover] * 100).toFixed(1)}%)` : ''}` : '–'}`)];
+    const lines = [`${xl.split(' ')[0]} = ${at(hover).toFixed(1)} mm`, ...curves.map((c) => `${c.name}: ${Number.isFinite(c.ys[hover]) ? `${(c.ys[hover] * 100).toFixed(1)}%` : '–'}`)];
     const bw = Math.max(...lines.map((l) => x.measureText(l).width)) + 10 * dpr, bh = lines.length * 13 * dpr + 6 * dpr;
     const bx = hx + bw + 8 * dpr > W - pr ? hx - bw - 6 * dpr : hx + 6 * dpr;
     x.fillStyle = 'rgba(20,26,38,.88)'; x.fillRect(bx, pt + 2 * dpr, bw, bh);
@@ -186,25 +180,7 @@ export function cropFinite(curves, x0, x1) {
   for (const c of curves) c.ys.forEach((v, k) => { if (Number.isFinite(v)) { a = Math.min(a, k); b = Math.max(b, k); } });
   if (b < 0 || (a === 0 && b === n - 1)) return { curves, x0, x1 };
   const dx = (x1 - x0) / n;
-  return { curves: curves.map((c) => ({ ...c, ys: Array.from(c.ys).slice(a, b + 1), ...(c.raw ? { raw: Array.from(c.raw).slice(a, b + 1) } : {}) })), x0: x0 + a * dx, x1: x0 + (b + 1) * dx };
-}
-// 표시용 평활 — 가우스(σ 칸, ±3σ), NaN 칸은 건너뛰고 자리는 NaN 그대로. 판정(U)에는 쓰지 않음 — 순수
-export function smoothCurve(ys, sigma) {
-  const n = ys.length, out = new Array(n), R = Math.max(1, Math.ceil(3 * sigma));
-  for (let i = 0; i < n; i++) {
-    if (!Number.isFinite(ys[i])) { out[i] = NaN; continue; }
-    let s = 0, w = 0;
-    for (let k = Math.max(0, i - R); k <= Math.min(n - 1, i + R); k++) if (Number.isFinite(ys[k])) { const g = Math.exp(-((k - i) ** 2) / (2 * sigma * sigma)); s += g * ys[k]; w += g; }
-    out[i] = s / w;
-  }
-  return out;
-}
-// 1D 평활 폭(칸, 순수, 2026-10-30) — 칸 잡음 relNoise 를 평활 뒤 ≈ 0.4% 로(가우스 σ 칸 평균 ≈ 2√π·σ 칸 → 잡음 /√(2√πσ)).
-// 상한 = LED 피치/8 · 3 mm(실제 LED 리플은 남김), 하한 0.5칸. 전에는 1칸 고정이라 고화질(1.1 mm 칸)은 거의 안 다듬고 저화질(4.4 mm)은 리플까지 깎았음
-export function smoothSigma({ relNoise, ds, pitch = null }) {
-  const want = Number.isFinite(relNoise) && relNoise > 0 ? (relNoise / 0.004) ** 2 / (2 * Math.sqrt(Math.PI)) : 1;
-  const capMm = Math.min(3, pitch > 0 ? pitch / 8 : 3);
-  return Math.max(0.5, Math.min(want, capMm / ds));
+  return { curves: curves.map((c) => ({ ...c, ys: Array.from(c.ys).slice(a, b + 1) })), x0: x0 + a * dx, x1: x0 + (b + 1) * dx };
 }
 // 2D 분포 TXT(탭 구분) — 머리말(#) + 첫 줄 s 칸 중심(mm), 다음 줄부터 w 칸 중심(위 = +w 부터)과 값(최대 대비 %, 관측면 밖 = 빈칸) — 순수
 export function mapTxt(G, map, { name = '', quality = '', photons = null, noise = null } = {}) {
@@ -240,12 +216,12 @@ export function lineTxt(G, map, pin, { name = '', quality = '', photons = null }
 // 1D 프로파일 TXT(탭 구분) — 그림마다 '# 제목' + 머리줄(x 이름, 곡선 이름) + x 칸 중심과 곡선별 값(최대 대비 %, 원자료 raw 우선, 값 없음 = 빈칸).
 // list = [{ title, v: { curves, opt:{ x0, x1, xl } } | null }] — v 없는 그림은 건너뜀 — 순수
 export function profileTxt(list) {
-  const f = (v) => String(+v.toFixed(3)), out = ['# UDS 1D 프로파일 — 값 = 최대 대비 %(평활 전 원자료) · 빈칸 = 값 없음'];
+  const f = (v) => String(+v.toFixed(3)), out = ['# UDS 1D 프로파일 — 값 = 최대 대비 %(원자료, 화면 그래프와 같음) · 빈칸 = 값 없음'];
   for (const { title, v } of list) {
     if (!v?.curves?.length) continue;
     const { x0, x1, xl } = v.opt, n = v.curves[0].ys.length, dx = (x1 - x0) / n;
     out.push('', `# ${title}`, [xl, ...v.curves.map((c) => c.name)].join('\t'));
-    for (let i = 0; i < n; i++) out.push([f(x0 + (i + 0.5) * dx), ...v.curves.map((c) => { const y = (c.raw ?? c.ys)[i]; return Number.isFinite(y) ? (y * 100).toFixed(2) : ''; })].join('\t'));
+    for (let i = 0; i < n; i++) out.push([f(x0 + (i + 0.5) * dx), ...v.curves.map((c) => { const y = c.ys[i]; return Number.isFinite(y) ? (y * 100).toFixed(2) : ''; })].join('\t'));
   }
   return out.join('\n') + '\n';
 }
@@ -395,7 +371,7 @@ export function createResultsPanel(el, { onQuality = null, fileName = () => 'uds
   q('map')._onPin = onPin;
   q('quality').onchange = (e) => onQuality?.(e.target.value);
   q('leak').onclick = () => onLeak?.();
-  // 부드럽게 = 늘 켬(2026-10-30 체크박스 없앰) — 2D 는 칸 중심 사이 선형 보간, 1D 는 잡음에 맞춘 평활(smoothSigma) 위에 원자료(흐린 선). 판정·최저점은 원자료
+  // 표시 = 원자료 그대로(2026-10-30) — 1D 평활은 LED 리플 높이를 깎아 그림이 TXT 와 달랐음(예: 76~100% → 81~96%). 2D 는 칸 중심 값 그대로, 칸 사이만 선형 보간
   const saveTxt = (txt, tag) => {
     const nm = String(fileName() ?? 'uds'), a = document.createElement('a'), url = URL.createObjectURL(new Blob(['\ufeff' + txt], { type: 'text/plain;charset=utf-8' }));
     a.href = url; a.download = `${nm.replace(/[\\/:*?"<>|]/g, '_')}-${tag}.txt`; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 1000);
@@ -409,9 +385,8 @@ export function createResultsPanel(el, { onQuality = null, fileName = () => 'uds
     saveTxt(lineTxt(sn.G, st.map, pin, { name: String(fileName() ?? 'uds'), quality: { low: '저', mid: '중', high: '고' }[last.observe?.quality ?? 'low'], photons: sn.photons }), '선택선');
   };
   const txt1D = (k = null) => { const ks = k ? [k] : ['prof', 'wprof'], L = ks.filter((x) => VIEW[x]); if (L.length) saveTxt(profileTxt(L.map((x) => ({ title: TITLE[x], v: VIEW[x] }))), k === 'wprof' ? '폭1D' : k === 'prof' ? '길이1D' : '1D프로파일'); };   // k = 그 그림만
-  // 1D 표시: 부드럽게면 평활 곡선(σ 1칸) + 원자료(raw), 가로축은 값이 있는 범위로
-  const sm = (c, sig) => ({ ...c, ys: smoothCurve(Array.from(c.ys), sig), raw: Array.from(c.ys) });
-  const plotView = (curves, tg, opt, sig = 1) => { const c = cropFinite(curves.map((x) => sm(x, sig)), opt.x0, opt.x1); return { curves: c.curves, tg, opt: { ...opt, x0: c.x0, x1: c.x1 } }; };
+  // 1D 표시: 원자료 그대로(평활 없음 — 그림 = TXT), 가로축은 값이 있는 범위로
+  const plotView = (curves, tg, opt) => { const c = cropFinite(curves.map((x) => ({ ...x, ys: Array.from(x.ys) })), opt.x0, opt.x1); return { curves: c.curves, tg, opt: { ...opt, x0: c.x0, x1: c.x1 } }; };
   // 큰 창(⤢, 어느 그림에서 눌러도) — 2D(위) + 길이 1D·폭 1D(아래)를 한 화면에. 그림마다 [⤢ 이 그림만] ↔ [모두 보기], 2D·1D TXT 저장.
   // 계산이 이어지면 같이 갱신 · 2D 는 [실제 비율] 전환 · 2D 클릭 = 지정 점 · Esc(한 그림만 → 모두 → 닫기)·바깥 클릭·닫기
   const KINDS = ['map', 'prof', 'wprof'];
@@ -507,15 +482,12 @@ export function createResultsPanel(el, { onQuality = null, fileName = () => 'uds
     if (pin && !(pi >= 0 && pi < G.ns && pj >= 0 && pj < G.nw)) pin = null;
     const pp = pin ? pointProfiles(G, st.map, pi, pj) : null, ring = G.closed ? '원주' : '길이', rad = G.closed ? '반경(폭)' : '폭';
     VIEW.map = { G, map: st.map, leds, pin, smooth: true };
-    // 평활 폭: 길이 = 잡음·LED 피치(중앙 간격)에 맞춤, 폭 = 잡음·관측 폭/8 에 맞춤
-    const ls = [...new Set(leds.map((p) => +(+p.s).toFixed(2)))].sort((a, b) => a - b), gp = ls.slice(1).map((v, i) => v - ls[i]).sort((a, b) => a - b), pitch = gp.length ? gp[Math.floor(gp.length / 2)] : null;
-    const sigL = smoothSigma({ relNoise: st.relNoise, ds: G.ds, pitch }), sigW = smoothSigma({ relNoise: st.relNoise, ds: G.cell, pitch: G.nw * G.cell });
-    VIEW.prof = plotView([{ ys: Array.from(st.profile, (v) => v / pm), color: '#1f6fd1', name: '폭 평균', band: st.relNoise ?? 0 }, ...(pp ? [{ ys: Array.from(pp.along), color: PIN_COLOR, name: `지정 점 w=${pin.w.toFixed(1)}` }] : [])], observe.targetLen, { x0: 0, x1: G.L, xl: 's (mm)', leds: leds.map((p) => p.s) }, sigL);
+    VIEW.prof = plotView([{ ys: Array.from(st.profile, (v) => v / pm), color: '#1f6fd1', name: '폭 평균', band: st.relNoise ?? 0 }, ...(pp ? [{ ys: Array.from(pp.along), color: PIN_COLOR, name: `지정 점 w=${pin.w.toFixed(1)}` }] : [])], observe.targetLen, { x0: 0, x1: G.L, xl: 's (mm)', leds: leds.map((p) => p.s) });
     q('psub').innerHTML = `${pin ? `폭 평균 + 지정 점(주황, ${ring} 방향) · 같은 점 다시 클릭 = 해제 <button type="button" class="m3-pintxt" data-pin-txt title="고른 점을 지나는 길이·폭 방향 원자료(평활 없음, 2D 최대 대비 %)">선택 선 TXT</button>` : '폭 평균 · 2D 클릭 = 그 점 기준 곡선 추가'} · 옅은 띠 = 계산 잡음 범위`;
     paint('map', q('map')); paint('prof', q('prof'));
     gauge('ul', st.Ulen, observe.targetLen);
     if (pp && (st.Uwid == null || !st.win)) {   // 폭 판정이 없어도 지정 점의 폭(원형 = 반경) 방향 곡선은 보여 줌
-      VIEW.wprof = plotView([{ ys: Array.from(pp.across), color: PIN_COLOR, name: `지정 점 s=${pin.s.toFixed(1)}` }], null, { x0: G.w0, x1: G.w0 + G.nw * G.cell, xl: 'w (mm)', leds: [] }, sigW);
+      VIEW.wprof = plotView([{ ys: Array.from(pp.across), color: PIN_COLOR, name: `지정 점 s=${pin.s.toFixed(1)}` }], null, { x0: G.w0, x1: G.w0 + G.nw * G.cell, xl: 'w (mm)', leds: [] });
       paint('wprof', q('wprof')); resetGauge(q('uwg'));
       q('uw').textContent = '–'; q('uw').className = 'v'; q('uwj').textContent = '폭 판정 불가(폭이 격자 2칸 미만)'; q('wsub').textContent = `지정 점 s = ${pin.s.toFixed(1)} mm · ${rad} 방향`;
     } else if (st.Uwid == null || !st.win) {
@@ -525,7 +497,7 @@ export function createResultsPanel(el, { onQuality = null, fileName = () => 'uds
       // 판정 = 최저 창(실선), 비교 = 길이 전체 평균(점선) — 각자 최대 = 100%
       const wp = windowProfile(G, snap.sum, st.win[0], st.win[1]), wm = finiteMax(wp), wa = windowProfile(G, snap.sum, 0, G.ns), wam = finiteMax(wa);
       VIEW.wprof = plotView([{ ys: Array.from(wp, (v) => v / wm), color: '#1f6fd1', name: `최저 창 s=${st.sWorst.toFixed(0)}`, band: st.relNoise ?? 0 }, { ys: Array.from(wa, (v) => v / wam), color: '#3fae7a', dash: [4, 3], name: '길이 전체 평균' }, ...(pp ? [{ ys: Array.from(pp.across), color: PIN_COLOR, name: `지정 점 s=${pin.s.toFixed(1)}` }] : [])],
-        observe.targetWid, { x0: G.w0, x1: G.w0 + G.nw * G.cell, xl: 'w (mm)', leds: [...new Set(leds.map((p) => +p.w.toFixed(2)))] }, sigW);
+        observe.targetWid, { x0: G.w0, x1: G.w0 + G.nw * G.cell, xl: 'w (mm)', leds: [...new Set(leds.map((p) => +p.w.toFixed(2)))] });
       paint('wprof', q('wprof'));
       gauge('uw', st.Uwid, observe.targetWid);
       q('wsub').textContent = `최저 창 s = ${st.sWorst.toFixed(1)} mm${pp ? ` · 지정 점 s = ${pin.s.toFixed(1)} mm(주황, ${rad} 방향)` : ''}`;

@@ -351,26 +351,23 @@ done();
   const p = pointProfiles(G, map, 2, 1), q0 = pointProfiles(G, map, 1, 0);
   const near = (a, b) => a.length === b.length && a.every((v, k) => (Number.isNaN(b[k]) ? Number.isNaN(v) : Math.abs(v - b[k]) < 1e-9));
   console.log(near(p.along, [4 / 8, 8 / 8, 6 / 8]) && near(p.across, [1 / 6, 1]) && near(q0.along, [2 / 2, NaN, 1 / 2]) && near(q0.across, [NaN, 1]) ? 'PASS 지정 점 프로파일: 길이(w 고정)·폭(s 고정) 곡선 · 관측면 밖 = 끊김' : (process.exitCode = 1, `FAIL 지정 점 프로파일 ${JSON.stringify([...p.along])} ${JSON.stringify([...q0.across])}`)); }
-{ const { cropFinite, smoothCurve, mapTxt } = await import('../src/ui/m3/results-panel.js');
+{ const { cropFinite, mapTxt } = await import('../src/ui/m3/results-panel.js');
   // 폭 프로파일 가로축 = 값이 있는 칸 범위로(양끝 NaN 칸 잘라냄 — 모든 곡선 기준)
   const c = cropFinite([{ ys: [NaN, 0.5, 1, NaN] }, { ys: [NaN, NaN, 0.8, NaN] }], -2, 2);
   const okC = c.x0 === -1 && c.x1 === 1 && c.curves[0].ys.length === 2 && c.curves[1].ys[0] !== c.curves[1].ys[0] && c.curves[1].ys[1] === 0.8 && cropFinite([{ ys: [NaN, NaN] }], 0, 1).x1 === 1;
-  // 평활(표시용): 가우스 σ 칸, NaN 은 건너뛰고 자리 유지, 상수는 그대로, 튀는 점은 줄어듦
-  const sm = smoothCurve([1, 1, 1, 2, 1, 1, 1, NaN, 1], 1);
-  const okS = Math.abs(smoothCurve([0.7, 0.7, 0.7], 1)[1] - 0.7) < 1e-12 && sm[3] < 1.6 && sm[3] > 1 && Number.isNaN(sm[7]) && Math.abs(sm[8] - 1) < 1e-9;
   // 2D TXT: 머리말 + w(위→아래) × s 표, 최대 = 100(%), 관측면 밖 = 빈칸
   const G = { ns: 2, nw: 2, ds: 5, cell: 1, w0: -1, L: 10, valid: [1, 1, 0, 1] }, t = mapTxt(G, [1, 2, 9, 4], { name: 'x' }), rows = t.split('\n');
   const okT = t.startsWith('#') && rows.some((r) => r === 'w\\s(mm)\t2.5\t7.5') && rows.some((r) => r === '0.5\t50.00\t100.00') && rows.some((r) => r === '-0.5\t25.00\t');
   // 2D TXT = 그림과 같은 범위(관측면 밖 빈 줄 뺌, 2026-10-30): 4줄 중 가운데 2줄만 유효 → 2줄만
   const G4 = { ns: 2, nw: 4, ds: 5, cell: 1, w0: -2, L: 10, valid: [0, 1, 1, 0, 0, 1, 1, 0] }, t4 = mapTxt(G4, [0, 1, 2, 0, 0, 3, 4, 0]).split(String.fromCharCode(10)).filter((r) => r && !r.startsWith('#')).slice(1);
   const okCrop = t4.length === 2 && t4[0].startsWith('0.5' + String.fromCharCode(9)) && t4[1].startsWith('-0.5' + String.fromCharCode(9));
-  console.log(okC && okS && okT && okCrop ? 'PASS 폭 범위 맞춤 · 표시 평활(σ칸, NaN 유지) · 2D 분포 TXT(그림과 같은 범위)' : (process.exitCode = 1, `FAIL 폭/평활/TXT ${okC} ${okS} ${okT} crop ${okCrop} ${JSON.stringify(t4)} ${JSON.stringify(sm)} ${JSON.stringify(rows)}`)); }
+  console.log(okC && okT && okCrop ? 'PASS 폭 범위 맞춤 · 2D 분포 TXT(그림과 같은 범위)' : (process.exitCode = 1, `FAIL 폭/TXT ${okC} ${okT} crop ${okCrop} ${JSON.stringify(t4)} ${JSON.stringify(rows)}`)); }
 { const { mapViewG } = await import('../src/ui/m3/results-panel.js');
   const G = { ns: 2, nw: 4, cell: 1, w0: -2, valid: [0, 1, 1, 0, 0, 0, 1, 0] }, v = mapViewG(G), e = mapViewG({ ns: 1, nw: 2, cell: 1, w0: 0, valid: [0, 0] });
   console.log(v.w0 === -1 && v.nw === 2 && v.jA === 1 && v.jB === 2 && mapViewG(G) === v && e.nw === 2 && e.jA === 0 ? 'PASS 2D 표시 폭 = 값 있는 w 줄만' : (process.exitCode = 1, `FAIL 2D 폭 ${JSON.stringify(v)}`)); }
 { const { profileTxt } = await import('../src/ui/m3/results-panel.js');
-  // 1D TXT: 그림마다 머리말 + x 칸 중심 · 곡선별 %(원자료 raw 우선, 없음 = 빈칸)
-  const t = profileTxt([{ title: '길이 방향 1D', v: { curves: [{ name: '폭 평균', ys: [0.9, 1], raw: [0.8, 1] }, { name: 'B', ys: [NaN, 0.5] }], opt: { x0: 0, x1: 10, xl: 's (mm)' } } }, { title: '폭', v: null }]);
+  // 1D TXT: 그림마다 머리말 + x 칸 중심 · 곡선별 %(그림 = 원자료 그대로, 없음 = 빈칸)
+  const t = profileTxt([{ title: '길이 방향 1D', v: { curves: [{ name: '폭 평균', ys: [0.8, 1] }, { name: 'B', ys: [NaN, 0.5] }], opt: { x0: 0, x1: 10, xl: 's (mm)' } } }, { title: '폭', v: null }]);
   const L = t.split('\n');
   console.log(L.includes('# 길이 방향 1D') && L.includes('s (mm)\t폭 평균\tB') && L.includes('2.5\t80.00\t') && L.includes('7.5\t100.00\t50.00') && !t.includes('# 폭') ? 'PASS 1D 프로파일 TXT(원자료 %, 없는 그림 생략)' : (process.exitCode = 1, `FAIL 1D TXT ${JSON.stringify(L)}`)); }
 { const { clampRect } = await import('../src/ui/m3/monitor.js');
@@ -435,12 +432,6 @@ done();
   const P = (role, untrace) => ({ ...setPartMaterial(defaultPart(0, 'x', 1), 'opaque'), ...(role ? { role } : {}), ...(untrace ? { untrace } : {}) });
   const a = stageAvailability({ parts: [P(), P('light'), P(null, true), P()], light: { kind: 'manual' }, observe: { faces: [] } }, { non25: [0, 0, 0, 0] });
   console.log(a.housing.parts.join() === '0,3' ? 'PASS ④ 대상 부품: 광원으로 옮긴 LED·추적 제외 부품 빼고' : (process.exitCode = 1, `FAIL ④ 대상 ${a.housing.parts}`)); }
-{ const { smoothSigma } = await import('../src/ui/m3/results-panel.js');
-  // 평활 폭(칸) = 잡음에 맞춰(잡음 1% → 평활 후 ≈ 0.4%) · 상한 = LED 피치/8 · 3 mm · 하한 0.5칸 — 화질(칸 크기)이 달라도 mm 로는 같게
-  const lo = smoothSigma({ relNoise: 0.01, ds: 4.4, pitch: 23 }), hi = smoothSigma({ relNoise: 0.01, ds: 1.1, pitch: 23 });
-  const okMm = hi * 1.1 > 1 && lo * 4.4 <= 23 / 8 + 1e-9;   // 고화질은 1 mm 넘게(전: 1.1 mm 고정 1칸), 저화질은 피치/8 이하(전: 4.4 mm — 리플 절반 깎음)
-  console.log(hi * 1.1 <= 23 / 8 + 1e-9 && hi > 1 && lo >= 0.5 && smoothSigma({ relNoise: 0.002, ds: 1, pitch: 23 }) === 0.5 && smoothSigma({ relNoise: 0.05, ds: 1, pitch: null }) === 3 && okMm
-    ? `PASS 1D 평활 폭: 고화질 ${(hi * 1.1).toFixed(2)} mm · 저화질 ${(lo * 4.4).toFixed(2)} mm (피치 23 → 상한 2.9 mm)` : (process.exitCode = 1, `FAIL 평활 폭 ${lo} ${hi}`)); }
 { // 기구 최적화 창(2026-10-30): 계산 순서(위치 → 케이스 면 → 형상 → Milky) · 적용한 항목 = 고정(다시 최적화 단추) · 오른쪽 모니터(진행 줄·지표·기록)
   const { STAGES, factorBoardHtml, monitorHtml } = await import('../src/ui/m3/opt-dash.js');
   const order = STAGES.map(([k]) => k).join();
