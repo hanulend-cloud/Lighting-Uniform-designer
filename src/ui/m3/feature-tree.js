@@ -46,7 +46,8 @@ export function treeNodes(M, S, lay) {
     node('leds', `LED ×${n}`, L.kind === 'manual' ? (L.manual.rows === 2 ? `${rw(L.manual)} ${pit(L.manual.pitch)}` : pit(L.manual.pitch)) : failed ? '배치 편집 실패' : vt ? (Array.isArray(vt.positions) ? 'STEP 편집' : `자동 ${rw(vt)} ${pit(vt.pitch)}`) : `${L.spec.beam}°`, true, 'led', L.kind === 'step' ? (S.hideLeds ? 'off' : 'on') : undefined);
   }
   const ln = S.line;
-  node('obs', '▾ 관측면', ln ? `${LINE_KIND[ln.kind] ?? ln.kind} ${ln.length.toFixed(0)}×${ln.width.toFixed(0)}` : O.faces.length ? '인식 중' : '미지정');
+  // 관측면(하위 노드 없음 — ▾ 뺌): 라인 종류·길이×폭 mm · 면 수 / 인식 실패 / 미지정
+  node('obs', '관측면', ln ? `${LINE_KIND[ln.kind] ?? ln.kind} ${ln.length.toFixed(0)}×${ln.width.toFixed(0)} mm` : S.lineErr && O.faces.length ? '라인 인식 실패' : O.faces.length ? `면 ${O.faces.length}개 · 인식 중` : '미지정 — 클릭');
   return out;
 }
 // 그룹 연산(순수, 2026-10-30) — groups = [{ id, name, parts:[번호] }]. 새 그룹의 부품은 다른 그룹에서 빠지고, 빈 그룹은 지움

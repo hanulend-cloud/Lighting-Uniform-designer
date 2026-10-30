@@ -876,3 +876,7 @@ body.booting::after { content: "불러오는 중…"; position: fixed; left: 50%
 .m3-right > .m3-simcard { overflow: auto; }
 .m3-right > .m3-psplit.col { margin: -6px 0; }
 @media (max-width: 1024px) { .m3-right > .m3-psplit { display: none; } .m3-right > .m3-simcard, .m3-right > .m3-res { flex: none !important; } }
+/* 관측면 속성: 목표와 지금 결과 표 */
+.m3-obs-t { width: 100%; font-size: 12px; }
+.m3-obs-t input[type=number] { width: 58px; }
+.m3-obs-t th:first-child { text-align: left; font-weight: 500; }

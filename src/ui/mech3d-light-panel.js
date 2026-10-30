@@ -214,19 +214,35 @@ export function renderLedProps(el, m, ui, h) {
 // ui = { pick, lineInfo, lineErr, auto:{cellS,cellW,winS}|null, dir }, h = { onPick, onClearObs(), onRetryLine(), onObsDir(v|null), onObs(key, v|null) }
 export function renderObserveProps(el, m, ui, h) {
   const O = m.observe, R = ui.result ?? null, tab = LP_TAB.obs;
-  const res = (v, tg) => (Number.isFinite(v) ? `<b class="${v + 1e-9 >= tg ? 'ok' : 'bad'}">${(Math.floor(v * 100 + 1e-9) / 100).toFixed(2)}</b> <span class="mut">${v + 1e-9 >= tg ? '목표 통과' : `목표까지 ${(tg - v).toFixed(2)}`}</span>` : '<span class="mut">계산 중</span>');
-  const basic = `<div class="m3-card"><div class="m3-row">${pickBtn(ui, 'obs', '👁 관측면 클릭 (추가/제거)')} <span class="mut">면 ${O.faces.length}개</span> ${O.faces.length ? '<button data-lp-clear>비우기</button>' : ''}</div>
-      <div class="m3-row mut">${O.faces.length ? '3D 의 하늘색 테두리 = 관측면 · 화살표 = 보는 방향' : '빛을 보는 면(예: 도광판 윗면)을 3D 에서 클릭하세요'}</div></div>
-    <div class="m3-card"><div class="m3-sub">목표 균일도</div>
-      <div class="m3-row"><label>길이 균일도</label><input type="number" min="0" max="1" step="0.05" value="${O.targetLen}" data-lp-tgt="targetLen" aria-label="길이 균일도 목표"> <label>폭 균일도</label><input type="number" min="0" max="1" step="0.05" value="${O.targetWid}" data-lp-tgt="targetWid" aria-label="폭 균일도 목표"></div></div>
-    ${O.faces.length ? `<div class="m3-card"><div class="m3-sub">지금 결과</div><div class="m3-row"><label>길이 균일도</label>${res(R?.Ulen, O.targetLen)}</div><div class="m3-row"><label>폭 균일도</label>${res(R?.Uwid, O.targetWid)}</div></div>` : ''}`;
-  const detail = `${ui.lineInfo ? `<div class="m3-row">${esc(ui.lineInfo)}</div>` : ''}
-    ${ui.lineErr ? `<div class="m3-row"><span class="warn">${esc(ui.lineErr)}</span> <button data-lp-reline>라인 다시 인식</button></div>` : ''}
-    ${O.faces.length ? `<div class="m3-row">보는 방향 ${O.dir ? '' : '<span class="mut">(자동: 면 법선)</span>'} x<input type="number" step="0.1" value="${numIn(ui.dir?.[0], 3)}" data-lp-dir="0"> y<input type="number" step="0.1" value="${numIn(ui.dir?.[1], 3)}" data-lp-dir="1"> z<input type="number" step="0.1" value="${numIn(ui.dir?.[2], 3)}" data-lp-dir="2"> ${O.dir ? '<button data-lp-dirauto>자동</button>' : ''}</div>` : ''}
-    <div class="m3-row">관측 원뿔 ±<input type="number" min="2" max="90" step="1" value="${O.cone}" data-lp-obs="cone">° <span class="mut">90 = 확산면 밝기, 좁히면 정면 밝기(잡음 큼)</span></div>
-    <div class="m3-row">가장자리 제외<input type="number" min="0" step="0.1" value="${O.edgeExcl}" data-lp-obs="edgeExcl">mm</div>
-    <div class="m3-row">길이 칸<input type="number" min="0.2" step="0.5" value="${O.cellS ?? ''}" placeholder="${autoPh(ui.auto?.cellS)}" data-lp-obs="cellS" data-lp-auto>mm 폭 칸<input type="number" min="0.1" step="0.1" value="${O.cellW ?? ''}" placeholder="${autoPh(ui.auto?.cellW)}" data-lp-obs="cellW" data-lp-auto>mm 폭 판정 창<input type="number" min="1" step="1" value="${O.winS ?? ''}" placeholder="${autoPh(ui.auto?.winS)}" data-lp-obs="winS" data-lp-auto>mm <span class="mut">빈칸 = 자동</span></div>
-    <div class="m3-row">계산 오차 목표<input type="number" min="0.2" max="20" step="0.5" value="${num((O.targetNoise ?? 0.01) * 100, 1)}" data-lp-tgt="targetNoise" data-lp-pct>% <span class="mut">이하가 되면 계산 멈춤</span></div>`;
+  const pass = (v, tg) => (Number.isFinite(v) ? `<b class="${v + 1e-9 >= tg ? 'ok' : 'bad'}">${(Math.floor(v * 100 + 1e-9) / 100).toFixed(2)}</b>` : '<span class="mut">–</span>');
+  const verdict = (v, tg) => (Number.isFinite(v) ? (v + 1e-9 >= tg ? ' <span class="ok">✓</span>' : ` <span class="bad" title="목표까지 ${(tg - v).toFixed(2)}">✕</span>`) : '');
+  const ln = ui.line ?? null, nF = O.faces.length;
+  const state = !nF ? '<span class="warn">아직 지정 안 함</span>' : ui.lineErr ? `<span class="warn">면 ${nF}개 · 라인 인식 실패</span>` : ln ? `<b>면 ${nF}개</b> · ${esc(ui.lineInfo ?? '')}` : `면 ${nF}개 · <span class="mut">라인 인식 중</span>`;
+  // 기본 탭(2026-10-30 정리): ① 어디를 보나(면 지정·상태) ② 목표와 지금 결과(한 표)
+  const basic = `<div class="m3-card"><div class="m3-sub">관측면 — 빛이 고르게 보여야 하는 면</div>
+      <div class="m3-row">${state}</div>
+      <div class="m3-row">${pickBtn(ui, 'obs', ui.pick === 'obs' ? '클릭 대기 중 — 끝내기' : nF ? '면 더하기 / 빼기' : '👁 3D 에서 면 클릭')} ${nF ? '<button data-lp-clear>모두 지우기</button>' : ''} ${ui.lineErr ? '<button data-lp-reline>라인 다시 인식</button>' : ''}</div>
+      <div class="m3-row mut">${nF ? '3D 의 하늘색 테두리 = 관측면 · 화살표 = 보는 방향 · 같은 면을 다시 클릭 = 빼기' : '예: 확산판·도광판의 윗면(사람이 보는 면)을 3D 에서 클릭'}</div>
+      ${ui.lineErr ? `<div class="m3-row warn">${esc(ui.lineErr)}</div>` : ''}</div>
+    <div class="m3-card"><div class="m3-sub">목표와 지금 결과</div>
+      <table class="m3-cmp m3-obs-t"><tr><th></th><th>목표</th><th>지금${O.faces.length ? '' : ' <span class="mut">(관측면 먼저)</span>'}</th></tr>
+        <tr><th>길이 균일도</th><td><input type="number" min="0" max="1" step="0.05" value="${O.targetLen}" data-lp-tgt="targetLen" aria-label="길이 균일도 목표"></td><td>${pass(R?.Ulen, O.targetLen)}${verdict(R?.Ulen, O.targetLen)}</td></tr>
+        <tr><th>폭 균일도</th><td><input type="number" min="0" max="1" step="0.05" value="${O.targetWid}" data-lp-tgt="targetWid" aria-label="폭 균일도 목표"></td><td>${pass(R?.Uwid, O.targetWid)}${verdict(R?.Uwid, O.targetWid)}</td></tr></table>
+      <div class="m3-row mut">균일도 = 가장 어두운 곳 ÷ 가장 밝은 곳 (1 = 완전히 고름)</div></div>`;
+  // 상세 탭: 묶음별 카드 — 라인 · 보는 방향 · 보는 범위 · 계산 격자 · 계산 정확도
+  const detail = `<div class="m3-card"><div class="m3-sub">관측 라인 <span class="mut">(관측면에서 자동 인식 — 길이·폭 방향의 기준)</span></div>
+      <div class="m3-row">${ui.lineInfo ? esc(ui.lineInfo) : '<span class="mut">관측면을 지정하면 인식</span>'}</div>
+      ${ui.lineErr ? `<div class="m3-row"><span class="warn">${esc(ui.lineErr)}</span> <button data-lp-reline>라인 다시 인식</button></div>` : ''}</div>
+    ${nF ? `<div class="m3-card"><div class="m3-sub">보는 방향 <span class="mut">${O.dir ? '(직접 지정)' : '(자동 = 면에 수직)'}</span></div>
+      <div class="m3-row">x<input type="number" step="0.1" value="${numIn(ui.dir?.[0], 3)}" data-lp-dir="0"> y<input type="number" step="0.1" value="${numIn(ui.dir?.[1], 3)}" data-lp-dir="1"> z<input type="number" step="0.1" value="${numIn(ui.dir?.[2], 3)}" data-lp-dir="2"> ${O.dir ? '<button data-lp-dirauto>자동으로</button>' : ''}</div></div>` : ''}
+    <div class="m3-card"><div class="m3-sub">보는 범위</div>
+      <div class="m3-row"><label>보는 각도 ±</label><input type="number" min="2" max="90" step="1" value="${O.cone}" data-lp-obs="cone">° <span class="mut">90 = 모든 방향(확산면 밝기) · 좁히면 정면에서 본 밝기(계산 잡음 큼)</span></div>
+      <div class="m3-row"><label>가장자리 제외</label><input type="number" min="0" step="0.1" value="${O.edgeExcl}" data-lp-obs="edgeExcl">mm <span class="mut">테두리 근처는 균일도 판정에서 뺌</span></div></div>
+    <div class="m3-card"><div class="m3-sub">계산 격자 <span class="mut">(빈칸 = 자동)</span></div>
+      <div class="m3-row"><label>길이 칸</label><input type="number" min="0.2" step="0.5" value="${O.cellS ?? ''}" placeholder="${autoPh(ui.auto?.cellS)}" data-lp-obs="cellS" data-lp-auto>mm <label>폭 칸</label><input type="number" min="0.1" step="0.1" value="${O.cellW ?? ''}" placeholder="${autoPh(ui.auto?.cellW)}" data-lp-obs="cellW" data-lp-auto>mm</div>
+      <div class="m3-row"><label>폭 판정 창</label><input type="number" min="1" step="1" value="${O.winS ?? ''}" placeholder="${autoPh(ui.auto?.winS)}" data-lp-obs="winS" data-lp-auto>mm <span class="mut">폭 균일도를 볼 때 길이 방향으로 묶는 길이</span></div></div>
+    <div class="m3-card"><div class="m3-sub">계산 정확도</div>
+      <div class="m3-row"><label>오차 목표</label><input type="number" min="0.2" max="20" step="0.5" value="${num((O.targetNoise ?? 0.01) * 100, 1)}" data-lp-tgt="targetNoise" data-lp-pct>% <span class="mut">이 오차 이하가 되면 계산을 멈춤(작을수록 오래 걸림)</span></div></div>`;
   const dSum = [O.dir ? '방향 지정' : '', O.cone !== 90 ? `원뿔 ±${O.cone}°` : ''].filter(Boolean).join(' · ');
   el.innerHTML = `<div class="m3-h">속성 · 관측면</div>${tabsHtml('obs', dSum)}<div class="m3-edit" role="tabpanel">${tab === 'basic' ? basic : detail}</div>`;
   wireTabs(el, 'obs', () => renderObserveProps(el, m, ui, h));

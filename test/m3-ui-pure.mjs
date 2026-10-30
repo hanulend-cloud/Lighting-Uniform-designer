@@ -25,16 +25,16 @@ const card = (o) => autoCardHtml(o) + ['milky', 'leds', 'shape', 'housing', 'hei
   ok(N.map((n) => n.id).join() === 'target,parts,part:0,part:1,light,leds,obs' && N[0].badge === '80% / 80%', `트리 노드(목표 맨 위): ${N.map((n) => n.id).join()}`);
   N.shift();
   ok(N[1].badge === 'Milky 3.0' && N[1].sel && N[1].child && N[2].badge.startsWith('불투명') && N[3].badge === '직접 배치' && N[4].label === 'LED ×10' && N[4].badge === '균등'
-    && N[5].badge === '직선 116×16', `배지: ${N.map((n) => n.badge).join(' | ')}`); }
+    && N[5].badge === '직선 116×16 mm', `배지: ${N.map((n) => n.badge).join(' | ')}`); }
 { const N = treeNodes({ ...M, light: defaultLight() }, { node: null, line: null });
-  ok(!N.some((n) => n.id === 'leds') && N.find((n) => n.id === 'obs').badge === '인식 중' && N.find((n) => n.id === 'light').badge === '지정 안 함', '광원 없음 → LED 노드 없음, 라인 인식 중');
+  ok(!N.some((n) => n.id === 'leds') && /인식 중$/.test(N.find((n) => n.id === 'obs').badge) && N.find((n) => n.id === 'light').badge === '지정 안 함', '광원 없음 → LED 노드 없음, 라인 인식 중');
   const N2 = treeNodes({ ...M, observe: defaultObserve() }, { node: null, line: null });
-  ok(N2.find((n) => n.id === 'obs').badge === '미지정', '관측면 없음 → 미지정'); }
+  ok(N2.find((n) => n.id === 'obs').badge === '미지정 — 클릭', '관측면 없음 → 미지정'); }
 ok(partBadge(setPartMaterial(defaultPart(0, 'p', 1), 'clear')).startsWith('투명 '), '투명 부품 배지 = 투명 + 투과율');
 ok(calcLabel({ state: 'running' }) === '⏸ 계산 중' && calcLabel({ state: 'paused' }) === '▶ 계산 재개' && calcLabel({ state: 'done', reason: 'converged' }).includes('완료')
   && calcLabel({ state: 'done', reason: 'max' }).includes('한도') && calcLabel(null) === '▶ 계산' && calcLabel({ state: 'error' }).includes('다시'), '계산 버튼 문구');
 { const N = treeNodes({ ...M, light: { ...defaultLight(), kind: 'manual', manual: { ...defaultLight().manual, pitch: 11.6000001 } } }, { node: null, line: { kind: 'zigzag', closed: false, length: 99.6, width: 7.4 } });
-  ok(N.find((n) => n.id === 'leds').badge === '피치 11.6' && N.find((n) => n.id === 'obs').badge === 'zigzag 100×7', `피치 반올림 · 모르는 라인 종류: ${N.find((n) => n.id === 'leds').badge} / ${N.find((n) => n.id === 'obs').badge}`); }
+  ok(N.find((n) => n.id === 'leds').badge === '피치 11.6' && N.find((n) => n.id === 'obs').badge === 'zigzag 100×7 mm', `피치 반올림 · 모르는 라인 종류: ${N.find((n) => n.id === 'leds').badge} / ${N.find((n) => n.id === 'obs').badge}`); }
 { const el = { innerHTML: '', addEventListener() {}, contains: () => false, ownerDocument: null, querySelectorAll: () => [] };
   const P = { ...M, parts: [{ ...M.parts[0], name: `<img src=x onerror="a()">&'` }] };
   renderFeatureTree(el, P, { node: null, line: null }, { onNode() {} });
