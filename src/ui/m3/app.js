@@ -1009,7 +1009,7 @@ function adStep() {
 // 메쉬를 LED STEP 처럼 복사(발광면 인식·배치 편집·기구 최적화를 그대로 씀)하고, 원본은 role 'light'(빛 계산·보기에서 빠짐 — 삭제 아님).
 // 클릭한 면 = 발광면(렌즈 윗면으로 보정). PCB 는 기구 부품 그대로 남김(면 처리 그대로 계산)
 // 새 기구 STEP 을 불러온 직후: 같은 모양이 반복되는 작은 부품(LED)을 찾아 바로 도면 광원으로(발광면 = PCB 반대쪽).
-// 광원이 이미 지정돼 있거나 못 찾으면 그대로. 틀렸으면 광원 노드의 [다른 LED 로 다시 지정]·[도면 광원 해제]로 고친다
+// 광원이 이미 지정돼 있거나 못 찾으면 그대로. 틀렸으면 광원 노드의 [직접 고르기]·[도면 광원 해제]로 고친다
 // force = 광원 속성의 [자동 선택] — 이미 지정된 광원이 있어도 다시 찾음(도면 광원은 먼저 해제)
 export function autoMechLight(force = false) {
   if (!A) return null;
@@ -1037,7 +1037,7 @@ function mechLightFromPick(s, auto = false) {
     m.parts = m.parts.map((p, i) => { const q = { ...p }; delete q.role; if (leds.includes(i)) q.role = 'light'; return q; });
     m.light.kind = 'step';
     m.light.step = { name, offset: [0, 0, 0], rot: [0, 0, 0], ref: null, leds: [], excluded: [], pcb: -1, emitters: [], fromMech: leds };
-    try { L.applyStepRecognition(m, x, m.light.step, { part: leds.indexOf(s.part), face }); x.ledInfo = auto ? `LED ${leds.length}개 자동 인식(같은 모양 반복 부품 · PCB 반대쪽 발광) — 틀리면 [다른 LED 로 다시 지정]` : `도면 부품 ${leds.length}개를 광원으로 — ${x.ledInfo}${face !== s.face ? ' (받침 부품 반대쪽 면에서 발광)' : ''}`; }
+    try { L.applyStepRecognition(m, x, m.light.step, { part: leds.indexOf(s.part), face }); x.ledInfo = auto ? `LED ${leds.length}개 자동 인식(같은 모양 반복 부품 · PCB 반대쪽 발광) — 틀리면 [직접 고르기]` : `도면 부품 ${leds.length}개를 광원으로 — ${x.ledInfo}${face !== s.face ? ' (받침 부품 반대쪽 면에서 발광)' : ''}`; }
     catch (e) { x.ledInfo = `발광면 인식 실패: ${e.message} — LED 노드에서 발광면을 다시 클릭하세요`; }
     x.pick = null; x.node = 'light'; x.hideLeds = false;
   });
@@ -1374,7 +1374,8 @@ const flash = (n) => { if (!n) return; n.scrollIntoView({ block: 'nearest', beha
 function cmdHandlers() {
   return {
     onImport: (f) => A.ctx.onImportMech3d(f),
-    onLed: () => A.store.update('session', (m, x) => { const stp = m.light.kind === 'step' && m.light.step; x.node = stp ? 'leds' : 'light'; x.pick = stp && !stp.virtual ? (x.pick === 'led' ? null : 'led') : null; }),
+    // ① LED 지정: 광원이 아직 없거나 발광 방향 미지정이면 먼저 자동 선택(같은 부품 2개 이상 · PCB 위 · PCB 반대쪽 발광) — 못 찾으면 기존 흐름
+    onLed: () => { const L0 = A.store.mspec.light; if ((L0.kind === 'none' || (L0.kind === 'step' && !L0.step?.emitters?.length)) && autoMechLight(true)) return; A.store.update('session', (m, x) => { const stp = m.light.kind === 'step' && m.light.step; x.node = stp ? 'leds' : 'light'; x.pick = stp && !stp.virtual ? (x.pick === 'led' ? null : 'led') : null; }); },
     onObs: () => A.store.update('session', (_, x) => { x.node = 'obs'; x.pick = x.pick === 'obs' ? null : 'obs'; }),
     onTarget: () => A.store.update('session', (_, x) => { x.node = 'target'; x.sel = null; x.ledSel = null; x.pick = null; }),
     onSection: () => A.store.update('view', (_, x) => {

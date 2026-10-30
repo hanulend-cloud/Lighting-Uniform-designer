@@ -834,3 +834,5 @@ body.booting::after { content: "불러오는 중…"; position: fixed; left: 50%
 .m3-mon.min .m3-mon-body > .m3-psplit { display: none; }
 /* 왼쪽 트리 제목 띠(결과 칸과 같은 모양) */
 .m3-tree > .m3-h { margin: -10px -10px 8px; padding: 7px 10px; background: var(--m3-head, #f3f5f9); border-bottom: 1px solid var(--m3-line); color: var(--m3-headtx, #3b4658); font-size: 12px; font-weight: 700; }
+/* 광원·LED 속성의 [LED 자동 선택] — 기본 방법이라 강조 */
+.m3-primary { font-weight: 600; background: var(--m3-acc, #1f6fd1) !important; color: #fff !important; border-color: var(--m3-acc, #1f6fd1) !important; }

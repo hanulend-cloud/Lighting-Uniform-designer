@@ -49,13 +49,13 @@ export function renderLightProps(el, m, ui, h) {
   // 3D 도면에서 지정한 광원: 파일·위치 보정 대신 다시 지정 · 해제
   const mechHtml = fromMech ? `
     <div class="m3-row">${ui.ledInfo ? esc(ui.ledInfo) : `도면 부품 ${st.fromMech.length}개 → LED ${st.leds.length}개`}</div>
-    <div class="m3-row"><button type="button" data-lp-mauto title="같은 모양이 반복되는 작은 부품(LED)을 찾아 광원으로 — 발광면 = PCB 반대쪽">자동 선택</button> ${pickBtn(ui, 'mled', '다른 LED 로 다시 지정')} <button type="button" data-lp-mclear>도면 광원 해제</button></div>
-    <div class="mut m3-note">발광면 수정·LED 제외는 LED 노드 · 트리 '광원' 눈 단추 = LED·지향각 한 번에 켜기/끄기</div>`
-    : ui.pick === 'mled' ? `<div class="m3-row">${esc(ui.ledInfo ?? '')}</div><div class="m3-row"><button type="button" data-lp-mauto title="같은 모양이 반복되는 작은 부품(LED)을 찾아 광원으로 — 발광면 = PCB 반대쪽">자동 선택</button> ${pickBtn(ui, 'mled', '클릭 대기 중 — 취소')}</div>` : '';
+    <div class="m3-row">${pickBtn(ui, 'mled', '직접 고르기 — 3D 에서 LED 1개 클릭')} <button type="button" data-lp-mclear>도면 광원 해제</button></div>
+    <div class="mut m3-note">자동 인식이 틀리면: [직접 고르기] 또는 LED 노드의 [인식 고치기]</div>`
+    : ui.pick === 'mled' ? `<div class="m3-row">${esc(ui.ledInfo ?? '')}</div><div class="m3-row">${pickBtn(ui, 'mled', '클릭 대기 중 — 취소')}</div>` : '';
   const stepHtml = L.kind !== 'step' || fromMech || ui.pick === 'mled' ? '' : `
     <div class="m3-row"><label class="shape-btn">LED STEP 불러오기<input type="file" accept=".stp,.step" hidden data-lp-file></label>
       ${st ? `<span class="mut">${esc(st.name)}</span>` : ''}</div>
-    ${st ? `<div class="m3-row">${ui.ledInfo ? esc(ui.ledInfo) : st.emitters?.length ? `LED ${st.leds.length}개 인식됨` : '<span class="mut">LED 하나의 발광면(빛이 나오는 면)을 클릭하세요</span>'}${st.excluded?.length ? ` <span class="mut">· 제외 ${st.excluded.length}개</span>` : ''} <span class="mut">(발광면·제외 클릭은 LED 노드)</span></div>
+    ${st ? `<div class="m3-row">${ui.ledInfo ? esc(ui.ledInfo) : st.emitters?.length ? `LED ${st.leds.length}개 인식됨` : '<span class="mut">LED 하나의 발광면(빛이 나오는 면)을 클릭하세요</span>'}${st.excluded?.length ? ` <span class="mut">· 제외 ${st.excluded.length}개</span>` : ''} <span class="mut">(틀리면 LED 노드의 인식 고치기)</span></div>
     <div class="m3-row">위치 보정 x<input type="number" step="0.1" value="${st.offset[0]}" data-lp-step="ox"> y<input type="number" step="0.1" value="${st.offset[1]}" data-lp-step="oy"> z<input type="number" step="0.1" value="${st.offset[2]}" data-lp-step="oz">mm</div>
     <div class="m3-row">회전 X<input type="number" step="90" value="${st.rot[0]}" data-lp-step="rx"> Y<input type="number" step="90" value="${st.rot[1]}" data-lp-step="ry"> Z<input type="number" step="90" value="${st.rot[2]}" data-lp-step="rz">°</div>`
       : ui.ledInfo ? `<div class="m3-row">${esc(ui.ledInfo)}</div>` : ''}`;
@@ -65,7 +65,11 @@ export function renderLightProps(el, m, ui, h) {
     <div class="m3-row">개수<input type="number" min="1" step="1" value="${man.count}" data-lp-man="count"> 피치<input type="number" min="0" step="0.5" value="${man.pitch}" data-lp-man="pitch">mm <span class="mut">(0 = 균등)</span></div>
     ${ledRowsHtml(man, ui.line ?? null, 'man')}
     <div class="m3-row">발광 <select data-lp-man="side"><option value="direct" ${sel(man.side, 'direct')}>직하(관측 방향)</option><option value="left" ${sel(man.side, 'left')}>측면 왼쪽</option><option value="right" ${sel(man.side, 'right')}>측면 오른쪽</option></select></div>`;
-  el.innerHTML = `<div class="m3-h">속성 · 광원</div>
+  // 맨 위 = 자동 선택(기본 방법). 그 아래 = 다른 방법(직접 고르기·LED STEP·직접 배치)
+  const autoCard = `<div class="m3-card"><div class="m3-row"><button type="button" class="m3-primary" data-lp-mauto title="같은 모양 부품 2개 이상 · PCB 위에 올라간 것 = LED, 발광면 = PCB 반대쪽">LED 자동 선택</button> <span class="mut">도면에서 LED 를 찾아 광원으로</span></div>
+    <div class="m3-row mut">같은 모양 부품 2개 이상 · PCB 위에 올라간 것 = LED · 발광면 = PCB 반대쪽</div></div>`;
+  el.innerHTML = `<div class="m3-h">속성 · 광원</div>${autoCard}
+    <div class="m3-sub">다른 방법</div>
     <div class="m3-row"><select data-lp-kind><option value="none" ${sel(L.kind, 'none')}>지정 안 함</option><option value="mech" ${fromMech || ui.pick === 'mled' ? 'selected' : ''}>3D 도면에서 지정</option><option value="step" ${L.kind === 'step' && !fromMech && ui.pick !== 'mled' ? 'selected' : ''}>LED STEP 불러오기</option><option value="manual" ${sel(L.kind, 'manual')}>관측 라인 따라 직접 배치</option></select></div>
     ${mechHtml}${stepHtml}${manHtml}`;
   on(el, '[data-lp-kind]', 'change', (x) => h.onLightKind(x.value));
@@ -115,7 +119,9 @@ function ledNodeBodyHtml(m, ui, adv = false, showBeam = false) {   // showBeam =
   return `<div class="m3-row">${status}</div>
     ${failed ? `<div class="m3-row"><span class="warn">${esc(lay?.err ?? 'LED STEP 메쉬가 없음 — 다시 불러오세요')}</span></div>` : ''}
     ${!adv && L.kind === 'step' && st ? stepLayoutRowHtml(st, ui.line ?? null, lay?.emitters?.length ?? null) : ''}
-    ${L.kind === 'step' && st ? (v ? '<div class="m3-row mut">배치를 편집한 상태 — 발광면 다시 지정·제외 클릭은 [STEP 원래대로] 뒤에</div>' : `<div class="m3-row">${pickBtn(ui, 'led', 'LED 발광면 클릭')} ${pickBtn(ui, 'ledx', 'LED 제외/포함 클릭')}</div>`) : ''}
+    ${L.kind === 'step' && st ? (v ? '<div class="m3-row mut">배치를 편집한 상태 — 인식 고치기(빛 나오는 면·빼기)는 [STEP 원래대로] 뒤에</div>' : `<div class="m3-card"><div class="m3-sub">인식 고치기 <span class="mut">(자동 인식이 틀렸을 때만)</span></div>
+      <div class="m3-row">${pickBtn(ui, 'led', ui.pick === 'led' ? '클릭 대기 중 — 취소' : '빛 나오는 면 다시 지정')} <span class="mut">3D 에서 LED 1개의 빛 나오는 면 클릭 → 모든 LED 에 같이 적용</span></div>
+      <div class="m3-row">${pickBtn(ui, 'ledx', ui.pick === 'ledx' ? '클릭 대기 중 — 끝내기' : 'LED 빼기 / 다시 넣기')} <span class="mut">LED 가 아닌 부품이 잡혔거나 끌 LED 를 3D 에서 클릭 · 다시 클릭 = 다시 넣기</span></div></div>`) : ''}
     ${ui.ledInfo ? `<div class="m3-row mut">${esc(ui.ledInfo)}</div>` : ''}
     ${adv && !showBeam ? '' : `<div class="m3-row"><label>배광</label><select data-lp-spec="model"><option value="lambertian" ${sel(L.spec.model, 'lambertian')}>램버시안</option><option value="gaussian" ${sel(L.spec.model, 'gaussian')}>가우시안</option></select>
       지향각<input type="number" min="10" max="170" step="5" value="${L.spec.beam}" data-lp-spec="beam">°</div>`}
@@ -130,7 +136,7 @@ function ledBasicHtml(m, ui, nav) {
   const seg = BEAM_PRESETS.map(([a, t]) => `<button type="button" data-lp-beam="${a}" aria-pressed="${pre === a ? 'true' : 'false'}">${t} ${a}°</button>`).join('');
   const ready = st ? !!st.emitters?.length : true;
   return `<div class="m3-card"><div class="m3-row"><b>LED ${n}개</b>${nav ? ` <span class="m3-ledsel">${nav}</span> <span class="mut">하나씩 보기 · 3D 에서 LED 클릭도 됨</span>` : ''}</div>
-      ${!ready ? '<div class="m3-row warn">LED 발광면을 아직 지정하지 않음 — 상세 탭의 [LED 발광면 클릭]</div>' : ''}</div>
+      ${!ready ? '<div class="m3-row warn">LED 빛 나오는 면을 아직 모름 — <button type="button" class="m3-primary" data-lp-mauto title="같은 모양 부품 2개 이상 · PCB 위에 올라간 것 = LED, 발광면 = PCB 반대쪽">LED 자동 선택</button></div>' : ''}</div>
     <div class="m3-card"><div class="m3-sub">빛 퍼짐</div><div class="m3-seg m3-seg3" role="group" aria-label="빛 퍼짐">${seg}</div></div>
     <div class="m3-card"><div class="m3-row"><label>밝기</label><input type="number" min="0" step="1" value="${L.spec.fluxLm ?? 0}" data-lp-spec="fluxLm" aria-label="LED 1개 광속 lm"> lm/개 <span class="mut">0 = 상대값(%)</span></div></div>
     <div class="m3-card"><div class="m3-sub">배치</div>${st ? stepLayoutRowHtml(st, ui.line ?? null, n) : `<div class="m3-row">개수<input type="number" min="1" step="1" value="${L.manual.count}" data-lp-man="count" aria-label="LED 개수"> 피치<input type="number" min="0" step="0.5" value="${L.manual.pitch}" data-lp-man="pitch" aria-label="LED 피치 mm">mm <span class="mut">(0 = 균등)</span></div>`}</div>`;
@@ -188,6 +194,7 @@ export function renderLedProps(el, m, ui, h) {
     if (val != null) h.onLedSpec(k, val); else if (k === 'fluxLm') h.onLedSpec(k, 0);   // 광속 빈칸 = 0(상대값)
   });
   on(el, '[data-lp-solder]', 'change', (x) => h.onSolder(x.value));
+  on(el, '[data-lp-mauto]', 'click', () => h.onMechAuto?.());
   on(el, '[data-lp-edit]', 'click', (x) => h.onLedEdit?.(x.dataset.lpEdit));   // add | align | orig
   wireManual(el, h);
   on(el, '[data-lp-ledsel]', 'click', (x) => h.onLedSel?.(x.dataset.lpLedsel === '' ? null : +x.dataset.lpLedsel));
